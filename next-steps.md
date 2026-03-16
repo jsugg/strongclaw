@@ -32,7 +32,7 @@ The repository is materially more than a thin install pack. It has:
 
 Current local verification baseline:
 
-- `PYTHONPATH=src pytest -q` -> passed locally (`105 passed` on 2026-03-16)
+- `PYTHONPATH=src pytest -q` -> passed locally (`109 passed` on 2026-03-16)
 - `PYTHONPATH=src python3 -m compileall -q src tests` -> passed
 - `.venv/bin/pyright src` -> `0 errors, 0 warnings, 0 informations`
 - `.venv/bin/ruff check src tests` -> passed
@@ -196,7 +196,7 @@ Proof:
 
 - `PYTHONPATH=src pytest -q tests/test_acp_runner.py tests/test_automation_surfaces.py`
   -> passed
-- `PYTHONPATH=src pytest -q` -> passed locally (`105 passed` on 2026-03-16)
+- `PYTHONPATH=src pytest -q` -> passed locally (`109 passed` on 2026-03-16)
 
 Compatibility notes:
 
@@ -430,7 +430,7 @@ Proof:
   -> `passed=2 total=2`, `passed=3 total=3`
 - `PYTHONPATH=src python3 -m clawops workflow --workflow platform/configs/workflows/daily_healthcheck.yaml --dry-run`
   -> passed
-- `PYTHONPATH=src pytest -q` -> passed locally (`105 passed` on 2026-03-16)
+- `PYTHONPATH=src pytest -q` -> passed locally (`109 passed` on 2026-03-16)
 
 Compatibility notes:
 
