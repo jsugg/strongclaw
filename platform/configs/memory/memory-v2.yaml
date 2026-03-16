@@ -40,3 +40,28 @@ corpus:
 limits:
   max_snippet_chars: 400
   default_max_results: 8
+
+governance:
+  default_scope: project:strongclaw
+  readable_scopes:
+    - "project:"
+    - "agent:"
+    - "user:"
+    - "global"
+  writable_scopes:
+    - "project:"
+    - "agent:"
+  auto_apply_scopes:
+    - "project:"
+    - "agent:"
+
+ranking:
+  memory_lane_weight: 1.0
+  corpus_lane_weight: 1.0
+  lexical_weight: 0.75
+  coverage_weight: 0.35
+  confidence_weight: 0.15
+  recency_weight: 0.1
+  contradiction_penalty: 0.2
+  diversity_penalty: 0.35
+  recency_half_life_days: 45

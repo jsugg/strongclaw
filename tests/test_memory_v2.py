@@ -116,8 +116,84 @@ def test_memory_v2_store_update_and_reflect(tmp_path: pathlib.Path) -> None:
     assert reflect_result["reflected"]["fact"] == 1
     assert reflect_result["reflected"]["opinion"] == 1
     assert reflect_result["reflected"]["entity"] == 1
+    assert reflect_result["proposed"] >= 3
     assert (workspace / "bank" / "opinions.md").exists()
     assert (workspace / "bank" / "entities" / "alice.md").exists()
+    assert (workspace / "bank" / "proposals.md").exists()
+
+
+def test_memory_v2_scope_filter_and_explain(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    engine = MemoryV2Engine(load_config(config_path))
+    engine.reindex()
+
+    engine.store(
+        kind="fact",
+        text="Global browser-lab recovery stays local-only.",
+        scope="project:strongclaw",
+    )
+    hits = engine.search(
+        "browser-lab recovery",
+        lane="memory",
+        scope="project:strongclaw",
+        include_explain=True,
+    )
+
+    assert hits
+    assert hits[0].scope == "project:strongclaw"
+    payload = hits[0].to_dict()
+    assert payload["explain"]["lexicalScore"] > 0
+    assert payload["scope"] == "project:strongclaw"
+
+
+def test_memory_v2_reflect_global_scope_becomes_pending_proposal(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    (workspace / "memory" / "2026-03-17.md").write_text(
+        """
+        # Daily Log
+
+        ## Retain
+        - Fact[scope=global]: Shared browser lab access remains disabled.
+        """.strip() + "\n",
+        encoding="utf-8",
+    )
+    engine = MemoryV2Engine(load_config(config_path))
+    engine.reindex()
+
+    payload = engine.reflect(mode="safe")
+    proposals_text = (workspace / "bank" / "proposals.md").read_text(encoding="utf-8")
+    world_text = (workspace / "bank" / "world.md").read_text(encoding="utf-8")
+
+    assert payload["pending"] >= 1
+    assert "scope=global" in proposals_text
+    assert "Shared browser lab access remains disabled." not in world_text
+
+
+def test_memory_v2_benchmark_runner(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    engine = MemoryV2Engine(load_config(config_path))
+    engine.reindex()
+
+    payload = engine.benchmark_cases(
+        [
+            {
+                "name": "runbook",
+                "query": "gateway token",
+                "expectedPaths": ["docs/runbook.md"],
+                "lane": "corpus",
+            }
+        ]
+    )
+
+    assert payload["provider"] == "strongclaw-memory-v2"
+    assert payload["passed"] == 1
+    assert payload["cases"][0]["passed"] is True
 
 
 def test_memory_v2_get_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
@@ -152,3 +228,38 @@ def test_memory_v2_cli_search_json(
     assert exit_code == 0
     assert payload["results"]
     assert payload["results"][0]["path"] in {"MEMORY.md", "memory/2026-03-16.md"}
+
+
+def test_memory_v2_cli_benchmark_json(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    fixtures_path = workspace / "benchmark.yaml"
+    fixtures_path.write_text(
+        textwrap.dedent("""
+            cases:
+              - name: runbook
+                query: gateway token
+                lane: corpus
+                expectedPaths:
+                  - docs/runbook.md
+            """).strip() + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "--config",
+            str(config_path),
+            "benchmark",
+            "--fixtures",
+            str(fixtures_path),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["passed"] == 1

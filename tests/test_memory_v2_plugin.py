@@ -27,3 +27,5 @@ def test_memory_v2_plugin_uses_compatible_tool_names() -> None:
     assert 'name: "memory_search"' in plugin_source
     assert 'name: "memory_get"' in plugin_source
     assert 'commands: ["memory"]' in plugin_source
+    assert "--scope" in plugin_source
+    assert "--mode" in plugin_source

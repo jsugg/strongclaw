@@ -9,6 +9,9 @@ const SEARCH_SCHEMA = {
     query: { type: "string" },
     maxResults: { type: "number" },
     minScore: { type: "number" },
+    lane: { type: "string", enum: ["all", "memory", "corpus"] },
+    scope: { type: "string" },
+    explain: { type: "boolean" },
   },
   required: ["query"],
 };
@@ -30,6 +33,7 @@ const STORE_SCHEMA = {
     text: { type: "string" },
     entity: { type: "string" },
     confidence: { type: "number" },
+    scope: { type: "string" },
   },
   required: ["type", "text"],
 };
@@ -47,7 +51,9 @@ const UPDATE_SCHEMA = {
 const EMPTY_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  properties: {},
+  properties: {
+    mode: { type: "string", enum: ["safe", "propose", "apply"] },
+  },
 };
 
 function jsonResult(payload) {
@@ -213,6 +219,8 @@ function registerMemoryCli(program, pluginConfig) {
     .option("--max-results <count>", "Maximum results.")
     .option("--min-score <score>", "Minimum score.")
     .option("--lane <lane>", "memory, corpus, or all.", "all")
+    .option("--scope <scope>", "Exact preferred scope.")
+    .option("--explain", "Include ranking explanation metadata.")
     .option("--json", "Print JSON.")
     .action(async (query, opts) => {
       const resolvedQuery =
@@ -226,6 +234,12 @@ function registerMemoryCli(program, pluginConfig) {
       }
       if (opts.minScore) {
         args.push("--min-score", String(opts.minScore));
+      }
+      if (opts.scope) {
+        args.push("--scope", String(opts.scope));
+      }
+      if (opts.explain) {
+        args.push("--explain");
       }
       if (opts.json) {
         args.push("--json");
@@ -260,6 +274,7 @@ function registerMemoryCli(program, pluginConfig) {
     .requiredOption("--text <text>", "Entry text.")
     .option("--entity <name>", "Entity name for entity entries.")
     .option("--confidence <score>", "Confidence for opinions.")
+    .option("--scope <scope>", "Target scope.")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
       const args = ["store", "--type", opts.type, "--text", opts.text];
@@ -268,6 +283,9 @@ function registerMemoryCli(program, pluginConfig) {
       }
       if (opts.confidence) {
         args.push("--confidence", String(opts.confidence));
+      }
+      if (opts.scope) {
+        args.push("--scope", String(opts.scope));
       }
       if (opts.json) {
         args.push("--json");
@@ -297,9 +315,11 @@ function registerMemoryCli(program, pluginConfig) {
   memory
     .command("reflect")
     .description("Promote retained notes into strongclaw bank files.")
+    .option("--mode <mode>", "safe, propose, or apply.", "safe")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
-      await runClawopsCommand(pluginConfig, ["reflect", ...(opts.json ? ["--json"] : [])], {
+      const args = ["reflect", "--mode", String(opts.mode ?? "safe"), ...(opts.json ? ["--json"] : [])];
+      await runClawopsCommand(pluginConfig, args, {
         captureJson: false,
       });
     });
@@ -342,12 +362,23 @@ const strongclawMemoryV2Plugin = {
             const query = readStringParam(params, "query", { required: true });
             const maxResults = readNumberParam(params, "maxResults");
             const minScore = readNumberParam(params, "minScore");
+            const lane = readStringParam(params, "lane");
+            const scope = readStringParam(params, "scope");
             const args = ["search", "--json", "--query", query];
             if (maxResults !== undefined) {
               args.push("--max-results", String(maxResults));
             }
             if (minScore !== undefined) {
               args.push("--min-score", String(minScore));
+            }
+            if (lane) {
+              args.push("--lane", lane);
+            }
+            if (scope) {
+              args.push("--scope", scope);
+            }
+            if (params?.explain === true) {
+              args.push("--explain");
             }
             const payload = await runClawopsCommand(pluginConfig, args);
             return jsonResult(payload);
@@ -401,11 +432,15 @@ const strongclawMemoryV2Plugin = {
             const args = ["store", "--json", "--type", type, "--text", text];
             const entity = readStringParam(params, "entity");
             const confidence = readNumberParam(params, "confidence");
+            const scope = readStringParam(params, "scope");
             if (entity) {
               args.push("--entity", entity);
             }
             if (confidence !== undefined) {
               args.push("--confidence", String(confidence));
+            }
+            if (scope) {
+              args.push("--scope", scope);
             }
             return jsonResult(await runClawopsCommand(pluginConfig, args));
           } catch (error) {
@@ -455,9 +490,14 @@ const strongclawMemoryV2Plugin = {
         label: "Memory Reflect",
         description: "Promote retained strongclaw notes into typed durable bank files.",
         parameters: EMPTY_SCHEMA,
-        async execute() {
+        async execute(_toolCallId, params) {
           try {
-            return jsonResult(await runClawopsCommand(pluginConfig, ["reflect", "--json"]));
+            const mode = readStringParam(params, "mode");
+            const args = ["reflect", "--json"];
+            if (mode) {
+              args.push("--mode", mode);
+            }
+            return jsonResult(await runClawopsCommand(pluginConfig, args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
