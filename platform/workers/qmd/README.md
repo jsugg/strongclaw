@@ -1,12 +1,11 @@
 # QMD worker notes
 
-QMD is enabled only after the baseline is stable.
+QMD-backed memory retrieval is enabled by the default rendered OpenClaw config.
 
-Install:
+The standard bootstrap path provisions QMD automatically. Re-run the bootstrap helper only when the backend is missing or needs repair:
+
 ```bash
-brew install bun sqlite
-bun install -g https://github.com/tobi/qmd
-which qmd
+./scripts/bootstrap/bootstrap_qmd.sh
 ```
 
 Prewarm:

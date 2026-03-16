@@ -19,7 +19,8 @@ That script:
 
 - creates the repo-local directories under `platform/`
 - installs or verifies Homebrew prerequisites
-- installs `openclaw`, `acpx`, and `varlock`
+- attempts a best-effort install of `openclaw`, `acpx`, and `varlock`
+- provisions the default QMD semantic memory backend
 - renders launchd templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
@@ -34,13 +35,23 @@ This merges:
 
 - `platform/configs/openclaw/00-baseline.json5`
 - `platform/configs/openclaw/10-trust-zones.json5`
+- a rendered form of `platform/configs/openclaw/40-qmd-context.json5`
 
 and writes the result to `~/.openclaw/openclaw.json`.
+
+The rendered config enables QMD-backed memory retrieval by default and indexes:
+
+- `platform/docs`
+- `platform/skills`
+- top-level operator guides
+- `memory.md`
+- `platform/workspace/shared/MEMORY.md`
 
 ## 4. Start sidecars
 
 ```bash
 ./scripts/bootstrap/bootstrap_sidecars.sh
+./scripts/bootstrap/verify_sidecars.sh
 ```
 
 This starts:
@@ -60,7 +71,11 @@ It runs:
 - `openclaw doctor`
 - `openclaw security audit --deep`
 - `openclaw secrets audit --check`
-- Docker/compose health checks
+- `openclaw memory status --deep`
+- `openclaw memory search --query "OpenClaw Platform Bootstrap" --max-results 1`
+- `./scripts/bootstrap/verify_sidecars.sh --skip-runtime`
+- `./scripts/bootstrap/verify_observability.sh --skip-runtime`
+- `./scripts/bootstrap/verify_channels.sh`
 - companion-tool smoke tests
 
 ## 6. Optional staged layers
@@ -69,11 +84,27 @@ Add these only in order:
 
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
-3. QMD backend: `./scripts/bootstrap/bootstrap_qmd.sh`
-4. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-5. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-6. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-7. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
+4. Opt-in memory v2 after the default QMD flow is stable:
+   [`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md)
+5. Telegram: `./scripts/bootstrap/enable_telegram.sh`
+6. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
+7. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
+8. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+
+After each layer is enabled, run the matching verification entrypoint:
+
+- ACP workers: `./scripts/workers/run_codex_session.sh "Summarize the repo"`
+- Telegram / WhatsApp: `./scripts/bootstrap/verify_channels.sh`
+- OTel/Langfuse: `./scripts/bootstrap/verify_observability.sh`
+
+For remote operator access, tunnel the gateway only:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
+```
+
+Do not forward `9222` or `3128`.
 
 ## 7. Read the real guide
 

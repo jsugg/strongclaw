@@ -1,4 +1,5 @@
 name: code-review
+base_dir: ../../..
 steps:
   - name: init journal
     kind: journal_init

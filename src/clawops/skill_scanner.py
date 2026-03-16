@@ -12,7 +12,6 @@ from typing import Iterable
 
 from clawops.common import write_json
 
-
 PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
     ("critical", "shell exfil", re.compile(r"\b(curl|wget|Invoke-WebRequest)\b", re.IGNORECASE)),
     ("critical", "shell delete", re.compile(r"\brm\s+-rf\b", re.IGNORECASE)),

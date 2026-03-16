@@ -19,8 +19,13 @@ Read these in order:
 1. [`QUICKSTART.md`](QUICKSTART.md)
 2. [`SETUP_GUIDE.md`](SETUP_GUIDE.md)
 3. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
-4. [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
-5. [`GAP_COVERAGE.md`](GAP_COVERAGE.md)
+4. [`next-steps.md`](next-steps.md)
+5. [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
+
+The current delivery tracker lives in [`next-steps.md`](next-steps.md). The
+opt-in durable memory rollout is documented in
+[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md) and tracked in
+[`memory-v2.md`](memory-v2.md).
 
 ## Repository map
 
@@ -70,7 +75,52 @@ make test
 ./scripts/bootstrap/bootstrap_macos.sh
 ./scripts/bootstrap/render_openclaw_config.sh
 ./scripts/bootstrap/bootstrap_sidecars.sh
+./scripts/bootstrap/verify_sidecars.sh
 ./scripts/bootstrap/verify_baseline.sh
 ```
 
-Then continue with ACP workers, QMD/context, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
+Then continue with ACP workers, repo lexical context indexing, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
+
+The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
+on the operator path: sidecars can be probed directly, while the baseline gate
+re-runs the sidecar, observability, and channel checks in static mode.
+
+## Development
+
+For local development, use `uv` for the project environment and install the
+pre-commit hooks once:
+
+```bash
+make dev
+```
+
+That syncs the `dev` extra into `.venv/` and installs hooks for:
+
+- isort import sorting
+- Black formatting
+- Ruff linting
+- mypy type checking
+- Pyright type checking
+- actionlint for GitHub Actions
+- basic repository hygiene checks
+
+Useful follow-up commands:
+
+```bash
+make fmt
+make lint
+make imports
+make typecheck
+make actionlint
+make precommit
+make dev-check
+```
+
+`make precommit` runs the full pre-commit hook stack across the repository and
+reruns automatically after formatter/import/hygiene fixes so auto-fixable
+issues are applied before verification.
+
+`make dev-check` builds on `make precommit` and then runs the test suite plus a
+compile smoke. That keeps the two targets distinct: `make precommit` is the
+repository normalization and hook gate, while `make dev-check` is the deeper
+development verification pass.
