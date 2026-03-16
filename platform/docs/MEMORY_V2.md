@@ -101,5 +101,3 @@ PYTHONPATH=src python3 -m clawops memory-v2 reflect --json
 - memory v2 is loaded through `plugins.load.paths` and `plugins.slots.memory`
 - auto-recall and auto-reflect exist in the plugin, but both default to `false`
 - plugin runtime code is trusted in-process OpenClaw code, so keep the plugin path explicitly controlled
-
-For the implementation tracker and longer-term roadmap, see [memory-v2.md](../../memory-v2.md).
