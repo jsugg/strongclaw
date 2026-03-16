@@ -1,0 +1,841 @@
+"""Core engine for strongclaw memory v2."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import pathlib
+import sqlite3
+from collections import defaultdict
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
+
+from clawops.common import ensure_parent
+from clawops.memory_v2.config import MemoryV2Config, matches_glob, resolve_under_workspace
+from clawops.memory_v2.governance import ensure_writable_scope, should_auto_apply, validate_scope
+from clawops.memory_v2.models import (
+    ProposalRecord,
+    ReflectionMode,
+    ReflectionSummary,
+    ReindexSummary,
+    SearchHit,
+    SearchMode,
+)
+from clawops.memory_v2.parser import build_document, iter_retained_notes, parse_typed_entry
+from clawops.memory_v2.retrieval import search_index
+from clawops.memory_v2.schema import SCHEMA_VERSION, ensure_schema
+
+BANK_HEADERS = {
+    "fact": "# World Model\n\n## Entries\n",
+    "reflection": "# Experience\n\n## Entries\n",
+    "opinion": "# Opinions\n\n## Entries\n",
+}
+WRITABLE_PREFIXES = ("memory/", "bank/")
+
+
+class MemoryV2Engine:
+    """Markdown-canonical memory engine with a derived SQLite index."""
+
+    def __init__(self, config: MemoryV2Config) -> None:
+        self.config = config
+
+    def connect(self) -> sqlite3.Connection:
+        """Open a configured SQLite connection."""
+        ensure_parent(self.config.db_path)
+        conn = sqlite3.connect(self.config.db_path)
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        return conn
+
+    def status(self) -> dict[str, Any]:
+        """Return index and governance status."""
+        with self.connect() as conn:
+            document_count = self._count_rows(conn, "documents")
+            item_count = self._count_rows(conn, "search_items")
+            facts = self._count_rows(conn, "facts")
+            opinions = self._count_rows(conn, "opinions")
+            reflections = self._count_rows(conn, "reflections")
+            entities = self._count_rows(conn, "entities")
+            proposals = self._count_rows(conn, "proposals")
+            conflicts = self._count_rows(conn, "conflicts")
+        return {
+            "ok": True,
+            "provider": "strongclaw-memory-v2",
+            "schemaVersion": SCHEMA_VERSION,
+            "workspaceRoot": self.config.workspace_root.as_posix(),
+            "dbPath": self.config.db_path.as_posix(),
+            "dirty": self.is_dirty(),
+            "documents": document_count,
+            "searchItems": item_count,
+            "facts": facts,
+            "opinions": opinions,
+            "reflections": reflections,
+            "entities": entities,
+            "proposals": proposals,
+            "conflicts": conflicts,
+            "defaultScope": self.config.governance.default_scope,
+            "readableScopes": list(self.config.governance.readable_scope_patterns),
+            "writableScopes": list(self.config.governance.writable_scope_patterns),
+            "autoApplyScopes": list(self.config.governance.auto_apply_scope_patterns),
+        }
+
+    def is_dirty(self) -> bool:
+        """Return whether the derived index differs from canonical Markdown files."""
+        with self.connect() as conn:
+            existing = {
+                str(row["rel_path"]): str(row["sha256"])
+                for row in conn.execute("SELECT rel_path, sha256 FROM documents")
+            }
+        current = {document.rel_path: document.sha256 for document in self._iter_documents()}
+        return current != existing
+
+    def reindex(self) -> ReindexSummary:
+        """Rebuild the derived index from canonical Markdown files."""
+        documents = list(self._iter_documents())
+        typed_counts: defaultdict[str, int] = defaultdict(int)
+        with self.connect() as conn:
+            existing = {
+                str(row["rel_path"]): str(row["sha256"])
+                for row in conn.execute("SELECT rel_path, sha256 FROM documents")
+            }
+            current = {document.rel_path: document.sha256 for document in documents}
+            dirty = current != existing
+            self._clear_derived_rows(conn)
+            indexed_at = datetime.now(tz=UTC).isoformat()
+            chunks = 0
+            for document in documents:
+                doc_cursor = conn.execute(
+                    """
+                    INSERT INTO documents (
+                        rel_path, abs_path, lane, source_name, sha256, line_count, modified_at, indexed_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        document.rel_path,
+                        document.abs_path.as_posix(),
+                        document.lane,
+                        document.source_name,
+                        document.sha256,
+                        document.line_count,
+                        document.modified_at,
+                        indexed_at,
+                    ),
+                )
+                document_id = doc_cursor.lastrowid
+                if document_id is None:
+                    raise RuntimeError("document insert did not return a rowid")
+                for item in document.items:
+                    evidence = self._evidence_entries(
+                        document.rel_path,
+                        item.start_line,
+                        item.end_line,
+                        item.evidence,
+                    )
+                    item_cursor = conn.execute(
+                        """
+                        INSERT INTO search_items (
+                            document_id,
+                            rel_path,
+                            lane,
+                            source_name,
+                            source_kind,
+                            item_type,
+                            title,
+                            snippet,
+                            normalized_text,
+                            start_line,
+                            end_line,
+                            confidence,
+                            scope,
+                            modified_at,
+                            contradiction_count,
+                            evidence_count,
+                            entities_json,
+                            evidence_json
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            document_id,
+                            document.rel_path,
+                            document.lane,
+                            document.source_name,
+                            "durable" if document.lane == "memory" else "corpus",
+                            item.item_type,
+                            item.title,
+                            item.snippet,
+                            " ".join(token for token in self._normalize_text(item.snippet)),
+                            item.start_line,
+                            item.end_line,
+                            item.confidence,
+                            item.scope,
+                            document.modified_at,
+                            len(item.contradicts),
+                            len(evidence),
+                            json.dumps(list(item.entities), sort_keys=True),
+                            json.dumps(evidence, sort_keys=True),
+                        ),
+                    )
+                    item_row_id = item_cursor.lastrowid
+                    if item_row_id is None:
+                        raise RuntimeError("search item insert did not return a rowid")
+                    conn.execute(
+                        "INSERT INTO search_items_fts(rowid, title, snippet, entities) VALUES (?, ?, ?, ?)",
+                        (item_row_id, item.title, item.snippet, " ".join(item.entities)),
+                    )
+                    self._insert_typed_row(
+                        conn=conn,
+                        item_id=item_row_id,
+                        document_rel_path=document.rel_path,
+                        item=item,
+                        typed_counts=typed_counts,
+                        evidence=evidence,
+                    )
+                    chunks += 1
+            conn.commit()
+        return ReindexSummary(
+            files=len(documents),
+            chunks=chunks,
+            dirty=dirty,
+            facts=typed_counts["fact"],
+            opinions=typed_counts["opinion"],
+            reflections=typed_counts["reflection"],
+            entities=typed_counts["entity"],
+            proposals=typed_counts["proposal"],
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        min_score: float | None = None,
+        lane: SearchMode = "all",
+        scope: str | None = None,
+        auto_index: bool = True,
+        include_explain: bool = False,
+    ) -> list[SearchHit]:
+        """Search the derived store through the dual-lane retrieval planner."""
+        if auto_index and self.is_dirty():
+            self.reindex()
+        limit = max_results if max_results is not None else self.config.default_max_results
+        if limit <= 0:
+            raise ValueError("max_results must be positive")
+        with self.connect() as conn:
+            return search_index(
+                conn,
+                query=query,
+                max_results=limit,
+                min_score=min_score,
+                mode=lane,
+                scope=scope,
+                ranking=self.config.ranking,
+                include_explain=include_explain,
+            )
+
+    def read(
+        self,
+        rel_path: str,
+        *,
+        from_line: int | None = None,
+        lines: int | None = None,
+    ) -> dict[str, Any]:
+        """Read a canonical file returned by the memory index."""
+        path = self._resolve_read_path(rel_path)
+        if not path.exists():
+            return {"path": rel_path, "text": ""}
+        content = path.read_text(encoding="utf-8")
+        if from_line is None:
+            return {"path": rel_path, "text": content}
+        if from_line <= 0:
+            raise ValueError("from_line must be positive")
+        line_count = lines if lines is not None else 20
+        if line_count <= 0:
+            raise ValueError("lines must be positive")
+        raw_lines = content.splitlines()
+        start_index = from_line - 1
+        return {
+            "path": rel_path,
+            "text": "\n".join(raw_lines[start_index : start_index + line_count]),
+        }
+
+    def store(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        text: str,
+        entity: str | None = None,
+        confidence: float | None = None,
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Append a durable memory entry to the appropriate canonical Markdown file."""
+        entry_text = text.strip()
+        if not entry_text:
+            raise ValueError("text must not be empty")
+        resolved_scope = ensure_writable_scope(
+            scope or self.config.governance.default_scope, self.config.governance
+        )
+        target = self._store_target(kind=kind, entity=entity)
+        entry_line = self._format_entry_line(
+            kind=kind,
+            text=entry_text,
+            entity=entity,
+            confidence=confidence,
+            scope=resolved_scope,
+        )
+        changed = self._append_unique_entry(target, kind=kind, entry_line=entry_line)
+        summary = self.reindex()
+        return {
+            "ok": True,
+            "stored": changed,
+            "path": resolve_under_workspace(self.config.workspace_root, target),
+            "entry": entry_line,
+            "scope": resolved_scope,
+            "index": summary.to_dict(),
+        }
+
+    def update(
+        self,
+        *,
+        rel_path: str,
+        find_text: str,
+        replace_text: str,
+        replace_all: bool = False,
+    ) -> dict[str, Any]:
+        """Replace text inside a writable memory file."""
+        path = self._resolve_writable_path(rel_path)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        content = path.read_text(encoding="utf-8")
+        replacements = content.count(find_text) if replace_all else int(find_text in content)
+        if replacements == 0:
+            return {"ok": True, "path": rel_path, "replacements": 0}
+        updated = (
+            content.replace(find_text, replace_text)
+            if replace_all
+            else content.replace(find_text, replace_text, 1)
+        )
+        path.write_text(updated, encoding="utf-8")
+        summary = self.reindex()
+        return {
+            "ok": True,
+            "path": rel_path,
+            "replacements": replacements,
+            "index": summary.to_dict(),
+        }
+
+    def reflect(self, *, mode: ReflectionMode = "safe") -> dict[str, Any]:
+        """Promote retained daily-log entries into durable bank pages via proposals."""
+        proposed = 0
+        applied = 0
+        pending = 0
+        reflected: dict[str, int] = {"fact": 0, "reflection": 0, "opinion": 0, "entity": 0}
+        proposals_path = self.config.proposals_path
+        daily_dir = self.config.workspace_root / self.config.daily_dir
+        for path in sorted(daily_dir.glob("*.md")):
+            source_rel_path = resolve_under_workspace(self.config.workspace_root, path)
+            for note in iter_retained_notes(
+                path, default_scope=self.config.governance.default_scope
+            ):
+                note_kind = note.kind
+                if note_kind not in reflected:
+                    continue
+                typed_note_kind = cast(
+                    Literal["fact", "reflection", "opinion", "entity"], note_kind
+                )
+                proposal = self._build_proposal(
+                    kind=typed_note_kind,
+                    entry_line=note.entry_line,
+                    scope=note.scope,
+                    source_rel_path=source_rel_path,
+                    source_line=note.source_line,
+                    entity=note.entity,
+                    confidence=note.confidence,
+                    mode=mode,
+                )
+                if self._append_unique_entry(
+                    proposals_path,
+                    kind="proposal",
+                    entry_line=self._format_proposal_line(proposal),
+                ):
+                    proposed += 1
+                if proposal.status == "applied":
+                    target = self._store_target(kind=proposal.kind, entity=proposal.entity)
+                    if self._append_unique_entry(
+                        target, kind=proposal.kind, entry_line=proposal.entry_line
+                    ):
+                        reflected[proposal.kind] += 1
+                        applied += 1
+                else:
+                    pending += 1
+        summary = self.reindex()
+        return ReflectionSummary(
+            proposed=proposed,
+            applied=applied,
+            pending=pending,
+            reflected=reflected,
+            index=summary,
+        ).to_dict()
+
+    def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run simple benchmark cases against the current engine."""
+        results: list[dict[str, Any]] = []
+        passed = 0
+        for case in cases:
+            name = str(case["name"])
+            query = str(case["query"])
+            expected_paths = {str(entry) for entry in case.get("expectedPaths", [])}
+            hits = self.search(
+                query,
+                max_results=int(case.get("maxResults", self.config.default_max_results)),
+                lane=str(case.get("lane", "all")),  # type: ignore[arg-type]
+            )
+            actual_paths = {hit.path for hit in hits}
+            hit = expected_paths.issubset(actual_paths)
+            if hit:
+                passed += 1
+            results.append(
+                {
+                    "name": name,
+                    "query": query,
+                    "expectedPaths": sorted(expected_paths),
+                    "actualPaths": sorted(actual_paths),
+                    "passed": hit,
+                }
+            )
+        return {
+            "provider": "strongclaw-memory-v2",
+            "cases": results,
+            "passed": passed,
+            "total": len(results),
+        }
+
+    def _iter_documents(self) -> Iterator[Any]:
+        yield from self._iter_memory_documents()
+        yield from self._iter_corpus_documents()
+
+    def _iter_memory_documents(self) -> Iterator[Any]:
+        if self.config.include_default_memory:
+            for file_name in self.config.memory_file_names:
+                path = self.config.workspace_root / file_name
+                if path.exists():
+                    yield build_document(
+                        workspace_root=self.config.workspace_root,
+                        path=path,
+                        lane="memory",
+                        source_name="memory",
+                        default_scope=self.config.governance.default_scope,
+                    )
+        daily_dir = self.config.workspace_root / self.config.daily_dir
+        if daily_dir.exists():
+            for path in sorted(daily_dir.glob("*.md")):
+                yield build_document(
+                    workspace_root=self.config.workspace_root,
+                    path=path,
+                    lane="memory",
+                    source_name="daily",
+                    default_scope=self.config.governance.default_scope,
+                )
+        bank_dir = self.config.workspace_root / self.config.bank_dir
+        if bank_dir.exists():
+            for path in sorted(bank_dir.rglob("*.md")):
+                yield build_document(
+                    workspace_root=self.config.workspace_root,
+                    path=path,
+                    lane="memory",
+                    source_name="bank",
+                    default_scope=self.config.governance.default_scope,
+                )
+
+    def _iter_corpus_documents(self) -> Iterator[Any]:
+        for source in self.config.corpus_paths:
+            if source.path.is_file():
+                if matches_glob(source.path.name, source.pattern):
+                    yield build_document(
+                        workspace_root=self.config.workspace_root,
+                        path=source.path,
+                        lane="corpus",
+                        source_name=source.name,
+                        default_scope=self.config.governance.default_scope,
+                    )
+                continue
+            for path in sorted(source.path.rglob("*.md")):
+                rel_path = resolve_under_workspace(self.config.workspace_root, path)
+                if matches_glob(rel_path, source.pattern):
+                    yield build_document(
+                        workspace_root=self.config.workspace_root,
+                        path=path,
+                        lane="corpus",
+                        source_name=source.name,
+                        default_scope=self.config.governance.default_scope,
+                    )
+
+    def _clear_derived_rows(self, conn: sqlite3.Connection) -> None:
+        """Clear the rebuildable tables before a full reindex."""
+        for table_name in (
+            "conflicts",
+            "evidence_links",
+            "proposals",
+            "facts",
+            "opinions",
+            "reflections",
+            "entities",
+            "search_items_fts",
+            "search_items",
+            "documents",
+        ):
+            conn.execute(f"DELETE FROM {table_name}")
+
+    def _insert_typed_row(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        item_id: int,
+        document_rel_path: str,
+        item: Any,
+        typed_counts: dict[str, int],
+        evidence: list[dict[str, Any]],
+    ) -> None:
+        """Insert typed rows and evidence/conflict metadata."""
+        for evidence_entry in evidence:
+            conn.execute(
+                """
+                INSERT INTO evidence_links(item_id, rel_path, start_line, end_line, relation)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    evidence_entry["rel_path"],
+                    evidence_entry["start_line"],
+                    evidence_entry["end_line"],
+                    evidence_entry["relation"],
+                ),
+            )
+        for target_ref in item.contradicts:
+            conn.execute(
+                "INSERT INTO conflicts(item_id, target_ref, reason) VALUES (?, ?, ?)",
+                (item_id, target_ref, "explicit"),
+            )
+        if item.item_type == "fact":
+            conn.execute(
+                "INSERT INTO facts(item_id, rel_path, start_line, end_line, scope, text) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    item_id,
+                    document_rel_path,
+                    item.start_line,
+                    item.end_line,
+                    item.scope,
+                    item.snippet,
+                ),
+            )
+            typed_counts["fact"] += 1
+            return
+        if item.item_type == "reflection":
+            conn.execute(
+                "INSERT INTO reflections(item_id, rel_path, start_line, end_line, scope, text) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    item_id,
+                    document_rel_path,
+                    item.start_line,
+                    item.end_line,
+                    item.scope,
+                    item.snippet,
+                ),
+            )
+            typed_counts["reflection"] += 1
+            return
+        if item.item_type == "opinion":
+            conn.execute(
+                """
+                INSERT INTO opinions(item_id, rel_path, start_line, end_line, scope, text, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    document_rel_path,
+                    item.start_line,
+                    item.end_line,
+                    item.scope,
+                    item.snippet,
+                    item.confidence,
+                ),
+            )
+            typed_counts["opinion"] += 1
+            return
+        if item.item_type == "entity":
+            entity_name = next(iter(item.entities), item.snippet)
+            conn.execute(
+                """
+                INSERT INTO entities(item_id, rel_path, start_line, end_line, scope, name, text)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    document_rel_path,
+                    item.start_line,
+                    item.end_line,
+                    item.scope,
+                    entity_name,
+                    item.snippet,
+                ),
+            )
+            typed_counts["entity"] += 1
+            return
+        if item.item_type == "proposal":
+            proposal_id = item.proposal_id or self._sha256(item.snippet)
+            proposal_kind = self._proposal_kind(item.snippet)
+            target = self._store_target(kind=proposal_kind, entity=next(iter(item.entities), None))
+            conn.execute(
+                """
+                INSERT INTO proposals(
+                    proposal_id, kind, scope, status, entry_line, source_rel_path, source_line,
+                    target_rel_path, entity, confidence, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    proposal_id,
+                    proposal_kind,
+                    item.scope,
+                    item.proposal_status or "pending",
+                    item.snippet,
+                    document_rel_path,
+                    item.start_line,
+                    resolve_under_workspace(self.config.workspace_root, target),
+                    next(iter(item.entities), None),
+                    item.confidence,
+                    datetime.now(tz=UTC).isoformat(),
+                ),
+            )
+            typed_counts["proposal"] += 1
+
+    def _evidence_entries(
+        self,
+        rel_path: str,
+        start_line: int,
+        end_line: int,
+        evidence_refs: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        """Build evidence entries, always including the source line itself."""
+        entries = [
+            {
+                "rel_path": rel_path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "relation": "supports",
+            }
+        ]
+        for reference in evidence_refs:
+            if "#" in reference:
+                reference_path, line_part = reference.split("#", 1)
+            else:
+                reference_path, line_part = reference, ""
+            parsed_start = 0
+            parsed_end = 0
+            if line_part.startswith("L"):
+                line_text = line_part[1:]
+                if "-L" in line_text:
+                    start_text, end_text = line_text.split("-L", 1)
+                    parsed_start = int(start_text)
+                    parsed_end = int(end_text)
+                else:
+                    parsed_start = int(line_text)
+                    parsed_end = parsed_start
+            entries.append(
+                {
+                    "rel_path": reference_path,
+                    "start_line": parsed_start,
+                    "end_line": parsed_end,
+                    "relation": "supports",
+                }
+            )
+        return entries
+
+    def _resolve_read_path(self, rel_path: str) -> pathlib.Path:
+        """Resolve a safe readable path within the workspace."""
+        path = (self.config.workspace_root / rel_path).resolve()
+        resolve_under_workspace(self.config.workspace_root, path)
+        if not path.exists():
+            return path
+        if path.is_dir():
+            raise IsADirectoryError(path)
+        return path
+
+    def _resolve_writable_path(self, rel_path: str) -> pathlib.Path:
+        """Resolve a safe writable path within the workspace."""
+        normalized = rel_path.strip()
+        if not normalized.startswith(WRITABLE_PREFIXES):
+            raise PermissionError(f"{rel_path} is not writable")
+        path = (self.config.workspace_root / normalized).resolve()
+        resolve_under_workspace(self.config.workspace_root, path)
+        return path
+
+    def _store_target(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        entity: str | None = None,
+    ) -> pathlib.Path:
+        """Return the canonical target path for a durable entry."""
+        bank_dir = self.config.workspace_root / self.config.bank_dir
+        if kind == "fact":
+            return bank_dir / "world.md"
+        if kind == "reflection":
+            return bank_dir / "experience.md"
+        if kind == "opinion":
+            return bank_dir / "opinions.md"
+        name = self._slugify(entity or "general")
+        return bank_dir / "entities" / f"{name}.md"
+
+    def _format_entry_line(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        text: str,
+        entity: str | None = None,
+        confidence: float | None = None,
+        scope: str,
+    ) -> str:
+        """Format a canonical typed entry line."""
+        label = kind.capitalize()
+        metadata: list[str] = []
+        if kind == "entity":
+            metadata.append((entity or text).strip())
+        if kind == "opinion" and confidence is not None:
+            if not 0.0 <= confidence <= 1.0:
+                raise ValueError("confidence must be between 0 and 1")
+            metadata.append(f"c={confidence:.2f}")
+        metadata.append(f"scope={scope}")
+        return f"{label}[{','.join(metadata)}]: {text.strip()}"
+
+    def _append_unique_entry(self, path: pathlib.Path, *, kind: str, entry_line: str) -> bool:
+        """Append *entry_line* if it is not already present semantically."""
+        ensure_parent(path)
+        current = (
+            path.read_text(encoding="utf-8") if path.exists() else self._document_header(path, kind)
+        )
+        lines = current.splitlines()
+        target_identity = self._entry_identity(entry_line)
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if stripped == entry_line.strip():
+                return False
+            if stripped.startswith("- "):
+                existing_identity = self._entry_identity(stripped[2:].strip())
+                if target_identity and existing_identity == target_identity:
+                    return False
+        if current and not current.endswith("\n"):
+            current += "\n"
+        current += f"- {entry_line}\n"
+        path.write_text(current, encoding="utf-8")
+        return True
+
+    def _document_header(self, path: pathlib.Path, kind: str) -> str:
+        """Return the default header for a writable canonical file."""
+        if kind == "proposal":
+            return "# Memory Proposals\n\n## Entries\n"
+        if path.name in {"world.md", "experience.md", "opinions.md"}:
+            mapped_kind = path.stem.rstrip("s") if path.stem != "experience" else "reflection"
+            return BANK_HEADERS.get(mapped_kind, "# Entries\n\n")
+        if path.parent.name == "entities":
+            title = path.stem.replace("-", " ").title()
+            return f"# Entity: {title}\n\n## Entries\n"
+        return "# Entries\n\n"
+
+    def _entry_identity(self, entry_line: str) -> tuple[str, str, str | None] | None:
+        """Return a semantic identity for a canonical entry line."""
+        parsed = parse_typed_entry(
+            entry_line.strip(), default_scope=self.config.governance.default_scope
+        )
+        if parsed is None:
+            return None
+        text = parsed.entry_line
+        if ": " in text:
+            _, normalized_body = text.split(": ", 1)
+        else:
+            normalized_body = text
+        entity_name = next(iter(parsed.entities), None)
+        return (parsed.item_type, normalized_body.lower(), entity_name)
+
+    def _build_proposal(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        entry_line: str,
+        scope: str,
+        source_rel_path: str,
+        source_line: int,
+        entity: str | None,
+        confidence: float | None,
+        mode: ReflectionMode,
+    ) -> ProposalRecord:
+        """Build a stable proposal record."""
+        normalized_scope = validate_scope(scope)
+        proposal_id = self._sha256(f"{source_rel_path}:{source_line}:{entry_line}")
+        scope_auto_apply = should_auto_apply(normalized_scope, self.config.governance)
+        auto_apply = mode == "safe" and scope_auto_apply
+        if mode == "apply":
+            auto_apply = scope_auto_apply
+        status: Literal["pending", "applied"] = "applied" if auto_apply else "pending"
+        return ProposalRecord(
+            proposal_id=proposal_id,
+            kind=kind,
+            entry_line=entry_line,
+            scope=normalized_scope,
+            source_rel_path=source_rel_path,
+            source_line=source_line,
+            status=status,
+            entity=entity,
+            confidence=confidence,
+        )
+
+    def _format_proposal_line(self, proposal: ProposalRecord) -> str:
+        """Format a canonical proposal log entry."""
+        metadata = [
+            f"id={proposal.proposal_id}",
+            f"status={proposal.status}",
+            f"kind={proposal.kind}",
+            f"scope={proposal.scope}",
+            f"source={proposal.source_rel_path}#L{proposal.source_line}",
+        ]
+        if proposal.entity:
+            metadata.append(f"entity={proposal.entity}")
+        if proposal.confidence is not None:
+            metadata.append(f"c={proposal.confidence:.2f}")
+        return f"Proposal[{','.join(metadata)}]: {proposal.entry_line}"
+
+    def _proposal_kind(self, entry_line: str) -> Literal["fact", "reflection", "opinion", "entity"]:
+        """Extract the proposal target kind from a proposal line."""
+        parsed = parse_typed_entry(entry_line, default_scope=self.config.governance.default_scope)
+        if parsed is None:
+            return "fact"
+        text = parsed.entry_line
+        target = parse_typed_entry(
+            text.split(": ", 1)[1], default_scope=self.config.governance.default_scope
+        )
+        if target is None:
+            return "fact"
+        return target.item_type  # type: ignore[return-value]
+
+    def _count_rows(self, conn: sqlite3.Connection, table_name: str) -> int:
+        """Count rows inside *table_name*."""
+        row = conn.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
+        return 0 if row is None else int(row["count"])
+
+    def _normalize_text(self, text: str) -> tuple[str, ...]:
+        """Normalize text into lowercase search tokens."""
+        collapsed = "".join(character.lower() if character.isalnum() else " " for character in text)
+        return tuple(token for token in collapsed.split() if token)
+
+    def _slugify(self, value: str) -> str:
+        """Return a stable slug for an entity file path."""
+        lowered = value.strip().lower()
+        slug = "".join(character if character.isalnum() else "-" for character in lowered)
+        collapsed = "-".join(part for part in slug.split("-") if part)
+        return collapsed or "entity"
+
+    def _sha256(self, value: str) -> str:
+        """Return a SHA-256 hex digest for *value*."""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
