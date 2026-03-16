@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>ai.openclaw.browserlab</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>-lc</string>
+      <string>cd __REPO_ROOT__ && ./scripts/bootstrap/bootstrap_browser_lab.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/logs/launchd-browserlab.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/logs/launchd-browserlab.err.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+  </dict>
+</plist>

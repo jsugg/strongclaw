@@ -1,0 +1,52 @@
+{
+  "channels": {
+    "defaults": {
+      "groupPolicy": "allowlist",
+      "heartbeat": {
+        "showAlerts": true,
+        "showOk": false,
+        "useIndicator": true
+      }
+    },
+    "modelByChannel": {
+      "telegram": {
+        "__OWNER_TELEGRAM_ID__": "messaging"
+      },
+      "whatsapp": {
+        "+5511999999999": "messaging"
+      }
+    },
+    "telegram": {
+      "allowFrom": [
+        "tg:__OWNER_TELEGRAM_ID__"
+      ],
+      "botToken": {
+        "id": "TELEGRAM_BOT_TOKEN",
+        "provider": "default",
+        "source": "env"
+      },
+      "dmPolicy": "pairing",
+      "enabled": true,
+      "groupPolicy": "allowlist",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      }
+    },
+    "whatsapp": {
+      "allowFrom": [
+        "+5511999999999"
+      ],
+      "dmPolicy": "pairing",
+      "enabled": true,
+      "groupAllowFrom": [],
+      "groupPolicy": "allowlist",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      }
+    }
+  }
+}

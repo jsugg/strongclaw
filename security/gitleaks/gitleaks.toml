@@ -1,0 +1,7 @@
+title = "clawops"
+
+[allowlist]
+description = "example files"
+paths = [
+  """platform/configs/varlock/.env.local.example"""
+]

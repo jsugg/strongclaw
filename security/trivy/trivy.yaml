@@ -1,0 +1,8 @@
+format: table
+scanners:
+  - vuln
+  - secret
+severity:
+  - HIGH
+  - CRITICAL
+ignore-unfixed: true

@@ -1,0 +1,22 @@
+{
+  "plugins": {
+    "allow": [
+      "lossless-claw"
+    ],
+    "enabled": true,
+    "entries": {
+      "lossless-claw": {
+        "enabled": true
+      }
+    },
+    "load": {
+      "paths": [
+        "~/Projects/openclaw-platform-bootstrap/vendor/lossless-claw"
+      ]
+    },
+    "slots": {
+      "contextEngine": "lossless-claw",
+      "memory": "memory-core"
+    }
+  }
+}

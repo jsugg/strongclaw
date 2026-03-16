@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenClaw Browser Lab
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
+ExecStart=/bin/bash -lc 'docker compose -f platform/compose/docker-compose.browser-lab.yaml up -d'
+ExecStop=/bin/bash -lc 'docker compose -f platform/compose/docker-compose.browser-lab.yaml down'
+User=openclaw-browser
+Group=openclaw-browser
+
+[Install]
+WantedBy=default.target
