@@ -75,6 +75,7 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
     assert 'GITLEAKS_VERSION: "8.28.0"' in workflow
     assert "gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact" in workflow
     assert "actions/setup-node@v6" not in workflow
+    assert "cache: false" in workflow
     assert "pull-requests: write" in workflow
     assert "security-events: write" in workflow
     assert "  - platform/plugins" in codeql_config
