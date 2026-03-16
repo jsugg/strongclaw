@@ -13,7 +13,7 @@ Built-in tool policy is necessary but not sufficient for platform-grade side eff
 
 - YAML policy bundle
 - SQLite operation journal
-- GitHub, Jira, and generic webhook wrappers
+- GitHub comment/label/merge wrappers and a generic webhook wrapper
 - optional Rego examples for future policy engines
 
 ## Wrapper pattern

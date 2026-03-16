@@ -1,0 +1,5 @@
+node_modules/
+.venv-skill-tools
+memory-plugin-feature-dev
+memory-plugin-host-validation
+memory-plugin-release-consistency

@@ -21,7 +21,11 @@ def _official_markdown_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
         repo_root / "SETUP_GUIDE.md",
         repo_root / "USAGE_GUIDE.md",
     ]
-    platform_markdown = list((repo_root / "platform").rglob("*.md"))
+    platform_markdown = [
+        path
+        for path in (repo_root / "platform").rglob("*.md")
+        if "platform/plugins/" not in path.as_posix()
+    ]
     return root_markdown + platform_markdown
 
 
@@ -45,6 +49,7 @@ def test_shipped_context_config_loads() -> None:
     config = load_config(repo_root / "platform/configs/context/context-service.yaml")
     assert config.include_globs
     assert config.exclude_globs
+    assert "platform/plugins/memory-lancedb-pro/**" in config.exclude_globs
 
 
 def test_operator_docs_surface_platform_verification_commands() -> None:

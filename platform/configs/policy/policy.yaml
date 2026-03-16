@@ -5,25 +5,28 @@ zones:
   reader:
     allow_actions: ["memory.search", "memory.get", "web.fetch", "web.search", "context.pack"]
     allow_categories: ["read_only", "context_read"]
-    deny_actions: ["github.comment.create", "jira.comment.create", "webhook.post", "browser.navigate"]
+    deny_actions:
+      ["github.comment.create", "github.issue.labels.add", "github.pull_request.merge", "webhook.post", "browser.navigate"]
 
   reviewer:
     allow_actions: ["memory.search", "memory.get", "web.fetch", "web.search", "context.pack"]
     allow_categories: ["read_only", "context_read"]
-    deny_actions: ["github.comment.create", "jira.comment.create", "webhook.post", "browser.navigate"]
+    deny_actions:
+      ["github.comment.create", "github.issue.labels.add", "github.pull_request.merge", "webhook.post", "browser.navigate"]
 
   coder:
-    allow_actions: ["context.pack", "github.comment.create"]
+    allow_actions: ["context.pack", "github.comment.create", "github.issue.labels.add"]
     allow_categories: ["context_read", "external_write"]
 
   automation:
-    allow_actions: ["webhook.post", "jira.comment.create"]
+    allow_actions: ["webhook.post", "github.comment.create", "github.issue.labels.add"]
     allow_categories: ["external_write"]
 
 approval:
   require_for_actions:
     - github.comment.create
-    - jira.comment.create
+    - github.issue.labels.add
+    - github.pull_request.merge
     - webhook.post
     - browser.navigate
   require_for_categories:
@@ -37,9 +40,6 @@ allowlists:
   github_repo:
     - your-org/openclaw-platform
     - your-org/infra
-  jira_project:
-    - OPS
-    - SEC
 
 rules:
   - id: deny-browser-on-main-host

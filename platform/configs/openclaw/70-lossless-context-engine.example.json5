@@ -11,7 +11,7 @@
     },
     "load": {
       "paths": [
-        "~/Projects/openclaw-platform-bootstrap/vendor/lossless-claw"
+        "__REPO_ROOT__/vendor/lossless-claw"
       ]
     },
     "slots": {

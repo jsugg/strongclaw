@@ -37,8 +37,8 @@
         "runTimeoutSeconds": 1800
       },
       "timeFormat": "24",
-      "userTimezone": "America/Sao_Paulo",
-      "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/admin"
+      "userTimezone": "__USER_TIMEZONE__",
+      "workspace": "__ADMIN_WORKSPACE__"
     },
     "list": [
       {
@@ -62,7 +62,7 @@
           ],
           "profile": "minimal"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/admin"
+        "workspace": "__ADMIN_WORKSPACE__"
       }
     ]
   },

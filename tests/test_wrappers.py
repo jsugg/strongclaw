@@ -15,8 +15,12 @@ from clawops.common import write_yaml
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
-from clawops.wrappers.github import create_comment, execute_github_comment_approved
-from clawops.wrappers.jira import add_comment, execute_jira_comment_approved
+from clawops.wrappers.github import (
+    add_labels,
+    create_comment,
+    execute_github_approved,
+    merge_pull_request,
+)
 from clawops.wrappers.webhook import execute_webhook_approved, invoke_webhook
 
 type InvokeWrapper = Callable[[WrapperContext, str], dict[str, object]]
@@ -30,12 +34,15 @@ class WrapperSpec:
 
     name: str
     action: str
+    category: str
     allowlist_key: str
     allowed_input: str
     denied_input: str
+    normalized_target: str
+    kind: str
+    payload: dict[str, object]
     invoke: InvokeWrapper
     execute: ExecuteWrapper
-    patch_target: str
     allowlist_value: AllowlistValue
     env: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -51,10 +58,6 @@ def _identity(value: str) -> str:
     return value
 
 
-def _jira_project(issue_key: str) -> str:
-    return issue_key.split("-", 1)[0]
-
-
 def _invoke_webhook(ctx: WrapperContext, url: str) -> dict[str, object]:
     return invoke_webhook(
         ctx=ctx,
@@ -65,7 +68,7 @@ def _invoke_webhook(ctx: WrapperContext, url: str) -> dict[str, object]:
     )
 
 
-def _invoke_github(ctx: WrapperContext, repo: str) -> dict[str, object]:
+def _invoke_github_comment(ctx: WrapperContext, repo: str) -> dict[str, object]:
     return create_comment(
         ctx=ctx,
         repo=repo,
@@ -76,11 +79,25 @@ def _invoke_github(ctx: WrapperContext, repo: str) -> dict[str, object]:
     )
 
 
-def _invoke_jira(ctx: WrapperContext, issue_key: str) -> dict[str, object]:
-    return add_comment(
+def _invoke_github_labels(ctx: WrapperContext, repo: str) -> dict[str, object]:
+    return add_labels(
         ctx=ctx,
-        issue_key=issue_key,
-        body="hello",
+        repo=repo,
+        issue_number=123,
+        labels=["needs-review", "triaged"],
+        scope="test",
+        trust_zone="automation",
+    )
+
+
+def _invoke_github_merge(ctx: WrapperContext, repo: str) -> dict[str, object]:
+    return merge_pull_request(
+        ctx=ctx,
+        repo=repo,
+        pull_number=123,
+        merge_method="squash",
+        commit_title="Merge ready",
+        commit_message="automerge",
         scope="test",
         trust_zone="automation",
     )
@@ -91,52 +108,72 @@ def _execute_webhook(ctx: WrapperContext, op_id: str) -> dict[str, object]:
 
 
 def _execute_github(ctx: WrapperContext, op_id: str) -> dict[str, object]:
-    return execute_github_comment_approved(ctx=ctx, op_id=op_id)
-
-
-def _execute_jira(ctx: WrapperContext, op_id: str) -> dict[str, object]:
-    return execute_jira_comment_approved(ctx=ctx, op_id=op_id)
+    return execute_github_approved(ctx=ctx, op_id=op_id)
 
 
 SPECS = (
     WrapperSpec(
         name="webhook",
         action="webhook.post",
+        category="external_write",
         allowlist_key="webhook_url",
         allowed_input="https://example.internal/hooks/deploy",
         denied_input="https://evil.invalid/hooks/deploy",
+        normalized_target="https://example.internal/hooks/deploy",
+        kind="webhook_post",
+        payload={"ok": True},
         invoke=_invoke_webhook,
         execute=_execute_webhook,
-        patch_target="clawops.wrappers.base.requests.post",
         allowlist_value=_identity,
     ),
     WrapperSpec(
-        name="github",
+        name="github-comment",
         action="github.comment.create",
+        category="external_write",
         allowlist_key="github_repo",
         allowed_input="example/repo",
         denied_input="evil/repo",
-        invoke=_invoke_github,
+        normalized_target="github://example/repo/issues/123",
+        kind="github_comment",
+        payload={"body": "hello"},
+        invoke=_invoke_github_comment,
         execute=_execute_github,
-        patch_target="clawops.wrappers.base.requests.post",
         allowlist_value=_identity,
         env={"GITHUB_TOKEN": "test-token"},
     ),
     WrapperSpec(
-        name="jira",
-        action="jira.comment.create",
-        allowlist_key="jira_project",
-        allowed_input="OPS-123",
-        denied_input="BAD-123",
-        invoke=_invoke_jira,
-        execute=_execute_jira,
-        patch_target="clawops.wrappers.jira.requests.post",
-        allowlist_value=_jira_project,
-        env={
-            "JIRA_BASE_URL": "https://jira.example.internal",
-            "JIRA_EMAIL": "operator@example.internal",
-            "JIRA_API_TOKEN": "test-token",
+        name="github-labels",
+        action="github.issue.labels.add",
+        category="external_write",
+        allowlist_key="github_repo",
+        allowed_input="example/repo",
+        denied_input="evil/repo",
+        normalized_target="github://example/repo/issues/123",
+        kind="github_issue_labels",
+        payload={"labels": ["needs-review", "triaged"]},
+        invoke=_invoke_github_labels,
+        execute=_execute_github,
+        allowlist_value=_identity,
+        env={"GITHUB_TOKEN": "test-token"},
+    ),
+    WrapperSpec(
+        name="github-merge",
+        action="github.pull_request.merge",
+        category="irreversible",
+        allowlist_key="github_repo",
+        allowed_input="example/repo",
+        denied_input="evil/repo",
+        normalized_target="github://example/repo/pulls/123/merge",
+        kind="github_pull_merge",
+        payload={
+            "merge_method": "squash",
+            "commit_title": "Merge ready",
+            "commit_message": "automerge",
         },
+        invoke=_invoke_github_merge,
+        execute=_execute_github,
+        allowlist_value=_identity,
+        env={"GITHUB_TOKEN": "test-token"},
     ),
 )
 
@@ -154,7 +191,7 @@ def _build_context(
         "zones": {
             "automation": {
                 "allow_actions": [spec.action],
-                "allow_categories": ["external_write"],
+                "allow_categories": [spec.category],
             }
         },
         "allowlists": {
@@ -178,58 +215,25 @@ def _configure_wrapper_environment(spec: WrapperSpec, monkeypatch: MonkeyPatch) 
         monkeypatch.setenv(key, value)
 
 
-def _install_success_response(
-    spec: WrapperSpec,
-    monkeypatch: MonkeyPatch,
-    calls: list[str],
-) -> None:
-    def _post(*args: object, **kwargs: object) -> _FakeResponse:
-        calls.append("post")
+def _install_success_response(monkeypatch: MonkeyPatch, calls: list[str]) -> None:
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
+        calls.append("request")
         return _FakeResponse(text="ok")
 
-    monkeypatch.setattr(spec.patch_target, _post)
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
 
 
 def _install_transport_error(
-    spec: WrapperSpec,
     monkeypatch: MonkeyPatch,
     message: str,
     calls: list[str] | None = None,
 ) -> None:
-    def _post(*args: object, **kwargs: object) -> _FakeResponse:
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
         if calls is not None:
-            calls.append("post")
+            calls.append("request")
         raise requests.Timeout(message)
 
-    monkeypatch.setattr(spec.patch_target, _post)
-
-
-def _normalized_target_for_spec(spec: WrapperSpec) -> str:
-    if spec.name == "webhook":
-        return spec.allowed_input
-    if spec.name == "github":
-        return f"github://{spec.allowed_input}/issues/123"
-    if spec.name == "jira":
-        return spec.allowed_input
-    raise AssertionError(f"unknown wrapper spec: {spec.name}")
-
-
-def _kind_for_spec(spec: WrapperSpec) -> str:
-    if spec.name == "webhook":
-        return "webhook_post"
-    if spec.name == "github":
-        return "github_comment"
-    if spec.name == "jira":
-        return "jira_comment"
-    raise AssertionError(f"unknown wrapper spec: {spec.name}")
-
-
-def _payload_for_spec(spec: WrapperSpec) -> dict[str, object]:
-    if spec.name == "webhook":
-        return {"ok": True}
-    if spec.name in {"github", "jira"}:
-        return {"body": "hello"}
-    raise AssertionError(f"unknown wrapper spec: {spec.name}")
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
 
 
 def _allow_decision_json() -> str:
@@ -275,7 +279,7 @@ def test_wrapper_requires_explicit_approval_then_replays_terminal_result(
     ctx, journal = _build_context(tmp_path, spec, require_approval=True)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     prepared = spec.invoke(ctx, spec.allowed_input)
 
@@ -294,7 +298,7 @@ def test_wrapper_requires_explicit_approval_then_replays_terminal_result(
     assert executed["executed"] is True
     assert executed["status"] == "succeeded"
     assert replayed == executed
-    assert calls == ["post"]
+    assert calls == ["request"]
 
     persisted = journal.get(str(prepared["op_id"]))
     assert persisted.approved_by == "operator"
@@ -315,7 +319,7 @@ def test_wrapper_replays_pending_approval_without_side_effect(
     ctx, journal = _build_context(tmp_path, spec, require_approval=True)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -343,7 +347,7 @@ def test_wrapper_replays_success_without_duplicate_side_effect(
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -355,7 +359,7 @@ def test_wrapper_replays_success_without_duplicate_side_effect(
     assert second["executed"] is True
     assert second["status"] == "succeeded"
     assert second["body"] == "ok"
-    assert calls == ["post"]
+    assert calls == ["request"]
 
     persisted = journal.get(str(first["op_id"]))
     assert persisted.result_ok == 1
@@ -374,7 +378,7 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_transport_error(spec, monkeypatch, "simulated timeout", calls)
+    _install_transport_error(monkeypatch, "simulated timeout", calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -385,7 +389,7 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     assert first["status"] == "failed"
     assert first["body"] == "simulated timeout"
     assert second == first
-    assert calls == ["post"]
+    assert calls == ["request"]
 
     persisted = journal.get(str(first["op_id"]))
     assert persisted.status == "failed"
@@ -403,7 +407,7 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
 ) -> None:
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
-    _install_transport_error(spec, monkeypatch, "simulated timeout")
+    _install_transport_error(monkeypatch, "simulated timeout")
 
     result = spec.invoke(ctx, spec.allowed_input)
 
@@ -432,14 +436,14 @@ def test_wrapper_replays_running_operation_without_duplicate_side_effect(
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     op = journal.begin(
         scope="test",
-        kind=_kind_for_spec(spec),
+        kind=spec.kind,
         trust_zone="automation",
-        normalized_target=_normalized_target_for_spec(spec),
-        inputs=_payload_for_spec(spec),
+        normalized_target=spec.normalized_target,
+        inputs=spec.payload,
     )
     approved = journal.transition(
         op.op_id,
@@ -474,7 +478,7 @@ def test_wrapper_replays_stored_decision_when_policy_changes(
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
 
@@ -486,7 +490,7 @@ def test_wrapper_replays_stored_decision_when_policy_changes(
             "zones": {
                 "automation": {
                     "allow_actions": [spec.action],
-                    "allow_categories": ["external_write"],
+                    "allow_categories": [spec.category],
                 }
             },
             "allowlists": {
@@ -507,7 +511,7 @@ def test_wrapper_replays_stored_decision_when_policy_changes(
     assert replayed["status"] == "succeeded"
     assert replayed["decision"]["decision"] == "allow"
     assert replayed["decision"] == first["decision"]
-    assert calls == ["post"]
+    assert calls == ["request"]
 
     persisted = journal.get(str(first["op_id"]))
     assert persisted.policy_decision == "allow"
@@ -524,10 +528,10 @@ def test_execute_approved_rejects_manual_rows_without_execution_contract(
     _configure_wrapper_environment(spec, monkeypatch)
     op = journal.begin(
         scope="test",
-        kind=_kind_for_spec(spec),
+        kind=spec.kind,
         trust_zone="automation",
-        normalized_target=_normalized_target_for_spec(spec),
-        inputs=_payload_for_spec(spec),
+        normalized_target=spec.normalized_target,
+        inputs=spec.payload,
     )
     approved = journal.approve(op.op_id, approved_by="operator", note="manual staging")
 
@@ -545,14 +549,14 @@ def test_execute_approved_can_restamp_legacy_rows_when_policy_is_supplied(
     ctx, journal = _build_context(tmp_path, spec, require_approval=False)
     _configure_wrapper_environment(spec, monkeypatch)
     calls: list[str] = []
-    _install_success_response(spec, monkeypatch, calls)
+    _install_success_response(monkeypatch, calls)
 
     op = journal.begin(
         scope="test",
-        kind=_kind_for_spec(spec),
+        kind=spec.kind,
         trust_zone="automation",
-        normalized_target=_normalized_target_for_spec(spec),
-        inputs=_payload_for_spec(spec),
+        normalized_target=spec.normalized_target,
+        inputs=spec.payload,
     )
     approved = journal.approve(op.op_id, approved_by="operator", note="legacy staged row")
 
@@ -561,7 +565,7 @@ def test_execute_approved_can_restamp_legacy_rows_when_policy_is_supplied(
     assert executed["ok"] is True
     assert executed["executed"] is True
     assert executed["status"] == "succeeded"
-    assert calls == ["post"]
+    assert calls == ["request"]
 
     persisted = journal.get(approved.op_id)
     assert persisted.execution_contract_version == 1

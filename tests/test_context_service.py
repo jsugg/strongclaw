@@ -25,6 +25,9 @@ def test_index_and_query(tmp_path: pathlib.Path) -> None:
     hits = service.query("validate_jwt", limit=3)
     assert hits
     assert hits[0].path == "auth.py"
+    assert hits[0].start_line == 1
+    assert hits[0].end_line >= hits[0].start_line
+    assert "2:     def validate_jwt(self):" in hits[0].snippet
 
 
 def test_context_service_respects_include_and_exclude_globs(tmp_path: pathlib.Path) -> None:
@@ -215,3 +218,24 @@ def test_context_config_rejects_non_positive_max_file_size(tmp_path: pathlib.Pat
 
     with pytest.raises(ValueError, match="index.max_file_size_bytes must be positive"):
         load_config(config_path)
+
+
+def test_index_with_stats_skips_unchanged_files(tmp_path: pathlib.Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "auth.py"
+    target.write_text("def validate_jwt():\n    return True\n", encoding="utf-8")
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+
+    service = service_from_config(config_path, repo)
+    first = service.index_with_stats()
+    second = service.index_with_stats()
+
+    assert first.total_files == 1
+    assert first.indexed_files == 1
+    assert first.skipped_files == 0
+    assert second.total_files == 1
+    assert second.indexed_files == 0
+    assert second.skipped_files == 1
+    assert second.deleted_files == 0

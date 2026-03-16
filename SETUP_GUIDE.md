@@ -167,11 +167,13 @@ clawops context query \
   --query "operation journal idempotency"
 ```
 
-If you need the opt-in Markdown-canonical durable memory path instead of the
-default QMD-backed retrieval rollout, merge
-`platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` after this
-step. Keep the default memory slot unchanged until you intentionally cut over
-to the memory-v2 overlay.
+If you need the opt-in local durable memory path instead of the default
+QMD-backed retrieval rollout, merge
+`platform/configs/openclaw/75-clawops-memory-pro.local.json5` after this step.
+Use `platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5` only
+after Ollama is serving both embeddings and a local extraction model. Keep
+`platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` as the
+Markdown-canonical migration source while you validate parity.
 
 ## 11. Add channels carefully
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fnmatch
+import json
 import pathlib
 import re
 import sqlite3
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS files (
     sha256 TEXT NOT NULL,
     language TEXT NOT NULL,
     mtime_ns INTEGER NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
     symbols TEXT NOT NULL,
     content TEXT NOT NULL
 );
@@ -169,6 +171,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
 );
 """
 
+MIGRATION_COLUMNS = {
+    "size_bytes": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class IndexStats:
+    """Stable indexing summary."""
+
+    total_files: int
+    indexed_files: int
+    skipped_files: int
+    deleted_files: int
+
+    def to_dict(self) -> dict[str, int]:
+        """Serialize the stats for CLI/reporting surfaces."""
+        return {
+            "total_files": self.total_files,
+            "indexed_files": self.indexed_files,
+            "skipped_files": self.skipped_files,
+            "deleted_files": self.deleted_files,
+        }
+
 
 @dataclasses.dataclass(slots=True)
 class SearchHit:
@@ -177,6 +202,8 @@ class SearchHit:
     path: str
     snippet: str
     symbols: list[str]
+    start_line: int
+    end_line: int
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -206,7 +233,17 @@ class ContextService:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        self._ensure_schema(conn)
         return conn
+
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        """Apply additive schema migrations for existing context databases."""
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(files)").fetchall()}
+        for column, definition in MIGRATION_COLUMNS.items():
+            if column in columns:
+                continue
+            conn.execute(f"ALTER TABLE files ADD COLUMN {column} {definition}")
+        conn.commit()
 
     def _allows_symlink(self, path: pathlib.Path) -> bool:
         """Return True when *path* satisfies the configured symlink policy."""
@@ -258,40 +295,66 @@ class ContextService:
                 continue
             yield path
 
-    def index(self) -> int:
+    def index_with_stats(self) -> IndexStats:
         """Index repository contents into the lexical store."""
-        count = 0
+        indexed_files = 0
+        skipped_files = 0
         seen_paths: set[str] = set()
         with self.connect() as conn:
             for path in self.iter_files():
                 try:
+                    stat_result = path.stat()
+                except OSError:
+                    continue
+                size_bytes = stat_result.st_size
+                mtime_ns = stat_result.st_mtime_ns
+                rel = str(path.relative_to(self.repo))
+                seen_paths.add(rel)
+                existing = conn.execute(
+                    "SELECT mtime_ns, size_bytes FROM files WHERE path = ?",
+                    (rel,),
+                ).fetchone()
+                if (
+                    existing is not None
+                    and int(existing["mtime_ns"]) == mtime_ns
+                    and int(existing["size_bytes"]) == size_bytes
+                ):
+                    skipped_files += 1
+                    continue
+                try:
                     text = path.read_text(encoding="utf-8")
                 except (OSError, UnicodeDecodeError):
                     continue
-                rel = str(path.relative_to(self.repo))
-                seen_paths.add(rel)
                 sha = sha256_hex(text)
                 symbols = extract_symbols(path, text)
-                mtime_ns = path.stat().st_mtime_ns
                 conn.execute(
                     """
-                    INSERT INTO files(path, sha256, language, mtime_ns, symbols, content)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO files(path, sha256, language, mtime_ns, size_bytes, symbols, content)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET
                         sha256 = excluded.sha256,
                         language = excluded.language,
                         mtime_ns = excluded.mtime_ns,
+                        size_bytes = excluded.size_bytes,
                         symbols = excluded.symbols,
                         content = excluded.content
                     """,
-                    (rel, sha, detect_language(path), mtime_ns, "\n".join(symbols), text),
+                    (
+                        rel,
+                        sha,
+                        detect_language(path),
+                        mtime_ns,
+                        size_bytes,
+                        "\n".join(symbols),
+                        text,
+                    ),
                 )
                 conn.execute("DELETE FROM files_fts WHERE path = ?", (rel,))
                 conn.execute(
                     "INSERT INTO files_fts(path, content, symbols) VALUES (?, ?, ?)",
                     (rel, text, "\n".join(symbols)),
                 )
-                count += 1
+                indexed_files += 1
             indexed_paths = {
                 str(row["path"]) for row in conn.execute("SELECT path FROM files").fetchall()
             }
@@ -304,7 +367,56 @@ class ContextService:
                     "DELETE FROM files_fts WHERE path = ?", ((path,) for path in stale_paths)
                 )
             conn.commit()
-        return count
+        return IndexStats(
+            total_files=len(seen_paths),
+            indexed_files=indexed_files,
+            skipped_files=skipped_files,
+            deleted_files=len(stale_paths),
+        )
+
+    def index(self) -> int:
+        """Index repository contents into the lexical store."""
+        return self.index_with_stats().total_files
+
+    def _build_search_hit(
+        self, *, path: str, content: str, symbols_text: str, query: str
+    ) -> SearchHit:
+        """Build a stable search hit with line-oriented snippet context."""
+        lines = content.splitlines()
+        if not lines:
+            return SearchHit(path=path, snippet="", symbols=[], start_line=1, end_line=1)
+        query_casefold = query.casefold()
+        match_line_index: int | None = None
+        for index, line in enumerate(lines):
+            if query_casefold in line.casefold():
+                match_line_index = index
+                break
+        if match_line_index is None:
+            tokens = [token for token in re.split(r"[^A-Za-z0-9_./:-]+", query) if token]
+            for token in tokens:
+                token_casefold = token.casefold()
+                for index, line in enumerate(lines):
+                    if token_casefold in line.casefold():
+                        match_line_index = index
+                        break
+                if match_line_index is not None:
+                    break
+        if match_line_index is None:
+            match_line_index = 0
+        start_line = max(1, match_line_index + 1 - 2)
+        end_line = min(len(lines), match_line_index + 1 + 2)
+        snippet = "\n".join(
+            f"{line_number}: {lines[line_number - 1]}"
+            for line_number in range(start_line, end_line + 1)
+        )
+        symbols = [symbol for symbol in symbols_text.splitlines() if symbol]
+        return SearchHit(
+            path=path,
+            snippet=snippet,
+            symbols=symbols,
+            start_line=start_line,
+            end_line=end_line,
+        )
 
     def query(self, query: str, *, limit: int = 8) -> list[SearchHit]:
         """Run a lexical query.
@@ -314,16 +426,19 @@ class ContextService:
         scan when the FTS query returns no rows.
         """
         with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT f.path, f.content, f.symbols
-                FROM files_fts fts
-                JOIN files f ON f.path = fts.path
-                WHERE files_fts MATCH ?
-                LIMIT ?
-                """,
-                (query, limit),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT f.path, f.content, f.symbols
+                    FROM files_fts fts
+                    JOIN files f ON f.path = fts.path
+                    WHERE files_fts MATCH ?
+                    LIMIT ?
+                    """,
+                    (query, limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
             if not rows:
                 rows = conn.execute(
                     """
@@ -336,10 +451,14 @@ class ContextService:
                 ).fetchall()
         hits: list[SearchHit] = []
         for row in rows:
-            content = str(row["content"])
-            snippet = content[:1200]
-            symbols = [s for s in str(row["symbols"]).splitlines() if s]
-            hits.append(SearchHit(path=str(row["path"]), snippet=snippet, symbols=symbols))
+            hits.append(
+                self._build_search_hit(
+                    path=str(row["path"]),
+                    content=str(row["content"]),
+                    symbols_text=str(row["symbols"]),
+                    query=query,
+                )
+            )
         return hits
 
     def git_diff(self) -> str:
@@ -377,6 +496,7 @@ class ContextService:
             lines.append(f"### {hit.path}")
             if hit.symbols:
                 lines.append(f"- symbols: {', '.join(hit.symbols[:12])}")
+            lines.append(f"- lines: {hit.start_line}-{hit.end_line}")
             lines.append("```text")
             lines.append(hit.snippet)
             lines.append("```")
@@ -437,6 +557,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         cmd.add_argument("--config", required=True, type=pathlib.Path)
         cmd.add_argument("--repo", required=True, type=pathlib.Path)
 
+    index = sub.choices["index"]
+    index.add_argument("--json", action="store_true")
+
     query = sub.choices["query"]
     query.add_argument("--query", required=True)
     query.add_argument("--limit", type=int, default=8)
@@ -454,8 +577,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     service = service_from_config(args.config, expand(args.repo))
     if args.command == "index":
-        count = service.index()
-        print(f"indexed={count}")
+        stats = service.index_with_stats()
+        if args.json:
+            print(json.dumps(stats.to_dict(), sort_keys=True))
+        else:
+            print(
+                " ".join(
+                    (
+                        f"indexed={stats.total_files}",
+                        f"changed={stats.indexed_files}",
+                        f"skipped={stats.skipped_files}",
+                        f"deleted={stats.deleted_files}",
+                    )
+                )
+            )
         return 0
     if args.command == "query":
         hits = service.query(args.query, limit=args.limit)
