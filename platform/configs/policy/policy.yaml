@@ -1,0 +1,64 @@
+defaults:
+  decision: deny
+
+zones:
+  reader:
+    allow_actions: ["memory.search", "memory.get", "web.fetch", "web.search", "context.pack"]
+    allow_categories: ["read_only", "context_read"]
+    deny_actions: ["github.comment.create", "jira.comment.create", "webhook.post", "browser.navigate"]
+
+  reviewer:
+    allow_actions: ["memory.search", "memory.get", "web.fetch", "web.search", "context.pack"]
+    allow_categories: ["read_only", "context_read"]
+    deny_actions: ["github.comment.create", "jira.comment.create", "webhook.post", "browser.navigate"]
+
+  coder:
+    allow_actions: ["context.pack", "github.comment.create"]
+    allow_categories: ["context_read", "external_write"]
+
+  automation:
+    allow_actions: ["webhook.post", "jira.comment.create"]
+    allow_categories: ["external_write"]
+
+approval:
+  require_for_actions:
+    - github.comment.create
+    - jira.comment.create
+    - webhook.post
+    - browser.navigate
+  require_for_categories:
+    - irreversible
+    - external_write
+
+allowlists:
+  webhook_url:
+    - https://example.internal/hooks/deploy
+    - https://example.internal/hooks/notify
+  github_repo:
+    - your-org/openclaw-platform
+    - your-org/infra
+  jira_project:
+    - OPS
+    - SEC
+
+rules:
+  - id: deny-browser-on-main-host
+    when:
+      action: browser.navigate
+      host_boundary: main-control-plane
+    decision: deny
+    reason: browser navigation is isolated to the browser lab only
+
+  - id: deny-reader-side-effects
+    when:
+      trust_zone: reader
+      category: external_write
+    decision: deny
+    reason: reader lanes may not perform external writes
+
+  - id: approval-for-prod-webhook
+    when:
+      action: webhook.post
+      environment: prod
+    decision: require_approval
+    reason: production webhooks always require approval

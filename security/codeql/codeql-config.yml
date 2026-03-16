@@ -1,0 +1,7 @@
+name: "clawops-codeql"
+paths:
+  - src
+  - scripts
+paths-ignore:
+  - platform/compose/state
+  - platform/skills/quarantine

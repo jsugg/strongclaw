@@ -1,0 +1,96 @@
+{
+  "agents": {
+    "list": [
+      {
+        "agentDir": "~/.openclaw/agents/coder-acp-codex/agent",
+        "id": "coder-acp-codex",
+        "name": "Coder ACP Codex",
+        "runtime": {
+          "acp": {
+            "agent": "codex",
+            "backend": "acpx",
+            "cwd": "~/Projects/openclaw-platform-bootstrap/repo/upstream",
+            "mode": "persistent"
+          },
+          "type": "acp"
+        },
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "rw"
+        },
+        "subagents": {
+          "allowAgents": [
+            "reviewer-acp-claude",
+            "reviewer"
+          ]
+        },
+        "tools": {
+          "allow": [
+            "sessions_spawn",
+            "sessions_list",
+            "session_status",
+            "memory_search",
+            "memory_get"
+          ],
+          "deny": [
+            "browser",
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "send",
+            "whatsapp",
+            "telegram"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+      },
+      {
+        "agentDir": "~/.openclaw/agents/reviewer-acp-claude/agent",
+        "id": "reviewer-acp-claude",
+        "name": "Reviewer ACP Claude",
+        "runtime": {
+          "acp": {
+            "agent": "claude",
+            "backend": "acpx",
+            "cwd": "~/Projects/openclaw-platform-bootstrap/repo/upstream",
+            "mode": "persistent"
+          },
+          "type": "acp"
+        },
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "ro"
+        },
+        "tools": {
+          "allow": [
+            "sessions_list",
+            "session_status",
+            "memory_search",
+            "memory_get"
+          ],
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "browser",
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "send",
+            "whatsapp",
+            "telegram"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+      }
+    ]
+  }
+}

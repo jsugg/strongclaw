@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  browserlab-proxy:
+    image: ubuntu/squid:latest
+    ports:
+      - "127.0.0.1:3128:3128"
+    volumes:
+      - ../workers/browser-lab/squid.conf:/etc/squid/squid.conf:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  browserlab-playwright:
+    image: mcr.microsoft.com/playwright:v1.41.1-jammy
+    depends_on:
+      - browserlab-proxy
+    environment:
+      HTTP_PROXY: http://browserlab-proxy:3128
+      HTTPS_PROXY: http://browserlab-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,browserlab-proxy
+    command: ["bash", "-lc", "sleep infinity"]
+    shm_size: "1gb"
+    ports:
+      - "127.0.0.1:9222:9222"
+    volumes:
+      - ./state/browser-lab:/workspace/state
+      - ../workers/browser-lab:/workspace/browser-lab:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

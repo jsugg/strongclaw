@@ -1,0 +1,14 @@
+rules:
+  - id: avoid-child-process
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "Avoid child_process in reviewed runtime code."
+    patterns:
+      - pattern: child_process.$X(...)
+
+  - id: avoid-shell-delete
+    languages: [bash]
+    severity: ERROR
+    message: "Avoid destructive shell patterns."
+    patterns:
+      - pattern-regex: 'rm\s+-rf'

@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenClaw Auxiliary Sidecars
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
+ExecStart=/bin/bash -lc './scripts/ops/launch_sidecars_with_varlock.sh'
+ExecStop=/bin/bash -lc './scripts/ops/stop_sidecars.sh'
+User=openclaw
+Group=openclaw
+
+[Install]
+WantedBy=default.target

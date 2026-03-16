@@ -1,0 +1,43 @@
+{
+  "memory": {
+    "backend": "qmd",
+    "citations": "auto",
+    "qmd": {
+      "includeDefaultMemory": true,
+      "limits": {
+        "maxResults": 6,
+        "timeoutMs": 4000
+      },
+      "paths": [
+        {
+          "name": "runbooks",
+          "path": "~/Projects/openclaw-platform-bootstrap/platform/docs",
+          "pattern": "**/*.md"
+        },
+        {
+          "name": "skills",
+          "path": "~/Projects/openclaw-platform-bootstrap/platform/skills",
+          "pattern": "**/*.md"
+        }
+      ],
+      "scope": {
+        "default": "deny",
+        "rules": [
+          {
+            "action": "allow",
+            "match": {
+              "chatType": "direct"
+            }
+          }
+        ]
+      },
+      "searchMode": "search",
+      "update": {
+        "debounceMs": 15000,
+        "interval": "15m",
+        "onBoot": true,
+        "waitForBootSync": false
+      }
+    }
+  }
+}

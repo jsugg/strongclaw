@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  langfuse-web:
+    image: langfuse/langfuse:3
+    environment:
+      DATABASE_URL: ${LANGFUSE_DATABASE_URL}
+      REDIS_CONNECTION_STRING: ${LANGFUSE_REDIS_URL}
+      CLICKHOUSE_URL: ${LANGFUSE_CLICKHOUSE_URL}
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      SALT: ${LANGFUSE_SALT}
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    environment:
+      DATABASE_URL: ${LANGFUSE_DATABASE_URL}
+      REDIS_CONNECTION_STRING: ${LANGFUSE_REDIS_URL}
+      CLICKHOUSE_URL: ${LANGFUSE_CLICKHOUSE_URL}
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD}
+      SALT: ${LANGFUSE_SALT}
+    restart: unless-stopped

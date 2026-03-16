@@ -1,0 +1,8 @@
+{
+  "defaultAgent": "codex",
+  "defaultPermissions": "approve-all",
+  "nonInteractivePermissions": "deny",
+  "ttl": 3600,
+  "timeout": 1800,
+  "format": "text"
+}

@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "description": "Allow bounded test and lint commands inside the repo workspace only.",
+      "id": "workspace-tests",
+      "match": {
+        "cwdPrefixes": [
+          "~/Projects/openclaw-platform-bootstrap",
+          "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+        ],
+        "executables": [
+          "python3",
+          "pytest",
+          "npm",
+          "pnpm",
+          "ruff",
+          "mypy",
+          "node"
+        ]
+      },
+      "policy": {
+        "allowArgsRegex": [
+          "(^| )-m pytest( |$)",
+          "(^| )pytest( |$)",
+          "(^| )ruff( |$)",
+          "(^| )mypy( |$)",
+          "(^| )test( |$)",
+          "(^| )lint( |$)"
+        ],
+        "denyArgsRegex": [
+          "(^| )rm\\s+-rf( |$)",
+          "(^| )curl( |$)",
+          "(^| )wget( |$)"
+        ]
+      }
+    }
+  ],
+  "version": 1
+}

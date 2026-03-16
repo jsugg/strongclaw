@@ -1,0 +1,24 @@
+index:
+  db_path: .clawops/context.sqlite
+
+paths:
+  include:
+    - "**/*.md"
+    - "**/*.py"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+    - "**/*.jsx"
+    - "**/*.go"
+    - "**/*.rs"
+    - "**/*.json"
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.toml"
+  exclude:
+    - ".git/**"
+    - "node_modules/**"
+    - ".venv/**"
+    - "dist/**"
+    - "build/**"
+    - ".openclaw/**"

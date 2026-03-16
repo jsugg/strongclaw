@@ -1,0 +1,11 @@
+telegram_allow:
+  - "12345678"
+
+whatsapp_allow:
+  - "+5511999999999"
+
+telegram_models:
+  "12345678": "messaging"
+
+whatsapp_models:
+  "+5511999999999": "messaging"

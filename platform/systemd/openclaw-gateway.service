@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenClaw Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
+ExecStart=/bin/bash -lc './scripts/ops/launch_gateway_with_varlock.sh'
+Restart=always
+RestartSec=5
+User=openclaw
+Group=openclaw
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

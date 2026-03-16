@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clawops"
+version = "0.1.0"
+description = "Companion ops, policy, context, and harness tooling for a hardened OpenClaw platform."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0",
+  "requests>=2.31.0",
+  "matplotlib>=3.8.0",
+]
+authors = [
+  {name = "OpenAI", email = "support@openai.com"}
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+clawops = "clawops.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
