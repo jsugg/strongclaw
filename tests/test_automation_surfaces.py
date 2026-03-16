@@ -67,32 +67,55 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
 
     assert "actions: read" in workflow
     assert "contents: read" in workflow
-    assert "actions/checkout@v5" in workflow
+    assert "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd" in workflow
     assert "languages: python,javascript" in workflow
-    assert "actions/setup-python@v6" in workflow
-    assert "github/codeql-action/init@v4" in workflow
-    assert "github/codeql-action/analyze@v4" in workflow
+    assert "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" in workflow
+    assert "github/codeql-action/init@b1bff81932f5cdfc8695c7752dcee935dcd061c8" in workflow
+    assert "github/codeql-action/analyze@b1bff81932f5cdfc8695c7752dcee935dcd061c8" in workflow
     assert 'GITLEAKS_VERSION: "8.28.0"' in workflow
     assert "gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact" in workflow
+    assert "--cov=src/clawops" in workflow
+    assert 'SYFT_VERSION: "v1.42.2"' in workflow
+    assert "syft dir:. -o spdx-json=sbom.spdx.json" in workflow
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "actions/setup-node@v6" not in workflow
     assert "cache: false" in workflow
     assert "pull-requests: write" in workflow
     assert "security-events: write" in workflow
+    assert "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1" in workflow
     assert "  - platform/plugins" in codeql_config
+    assert "  - platform/plugins/memory-lancedb-pro" in codeql_config
 
 
-def test_github_workflows_do_not_use_deprecated_action_majors() -> None:
+def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    deprecated_refs = (
-        "actions/checkout@v4",
-        "actions/setup-python@v5",
-        "actions/setup-node@v4",
-        "github/codeql-action/init@v3",
-        "github/codeql-action/analyze@v3",
-        "gitleaks/gitleaks-action@v2",
-    )
 
     for workflow_path in (repo_root / ".github/workflows").glob("*.yml"):
         text = workflow_path.read_text(encoding="utf-8")
-        for deprecated_ref in deprecated_refs:
-            assert deprecated_ref not in text, f"deprecated action ref in {workflow_path.name}"
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("- uses: "):
+                continue
+            assert (
+                "@master" not in stripped
+            ), f"mutable action ref in {workflow_path.name}: {stripped}"
+            action_ref = stripped.removeprefix("- uses: ")
+            owner_and_repo, _, version = action_ref.partition("@")
+            assert (
+                owner_and_repo and version
+            ), f"invalid action ref in {workflow_path.name}: {stripped}"
+            assert (
+                len(version.split("#", 1)[0].strip()) == 40
+            ), f"workflow action must pin a full commit SHA in {workflow_path.name}: {stripped}"
+
+
+def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    macos = (repo_root / "scripts/bootstrap/bootstrap_macos.sh").read_text(encoding="utf-8")
+    linux = (repo_root / "scripts/bootstrap/bootstrap_linux.sh").read_text(encoding="utf-8")
+
+    for script in (macos, linux):
+        assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in script
+        assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in script
+        assert "acpx@latest" not in script
+    assert "|| true" not in macos

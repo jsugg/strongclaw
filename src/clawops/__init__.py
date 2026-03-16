@@ -1,5 +1,7 @@
 """Companion tooling for a hardened OpenClaw platform deployment."""
 
+__version__ = "0.1.0"
+
 __all__ = [
     "acp_runner",
     "common",

@@ -121,6 +121,7 @@ def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.P
     env = os.environ | {
         "HOME": str(tmp_path / "home"),
         "PYTHONPATH": str(repo_root / "src"),
+        "OPENCLAW_USER_TIMEZONE": "UTC",
     }
     outside_cwd = tmp_path / "outside"
     outside_cwd.mkdir()
@@ -141,6 +142,11 @@ def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.P
     assert f'"command": "{pathlib.Path(env["HOME"]).resolve().as_posix()}/.bun/bin/qmd"' in rendered
     assert f'"path": "{(repo_root / "platform/docs").resolve().as_posix()}"' in rendered
     assert '"pattern": "memory.md"' in rendered
+    assert (
+        f'"workspace": "{(repo_root / "platform/workspace/admin").resolve().as_posix()}"'
+        in rendered
+    )
+    assert '"userTimezone": "UTC"' in rendered
 
 
 def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(

@@ -85,12 +85,16 @@ Add these only in order:
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
 3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
-4. Opt-in memory v2 after the default QMD flow is stable by merging
-   `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5`
-5. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-6. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-7. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-8. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+4. Opt-in local LanceDB durable memory after the default QMD flow is stable by merging
+   `platform/configs/openclaw/75-clawops-memory-pro.local.json5`
+5. Optional local smart extraction profile with Ollama-backed LLM extraction:
+   `platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5`
+6. Keep `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` only as a
+   migration-source/reference overlay while you validate parity
+7. Telegram: `./scripts/bootstrap/enable_telegram.sh`
+8. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
+9. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
+10. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
 
 After each layer is enabled, run the matching verification entrypoint:
 

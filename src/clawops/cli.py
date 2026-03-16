@@ -22,7 +22,6 @@ from clawops import (
     workflow_runner,
 )
 from clawops.wrappers import github as github_wrapper
-from clawops.wrappers import jira as jira_wrapper
 from clawops.wrappers import webhook as webhook_wrapper
 
 
@@ -37,7 +36,6 @@ class CommandSpec:
 
 WRAPPER_COMMANDS: dict[str, Callable[[list[str] | None], int]] = {
     "github": github_wrapper.main,
-    "jira": jira_wrapper.main,
     "webhook": webhook_wrapper.main,
 }
 
@@ -46,7 +44,7 @@ def _dispatch_wrapper(argv: list[str] | None) -> int:
     """Dispatch wrapper commands."""
     args = [] if argv is None else list(argv)
     if not args or args[0] in {"-h", "--help"}:
-        print("usage: clawops wrapper {github|jira|webhook} [args...]")
+        print("usage: clawops wrapper {github|webhook} [args...]")
         return 0 if args else 1
     wrapper = args.pop(0)
     handler = WRAPPER_COMMANDS.get(wrapper)

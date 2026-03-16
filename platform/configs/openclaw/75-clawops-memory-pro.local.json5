@@ -1,0 +1,50 @@
+{
+  "plugins": {
+    "allow": [
+      "memory-lancedb-pro"
+    ],
+    "enabled": true,
+    "entries": {
+      "memory-lancedb-pro": {
+        "enabled": true,
+        "config": {
+          "embedding": {
+            "provider": "openai-compatible",
+            "apiKey": "ollama",
+            "model": "nomic-embed-text",
+            "baseURL": "http://127.0.0.1:11434/v1"
+          },
+          "dbPath": "__OPENCLAW_HOME__/memory/lancedb-pro",
+          "enableManagementTools": false,
+          "sessionStrategy": "none",
+          "autoCapture": true,
+          "autoRecall": false,
+          "captureAssistant": false,
+          "smartExtraction": false,
+          "selfImprovement": {
+            "enabled": false
+          },
+          "retrieval": {
+            "mode": "hybrid",
+            "rerank": "none",
+            "candidatePoolSize": 12,
+            "minScore": 0.35,
+            "hardMinScore": 0.4
+          },
+          "mdMirror": {
+            "enabled": true,
+            "dir": "__OPENCLAW_HOME__/memory/lancedb-pro-md"
+          }
+        }
+      }
+    },
+    "load": {
+      "paths": [
+        "__PLUGIN_ROOT__/memory-lancedb-pro"
+      ]
+    },
+    "slots": {
+      "memory": "memory-lancedb-pro"
+    }
+  }
+}

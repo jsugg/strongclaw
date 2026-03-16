@@ -23,3 +23,4 @@ paths:
     - "dist/**"
     - "build/**"
     - ".openclaw/**"
+    - "platform/plugins/memory-lancedb-pro/**"
