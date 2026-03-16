@@ -19,13 +19,11 @@ Read these in order:
 1. [`QUICKSTART.md`](QUICKSTART.md)
 2. [`SETUP_GUIDE.md`](SETUP_GUIDE.md)
 3. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
-4. [`next-steps.md`](next-steps.md)
-5. [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
+4. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
+5. [`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md)
 
-The current delivery tracker lives in [`next-steps.md`](next-steps.md). The
-opt-in durable memory rollout is documented in
-[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md) and tracked in
-[`memory-v2.md`](memory-v2.md).
+The opt-in durable memory rollout is documented in
+[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md).
 
 ## Repository map
 
