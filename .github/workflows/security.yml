@@ -11,9 +11,6 @@ permissions:
   pull-requests: write
   security-events: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   security:
     runs-on: ubuntu-latest
@@ -39,9 +36,19 @@ jobs:
       - uses: returntocorp/semgrep-action@v1
         with:
           config: security/semgrep/semgrep.yml
-      - uses: gitleaks/gitleaks-action@v2
+      - name: Install gitleaks CLI
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.28.0"
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          mkdir -p "${HOME}/.local/bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" gitleaks
+          install "${RUNNER_TEMP}/gitleaks" "${HOME}/.local/bin/gitleaks"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+      - name: Run gitleaks
+        run: gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact
       - uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
