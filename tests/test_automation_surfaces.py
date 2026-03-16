@@ -67,8 +67,31 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
 
     assert "actions: read" in workflow
     assert "contents: read" in workflow
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true" in workflow
+    assert "actions/checkout@v5" in workflow
     assert "languages: python,javascript" in workflow
+    assert "actions/setup-python@v6" in workflow
+    assert "actions/setup-node@v6" in workflow
+    assert "github/codeql-action/init@v4" in workflow
+    assert "github/codeql-action/analyze@v4" in workflow
+    assert "package-manager-cache: false" in workflow
     assert "pull-requests: write" in workflow
     assert "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in workflow
     assert "security-events: write" in workflow
     assert "  - platform/plugins" in codeql_config
+
+
+def test_github_workflows_do_not_use_deprecated_action_majors() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    deprecated_refs = (
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "actions/setup-node@v4",
+        "github/codeql-action/init@v3",
+        "github/codeql-action/analyze@v3",
+    )
+
+    for workflow_path in (repo_root / ".github/workflows").glob("*.yml"):
+        text = workflow_path.read_text(encoding="utf-8")
+        for deprecated_ref in deprecated_refs:
+            assert deprecated_ref not in text, f"deprecated action ref in {workflow_path.name}"
