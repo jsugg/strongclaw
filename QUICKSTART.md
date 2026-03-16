@@ -85,8 +85,8 @@ Add these only in order:
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
 3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
-4. Opt-in memory v2 after the default QMD flow is stable:
-   [`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md)
+4. Opt-in memory v2 after the default QMD flow is stable by merging
+   `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5`
 5. Telegram: `./scripts/bootstrap/enable_telegram.sh`
 6. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
 7. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`

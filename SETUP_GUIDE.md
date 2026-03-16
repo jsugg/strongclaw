@@ -168,10 +168,10 @@ clawops context query \
 ```
 
 If you need the opt-in Markdown-canonical durable memory path instead of the
-default QMD-backed retrieval rollout, follow
-[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md) after this step.
-That guide keeps the default memory slot unchanged until you explicitly merge
-the memory-v2 overlay.
+default QMD-backed retrieval rollout, merge
+`platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` after this
+step. Keep the default memory slot unchanged until you intentionally cut over
+to the memory-v2 overlay.
 
 ## 11. Add channels carefully
 

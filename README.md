@@ -20,10 +20,7 @@ Read these in order:
 2. [`SETUP_GUIDE.md`](SETUP_GUIDE.md)
 3. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
 4. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
-5. [`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md)
-
-The opt-in durable memory rollout is documented in
-[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md).
+5. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
 
 ## Repository map
 
