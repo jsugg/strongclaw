@@ -7,20 +7,37 @@ BASE="$ROOT/platform/configs/openclaw/00-baseline.json5"
 TRUST_ZONES_OVERLAY="$ROOT/platform/configs/openclaw/10-trust-zones.json5"
 QMD_TEMPLATE="$ROOT/platform/configs/openclaw/40-qmd-context.json5"
 OUT="$HOME/.openclaw/openclaw.json"
-QMD_OVERLAY="$(mktemp "${TMPDIR:-/tmp}/strongclaw-qmd-overlay.XXXXXX")"
+RENDER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-openclaw-render.XXXXXX")"
+BASE_RENDERED="$RENDER_DIR/00-baseline.json"
+TRUST_RENDERED="$RENDER_DIR/10-trust-zones.json"
+QMD_RENDERED="$RENDER_DIR/40-qmd-context.json"
+USER_TIMEZONE="${OPENCLAW_USER_TIMEZONE:-${TZ:-}}"
 
-trap 'rm -f "$QMD_OVERLAY"' EXIT
+trap 'rm -f "$BASE_RENDERED" "$TRUST_RENDERED" "$QMD_RENDERED"; rmdir "$RENDER_DIR"' EXIT
 
-PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m clawops.openclaw_config \
-  --template "$QMD_TEMPLATE" \
-  --repo-root "$ROOT" \
-  --home-dir "$HOME" \
-  --output "$QMD_OVERLAY"
+render_overlay() {
+  local template="$1"
+  local output="$2"
+  local args=(
+    --template "$template"
+    --repo-root "$ROOT"
+    --home-dir "$HOME"
+    --output "$output"
+  )
+  if [[ -n "$USER_TIMEZONE" ]]; then
+    args+=(--user-timezone "$USER_TIMEZONE")
+  fi
+  PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m clawops.openclaw_config "${args[@]}"
+}
+
+render_overlay "$BASE" "$BASE_RENDERED"
+render_overlay "$TRUST_ZONES_OVERLAY" "$TRUST_RENDERED"
+render_overlay "$QMD_TEMPLATE" "$QMD_RENDERED"
 
 mkdir -p "$(dirname "$OUT")"
 PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m clawops merge-json \
-  --base "$BASE" \
-  --overlay "$TRUST_ZONES_OVERLAY" "$QMD_OVERLAY" \
+  --base "$BASE_RENDERED" \
+  --overlay "$TRUST_RENDERED" "$QMD_RENDERED" \
   --output "$OUT"
 chmod 600 "$OUT"
 echo "Rendered $OUT"

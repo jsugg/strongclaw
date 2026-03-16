@@ -26,6 +26,8 @@ This manifest lists the major components shipped in the platform bundle.
 - `platform/configs/openclaw/50-observability.json5`
 - `platform/configs/openclaw/60-browser-lab.json5`
 - `platform/configs/openclaw/70-lossless-context-engine.example.json5`
+- `platform/configs/openclaw/75-clawops-memory-pro.local.json5`
+- `platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5`
 - `platform/configs/openclaw/exec-approvals.json`
 - `platform/configs/openclaw/channel-model-overrides.example.json5`
 
@@ -34,6 +36,11 @@ This manifest lists the major components shipped in the platform bundle.
 - `platform/compose/docker-compose.aux-stack.yaml`
 - `platform/compose/docker-compose.browser-lab.yaml`
 - `platform/compose/docker-compose.langfuse.optional.yaml`
+
+## Plugins
+
+- `platform/plugins/memory-lancedb-pro`
+- `platform/plugins/strongclaw-memory-v2`
 - `platform/configs/litellm/config.yaml`
 - `platform/configs/otel/collector.yaml`
 

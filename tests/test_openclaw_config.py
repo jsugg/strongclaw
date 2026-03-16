@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 from clawops.openclaw_config import render_openclaw_overlay, render_qmd_overlay
@@ -32,6 +33,7 @@ def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) 
         template_path=template,
         repo_root=repo_root,
         home_dir=home_dir,
+        user_timezone="UTC",
     )
 
     qmd = rendered["memory"]["qmd"]
@@ -45,12 +47,42 @@ def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) 
     ]
 
 
+def test_render_overlay_accepts_json5_comments_and_trailing_commas(tmp_path: pathlib.Path) -> None:
+    repo_root = tmp_path / "repo"
+    home_dir = tmp_path / "home"
+    template = tmp_path / "overlay.json5"
+    template.write_text(
+        """
+        {
+          // operator-facing note
+          "memory": {
+            "backend": "qmd",
+            "qmd": {
+              "command": "__HOME__/.bun/bin/qmd",
+            },
+          },
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    rendered = render_openclaw_overlay(
+        template_path=template,
+        repo_root=repo_root,
+        home_dir=home_dir,
+        user_timezone="UTC",
+    )
+
+    assert rendered["memory"]["qmd"]["command"] == f"{home_dir.resolve().as_posix()}/.bun/bin/qmd"
+
+
 def test_repo_qmd_template_includes_expected_default_corpus() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_qmd_overlay(
         template_path=repo_root / "platform/configs/openclaw/40-qmd-context.json5",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
     )
 
     assert rendered["memory"]["backend"] == "qmd"
@@ -75,6 +107,7 @@ def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
         template_path=repo_root / "platform/configs/openclaw/75-strongclaw-memory-v2.example.json5",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
     )
 
     plugin_config = rendered["plugins"]["entries"]["strongclaw-memory-v2"]["config"]
@@ -86,3 +119,67 @@ def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
     assert rendered["plugins"]["load"]["paths"] == [
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2"
     ]
+
+
+def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_overlay(
+        template_path=repo_root / "platform/configs/openclaw/00-baseline.json5",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    defaults = rendered["agents"]["defaults"]
+    assert defaults["userTimezone"] == "UTC"
+    assert defaults["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+
+
+def test_memory_lancedb_pro_local_overlay_renders_vendor_local_paths() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_overlay(
+        template_path=repo_root / "platform/configs/openclaw/75-clawops-memory-pro.local.json5",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
+    assert rendered["plugins"]["slots"]["memory"] == "memory-lancedb-pro"
+    assert rendered["plugins"]["load"]["paths"] == [
+        f"{repo_root.as_posix()}/platform/plugins/memory-lancedb-pro"
+    ]
+    assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
+    assert plugin["sessionStrategy"] == "none"
+    assert plugin["selfImprovement"]["enabled"] is False
+    assert plugin["smartExtraction"] is False
+
+
+def test_memory_lancedb_pro_local_smart_overlay_enables_local_llm_only() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_overlay(
+        template_path=repo_root
+        / "platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
+    assert plugin["smartExtraction"] is True
+    assert plugin["llm"]["baseURL"] == "http://127.0.0.1:11434/v1"
+    assert plugin["selfImprovement"]["enabled"] is False
+
+
+def test_vendored_memory_lancedb_pro_bundle_is_pinned() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    package = json.loads(
+        (repo_root / "platform/plugins/memory-lancedb-pro/package.json").read_text(encoding="utf-8")
+    )
+    vendor_note = (
+        repo_root / "platform/plugins/memory-lancedb-pro/STRONGCLAW_VENDOR.md"
+    ).read_text(encoding="utf-8")
+
+    assert package["version"] == "1.1.0-beta.9"
+    assert "2ebba8e6b7b65bf38336199384d5ec8690701f6e" in vendor_note
+    assert "selfImprovement.enabled = false" in vendor_note

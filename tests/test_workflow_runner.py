@@ -173,6 +173,10 @@ def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     assert [item.ok for item in results] == [True, True, True]
     assert (repo / ".clawops" / "op_journal.sqlite").exists()
     assert (repo / ".clawops" / "context.sqlite").exists()
+    context_pack = repo / ".runs" / "context-packs" / "context.md"
+    assert context_pack.exists()
+    assert "run_review" in context_pack.read_text(encoding="utf-8")
+    assert results[2].message.endswith(str(context_pack))
 
 
 def test_workflow_runner_prefers_explicit_base_dir_over_workflow_base_dir(

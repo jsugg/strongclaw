@@ -9,7 +9,7 @@
           "acp": {
             "agent": "codex",
             "backend": "acpx",
-            "cwd": "~/Projects/openclaw-platform-bootstrap/repo/upstream",
+            "cwd": "__UPSTREAM_REPO_ROOT__",
             "mode": "persistent"
           },
           "type": "acp"
@@ -45,7 +45,7 @@
           ],
           "profile": "minimal"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+        "workspace": "__UPSTREAM_REPO_ROOT__"
       },
       {
         "agentDir": "~/.openclaw/agents/reviewer-acp-claude/agent",
@@ -55,7 +55,7 @@
           "acp": {
             "agent": "claude",
             "backend": "acpx",
-            "cwd": "~/Projects/openclaw-platform-bootstrap/repo/upstream",
+            "cwd": "__UPSTREAM_REPO_ROOT__",
             "mode": "persistent"
           },
           "type": "acp"
@@ -89,7 +89,7 @@
           ],
           "profile": "minimal"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+        "workspace": "__UPSTREAM_REPO_ROOT__"
       }
     ]
   }

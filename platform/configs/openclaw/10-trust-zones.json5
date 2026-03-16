@@ -29,7 +29,7 @@
           ],
           "profile": "coding"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/admin"
+        "workspace": "__ADMIN_WORKSPACE__"
       },
       {
         "agentDir": "~/.openclaw/agents/reader/agent",
@@ -73,7 +73,7 @@
           ],
           "profile": "minimal"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/reader"
+        "workspace": "__READER_WORKSPACE__"
       },
       {
         "agentDir": "~/.openclaw/agents/coder/agent",
@@ -120,7 +120,7 @@
           ],
           "profile": "coding"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/coder"
+        "workspace": "__CODER_WORKSPACE__"
       },
       {
         "agentDir": "~/.openclaw/agents/reviewer/agent",
@@ -168,7 +168,7 @@
           ],
           "profile": "minimal"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/reviewer"
+        "workspace": "__REVIEWER_WORKSPACE__"
       },
       {
         "agentDir": "~/.openclaw/agents/messaging/agent",
@@ -210,7 +210,7 @@
           ],
           "profile": "messaging"
         },
-        "workspace": "~/Projects/openclaw-platform-bootstrap/platform/workspace/messaging"
+        "workspace": "__MESSAGING_WORKSPACE__"
       }
     ]
   },

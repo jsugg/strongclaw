@@ -1,4 +1,4 @@
-"""Base wrapper logic shared by GitHub, Jira, and webhook helpers."""
+"""Base wrapper logic shared by GitHub and webhook helpers."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 import requests
 
+from clawops import __version__
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import TERMINAL_DENY, TERMINAL_REQUIRE_APPROVAL, Decision, PolicyEngine
 
@@ -474,8 +475,33 @@ class JsonHttpClient:
     def __init__(self, timeout: int = 30) -> None:
         self.timeout = timeout
 
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        json_body: Mapping[str, Any] | None = None,
+    ) -> requests.Response:
+        """Execute a JSON request with a stable User-Agent."""
+        request_headers = dict(headers)
+        request_headers.setdefault("User-Agent", f"clawops/{__version__}")
+        return requests.request(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json=json_body,
+            timeout=self.timeout,
+        )
+
     def post(
         self, url: str, *, headers: Mapping[str, str], json_body: Mapping[str, Any]
     ) -> requests.Response:
         """Execute a JSON POST."""
-        return requests.post(url, headers=dict(headers), json=json_body, timeout=self.timeout)
+        return self.request("POST", url, headers=headers, json_body=json_body)
+
+    def put(
+        self, url: str, *, headers: Mapping[str, str], json_body: Mapping[str, Any]
+    ) -> requests.Response:
+        """Execute a JSON PUT."""
+        return self.request("PUT", url, headers=headers, json_body=json_body)

@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import pathlib
+import re
 from collections.abc import Mapping
 from typing import Any
 
-from clawops.common import load_yaml
+from clawops.common import load_yaml, write_text
 from clawops.context_service import service_from_config
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
@@ -55,6 +56,13 @@ def _resolve_base_dir(
         pathlib.Path.cwd() if workflow_path is None else workflow_path.expanduser().resolve().parent
     )
     return (anchor / base_dir).resolve()
+
+
+def _default_context_pack_output(*, base_dir: pathlib.Path, step_name: str) -> pathlib.Path:
+    """Return the default on-disk path for a workflow-generated context pack."""
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", step_name.strip()).strip("-")
+    slug = safe_name or "context-pack"
+    return base_dir / ".runs" / "context-packs" / f"{slug}.md"
 
 
 TRUSTED_WORKFLOW_ROOTS: tuple[pathlib.Path, ...] = (
@@ -124,6 +132,8 @@ def _validate_workflow(workflow: object) -> dict[str, Any]:
                 if not isinstance(step.get(field), str):
                     raise TypeError(f"{prefix}.{field} must be a string")
             _validate_optional_positive_int(f"{prefix}.limit", step.get("limit"))
+            if step.get("output") is not None and not isinstance(step.get("output"), str):
+                raise TypeError(f"{prefix}.output must be a string")
             continue
     return workflow
 
@@ -217,8 +227,14 @@ class WorkflowRunner:
                 repo_path = self._resolve_step_path(step["repo"], field_name="context_pack.repo")
                 service = service_from_config(config_path, repo_path)
                 service.index()
-                _ = service.pack(step["query"], limit=int(step.get("limit", 8)))
-                results.append(StepResult(name, True, "context packed"))
+                output_path = (
+                    _default_context_pack_output(base_dir=self.base_dir, step_name=name)
+                    if step.get("output") is None
+                    else self._resolve_step_path(step["output"], field_name="context_pack.output")
+                )
+                output = service.pack(step["query"], limit=int(step.get("limit", 8)))
+                write_text(output_path, output)
+                results.append(StepResult(name, True, f"context packed -> {output_path}"))
                 continue
             raise ValueError(f"unknown workflow step kind: {kind}")
         return results
