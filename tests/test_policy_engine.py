@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pathlib
-import json
 
-from clawops.common import write_json, write_yaml
+from clawops.common import write_yaml
 from clawops.policy_engine import PolicyEngine
 
 
@@ -43,7 +42,12 @@ def test_policy_requires_approval_for_external_write(tmp_path: pathlib.Path) -> 
         policy_path,
         {
             "defaults": {"decision": "allow"},
-            "zones": {"coder": {"allow_actions": ["github.comment.create"], "allow_categories": ["external_write"]}},
+            "zones": {
+                "coder": {
+                    "allow_actions": ["github.comment.create"],
+                    "allow_categories": ["external_write"],
+                }
+            },
             "approval": {"require_for_actions": ["github.comment.create"]},
         },
     )

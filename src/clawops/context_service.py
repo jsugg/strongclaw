@@ -4,19 +4,41 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import fnmatch
 import pathlib
 import re
 import sqlite3
 import subprocess
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Literal, cast
 
 from clawops.common import expand, load_yaml, sha256_hex, utc_now_ms, write_text
 
-
 DEFAULT_TEXT_EXTENSIONS = {
-    ".md", ".txt", ".py", ".ts", ".tsx", ".js", ".jsx", ".json",
-    ".yaml", ".yml", ".toml", ".sh", ".bash", ".zsh", ".sql",
-    ".go", ".rs", ".java", ".kt", ".c", ".cc", ".cpp", ".h", ".hpp",
+    ".md",
+    ".txt",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".sql",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
 }
 
 SYMBOL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
@@ -38,6 +60,15 @@ SYMBOL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", re.MULTILINE),
     ],
 }
+
+type SymlinkPolicy = Literal["follow", "in_repo_only", "never"]
+
+
+def _matches_path_pattern(path_text: str, pattern: str) -> bool:
+    """Return True when a repo-relative path matches a configured glob."""
+    return fnmatch.fnmatch(path_text, pattern) or (
+        pattern.startswith("**/") and fnmatch.fnmatch(path_text, pattern.removeprefix("**/"))
+    )
 
 
 def detect_language(path: pathlib.Path) -> str:
@@ -70,6 +101,55 @@ def extract_symbols(path: pathlib.Path, text: str) -> list[str]:
     return deduped[:64]
 
 
+def _as_mapping(name: str, value: object) -> dict[str, object]:
+    """Validate a mapping-shaped config section."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} config must be a mapping")
+    return value
+
+
+def _as_string_list(name: str, value: object) -> list[str]:
+    """Validate a list of string config values."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise TypeError(f"{name} must be a list of strings")
+    return value
+
+
+def _as_bool(name: str, value: object, *, default: bool) -> bool:
+    """Validate a boolean config value."""
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a boolean")
+    return value
+
+
+def _as_positive_int(name: str, value: object, *, default: int) -> int:
+    """Validate a positive integer config value."""
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _as_symlink_policy(name: str, value: object, *, default: SymlinkPolicy) -> SymlinkPolicy:
+    """Validate the symlink handling policy."""
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    if value not in {"follow", "in_repo_only", "never"}:
+        raise ValueError(f"{name} must be one of: follow, in_repo_only, never")
+    return cast(SymlinkPolicy, value)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
@@ -99,12 +179,25 @@ class SearchHit:
     symbols: list[str]
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class ContextConfig:
+    """Context-service configuration."""
+
+    db_path: pathlib.Path
+    include_globs: tuple[str, ...] = ()
+    exclude_globs: tuple[str, ...] = ()
+    max_file_size_bytes: int = 1_000_000
+    include_hidden: bool = False
+    symlink_policy: SymlinkPolicy = "in_repo_only"
+
+
 class ContextService:
     """Lexical repo indexer and query engine."""
 
-    def __init__(self, repo: pathlib.Path, db_path: pathlib.Path) -> None:
+    def __init__(self, repo: pathlib.Path, config: ContextConfig) -> None:
         self.repo = repo.expanduser().resolve()
-        self.db_path = db_path.expanduser().resolve()
+        self.config = config
+        self.db_path = config.db_path.expanduser().resolve()
 
     def connect(self) -> sqlite3.Connection:
         """Open the sqlite database."""
@@ -115,17 +208,51 @@ class ContextService:
         conn.executescript(SCHEMA)
         return conn
 
+    def _allows_symlink(self, path: pathlib.Path) -> bool:
+        """Return True when *path* satisfies the configured symlink policy."""
+        if not path.is_symlink():
+            return True
+        if self.config.symlink_policy == "never":
+            return False
+        if self.config.symlink_policy == "follow":
+            return True
+        try:
+            resolved_target = path.resolve(strict=True)
+        except OSError:
+            return False
+        if not resolved_target.is_file():
+            return False
+        try:
+            resolved_target.relative_to(self.repo)
+        except ValueError:
+            return False
+        return True
+
     def iter_files(self, include_hidden: bool = False) -> Iterable[pathlib.Path]:
         """Yield indexable files from the repository."""
         for path in self.repo.rglob("*"):
             if not path.is_file():
                 continue
-            if not include_hidden and any(part.startswith(".") for part in path.relative_to(self.repo).parts):
+            if not self._allows_symlink(path):
+                continue
+            rel_path = path.relative_to(self.repo)
+            rel_text = rel_path.as_posix()
+            if not (include_hidden or self.config.include_hidden) and any(
+                part.startswith(".") for part in rel_path.parts
+            ):
                 continue
             if path.suffix.lower() not in DEFAULT_TEXT_EXTENSIONS:
                 continue
+            if self.config.include_globs and not any(
+                _matches_path_pattern(rel_text, pattern) for pattern in self.config.include_globs
+            ):
+                continue
+            if self.config.exclude_globs and any(
+                _matches_path_pattern(rel_text, pattern) for pattern in self.config.exclude_globs
+            ):
+                continue
             try:
-                if path.stat().st_size > 1_000_000:
+                if path.stat().st_size > self.config.max_file_size_bytes:
                     continue
             except OSError:
                 continue
@@ -134,6 +261,7 @@ class ContextService:
     def index(self) -> int:
         """Index repository contents into the lexical store."""
         count = 0
+        seen_paths: set[str] = set()
         with self.connect() as conn:
             for path in self.iter_files():
                 try:
@@ -141,6 +269,7 @@ class ContextService:
                 except (OSError, UnicodeDecodeError):
                     continue
                 rel = str(path.relative_to(self.repo))
+                seen_paths.add(rel)
                 sha = sha256_hex(text)
                 symbols = extract_symbols(path, text)
                 mtime_ns = path.stat().st_mtime_ns
@@ -163,6 +292,17 @@ class ContextService:
                     (rel, text, "\n".join(symbols)),
                 )
                 count += 1
+            indexed_paths = {
+                str(row["path"]) for row in conn.execute("SELECT path FROM files").fetchall()
+            }
+            stale_paths = indexed_paths - seen_paths
+            if stale_paths:
+                conn.executemany(
+                    "DELETE FROM files WHERE path = ?", ((path,) for path in stale_paths)
+                )
+                conn.executemany(
+                    "DELETE FROM files_fts WHERE path = ?", ((path,) for path in stale_paths)
+                )
             conn.commit()
         return count
 
@@ -244,21 +384,47 @@ class ContextService:
         return "\n".join(lines).rstrip() + "\n"
 
 
-def load_config(path: pathlib.Path) -> dict[str, Any]:
-    """Load the context-service YAML config."""
+def load_config(path: pathlib.Path) -> ContextConfig:
+    """Load and validate the context-service YAML config."""
     config = load_yaml(path)
     if not isinstance(config, dict):
         raise TypeError(f"expected mapping config, got: {type(config)!r}")
-    return config
+    index = _as_mapping("index", config.get("index"))
+    paths = _as_mapping("paths", config.get("paths"))
+    db_path = index.get("db_path", ".clawops/context.sqlite")
+    if not isinstance(db_path, str):
+        raise TypeError("index.db_path must be a string")
+    include = _as_string_list("paths.include", paths.get("include"))
+    exclude = _as_string_list("paths.exclude", paths.get("exclude"))
+    return ContextConfig(
+        db_path=pathlib.Path(db_path),
+        include_globs=tuple(include),
+        exclude_globs=tuple(exclude),
+        max_file_size_bytes=_as_positive_int(
+            "index.max_file_size_bytes",
+            index.get("max_file_size_bytes"),
+            default=1_000_000,
+        ),
+        include_hidden=_as_bool(
+            "index.include_hidden",
+            index.get("include_hidden"),
+            default=False,
+        ),
+        symlink_policy=_as_symlink_policy(
+            "index.symlink_policy",
+            index.get("symlink_policy"),
+            default="in_repo_only",
+        ),
+    )
 
 
 def service_from_config(config_path: pathlib.Path, repo: pathlib.Path) -> ContextService:
     """Build a ContextService from a YAML config."""
     config = load_config(config_path)
-    db_path = pathlib.Path(config.get("index", {}).get("db_path", ".clawops/context.sqlite"))
+    db_path = config.db_path
     if not db_path.is_absolute():
         db_path = repo / db_path
-    return ContextService(repo, db_path)
+    return ContextService(repo, dataclasses.replace(config, db_path=db_path))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

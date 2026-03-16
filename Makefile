@@ -1,10 +1,40 @@
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
+UV ?= uv
 
-.PHONY: install test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: install dev fmt lint imports typecheck actionlint precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
 install:
 	$(PIP) install -e .
+
+dev:
+	$(UV) sync --extra dev
+	$(UV) run pre-commit install --install-hooks
+
+fmt:
+	$(UV) run isort src tests
+	$(UV) run ruff check --fix src tests
+	$(UV) run black src tests
+
+lint:
+	$(UV) run ruff check src tests
+
+imports:
+	$(UV) run isort --check-only src tests
+
+typecheck:
+	$(UV) run mypy
+	$(UV) run pyright
+
+actionlint:
+	$(UV) run pre-commit run actionlint --all-files
+
+precommit:
+	$(UV) run pre-commit run --all-files || $(UV) run pre-commit run --all-files
+
+dev-check: precommit
+	$(UV) run pytest -q
+	$(UV) run python -m compileall -q src tests
 
 test:
 	PYTHONPATH=src pytest -q
@@ -28,7 +58,7 @@ context-index:
 	clawops context index --config platform/configs/context/context-service.yaml --repo .
 
 run-harness:
-	clawops harness run --suite platform/configs/harness/policy_regressions.yaml --output ./.runs/policy.jsonl
+	./scripts/bootstrap/run_harness_smoke.sh ./.runs
 
 backup:
 	./scripts/recovery/backup_create.sh

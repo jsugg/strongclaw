@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
 .runs/
 .env.local
 .env.ci
@@ -12,3 +15,5 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+.tmp/
+.serena/

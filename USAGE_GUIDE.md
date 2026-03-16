@@ -21,14 +21,30 @@ launchctl kickstart -k gui/$(id -u)/ai.openclaw.sidecars
 
 ## Health checks
 
+Repository helper scripts that depend on `openclaw` now detect whether the CLI is installed. Tasks that require it fail fast with a clear message, while fallback-capable tasks warn and continue with their fallback path.
+
 ```bash
 openclaw gateway status --json
 openclaw status --all
 openclaw doctor
+openclaw memory status --deep
+openclaw memory search --query "OpenClaw Platform Bootstrap" --max-results 1
 openclaw security audit --deep
 openclaw secrets audit --check
 docker compose -f platform/compose/docker-compose.aux-stack.yaml ps
+./scripts/ops/check_loopback_bindings.sh
 ```
+
+## Remote operator access
+
+Tunnel the gateway only:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
+```
+
+Keep browser-lab ports local to the hardened session. Do not tunnel `9222` or
+`3128` to an operator workstation.
 
 ## Merge overlays safely
 
@@ -47,6 +63,13 @@ Initialize:
 clawops op-journal init --db ~/.openclaw/clawops/op_journal.sqlite
 ```
 
+Treat `~/.openclaw/clawops` as service-owned state, not a shared scratch
+directory.
+
+- keep directory mode `0700` on `~/.openclaw/clawops`
+- keep file mode `0600` on `~/.openclaw/clawops/op_journal.sqlite`
+- do not grant write access to lower-trust workers or shared workspaces
+
 Begin an external action:
 
 ```bash
@@ -59,10 +82,23 @@ clawops op-journal begin \
   --payload-file payload.json
 ```
 
+`op-journal begin` is an audit/bookkeeping primitive. It does not create an
+executable wrapper operation by itself.
+
+Approve an external action:
+
+```bash
+clawops op-journal approve \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --op-id <op-id> \
+  --approved-by operator \
+  --note "approved after review"
+```
+
 ## Evaluate policy
 
 ```bash
-clawops policy evaluate \
+clawops policy \
   --policy platform/configs/policy/policy.yaml \
   --input examples/policy-inputs/github-comment.json
 ```
@@ -112,11 +148,11 @@ clawops skill-scan \
 Run the default suites:
 
 ```bash
-clawops harness run \
+clawops harness \
   --suite platform/configs/harness/security_regressions.yaml \
   --output ./.runs/security.jsonl
 
-clawops harness run \
+clawops harness \
   --suite platform/configs/harness/policy_regressions.yaml \
   --output ./.runs/policy.jsonl
 ```
@@ -127,6 +163,72 @@ Chart results:
 clawops charts \
   --input ./.runs/security.jsonl \
   --output ./.runs/security.png
+```
+
+## Workflows
+
+Run a repository workflow directly:
+
+```bash
+clawops workflow \
+  --workflow platform/configs/workflows/code_review.yaml
+```
+
+The shipped repository workflows declare `base_dir`, so they can be run from
+any current working directory. The helper script also pins the repo root
+explicitly:
+
+```bash
+./scripts/ops/run_workflow.sh platform/configs/workflows/code_review.yaml --dry-run
+```
+
+## Approval-gated wrappers
+
+Preparing a webhook call may return `pending_approval` instead of executing immediately:
+
+```bash
+clawops wrapper webhook \
+  --policy platform/configs/policy/policy.yaml \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --scope telegram:owner \
+  --trust-zone automation \
+  --url https://example.internal/hooks/deploy \
+  --payload-file payload.json
+```
+
+After approval, execute the saved operation:
+
+```bash
+clawops wrapper webhook \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --op-id <op-id> \
+  --execute-approved
+```
+
+If you are replaying an older approved row created before execution contracts
+were introduced, pass the policy file again so the wrapper can restamp the row
+before executing:
+
+```bash
+clawops wrapper webhook \
+  --policy platform/configs/policy/policy.yaml \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --op-id <op-id> \
+  --execute-approved
+```
+
+## Workflow trust roots
+
+`clawops workflow` now treats workflow YAML as executable code rather than
+passive config. By default it only runs workflows from
+`platform/configs/workflows/`.
+
+For intentional ad hoc local workflows, use:
+
+```bash
+clawops workflow \
+  --workflow /tmp/custom-workflow.yaml \
+  --allow-untrusted-workflow
 ```
 
 ## ACP workers

@@ -85,6 +85,14 @@ varlock load
 
 This writes the merged config to `~/.openclaw/openclaw.json`.
 
+By default it now enables QMD-backed memory retrieval and renders repo-local memory corpus paths for:
+
+- `platform/docs`
+- `platform/skills`
+- top-level operator guides
+- `memory.md`
+- `platform/workspace/shared/MEMORY.md`
+
 ## 7. Install launchd services
 
 ```bash
@@ -98,6 +106,7 @@ Or run manually first:
 ```bash
 ./scripts/ops/launch_gateway_with_varlock.sh
 ./scripts/ops/launch_sidecars_with_varlock.sh
+./scripts/bootstrap/verify_sidecars.sh
 ```
 
 ## 8. Verify the secure baseline
@@ -132,12 +141,14 @@ Smoke test:
 ./scripts/workers/run_claude_review.sh "Review auth boundaries"
 ```
 
-## 10. Enable context service and QMD
+## 10. Enable repo lexical context indexing and verify QMD
 
 ```bash
 ./scripts/bootstrap/bootstrap_context.sh
-./scripts/bootstrap/bootstrap_qmd.sh
+./scripts/workers/prewarm_qmd.sh
 ```
+
+`bootstrap_qmd.sh` is now part of the standard host bootstrap path. Re-run it only if the QMD backend is missing or needs repair.
 
 Index a repo:
 
@@ -156,6 +167,12 @@ clawops context query \
   --query "operation journal idempotency"
 ```
 
+If you need the opt-in Markdown-canonical durable memory path instead of the
+default QMD-backed retrieval rollout, follow
+[`platform/docs/MEMORY_V2.md`](platform/docs/MEMORY_V2.md) after this step.
+That guide keeps the default memory slot unchanged until you explicitly merge
+the memory-v2 overlay.
+
 ## 11. Add channels carefully
 
 ### Telegram
@@ -169,6 +186,12 @@ clawops context query \
 ./scripts/bootstrap/enable_telegram.sh
 ```
 
+Verify the channel overlay, docs, and allowlist contract:
+
+```bash
+./scripts/bootstrap/verify_channels.sh
+```
+
 ### WhatsApp
 
 Use a dedicated number.
@@ -177,12 +200,19 @@ Use a dedicated number.
 ./scripts/bootstrap/enable_whatsapp.sh
 ```
 
+Re-run channel verification after WhatsApp is enabled:
+
+```bash
+./scripts/bootstrap/verify_channels.sh
+```
+
 ## 12. Enable observability
 
 First start OTEL only:
 
 ```bash
 ./scripts/bootstrap/enable_observability.sh
+./scripts/bootstrap/verify_observability.sh
 ```
 
 Optional: start Langfuse on a separate VM or later on Linux using:
@@ -195,7 +225,7 @@ docker compose -f platform/compose/docker-compose.langfuse.optional.yaml up -d
 
 Do **not** enable browser automation on the main control-plane host.
 
-On a dedicated box:
+On a dedicated box or separate hardened OS user session:
 
 ```bash
 ./scripts/bootstrap/bootstrap_browser_lab.sh
@@ -206,6 +236,19 @@ Run exfil tests:
 
 ```bash
 ./scripts/workers/run_browser_lab_exfil_tests.sh
+```
+
+Reach the gateway over SSH tunnel only:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
+```
+
+Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator
+workstation. Verify the local-only posture after startup:
+
+```bash
+./scripts/ops/check_loopback_bindings.sh 18789 3128 9222
 ```
 
 ## 14. Backups and retention

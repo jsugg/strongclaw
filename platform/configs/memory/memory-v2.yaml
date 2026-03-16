@@ -1,0 +1,42 @@
+storage:
+  db_path: .openclaw/memory-v2.sqlite
+
+workspace:
+  root: ../../../
+  include_default_memory: true
+  memory_file_names:
+    - MEMORY.md
+    - memory.md
+  daily_dir: memory
+  bank_dir: bank
+
+corpus:
+  paths:
+    - name: runbooks
+      path: ../../../platform/docs
+      pattern: "**/*.md"
+    - name: skills
+      path: ../../../platform/skills
+      pattern: "**/*.md"
+    - name: readme
+      path: ../../../README.md
+      pattern: "*.md"
+    - name: quickstart
+      path: ../../../QUICKSTART.md
+      pattern: "*.md"
+    - name: setup-guide
+      path: ../../../SETUP_GUIDE.md
+      pattern: "*.md"
+    - name: usage-guide
+      path: ../../../USAGE_GUIDE.md
+      pattern: "*.md"
+    - name: project-memory
+      path: ../../../memory.md
+      pattern: "*.md"
+    - name: shared-memory
+      path: ../../../platform/workspace/shared/MEMORY.md
+      pattern: "*.md"
+
+limits:
+  max_snippet_chars: 400
+  default_max_results: 8
