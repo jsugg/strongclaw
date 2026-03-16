@@ -65,6 +65,10 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
     workflow = (repo_root / ".github/workflows/security.yml").read_text(encoding="utf-8")
     codeql_config = (repo_root / "security/codeql/codeql-config.yml").read_text(encoding="utf-8")
 
+    assert "actions: read" in workflow
+    assert "contents: read" in workflow
     assert "languages: python,javascript" in workflow
+    assert "pull-requests: write" in workflow
     assert "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in workflow
+    assert "security-events: write" in workflow
     assert "  - platform/plugins" in codeql_config
