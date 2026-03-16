@@ -2,5 +2,13 @@
 set -euo pipefail
 PROMPT="${1:?prompt required}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT/repo/upstream"
-acpx claude "$PROMPT"
+WORKTREE="$ROOT/repo/upstream"
+BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
+
+exec clawops acp-runner \
+  --backend claude \
+  --session-type reviewer \
+  --branch "$BRANCH" \
+  --worktree "$WORKTREE" \
+  --repo-root "$ROOT" \
+  --prompt "$PROMPT"

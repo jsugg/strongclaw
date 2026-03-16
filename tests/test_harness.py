@@ -25,3 +25,24 @@ def test_run_command_case(tmp_path: pathlib.Path) -> None:
     )
     results = run_suite(suite)
     assert results[0]["passed"] is True
+
+
+def test_run_command_case_enforces_timeout(tmp_path: pathlib.Path) -> None:
+    suite = tmp_path / "suite.yaml"
+    write_yaml(
+        suite,
+        {
+            "cases": [
+                {
+                    "id": "sleep",
+                    "kind": "command",
+                    "command": ["python3", "-c", "import time; time.sleep(2)"],
+                    "timeout": 1,
+                    "assert": {"exit_code": 0},
+                }
+            ]
+        },
+    )
+    results = run_suite(suite)
+    assert results[0]["passed"] is False
+    assert results[0]["timed_out"] is True

@@ -10,7 +10,6 @@ from typing import Any, Mapping
 
 from clawops.common import load_json, load_yaml, match_mapping
 
-
 TERMINAL_ALLOW = "allow"
 TERMINAL_DENY = "deny"
 TERMINAL_REQUIRE_APPROVAL = "require_approval"
@@ -95,7 +94,9 @@ class PolicyEngine:
                 return Decision(outcome, reasons, matched_rules)
 
         approval_rules = self.policy.get("approval", {})
-        if action in approval_rules.get("require_for_actions", []) or category in approval_rules.get("require_for_categories", []):
+        if action in approval_rules.get(
+            "require_for_actions", []
+        ) or category in approval_rules.get("require_for_categories", []):
             reasons.append("approval required by approval matrix")
             return Decision(TERMINAL_REQUIRE_APPROVAL, reasons, matched_rules)
 

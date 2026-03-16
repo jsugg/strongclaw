@@ -18,6 +18,7 @@ jobs:
           node-version: "24"
       - run: python -m pip install -e .[dev]
       - run: pytest -q
+      - run: python -m compileall -q src tests
       - uses: github/codeql-action/init@v3
         with:
           config-file: security/codeql/codeql-config.yml
@@ -27,6 +28,8 @@ jobs:
         with:
           config: security/semgrep/semgrep.yml
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs

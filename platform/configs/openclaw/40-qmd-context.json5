@@ -3,6 +3,7 @@
     "backend": "qmd",
     "citations": "auto",
     "qmd": {
+      "command": "__HOME__/.bun/bin/qmd",
       "includeDefaultMemory": true,
       "limits": {
         "maxResults": 6,
@@ -11,13 +12,43 @@
       "paths": [
         {
           "name": "runbooks",
-          "path": "~/Projects/openclaw-platform-bootstrap/platform/docs",
+          "path": "__REPO_ROOT__/platform/docs",
           "pattern": "**/*.md"
         },
         {
           "name": "skills",
-          "path": "~/Projects/openclaw-platform-bootstrap/platform/skills",
+          "path": "__REPO_ROOT__/platform/skills",
           "pattern": "**/*.md"
+        },
+        {
+          "name": "readme",
+          "path": "__REPO_ROOT__",
+          "pattern": "README.md"
+        },
+        {
+          "name": "quickstart",
+          "path": "__REPO_ROOT__",
+          "pattern": "QUICKSTART.md"
+        },
+        {
+          "name": "setup-guide",
+          "path": "__REPO_ROOT__",
+          "pattern": "SETUP_GUIDE.md"
+        },
+        {
+          "name": "usage-guide",
+          "path": "__REPO_ROOT__",
+          "pattern": "USAGE_GUIDE.md"
+        },
+        {
+          "name": "project-memory",
+          "path": "__REPO_ROOT__",
+          "pattern": "memory.md"
+        },
+        {
+          "name": "shared-memory",
+          "path": "__REPO_ROOT__/platform/workspace/shared",
+          "pattern": "MEMORY.md"
         }
       ],
       "scope": {
