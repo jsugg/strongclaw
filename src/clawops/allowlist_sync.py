@@ -10,7 +10,6 @@ from typing import Any
 
 from clawops.common import dump_json, load_json, load_yaml, write_text
 
-
 TG_ID_RE = re.compile(r"^(?:tg:|telegram:)?(\d+)$")
 E164_RE = re.compile(r"^\+\d{8,15}$")
 

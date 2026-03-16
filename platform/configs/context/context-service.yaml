@@ -1,5 +1,6 @@
 index:
   db_path: .clawops/context.sqlite
+  symlink_policy: in_repo_only
 
 paths:
   include:

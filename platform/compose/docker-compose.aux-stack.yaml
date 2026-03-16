@@ -37,7 +37,6 @@ services:
     volumes:
       - ../configs/litellm/config.yaml:/app/config.yaml:ro
       - ./state/litellm:/app/data
-    read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     cap_drop:
@@ -54,6 +53,9 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.120.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      LANGFUSE_OTEL_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT}
+      LANGFUSE_OTEL_BASIC_AUTH: ${LANGFUSE_OTEL_BASIC_AUTH}
     ports:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1:9464:9464"

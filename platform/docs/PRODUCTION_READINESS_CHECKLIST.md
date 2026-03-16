@@ -16,3 +16,5 @@
 - [ ] backup and restore tested
 - [ ] channel allowlists durable
 - [ ] browser lab isolated or disabled
+- [ ] browser-lab ports verified loopback-only
+- [ ] remote operator access uses SSH tunnel to gateway only

@@ -2,6 +2,7 @@ name: "clawops-codeql"
 paths:
   - src
   - scripts
+  - platform/plugins
 paths-ignore:
   - platform/compose/state
   - platform/skills/quarantine

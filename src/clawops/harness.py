@@ -6,12 +6,11 @@ import argparse
 import json
 import pathlib
 import re
-import subprocess
-import time
 from typing import Any
 
 from clawops.common import load_yaml, write_text
 from clawops.policy_engine import PolicyEngine
+from clawops.process_runner import run_command
 
 
 def _assert_contains(label: str, haystack: str, needles: list[str]) -> list[str]:
@@ -27,22 +26,27 @@ def run_command_case(case: dict[str, Any]) -> dict[str, Any]:
     command = case["command"]
     timeout = int(case.get("timeout", 30))
     cwd = case.get("cwd")
-    start = time.perf_counter()
-    result = subprocess.run(
+    shell = bool(case.get("shell", False))
+    result = run_command(
         command,
-        check=False,
-        capture_output=True,
-        text=True,
         cwd=cwd,
-        shell=isinstance(command, str),
+        timeout_seconds=timeout,
+        shell=shell,
     )
-    duration_ms = int((time.perf_counter() - start) * 1000)
     assertions = case.get("assert", {})
     failures: list[str] = []
+    if result.timed_out:
+        failures.append(f"command timed out after {timeout}s")
+    if result.failed_to_start:
+        failures.append(f"command failed to start: {result.stderr}")
     if "exit_code" in assertions and result.returncode != assertions["exit_code"]:
         failures.append(f"exit_code expected {assertions['exit_code']} got {result.returncode}")
-    failures.extend(_assert_contains("stdout", result.stdout, assertions.get("stdout_contains", [])))
-    failures.extend(_assert_contains("stderr", result.stderr, assertions.get("stderr_contains", [])))
+    failures.extend(
+        _assert_contains("stdout", result.stdout, assertions.get("stdout_contains", []))
+    )
+    failures.extend(
+        _assert_contains("stderr", result.stderr, assertions.get("stderr_contains", []))
+    )
     for regex in assertions.get("stdout_matches", []):
         if not re.search(regex, result.stdout, re.MULTILINE):
             failures.append(f"stdout missing regex: {regex!r}")
@@ -52,7 +56,8 @@ def run_command_case(case: dict[str, Any]) -> dict[str, Any]:
         "passed": not failures,
         "failures": failures,
         "returncode": result.returncode,
-        "duration_ms": duration_ms,
+        "duration_ms": result.duration_ms,
+        "timed_out": result.timed_out,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }

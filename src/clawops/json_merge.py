@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 from typing import Any
 
-from clawops.common import deep_merge, load_json, write_text, dump_json
+from clawops.common import deep_merge, dump_json, load_json, write_text
 
 
 def merge_documents(base: Any, overlays: list[Any]) -> Any:
