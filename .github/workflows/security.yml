@@ -47,6 +47,7 @@ jobs:
         run: gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact
       - uses: aquasecurity/trivy-action@master
         with:
+          cache: false
           scan-type: fs
           scan-ref: .
           trivy-config: security/trivy/trivy.yaml
