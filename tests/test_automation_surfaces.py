@@ -67,6 +67,7 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
 
     assert "actions: read" in workflow
     assert "contents: read" in workflow
+    assert 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"' in workflow
     assert "actions/checkout@v5" in workflow
     assert "languages: python,javascript" in workflow
     assert "actions/setup-python@v6" in workflow
