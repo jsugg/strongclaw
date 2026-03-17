@@ -28,7 +28,7 @@ openclaw gateway status --json
 openclaw status --all
 openclaw doctor
 openclaw memory status --deep
-openclaw memory search --query "OpenClaw Platform Bootstrap" --max-results 1
+openclaw memory search --query "ClawOps" --max-results 1
 openclaw security audit --deep
 openclaw secrets audit --check
 docker compose -f platform/compose/docker-compose.aux-stack.yaml ps
@@ -117,11 +117,24 @@ executable wrapper operation by itself.
 Approve an external action:
 
 ```bash
-clawops op-journal approve \
+clawops approvals approve \
   --db ~/.openclaw/clawops/op_journal.sqlite \
   --op-id <op-id> \
   --approved-by operator \
   --note "approved after review"
+```
+
+Inspect the queue or delegate a queued review:
+
+```bash
+clawops approvals queue --db ~/.openclaw/clawops/op_journal.sqlite
+
+clawops approvals delegate \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --op-id <op-id> \
+  --reviewed-by operator \
+  --to reviewer-acp-claude \
+  --note "route through ACP reviewer"
 ```
 
 ## Evaluate policy

@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS op (
   approved_by TEXT,
   approved_at_ms INTEGER,
   approval_note TEXT,
+  review_mode TEXT,
+  review_target TEXT,
+  review_status TEXT,
+  reviewed_by TEXT,
+  reviewed_at_ms INTEGER,
+  review_note TEXT,
+  review_artifact_path TEXT,
+  review_payload_json TEXT,
   result_ok INTEGER,
   result_status_code INTEGER,
   result_body_excerpt TEXT,
@@ -59,19 +67,28 @@ MIGRATION_COLUMNS: dict[str, str] = {
     "approved_by": "TEXT",
     "approved_at_ms": "INTEGER",
     "approval_note": "TEXT",
+    "review_mode": "TEXT",
+    "review_target": "TEXT",
+    "review_status": "TEXT",
+    "reviewed_by": "TEXT",
+    "reviewed_at_ms": "INTEGER",
+    "review_note": "TEXT",
+    "review_artifact_path": "TEXT",
+    "review_payload_json": "TEXT",
     "result_ok": "INTEGER",
     "result_status_code": "INTEGER",
     "result_body_excerpt": "TEXT",
 }
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "proposed": {"failed", "pending_approval", "approved", "cancelled"},
-    "pending_approval": {"approved", "failed", "cancelled"},
+    "proposed": {"failed", "pending_approval", "approved", "cancelled", "rejected"},
+    "pending_approval": {"approved", "failed", "cancelled", "rejected"},
     "approved": {"running", "failed", "cancelled"},
     "running": {"succeeded", "failed", "cancelled"},
     "succeeded": set(),
     "failed": set(),
     "cancelled": set(),
+    "rejected": set(),
 }
 
 _UNSET = object()
@@ -83,6 +100,29 @@ _CONNECT_RETRY_DELAY_SECONDS = 0.01
 def _is_retryable_open_error(error: sqlite3.OperationalError) -> bool:
     """Return whether a SQLite operational error is worth retrying."""
     return _RETRYABLE_OPEN_ERROR in str(error).lower()
+
+
+def _load_json_mapping(raw_value: str | None) -> dict[str, Any]:
+    """Decode a stored JSON mapping payload."""
+    if raw_value is None or not raw_value.strip():
+        return {}
+    payload = json.loads(raw_value)
+    if not isinstance(payload, dict):
+        raise TypeError("stored review payload must be a JSON object")
+    return payload
+
+
+def _merge_review_payload(
+    existing: str | None,
+    updates: dict[str, Any] | None,
+) -> str | None:
+    """Merge new review metadata into the stored review payload JSON."""
+    payload = _load_json_mapping(existing)
+    if updates:
+        payload.update(updates)
+    if not payload:
+        return None
+    return canonical_json(payload)
 
 
 @dataclasses.dataclass(slots=True)
@@ -111,6 +151,14 @@ class Operation:
     approved_by: str | None
     approved_at_ms: int | None
     approval_note: str | None
+    review_mode: str | None
+    review_target: str | None
+    review_status: str | None
+    reviewed_by: str | None
+    reviewed_at_ms: int | None
+    review_note: str | None
+    review_artifact_path: str | None
+    review_payload_json: str | None
     result_ok: int | None
     result_status_code: int | None
     result_body_excerpt: str | None
@@ -204,8 +252,12 @@ class OperationJournal:
                   status, attempt, last_error, compensation_state,
                   policy_decision, policy_decision_json, execution_contract_version, execution_contract_json,
                   approval_required, approved_by, approved_at_ms, approval_note,
+                  review_mode, review_target, review_status, reviewed_by,
+                  reviewed_at_ms, review_note, review_artifact_path, review_payload_json,
                   result_ok, result_status_code, result_body_excerpt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     op_id,
@@ -227,6 +279,14 @@ class OperationJournal:
                     None,
                     None,
                     0,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
                     None,
                     None,
                     None,
@@ -259,6 +319,14 @@ class OperationJournal:
         execution_contract_version: int | None | object = _UNSET,
         execution_contract_json: str | None | object = _UNSET,
         approval_required: bool | object = _UNSET,
+        review_mode: str | None | object = _UNSET,
+        review_target: str | None | object = _UNSET,
+        review_status: str | None | object = _UNSET,
+        reviewed_by: str | None | object = _UNSET,
+        reviewed_at_ms: int | None | object = _UNSET,
+        review_note: str | None | object = _UNSET,
+        review_artifact_path: str | None | object = _UNSET,
+        review_payload_json: str | None | object = _UNSET,
         result_ok: bool | None | object = _UNSET,
         result_status_code: int | None | object = _UNSET,
         result_body_excerpt: str | None | object = _UNSET,
@@ -296,6 +364,22 @@ class OperationJournal:
                 if approval_required is _UNSET
                 else int(bool(approval_required))
             )
+            next_review_mode = row["review_mode"] if review_mode is _UNSET else review_mode
+            next_review_target = row["review_target"] if review_target is _UNSET else review_target
+            next_review_status = row["review_status"] if review_status is _UNSET else review_status
+            next_reviewed_by = row["reviewed_by"] if reviewed_by is _UNSET else reviewed_by
+            next_reviewed_at_ms = (
+                row["reviewed_at_ms"] if reviewed_at_ms is _UNSET else reviewed_at_ms
+            )
+            next_review_note = row["review_note"] if review_note is _UNSET else review_note
+            next_review_artifact_path = (
+                row["review_artifact_path"]
+                if review_artifact_path is _UNSET
+                else review_artifact_path
+            )
+            next_review_payload_json = (
+                row["review_payload_json"] if review_payload_json is _UNSET else review_payload_json
+            )
             next_result_ok = (
                 row["result_ok"]
                 if result_ok is _UNSET
@@ -313,7 +397,9 @@ class OperationJournal:
                 SET updated_at_ms = ?, status = ?, attempt = ?, last_error = ?,
                     policy_decision = ?, policy_decision_json = ?,
                     execution_contract_version = ?, execution_contract_json = ?,
-                    approval_required = ?, result_ok = ?, result_status_code = ?, result_body_excerpt = ?
+                    approval_required = ?, review_mode = ?, review_target = ?, review_status = ?,
+                    reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
+                    review_payload_json = ?, result_ok = ?, result_status_code = ?, result_body_excerpt = ?
                 WHERE op_id = ?
                 """,
                 (
@@ -326,6 +412,14 @@ class OperationJournal:
                     next_contract_version,
                     next_contract_json,
                     next_approval_required,
+                    next_review_mode,
+                    next_review_target,
+                    next_review_status,
+                    next_reviewed_by,
+                    next_reviewed_at_ms,
+                    next_review_note,
+                    next_review_artifact_path,
+                    next_review_payload_json,
                     next_result_ok,
                     next_result_status_code,
                     next_result_body_excerpt,
@@ -337,7 +431,15 @@ class OperationJournal:
             assert updated is not None
             return Operation.from_row(updated)
 
-    def approve(self, op_id: str, *, approved_by: str, note: str | None = None) -> Operation:
+    def approve(
+        self,
+        op_id: str,
+        *,
+        approved_by: str,
+        note: str | None = None,
+        review_artifact_path: pathlib.Path | None = None,
+        review_payload: dict[str, Any] | None = None,
+    ) -> Operation:
         """Approve a pending operation."""
         now = utc_now_ms()
         with self.connect() as conn:
@@ -351,14 +453,197 @@ class OperationJournal:
                     f"approval-required operation must be pending_approval before approval: {current_status}"
                 )
             self._validate_transition(current_status, "approved")
+            review_mode = row["review_mode"] or "manual"
+            merged_review_payload = _merge_review_payload(
+                row["review_payload_json"], review_payload
+            )
             conn.execute(
                 """
                 UPDATE op
                 SET updated_at_ms = ?, status = ?, approved_by = ?, approved_at_ms = ?,
-                    approval_note = ?, last_error = NULL
+                    approval_note = ?, last_error = NULL, review_mode = ?, review_status = ?,
+                    reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
+                    review_payload_json = ?
                 WHERE op_id = ?
                 """,
-                (now, "approved", approved_by, now, note, op_id),
+                (
+                    now,
+                    "approved",
+                    approved_by,
+                    now,
+                    note,
+                    review_mode,
+                    "approved",
+                    approved_by,
+                    now,
+                    note,
+                    None if review_artifact_path is None else str(review_artifact_path),
+                    merged_review_payload,
+                    op_id,
+                ),
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            assert updated is not None
+            return Operation.from_row(updated)
+
+    def queue(self) -> list[Operation]:
+        """Return queued review operations."""
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM op
+                WHERE status = 'pending_approval'
+                ORDER BY updated_at_ms ASC, created_at_ms ASC
+                """).fetchall()
+            return [Operation.from_row(row) for row in rows]
+
+    def reject(
+        self,
+        op_id: str,
+        *,
+        reviewed_by: str,
+        note: str | None = None,
+        review_artifact_path: pathlib.Path | None = None,
+        review_payload: dict[str, Any] | None = None,
+    ) -> Operation:
+        """Reject a queued review operation."""
+        now = utc_now_ms()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"unknown operation: {op_id}")
+            current_status = str(row["status"])
+            self._validate_transition(current_status, "rejected")
+            merged_review_payload = _merge_review_payload(
+                row["review_payload_json"], review_payload
+            )
+            conn.execute(
+                """
+                UPDATE op
+                SET updated_at_ms = ?, status = ?, last_error = ?, review_mode = ?, review_status = ?,
+                    reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
+                    review_payload_json = ?
+                WHERE op_id = ?
+                """,
+                (
+                    now,
+                    "rejected",
+                    note or "review rejected",
+                    row["review_mode"] or "manual",
+                    "rejected",
+                    reviewed_by,
+                    now,
+                    note,
+                    None if review_artifact_path is None else str(review_artifact_path),
+                    merged_review_payload,
+                    op_id,
+                ),
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            assert updated is not None
+            return Operation.from_row(updated)
+
+    def delegate(
+        self,
+        op_id: str,
+        *,
+        reviewed_by: str,
+        delegate_to: str,
+        note: str | None = None,
+        review_artifact_path: pathlib.Path | None = None,
+        review_payload: dict[str, Any] | None = None,
+    ) -> Operation:
+        """Delegate a queued review operation."""
+        now = utc_now_ms()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"unknown operation: {op_id}")
+            current_status = str(row["status"])
+            if current_status != "pending_approval":
+                raise ValueError(
+                    f"only pending_approval operations may be delegated: {current_status}"
+                )
+            merged_review_payload = _merge_review_payload(
+                row["review_payload_json"],
+                {**(review_payload or {}), "delegate_to": delegate_to},
+            )
+            conn.execute(
+                """
+                UPDATE op
+                SET updated_at_ms = ?, review_mode = ?, review_target = ?, review_status = ?,
+                    reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
+                    review_payload_json = ?
+                WHERE op_id = ?
+                """,
+                (
+                    now,
+                    row["review_mode"] or "delegate_recommend",
+                    delegate_to,
+                    "delegated",
+                    reviewed_by,
+                    now,
+                    note,
+                    None if review_artifact_path is None else str(review_artifact_path),
+                    merged_review_payload,
+                    op_id,
+                ),
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            assert updated is not None
+            return Operation.from_row(updated)
+
+    def ingest_review(
+        self,
+        op_id: str,
+        *,
+        reviewed_by: str,
+        decision: str,
+        note: str | None = None,
+        review_artifact_path: pathlib.Path | None = None,
+        review_payload: dict[str, Any] | None = None,
+    ) -> Operation:
+        """Resolve a queued operation from an external review artifact."""
+        if decision not in {"allow", "deny"}:
+            raise ValueError("review decision must be allow or deny")
+        now = utc_now_ms()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"unknown operation: {op_id}")
+            current_status = str(row["status"])
+            target_status = "approved" if decision == "allow" else "rejected"
+            self._validate_transition(current_status, target_status)
+            merged_review_payload = _merge_review_payload(
+                row["review_payload_json"],
+                {**(review_payload or {}), "review_decision": decision},
+            )
+            conn.execute(
+                """
+                UPDATE op
+                SET updated_at_ms = ?, status = ?, last_error = ?, approved_by = ?, approved_at_ms = ?,
+                    approval_note = ?, review_mode = ?, review_status = ?, reviewed_by = ?,
+                    reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?, review_payload_json = ?
+                WHERE op_id = ?
+                """,
+                (
+                    now,
+                    target_status,
+                    None if decision == "allow" else (note or "review rejected"),
+                    reviewed_by if decision == "allow" else None,
+                    now if decision == "allow" else None,
+                    note if decision == "allow" else row["approval_note"],
+                    row["review_mode"] or "manual",
+                    "approved" if decision == "allow" else "rejected",
+                    reviewed_by,
+                    now,
+                    note,
+                    None if review_artifact_path is None else str(review_artifact_path),
+                    merged_review_payload,
+                    op_id,
+                ),
             )
             conn.commit()
             updated = conn.execute("SELECT * FROM op WHERE op_id = ?", (op_id,)).fetchone()

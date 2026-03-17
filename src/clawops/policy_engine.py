@@ -22,14 +22,36 @@ class Decision:
     decision: str
     reasons: list[str]
     matched_rules: list[str]
+    review_mode: str | None = None
+    review_target: str | None = None
+    review_reason: str | None = None
+    review_policy_id: str | None = None
+    delegate_to: str | None = None
+
+    def review_payload(self) -> dict[str, str]:
+        """Serialize the optional review metadata."""
+        payload: dict[str, str] = {}
+        if self.review_mode is not None:
+            payload["review_mode"] = self.review_mode
+        if self.review_target is not None:
+            payload["review_target"] = self.review_target
+        if self.review_reason is not None:
+            payload["review_reason"] = self.review_reason
+        if self.review_policy_id is not None:
+            payload["review_policy_id"] = self.review_policy_id
+        if self.delegate_to is not None:
+            payload["delegate_to"] = self.delegate_to
+        return payload
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the decision."""
-        return {
+        payload: dict[str, Any] = {
             "decision": self.decision,
             "reasons": self.reasons,
             "matched_rules": self.matched_rules,
         }
+        payload.update(self.review_payload())
+        return payload
 
 
 class PolicyEngine:
@@ -91,16 +113,113 @@ class PolicyEngine:
             if outcome == TERMINAL_DENY:
                 return Decision(outcome, reasons, matched_rules)
             if outcome == TERMINAL_REQUIRE_APPROVAL:
-                return Decision(outcome, reasons, matched_rules)
+                return self._build_review_decision(
+                    payload=payload,
+                    decision=outcome,
+                    reasons=reasons,
+                    matched_rules=matched_rules,
+                    review_policy_id=rule_id,
+                    fallback_reason=note,
+                )
 
         approval_rules = self.policy.get("approval", {})
-        if action in approval_rules.get(
-            "require_for_actions", []
-        ) or category in approval_rules.get("require_for_categories", []):
+        review_policy_id: str | None = None
+        if action in approval_rules.get("require_for_actions", []):
+            review_policy_id = f"approval.actions.{action}"
+        elif category in approval_rules.get("require_for_categories", []):
+            review_policy_id = f"approval.categories.{category}"
+        if review_policy_id is not None:
             reasons.append("approval required by approval matrix")
-            return Decision(TERMINAL_REQUIRE_APPROVAL, reasons, matched_rules)
+            return self._build_review_decision(
+                payload=payload,
+                decision=TERMINAL_REQUIRE_APPROVAL,
+                reasons=reasons,
+                matched_rules=matched_rules,
+                review_policy_id=review_policy_id,
+                fallback_reason=reasons[-1],
+            )
 
-        return Decision(default_decision, reasons or ["default"], matched_rules)
+        return self._build_review_decision(
+            payload=payload,
+            decision=default_decision,
+            reasons=reasons or ["default"],
+            matched_rules=matched_rules,
+            review_policy_id="defaults.decision",
+            fallback_reason=reasons[-1] if reasons else "default",
+        )
+
+    def _build_review_decision(
+        self,
+        *,
+        payload: Mapping[str, Any],
+        decision: str,
+        reasons: list[str],
+        matched_rules: list[str],
+        review_policy_id: str,
+        fallback_reason: str,
+    ) -> Decision:
+        """Build a decision and attach additive review metadata when needed."""
+        if decision != TERMINAL_REQUIRE_APPROVAL:
+            return Decision(decision, reasons, matched_rules)
+
+        review_config = self._resolve_review_config(payload)
+        mode_value = review_config.get("mode", "manual")
+        review_mode = str(mode_value).strip() or "manual"
+        delegate_to_value = review_config.get("delegate_to")
+        delegate_to = (
+            str(delegate_to_value).strip()
+            if isinstance(delegate_to_value, str) and delegate_to_value.strip()
+            else None
+        )
+        review_target_value = review_config.get("review_target", review_config.get("target"))
+        review_target = (
+            str(review_target_value).strip()
+            if isinstance(review_target_value, str) and review_target_value.strip()
+            else delegate_to
+        )
+        reason_value = review_config.get("reason")
+        review_reason = (
+            str(reason_value).strip()
+            if isinstance(reason_value, str) and reason_value.strip()
+            else fallback_reason
+        )
+        return Decision(
+            decision=decision,
+            reasons=reasons,
+            matched_rules=matched_rules,
+            review_mode=review_mode,
+            review_target=review_target,
+            review_reason=review_reason,
+            review_policy_id=review_policy_id,
+            delegate_to=delegate_to,
+        )
+
+    def _resolve_review_config(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Resolve optional review overrides for the payload."""
+        review_block = self.policy.get("review", {})
+        if not isinstance(review_block, Mapping):
+            return {}
+
+        merged: dict[str, Any] = {}
+        defaults = review_block.get("defaults", {})
+        if isinstance(defaults, Mapping):
+            merged.update(defaults)
+
+        categories = review_block.get("categories", {})
+        category = str(payload.get("category", ""))
+        if isinstance(categories, Mapping):
+            category_config = categories.get(category, {})
+            if isinstance(category_config, Mapping):
+                merged.update(category_config)
+
+        actions = review_block.get("actions", {})
+        action = str(payload.get("action", ""))
+        if isinstance(actions, Mapping):
+            action_config = actions.get(action, {})
+            if isinstance(action_config, Mapping):
+                merged.update(action_config)
+
+        return merged
 
     @staticmethod
     def load_payload(path: pathlib.Path) -> Mapping[str, Any]:

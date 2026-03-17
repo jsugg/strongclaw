@@ -33,6 +33,15 @@ approval:
     - irreversible
     - external_write
 
+review:
+  defaults:
+    mode: manual
+  actions:
+    github.pull_request.merge:
+      mode: delegate_recommend
+      delegate_to: reviewer-acp-claude
+      reason: pull request merges are routed through the reviewer worker by default
+
 allowlists:
   webhook_url:
     - https://example.internal/hooks/deploy
