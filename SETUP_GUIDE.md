@@ -42,7 +42,7 @@ cd openclaw-platform-bootstrap
 ## 3. Install companion tooling
 
 ```bash
-python3 -m pip install -e .
+make dev
 make test
 ```
 
