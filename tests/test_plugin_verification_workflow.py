@@ -20,15 +20,14 @@ def test_plugin_verification_workflow_runs_vendored_memory_plugin_checks() -> No
     assert "./scripts/ci/run_memory_plugin_verification.sh" in workflow
 
     assert 'OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.13}"' in script
-    assert 'PLUGIN_DIR="$ROOT/platform/plugins/memory-lancedb-pro"' in script
-    assert "npm ci" in script
-    assert "npm test" in script
+    assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in script
     assert (
         'npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@${OPENCLAW_VERSION}"'
         in script
     )
     assert "npm run test:openclaw-host" in script
-    assert "darwin-x64 native binary" in script
+    assert "-u AWS_PROFILE" in script
+    assert "-u AWS_REGION" in script
 
 
 def test_plugin_verification_docs_describe_linux_ci_gate() -> None:
@@ -41,6 +40,7 @@ def test_plugin_verification_docs_describe_linux_ci_gate() -> None:
     assert "plugin-verification" in ci_doc
     assert "memory-lancedb-pro" in ci_doc
     assert "openclaw@2026.3.13" in ci_doc
-    assert "darwin-x64" in ci_doc
-    assert "darwin-x64" in vendor_note
-    assert "Ubuntu CI" in vendor_note
+    assert "@lancedb/lancedb@0.22.3" in ci_doc
+    assert "AWS credential env vars" in ci_doc
+    assert "darwin/x86_64" in vendor_note
+    assert "@lancedb/lancedb@0.22.3" in vendor_note

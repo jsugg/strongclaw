@@ -49,7 +49,7 @@ make test
 ## 4. Install platform dependencies
 
 ```bash
-./scripts/bootstrap/bootstrap_macos.sh
+./scripts/bootstrap/bootstrap_host.sh
 ```
 
 This script verifies or installs:
@@ -61,6 +61,7 @@ This script verifies or installs:
 - `sqlite`
 - `bun`
 - Python dependencies
+- host-compatible vendored `memory-lancedb-pro` dependencies
 
 ## 5. Prepare the Varlock env contract
 

@@ -15,6 +15,7 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 python3 -m pip install -e "$ROOT"
 sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
 "$ROOT/scripts/bootstrap/bootstrap_qmd.sh"
+"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"
 mkdir -p "$HOME/.openclaw/clawops" "$HOME/.openclaw/logs" "$ROOT/platform/compose/state"
 command -v openclaw >/dev/null 2>&1 || { echo "openclaw install failed"; exit 1; }
 command -v acpx >/dev/null 2>&1 || { echo "acpx install failed"; exit 1; }

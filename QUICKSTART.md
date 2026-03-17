@@ -12,15 +12,17 @@ make test
 ## 2. Bootstrap the host
 
 ```bash
-./scripts/bootstrap/bootstrap_macos.sh
+./scripts/bootstrap/bootstrap_host.sh
 ```
 
 That script:
 
+- auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
 - creates the repo-local directories under `platform/`
 - installs or verifies Homebrew prerequisites
 - attempts a best-effort install of `openclaw`, `acpx`, and `varlock`
 - provisions the default QMD semantic memory backend
+- installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
 - renders launchd templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests

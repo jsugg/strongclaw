@@ -117,11 +117,19 @@ def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
 
 def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
+    host = (repo_root / "scripts/bootstrap/bootstrap_host.sh").read_text(encoding="utf-8")
+    memory_plugin = (repo_root / "scripts/bootstrap/bootstrap_memory_plugin.sh").read_text(
+        encoding="utf-8"
+    )
     macos = (repo_root / "scripts/bootstrap/bootstrap_macos.sh").read_text(encoding="utf-8")
     linux = (repo_root / "scripts/bootstrap/bootstrap_linux.sh").read_text(encoding="utf-8")
 
+    assert "clawops.platform_compat --field bootstrap_script" in host
+    assert "memory_plugin_lancedb_version" in memory_plugin
+    assert "@lancedb/lancedb@$RESOLVED_LANCEDB_VERSION" in memory_plugin
     for script in (macos, linux):
         assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in script
+        assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in script
         assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in script
         assert "acpx@latest" not in script
     assert "|| true" not in macos
