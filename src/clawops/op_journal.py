@@ -7,12 +7,13 @@ import dataclasses
 import json
 import pathlib
 import sqlite3
+import time
 from typing import Any
 
 from clawops.common import canonical_json, sha256_hex, utc_now_ms, write_json
 
 SCHEMA_SQL = """
-PRAGMA journal_mode=WAL;
+PRAGMA journal_mode=DELETE;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS op (
@@ -74,6 +75,14 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 }
 
 _UNSET = object()
+_RETRYABLE_OPEN_ERROR = "unable to open database file"
+_CONNECT_ATTEMPTS = 3
+_CONNECT_RETRY_DELAY_SECONDS = 0.01
+
+
+def _is_retryable_open_error(error: sqlite3.OperationalError) -> bool:
+    """Return whether a SQLite operational error is worth retrying."""
+    return _RETRYABLE_OPEN_ERROR in str(error).lower()
 
 
 @dataclasses.dataclass(slots=True)
@@ -121,10 +130,19 @@ class OperationJournal:
     def connect(self) -> sqlite3.Connection:
         """Open a SQLite connection with row access by name."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        self._ensure_schema(conn)
-        return conn
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                self._ensure_schema(conn)
+            except sqlite3.OperationalError as exc:
+                conn.close()
+                if not _is_retryable_open_error(exc) or attempt == _CONNECT_ATTEMPTS:
+                    raise
+                time.sleep(_CONNECT_RETRY_DELAY_SECONDS * attempt)
+                continue
+            return conn
+        raise AssertionError("unreachable: connect loop returned no SQLite connection")
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
         """Create and migrate the journal schema."""

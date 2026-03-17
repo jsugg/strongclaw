@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   browserlab-proxy:
-    image: ubuntu/squid:latest
+    image: ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
     ports:
       - "127.0.0.1:3128:3128"
     volumes:
@@ -12,7 +10,7 @@ services:
       - no-new-privileges:true
 
   browserlab-playwright:
-    image: mcr.microsoft.com/playwright:v1.41.1-jammy
+    image: mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:0f0547cc1492898e84a6fd0847bcfdde15e483b333a66e88b547c9ce15aea6c7
     depends_on:
       - browserlab-proxy
     environment:
