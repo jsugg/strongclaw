@@ -49,10 +49,15 @@ make test
 ## 4. Install platform dependencies
 
 ```bash
+./scripts/bootstrap/preflight_host.sh
 ./scripts/bootstrap/bootstrap_host.sh
 ```
 
-This script verifies or installs:
+`bootstrap_host.sh` runs the matching host preflight internally and finishes
+with `./scripts/bootstrap/doctor_host.sh`, so it now fails if the required
+toolchain is still missing or the rendered OpenClaw config is invalid.
+
+The bootstrap flow verifies or installs:
 
 - `openclaw`
 - `acpx`
@@ -62,6 +67,9 @@ This script verifies or installs:
 - `bun`
 - Python dependencies
 - host-compatible vendored `memory-lancedb-pro` dependencies
+
+Use `./scripts/bootstrap/doctor_host.sh` again after any host-side package or
+config change that might affect the local OpenClaw runtime contract.
 
 ## 5. Prepare the Varlock env contract
 

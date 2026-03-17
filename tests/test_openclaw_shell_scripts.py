@@ -25,7 +25,32 @@ def _build_tool_path(tmp_path: pathlib.Path, tool_names: list[str]) -> pathlib.P
 def _write_fake_openclaw(bin_dir: pathlib.Path) -> None:
     target = bin_dir / "openclaw"
     target.write_text(
-        "#!/usr/bin/env bash\n" "set -euo pipefail\n" "printf 'fake-openclaw %s\\n' \"$*\"\n",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'if [[ "$*" == "--version" ]]; then\n'
+        "  printf 'openclaw 2026.3.13\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$*" == "config validate" ]]; then\n'
+        "  printf 'config ok\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'fake-openclaw %s\\n' \"$*\"\n",
+        encoding="utf-8",
+    )
+    target.chmod(0o755)
+
+
+def _write_fake_acpx(bin_dir: pathlib.Path) -> None:
+    target = bin_dir / "acpx"
+    target.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'if [[ "$*" == "--version" ]]; then\n'
+        "  printf 'acpx 0.3.0\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "printf 'fake-acpx %s\\n' \"$*\"\n",
         encoding="utf-8",
     )
     target.chmod(0o755)
@@ -226,6 +251,59 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     assert "== Harness smoke ==" in result.stdout
     assert "passed=2 total=2" in result.stdout
     assert "passed=3 total=3" in result.stdout
+
+
+def test_preflight_macos_requires_homebrew(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "uname"])
+    env = os.environ | {"PATH": str(bin_dir)}
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/preflight_macos.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Homebrew is required for macOS bootstrap." in result.stderr
+
+
+def test_doctor_host_validates_installed_tools_and_rendered_config(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
+    _write_fake_openclaw(bin_dir)
+    _write_fake_acpx(bin_dir)
+    home_dir = tmp_path / "home"
+    _write_fake_qmd(home_dir)
+    config_path = home_dir / ".openclaw" / "openclaw.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"gateway":{"bind":"loopback"}}\n', encoding="utf-8")
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+    }
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/doctor_host.sh")],
+        cwd=outside_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "== OpenClaw version ==" in result.stdout
+    assert "openclaw 2026.3.13" in result.stdout
+    assert "== ACPX version ==" in result.stdout
+    assert "acpx 0.3.0" in result.stdout
+    assert "config ok" in result.stdout
+    assert "validated " in result.stdout
 
 
 def test_backup_create_warns_and_falls_back_without_openclaw(tmp_path: pathlib.Path) -> None:
