@@ -31,7 +31,8 @@ def test_local_automation_reuses_shared_harness_smoke_script() -> None:
     verify_script = (repo_root / "scripts/bootstrap/verify_baseline.sh").read_text(encoding="utf-8")
     workflow = (repo_root / ".github/workflows/harness.yml").read_text(encoding="utf-8")
 
-    assert "./scripts/bootstrap/run_harness_smoke.sh ./.runs" in makefile
+    assert "RUNS_DIR ?= ./.runs" in makefile
+    assert "./scripts/bootstrap/run_harness_smoke.sh $(RUNS_DIR)" in makefile
     assert '"$ROOT/scripts/bootstrap/run_harness_smoke.sh" "$ROOT/.runs"' in verify_script
     assert "./scripts/bootstrap/run_harness_smoke.sh ./.runs" in workflow
 

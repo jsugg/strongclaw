@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 .runs/
+.clawops/
 .env.local
 .env.ci
 .env.prod
