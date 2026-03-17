@@ -117,7 +117,16 @@ expects.
      --output /tmp/strongclaw-memory-pro-project.json
    ```
 
-3. Import that file into the vendored plugin:
+3. Import that file into the vendored plugin through the ClawOps wrapper. It
+   preserves the documented upstream `openclaw memory-pro import` command
+   shape and writes an import report alongside the snapshot by default:
+
+   ```bash
+   clawops memory import-pro-snapshot \
+     --input /tmp/strongclaw-memory-pro-project.json
+   ```
+
+   Equivalent upstream command shape:
 
    ```bash
    openclaw memory-pro import /tmp/strongclaw-memory-pro-project.json \

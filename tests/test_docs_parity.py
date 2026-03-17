@@ -69,11 +69,14 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
 def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:
     repo_root = _repo_root()
     memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
+    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
 
     assert "clawops memory migrate-v2-to-pro" in memory_doc
+    assert "clawops memory import-pro-snapshot" in memory_doc
     assert "clawops memory verify-pro-parity" in memory_doc
     assert "openclaw memory-pro import" in memory_doc
     assert "--mode openclaw" in memory_doc
+    assert "clawops memory import-pro-snapshot" in usage
 
 
 def test_operator_docs_surface_approvals_cli() -> None:

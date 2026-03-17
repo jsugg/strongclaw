@@ -189,6 +189,14 @@ clawops memory migrate-v2-to-pro \
   --output ./.runs/memory/project-strongclaw-import.json
 ```
 
+Apply that snapshot through the same upstream `openclaw memory-pro import`
+command shape, but with a ClawOps-managed report artifact:
+
+```bash
+clawops memory import-pro-snapshot \
+  --input ./.runs/memory/project-strongclaw-import.json
+```
+
 Generate a parity report before you cut over durable writes:
 
 ```bash

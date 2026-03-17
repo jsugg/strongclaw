@@ -18,6 +18,7 @@ from clawops.process_runner import run_command
 MIGRATION_REPORT_VERSION: Final[int] = 1
 DEFAULT_QUERY_COUNT: Final[int] = 5
 DEFAULT_RESULT_LIMIT: Final[int] = 5
+DEFAULT_IMPORT_TIMEOUT_SECONDS: Final[int] = 120
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -63,6 +64,11 @@ def _default_import_output(engine: MemoryV2Engine, scope: str) -> pathlib.Path:
 def _default_report_output(engine: MemoryV2Engine, scope: str, name: str) -> pathlib.Path:
     """Return the default report path for a migration/parity action."""
     return _artifact_dir(engine) / f"{name}-{_scope_slug(scope)}.json"
+
+
+def _default_import_report_output(snapshot_path: pathlib.Path, scope: str) -> pathlib.Path:
+    """Return the default report path for a managed memory-pro import."""
+    return snapshot_path.parent / f"import-report-{_scope_slug(scope)}.json"
 
 
 def _category_counts(memories: list[dict[str, Any]]) -> dict[str, int]:
@@ -145,6 +151,68 @@ def migrate_v2_to_pro(
         report_output=report_output,
         dry_run=dry_run,
     )
+    write_json(report_output, summary)
+    return summary
+
+
+def import_pro_snapshot(
+    *,
+    input_path: pathlib.Path,
+    scope: str | None,
+    report: pathlib.Path | None,
+    dry_run: bool,
+    openclaw_bin: str,
+) -> dict[str, Any]:
+    """Import a migration snapshot into a live memory-pro plugin via the OpenClaw CLI."""
+    payload = load_json(input_path)
+    if not isinstance(payload, dict):
+        raise ValueError("memory-pro import snapshot must be a JSON object")
+    scope_value = payload.get("scope")
+    resolved_scope = scope or (str(scope_value) if isinstance(scope_value, str) else "")
+    if not resolved_scope:
+        raise ValueError("memory-pro import snapshot must declare a scope or receive --scope")
+
+    snapshot_path = input_path.expanduser().resolve()
+    report_output = (
+        _default_import_report_output(snapshot_path, resolved_scope)
+        if report is None
+        else report.expanduser().resolve()
+    )
+    command = [
+        openclaw_bin,
+        "memory-pro",
+        "import",
+        snapshot_path.as_posix(),
+        "--scope",
+        resolved_scope,
+    ]
+    if dry_run:
+        command.append("--dry-run")
+
+    result = run_command(command, timeout_seconds=DEFAULT_IMPORT_TIMEOUT_SECONDS)
+    summary: dict[str, Any] = {
+        "ok": result.ok,
+        "version": MIGRATION_REPORT_VERSION,
+        "scope": resolved_scope,
+        "dryRun": dry_run,
+        "importSnapshot": snapshot_path.as_posix(),
+        "report": report_output.as_posix(),
+        "command": command,
+        "durationMs": result.duration_ms,
+        "returnCode": result.returncode,
+        "timedOut": result.timed_out,
+        "failedToStart": result.failed_to_start,
+    }
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    if stdout:
+        try:
+            summary["response"] = json.loads(stdout)
+        except json.JSONDecodeError:
+            summary["stdoutExcerpt"] = stdout[:1000]
+    if stderr:
+        summary["stderrExcerpt"] = stderr[:1000]
     write_json(report_output, summary)
     return summary
 
@@ -464,6 +532,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use the exported import snapshot, the live OpenClaw CLI, or auto-fallback.",
     )
     verify.add_argument("--openclaw-bin", default="openclaw")
+
+    import_snapshot = sub.add_parser(
+        "import-pro-snapshot",
+        help="Import a migration snapshot into a live memory-pro plugin via OpenClaw.",
+    )
+    import_snapshot.add_argument("--input", required=True, type=pathlib.Path)
+    import_snapshot.add_argument("--scope")
+    import_snapshot.add_argument("--report", type=pathlib.Path)
+    import_snapshot.add_argument("--dry-run", action="store_true")
+    import_snapshot.add_argument("--openclaw-bin", default="openclaw")
     return parser.parse_args(argv)
 
 
@@ -481,6 +559,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    if args.command == "import-pro-snapshot":
+        payload = import_pro_snapshot(
+            input_path=args.input,
+            scope=args.scope,
+            report=args.report,
+            dry_run=bool(args.dry_run),
+            openclaw_bin=args.openclaw_bin,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if bool(payload.get("ok")) else 1
     if args.limit <= 0:
         result = ResultSummary(False, "limit must be positive")
         print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
