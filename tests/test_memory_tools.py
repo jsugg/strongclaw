@@ -6,7 +6,10 @@ import json
 import pathlib
 import textwrap
 
+import pytest
+
 from clawops.memory_tools import main as memory_main
+from clawops.process_runner import CommandResult
 
 
 def _write_memory_v2_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -144,3 +147,176 @@ def test_memory_verify_pro_parity_uses_import_snapshot(
     assert report["mode"] == "import_snapshot"
     assert "MEMORY.md" in report["queries"][0]["overlapPaths"]
     assert report_path.exists()
+
+
+def test_memory_import_pro_snapshot_invokes_openclaw_cli_and_writes_report(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, config_path = _build_workspace(tmp_path)
+    snapshot_path = workspace / ".runs" / "memory" / "import.json"
+    report_path = workspace / ".runs" / "memory" / "import-report.json"
+
+    migrate_exit = memory_main(
+        [
+            "migrate-v2-to-pro",
+            "--config",
+            str(config_path),
+            "--scope",
+            "project:strongclaw",
+            "--output",
+            str(snapshot_path),
+        ]
+    )
+    assert migrate_exit == 0
+    _ = capsys.readouterr()
+
+    recorded: list[list[str]] = []
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> CommandResult:
+        assert cwd is None
+        assert env is None
+        assert timeout_seconds == 120
+        assert shell is False
+        recorded.append(command)
+        return CommandResult(
+            returncode=0,
+            stdout='{"imported":2,"scope":"project:strongclaw"}',
+            stderr="",
+            duration_ms=42,
+        )
+
+    monkeypatch.setattr("clawops.memory_tools.run_command", _fake_run_command)
+
+    exit_code = memory_main(
+        [
+            "import-pro-snapshot",
+            "--input",
+            str(snapshot_path),
+            "--report",
+            str(report_path),
+            "--openclaw-bin",
+            "/opt/openclaw/bin/openclaw",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "/opt/openclaw/bin/openclaw",
+            "memory-pro",
+            "import",
+            snapshot_path.resolve().as_posix(),
+            "--scope",
+            "project:strongclaw",
+        ]
+    ]
+    assert summary["ok"] is True
+    assert summary["response"] == {"imported": 2, "scope": "project:strongclaw"}
+    assert report_path.exists()
+    assert json.loads(report_path.read_text(encoding="utf-8"))["command"] == recorded[0]
+
+
+def test_memory_import_pro_snapshot_supports_scope_override_and_dry_run(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_path = tmp_path / "memory-pro-import.json"
+    snapshot_path.write_text(
+        json.dumps({"scope": "project:strongclaw", "memories": []}),
+        encoding="utf-8",
+    )
+
+    recorded: list[list[str]] = []
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> CommandResult:
+        recorded.append(command)
+        return CommandResult(returncode=0, stdout="", stderr="", duration_ms=7)
+
+    monkeypatch.setattr("clawops.memory_tools.run_command", _fake_run_command)
+
+    exit_code = memory_main(
+        [
+            "import-pro-snapshot",
+            "--input",
+            str(snapshot_path),
+            "--scope",
+            "global",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    assert exit_code == 0
+    assert recorded == [
+        [
+            "openclaw",
+            "memory-pro",
+            "import",
+            snapshot_path.resolve().as_posix(),
+            "--scope",
+            "global",
+            "--dry-run",
+        ]
+    ]
+    assert summary["dryRun"] is True
+    assert summary["scope"] == "global"
+    assert pathlib.Path(summary["report"]).exists()
+
+
+def test_memory_import_pro_snapshot_reports_openclaw_start_failure(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_path = tmp_path / "memory-pro-import.json"
+    snapshot_path.write_text(
+        json.dumps({"scope": "project:strongclaw", "memories": []}),
+        encoding="utf-8",
+    )
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> CommandResult:
+        return CommandResult(
+            returncode=None,
+            stdout="",
+            stderr="openclaw executable not found",
+            duration_ms=3,
+            failed_to_start=True,
+        )
+
+    monkeypatch.setattr("clawops.memory_tools.run_command", _fake_run_command)
+
+    exit_code = memory_main(["import-pro-snapshot", "--input", str(snapshot_path)])
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    assert exit_code == 1
+    assert summary["ok"] is False
+    assert summary["failedToStart"] is True
+    assert summary["stderrExcerpt"] == "openclaw executable not found"
