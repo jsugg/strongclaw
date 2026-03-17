@@ -64,7 +64,7 @@ This pack assumes:
 git clone <this repo> openclaw-platform-bootstrap
 cd openclaw-platform-bootstrap
 
-python3 -m pip install -e .
+make dev
 make test
 
 ./scripts/bootstrap/bootstrap_host.sh
@@ -102,6 +102,7 @@ That syncs the `dev` extra into `.venv/` and installs hooks for:
 Useful follow-up commands:
 
 ```bash
+make help
 make fmt
 make lint
 make imports
@@ -111,9 +112,8 @@ make precommit
 make dev-check
 ```
 
-`make precommit` runs the full pre-commit hook stack across the repository and
-reruns automatically after formatter/import/hygiene fixes so auto-fixable
-issues are applied before verification.
+`make precommit` runs the mutating formatter/import/hygiene hooks first and then
+verifies the full pre-commit stack in one final pass.
 
 `make dev-check` builds on `make precommit` and then runs the test suite plus a
 compile smoke. That keeps the two targets distinct: `make precommit` is the
