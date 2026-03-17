@@ -64,3 +64,12 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/verify_channels.sh" in setup
     assert "./scripts/bootstrap/verify_observability.sh" in quickstart
     assert "./scripts/bootstrap/verify_observability.sh" in setup
+
+
+def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:
+    repo_root = _repo_root()
+    memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
+
+    assert "export-memory-pro" in memory_doc
+    assert "openclaw memory-pro import" in memory_doc
+    assert "--include-daily" in memory_doc

@@ -7,6 +7,7 @@ import json
 import pathlib
 from typing import Any
 
+from clawops.common import write_json
 from clawops.memory_v2.benchmark import load_benchmark_cases
 from clawops.memory_v2.config import default_config_path, load_config
 from clawops.memory_v2.engine import MemoryV2Engine
@@ -85,6 +86,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     benchmark_parser.add_argument("--fixtures", type=pathlib.Path, required=True)
     benchmark_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
+    export_parser = subparsers.add_parser(
+        "export-memory-pro",
+        help="Export durable memory-v2 entries into memory-lancedb-pro import JSON.",
+    )
+    export_parser.add_argument("--scope", help="Exact scope to export, e.g. project:strongclaw.")
+    export_parser.add_argument(
+        "--include-daily",
+        action="store_true",
+        help="Include retained daily-log notes in addition to durable bank/root memory files.",
+    )
+    export_parser.add_argument("--output", type=pathlib.Path)
+    export_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
     return parser.parse_args(argv)
 
 
@@ -149,6 +163,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "benchmark":
         payload = engine.benchmark_cases(load_benchmark_cases(args.fixtures))
         _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "export-memory-pro":
+        payload = engine.export_memory_pro_import(
+            scope=args.scope,
+            include_daily=bool(args.include_daily),
+        )
+        if args.output is None:
+            _print_payload(payload, as_json=True)
+            return 0
+        write_json(args.output, payload)
+        summary = {
+            "ok": True,
+            "provider": "strongclaw-memory-v2",
+            "scope": payload["scope"],
+            "includeDaily": bool(args.include_daily),
+            "memories": len(payload["memories"]),
+            "output": args.output.as_posix(),
+            "nextCommand": (
+                f"openclaw memory-pro import {args.output.as_posix()} --scope {payload['scope']}"
+            ),
+        }
+        _print_payload(summary, as_json=bool(args.json))
         return 0
     raise SystemExit(f"unsupported command: {args.command}")
 
