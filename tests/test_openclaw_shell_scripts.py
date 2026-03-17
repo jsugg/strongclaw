@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
@@ -147,6 +148,49 @@ def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.P
         in rendered
     )
     assert '"userTimezone": "UTC"' in rendered
+
+
+def test_render_openclaw_config_supports_profiles_and_exec_approvals_output(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    approvals_output = tmp_path / "home" / ".openclaw" / "exec-approvals.json"
+    env = os.environ | {
+        "HOME": str(tmp_path / "home"),
+        "PYTHONPATH": str(repo_root / "src"),
+        "OPENCLAW_USER_TIMEZONE": "UTC",
+    }
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/render_openclaw_config.sh"),
+            "--profile",
+            "acp",
+            "--exec-approvals-output",
+            str(approvals_output),
+        ],
+        cwd=outside_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    rendered = json.loads(
+        ((tmp_path / "home") / ".openclaw" / "openclaw.json").read_text(encoding="utf-8")
+    )
+    approvals = json.loads(approvals_output.read_text(encoding="utf-8"))
+
+    coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
+    assert coder["runtime"]["acp"]["cwd"] == f"{repo_root.as_posix()}/repo/upstream"
+    assert approvals["rules"][0]["match"]["cwdPrefixes"] == [
+        repo_root.as_posix(),
+        f"{repo_root.as_posix()}/repo/upstream",
+    ]
 
 
 def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(

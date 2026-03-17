@@ -94,6 +94,14 @@ By default it now enables QMD-backed memory retrieval and renders repo-local mem
 - `memory.md`
 - `platform/workspace/shared/MEMORY.md`
 
+Use profile rerenders for placeholder-backed variants:
+
+```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile acp
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+```
+
 ## 7. Install launchd services
 
 ```bash
@@ -126,13 +134,10 @@ Do not continue until all baseline checks are clean.
 
 This installs the acpx config templates and writes the ACP worker overlay.
 
-Then merge:
+Then rerender the OpenClaw config with the ACP worker profile:
 
 ```bash
-clawops merge-json \
-  --base ~/.openclaw/openclaw.json \
-  --overlay platform/configs/openclaw/20-acp-workers.json5 \
-  --output ~/.openclaw/openclaw.json
+./scripts/bootstrap/render_openclaw_config.sh --profile acp
 ```
 
 Smoke test:
@@ -169,11 +174,30 @@ clawops context query \
 ```
 
 If you need the opt-in local durable memory path instead of the default
-QMD-backed retrieval rollout, merge
-`platform/configs/openclaw/75-clawops-memory-pro.local.json5` after this step.
-Use `platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5` only
-after Ollama is serving both embeddings and a local extraction model. Keep
-`platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` as the
+QMD-backed retrieval rollout, rerender with:
+
+```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
+```
+
+Use the Ollama-backed smart extraction profile only after Ollama is serving
+both embeddings and a local extraction model:
+
+```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+```
+
+If you need a combined placeholder-backed variant, use the root CLI and append
+the extra overlay explicitly so every selected fragment is rendered first:
+
+```bash
+clawops render-openclaw-config \
+  --repo-root "$(pwd)" \
+  --profile memory-pro-local \
+  --overlay platform/configs/openclaw/20-acp-workers.json5
+```
+
+Keep `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` as the
 Markdown-canonical migration source while you validate parity.
 
 ## 11. Add channels carefully

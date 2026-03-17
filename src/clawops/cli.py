@@ -16,6 +16,7 @@ from clawops import (
     json_merge,
     memory_v2,
     op_journal,
+    openclaw_config,
     platform_verify,
     policy_engine,
     skill_scanner,
@@ -56,6 +57,11 @@ def _dispatch_wrapper(argv: list[str] | None) -> int:
 
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("merge-json", json_merge.main, "Merge JSON config overlays."),
+    CommandSpec(
+        "render-openclaw-config",
+        openclaw_config.main,
+        "Render OpenClaw config profiles and placeholder-backed overlays.",
+    ),
     CommandSpec("op-journal", op_journal.main, "Manage the SQLite operation journal."),
     CommandSpec("policy", policy_engine.main, "Evaluate policy payloads against YAML rules."),
     CommandSpec("context", context_service.main, "Index, query, or pack repository context."),

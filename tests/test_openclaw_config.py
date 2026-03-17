@@ -1,11 +1,15 @@
-"""Tests for rendered OpenClaw memory config overlays."""
+"""Tests for rendered OpenClaw config overlays and profiles."""
 
 from __future__ import annotations
 
 import json
 import pathlib
 
-from clawops.openclaw_config import render_openclaw_overlay, render_qmd_overlay
+from clawops.openclaw_config import (
+    render_openclaw_overlay,
+    render_openclaw_profile,
+    render_qmd_overlay,
+)
 
 
 def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) -> None:
@@ -101,6 +105,52 @@ def test_repo_qmd_template_includes_expected_default_corpus() -> None:
     } <= path_names
 
 
+def test_render_default_profile_merges_baseline_trust_zones_and_qmd() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_profile(
+        profile_name="default",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    assert rendered["memory"]["backend"] == "qmd"
+    assert rendered["gateway"]["bind"] == "loopback"
+    admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
+    assert admin["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+
+
+def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_profile(
+        profile_name="acp",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
+    runtime = coder["runtime"]["acp"]
+    assert runtime["cwd"] == f"{repo_root.as_posix()}/repo/upstream"
+    assert coder["workspace"] == f"{repo_root.as_posix()}/repo/upstream"
+
+
+def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_profile(
+        profile_name="memory-pro-local",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+        extra_overlays=(pathlib.Path("platform/configs/openclaw/20-acp-workers.json5"),),
+    )
+
+    plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
+    coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
+    assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
+    assert coder["workspace"] == f"{repo_root.as_posix()}/repo/upstream"
+
+
 def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_overlay(
@@ -133,6 +183,22 @@ def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders()
     defaults = rendered["agents"]["defaults"]
     assert defaults["userTimezone"] == "UTC"
     assert defaults["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+
+
+def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_overlay(
+        template_path=repo_root / "platform/configs/openclaw/exec-approvals.json",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    cwd_prefixes = rendered["rules"][0]["match"]["cwdPrefixes"]
+    assert cwd_prefixes == [
+        repo_root.as_posix(),
+        f"{repo_root.as_posix()}/repo/upstream",
+    ]
 
 
 def test_memory_lancedb_pro_local_overlay_renders_vendor_local_paths() -> None:
