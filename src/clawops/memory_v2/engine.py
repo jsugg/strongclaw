@@ -32,6 +32,18 @@ BANK_HEADERS = {
     "opinion": "# Opinions\n\n## Entries\n",
 }
 WRITABLE_PREFIXES = ("memory/", "bank/")
+MEMORY_PRO_CATEGORY_MAP = {
+    "fact": "fact",
+    "reflection": "other",
+    "opinion": "preference",
+    "entity": "entity",
+}
+MEMORY_PRO_IMPORTANCE_MAP = {
+    "fact": 0.8,
+    "reflection": 0.7,
+    "opinion": 0.65,
+    "entity": 0.75,
+}
 
 
 class MemoryV2Engine:
@@ -261,6 +273,73 @@ class MemoryV2Engine:
             "text": "\n".join(raw_lines[start_index : start_index + line_count]),
         }
 
+    def export_memory_pro_import(
+        self,
+        *,
+        scope: str | None = None,
+        include_daily: bool = False,
+        auto_index: bool = True,
+    ) -> dict[str, Any]:
+        """Export durable memory-v2 entries as `memory-lancedb-pro` import JSON.
+
+        The vendored `memory-lancedb-pro` CLI imports one target scope at a time,
+        so this export stays scope-specific and preserves the original source
+        coordinates in metadata for auditability.
+        """
+        resolved_scope = validate_scope(scope or self.config.governance.default_scope)
+        if auto_index and self.is_dirty():
+            self.reindex()
+        memories: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            for row in self._memory_pro_export_rows(conn, scope=resolved_scope):
+                rel_path = str(row["rel_path"])
+                if not self._allows_memory_pro_export_path(
+                    rel_path=rel_path, include_daily=include_daily
+                ):
+                    continue
+                item_type = str(row["item_type"])
+                text = str(row["text"]).strip()
+                if not text:
+                    continue
+                start_line = int(row["start_line"])
+                end_line = int(row["end_line"])
+                confidence = None if row["confidence"] is None else float(row["confidence"])
+                entities = self._load_entities_json(row["entities_json"])
+                source_fingerprint = (
+                    f"{item_type}:{resolved_scope}:{rel_path}:{start_line}:{end_line}:{text}"
+                )
+                metadata: dict[str, Any] = {
+                    "source": "strongclaw-memory-v2",
+                    "memoryV2": {
+                        "itemType": item_type,
+                        "scope": resolved_scope,
+                        "sourcePath": rel_path,
+                        "startLine": start_line,
+                        "endLine": end_line,
+                        "entities": entities,
+                    },
+                }
+                if confidence is not None:
+                    metadata["memoryV2"]["confidence"] = confidence
+                memories.append(
+                    {
+                        "id": f"strongclaw-memory-v2:{self._sha256(source_fingerprint)}",
+                        "text": text,
+                        "category": MEMORY_PRO_CATEGORY_MAP[item_type],
+                        "importance": self._memory_pro_importance(
+                            item_type=item_type, confidence=confidence
+                        ),
+                        "timestamp": self._memory_pro_timestamp_ms(str(row["modified_at"])),
+                        "metadata": metadata,
+                    }
+                )
+        return {
+            "provider": "strongclaw-memory-v2",
+            "scope": resolved_scope,
+            "includeDaily": include_daily,
+            "memories": memories,
+        }
+
     def store(
         self,
         *,
@@ -411,6 +490,76 @@ class MemoryV2Engine:
             "passed": passed,
             "total": len(results),
         }
+
+    def _memory_pro_export_rows(
+        self, conn: sqlite3.Connection, *, scope: str
+    ) -> Iterator[sqlite3.Row]:
+        """Yield typed durable-memory rows for a single scope."""
+        specs = (
+            ("fact", "facts"),
+            ("reflection", "reflections"),
+            ("opinion", "opinions"),
+            ("entity", "entities"),
+        )
+        for item_type, table_name in specs:
+            yield from conn.execute(
+                f"""
+                SELECT
+                    ? AS item_type,
+                    search_items.rel_path,
+                    search_items.start_line,
+                    search_items.end_line,
+                    search_items.modified_at,
+                    search_items.confidence,
+                    search_items.entities_json,
+                    {table_name}.text
+                FROM {table_name}
+                JOIN search_items ON search_items.id = {table_name}.item_id
+                WHERE search_items.scope = ?
+                ORDER BY search_items.rel_path, search_items.start_line
+                """,
+                (item_type, scope),
+            )
+
+    def _allows_memory_pro_export_path(self, *, rel_path: str, include_daily: bool) -> bool:
+        """Return whether *rel_path* is safe to export into the new backend."""
+        if rel_path in self.config.memory_file_names:
+            return True
+        bank_prefix = f"{self.config.bank_dir}/"
+        if rel_path.startswith(bank_prefix):
+            return True
+        if include_daily:
+            daily_prefix = f"{self.config.daily_dir}/"
+            return rel_path.startswith(daily_prefix)
+        return False
+
+    def _load_entities_json(self, raw_value: Any) -> list[str]:
+        """Decode a JSON list of entity names."""
+        if not isinstance(raw_value, str):
+            return []
+        try:
+            payload = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [str(item) for item in payload if isinstance(item, str)]
+
+    def _memory_pro_importance(self, *, item_type: str, confidence: float | None) -> float:
+        """Return a conservative import importance for the new memory backend."""
+        if item_type == "opinion" and confidence is not None:
+            return max(0.0, min(1.0, confidence))
+        return MEMORY_PRO_IMPORTANCE_MAP[item_type]
+
+    def _memory_pro_timestamp_ms(self, value: str) -> int:
+        """Convert a stored ISO timestamp into Unix milliseconds."""
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            parsed = datetime.now(tz=UTC)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return int(parsed.timestamp() * 1000)
 
     def _iter_documents(self) -> Iterator[Any]:
         yield from self._iter_memory_documents()
