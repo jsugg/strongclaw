@@ -33,13 +33,22 @@ That script:
 ./scripts/bootstrap/render_openclaw_config.sh
 ```
 
-This merges:
+This renders the `default` profile, which merges:
 
 - `platform/configs/openclaw/00-baseline.json5`
 - `platform/configs/openclaw/10-trust-zones.json5`
 - a rendered form of `platform/configs/openclaw/40-qmd-context.json5`
 
 and writes the result to `~/.openclaw/openclaw.json`.
+
+For placeholder-backed variants, rerender by profile instead of merging raw
+JSON5 overlays:
+
+```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile acp
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+```
 
 The rendered config enables QMD-backed memory retrieval by default and indexes:
 

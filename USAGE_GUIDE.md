@@ -46,7 +46,36 @@ ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 Keep browser-lab ports local to the hardened session. Do not tunnel `9222` or
 `3128` to an operator workstation.
 
-## Merge overlays safely
+## Render placeholder-backed profiles
+
+```bash
+clawops render-openclaw-config \
+  --repo-root "$(pwd)" \
+  --profile acp
+```
+
+If you need to combine a named profile with another placeholder-bearing
+overlay, append it explicitly so each fragment is rendered before merge:
+
+```bash
+clawops render-openclaw-config \
+  --repo-root "$(pwd)" \
+  --profile memory-pro-local \
+  --overlay platform/configs/openclaw/20-acp-workers.json5
+```
+
+Optional: render the companion exec approvals file with repo-local prefixes:
+
+```bash
+clawops render-openclaw-config \
+  --repo-root "$(pwd)" \
+  --profile default \
+  --exec-approvals-output ~/.openclaw/exec-approvals.json
+```
+
+## Merge static overlays safely
+
+Static overlays without placeholders can still be merged directly:
 
 ```bash
 clawops merge-json \

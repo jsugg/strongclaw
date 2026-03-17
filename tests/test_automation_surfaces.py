@@ -136,6 +136,16 @@ def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> No
     assert "|| true" not in macos
 
 
+def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    setup_guide = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage_guide = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+
+    assert "./scripts/bootstrap/render_openclaw_config.sh --profile acp" in setup_guide
+    assert "clawops merge-json \\\n  --base ~/.openclaw/openclaw.json" not in setup_guide
+    assert "clawops render-openclaw-config" in usage_guide
+
+
 def test_compose_images_are_pinned_to_content_digests() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
 
