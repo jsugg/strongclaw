@@ -1,6 +1,8 @@
-# OpenClaw Platform Bootstrap
+# Strongclaw / ClawOps
 
-This repository is a **platform bootstrap** for a hardened, production-oriented OpenClaw deployment. It is intentionally broader than a simple install pack. It includes:
+This repository is the **Strongclaw** bootstrap for a hardened,
+production-oriented OpenClaw deployment and ships the **ClawOps** companion
+tooling. It is intentionally broader than a simple install pack. It includes:
 
 - a hardened OpenClaw control plane baseline
 - a separate execution plane for ACP/acpx coding workers
@@ -61,8 +63,8 @@ This pack assumes:
 ## Fastest path
 
 ```bash
-git clone <this repo> openclaw-platform-bootstrap
-cd openclaw-platform-bootstrap
+git clone <this repo> strongclaw
+cd strongclaw
 
 make dev
 make test
@@ -75,6 +77,15 @@ make test
 ```
 
 Then continue with ACP workers, repo lexical context indexing, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
+
+For placeholder-backed variants, rerender through the profile-aware entrypoint
+instead of merging raw overlays:
+
+```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile acp
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+```
 
 The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
 on the operator path: sidecars can be probed directly, while the baseline gate

@@ -35,8 +35,8 @@ The SSH loopback method is documented in:
 ```bash
 mkdir -p ~/Projects
 cd ~/Projects
-git clone <this repo> openclaw-platform-bootstrap
-cd openclaw-platform-bootstrap
+git clone <this repo> strongclaw
+cd strongclaw
 ```
 
 ## 3. Install companion tooling
@@ -161,7 +161,7 @@ Index a repo:
 ```bash
 clawops context index \
   --config platform/configs/context/context-service.yaml \
-  --repo ~/Projects/openclaw-platform-bootstrap
+  --repo ~/Projects/strongclaw
 ```
 
 Query it:
@@ -169,7 +169,7 @@ Query it:
 ```bash
 clawops context query \
   --config platform/configs/context/context-service.yaml \
-  --repo ~/Projects/openclaw-platform-bootstrap \
+  --repo ~/Projects/strongclaw \
   --query "operation journal idempotency"
 ```
 
