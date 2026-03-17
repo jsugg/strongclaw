@@ -15,11 +15,13 @@ from clawops import (
     context_service,
     harness,
     json_merge,
+    memory_tools,
     memory_v2,
     op_journal,
     openclaw_config,
     platform_verify,
     policy_engine,
+    repo_tools,
     skill_scanner,
     workflow_runner,
 )
@@ -67,7 +69,23 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("op-journal", op_journal.main, "Manage the SQLite operation journal."),
     CommandSpec("policy", policy_engine.main, "Evaluate policy payloads against YAML rules."),
     CommandSpec("context", context_service.main, "Index, query, or pack repository context."),
-    CommandSpec("skill-scan", skill_scanner.main, "Scan skill bundles for suspicious patterns."),
+    CommandSpec(
+        "memory",
+        memory_tools.main,
+        "Migrate and verify the memory-v2 to memory-pro transition.",
+    ),
+    CommandSpec("repo", repo_tools.repo_main, "Validate the repo/upstream workspace contract."),
+    CommandSpec(
+        "worktree",
+        repo_tools.worktree_main,
+        "List, create, or prune managed git worktrees.",
+    ),
+    CommandSpec("skills", skill_scanner.main, "Scan and promote staged skill bundles."),
+    CommandSpec(
+        "skill-scan",
+        skill_scanner.main,
+        "Legacy alias for skills scan and quarantine workflows.",
+    ),
     CommandSpec("harness", harness.main, "Run YAML-driven regression suites."),
     CommandSpec("charts", charts.main, "Render charts from harness results."),
     CommandSpec("allowlists", allowlist_sync.main, "Normalize and render channel allowlists."),
@@ -76,7 +94,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "verify-platform", platform_verify.main, "Verify sidecars, observability, and channels."
     ),
-    CommandSpec("memory-v2", memory_v2.main, "Run the opt-in Markdown-canonical memory v2 engine."),
+    CommandSpec("memory-v2", memory_v2.main, "Run the legacy Markdown-canonical memory v2 engine."),
     CommandSpec("wrapper", _dispatch_wrapper, "Run policy-gated external wrappers."),
 )
 
