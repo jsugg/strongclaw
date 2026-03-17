@@ -10,6 +10,7 @@ from typing import Any, Mapping
 import requests
 
 from clawops import __version__
+from clawops.common import canonical_json
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import TERMINAL_DENY, TERMINAL_REQUIRE_APPROVAL, Decision, PolicyEngine
 
@@ -200,6 +201,11 @@ def decision_from_operation(op: Operation) -> Decision | None:
             decision = payload.get("decision")
             reasons = payload.get("reasons")
             matched_rules = payload.get("matched_rules")
+            review_mode = payload.get("review_mode")
+            review_target = payload.get("review_target")
+            review_reason = payload.get("review_reason")
+            review_policy_id = payload.get("review_policy_id")
+            delegate_to = payload.get("delegate_to")
             if (
                 isinstance(decision, str)
                 and isinstance(reasons, list)
@@ -208,7 +214,16 @@ def decision_from_operation(op: Operation) -> Decision | None:
                 and all(isinstance(item, str) for item in matched_rules)
             ):
                 return Decision(
-                    decision=decision, reasons=list(reasons), matched_rules=list(matched_rules)
+                    decision=decision,
+                    reasons=list(reasons),
+                    matched_rules=list(matched_rules),
+                    review_mode=review_mode if isinstance(review_mode, str) else None,
+                    review_target=review_target if isinstance(review_target, str) else None,
+                    review_reason=review_reason if isinstance(review_reason, str) else None,
+                    review_policy_id=(
+                        review_policy_id if isinstance(review_policy_id, str) else None
+                    ),
+                    delegate_to=delegate_to if isinstance(delegate_to, str) else None,
                 )
     if op.policy_decision is None:
         return None
@@ -235,6 +250,7 @@ def ensure_execution_contract(
         )
 
     contract = _build_execution_contract(op, decision)
+    review_payload = decision.review_payload()
     updated = ctx.journal.transition(
         op.op_id,
         op.status,
@@ -244,6 +260,14 @@ def ensure_execution_contract(
         execution_contract_json=_execution_contract_to_json(contract),
         approval_required=bool(op.approval_required)
         or decision.decision == TERMINAL_REQUIRE_APPROVAL,
+        review_mode=decision.review_mode,
+        review_target=decision.review_target,
+        review_status=(
+            "pending"
+            if op.status == "pending_approval" and decision.decision == TERMINAL_REQUIRE_APPROVAL
+            else op.review_status
+        ),
+        review_payload_json=None if not review_payload else canonical_json(review_payload),
     )
     return updated, decision
 
@@ -364,6 +388,7 @@ def prepare_operation(
             ),
         )
     if decision.decision == TERMINAL_REQUIRE_APPROVAL:
+        review_payload = decision.review_payload()
         contract = _build_execution_contract(op, decision)
         updated = ctx.journal.transition(
             op.op_id,
@@ -373,6 +398,10 @@ def prepare_operation(
             execution_contract_version=contract.version,
             execution_contract_json=_execution_contract_to_json(contract),
             approval_required=True,
+            review_mode=decision.review_mode,
+            review_target=decision.review_target,
+            review_status="pending",
+            review_payload_json=(None if not review_payload else canonical_json(review_payload)),
         )
         return PreparedOperation(
             updated,
