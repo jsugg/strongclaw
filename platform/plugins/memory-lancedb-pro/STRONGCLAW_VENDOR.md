@@ -15,10 +15,12 @@ Strongclaw does not enable this plugin by default. The shipped local overlays ke
 
 This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.3.13`.
 
-- Strongclaw verifies the vendored bundle in Ubuntu CI because LanceDB `0.26.2`
-  publishes Apple binaries for `darwin-arm64` but not `darwin-x64`. Intel macOS
-  hosts should treat `.github/workflows/plugin-verification.yml` as the
-  authoritative verification lane.
+- Strongclaw auto-detects `darwin/x86_64` and installs the newest stable
+  compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB
+  `0.26.2` publishes Apple binaries for `darwin-arm64` but not `darwin-x64`.
+- The shared verification path still runs in GitHub Actions and through
+  `scripts/ci/run_memory_plugin_verification.sh`, but Intel macOS hosts now use
+  the same compatibility matrix locally instead of hard-failing.
 
 ## Review notes
 

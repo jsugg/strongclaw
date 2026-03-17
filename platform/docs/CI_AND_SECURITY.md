@@ -14,15 +14,17 @@ The repository includes:
 ## Vendored plugin verification
 
 The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on
-Ubuntu in `.github/workflows/plugin-verification.yml`.
+GitHub Actions in `.github/workflows/plugin-verification.yml`.
 
 - The shared entrypoint is `scripts/ci/run_memory_plugin_verification.sh`.
-- The script runs `npm ci`, `npm test`, installs the pinned
+- That flow reuses `scripts/bootstrap/bootstrap_memory_plugin.sh`, which
+  auto-detects the host and installs the default LanceDB dependency on
+  supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
+- The script then installs the pinned
   `openclaw@2026.3.13` CLI into a temporary tool directory, and then runs
   `npm run test:openclaw-host`.
-- Linux CI is intentional: LanceDB `0.26.2` does not publish a
-  `darwin-x64` native package, so Intel macOS hosts should use the GitHub
-  Actions lane instead of expecting the vendored suite to pass locally.
+- The host-functional step clears ambient AWS credential env vars first so
+  local Bedrock model discovery noise does not contaminate test assertions.
 
 ## Policy for new code
 

@@ -14,6 +14,7 @@ brew install bun
 python3 -m pip install -e "$ROOT"
 npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
 "$ROOT/scripts/bootstrap/bootstrap_qmd.sh"
+"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"
 
 mkdir -p "$HOME/.openclaw/clawops" "$HOME/.openclaw/logs" "$ROOT/platform/compose/state"
 command -v openclaw >/dev/null 2>&1 || { echo "openclaw install failed"; exit 1; }

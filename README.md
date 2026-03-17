@@ -67,7 +67,7 @@ cd openclaw-platform-bootstrap
 python3 -m pip install -e .
 make test
 
-./scripts/bootstrap/bootstrap_macos.sh
+./scripts/bootstrap/bootstrap_host.sh
 ./scripts/bootstrap/render_openclaw_config.sh
 ./scripts/bootstrap/bootstrap_sidecars.sh
 ./scripts/bootstrap/verify_sidecars.sh

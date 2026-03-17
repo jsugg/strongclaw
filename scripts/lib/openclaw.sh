@@ -10,17 +10,7 @@ openclaw_is_available() {
 }
 
 _openclaw_install_hint() {
-  case "$(uname -s)" in
-    Darwin)
-      printf 'Run %s/scripts/bootstrap/bootstrap_macos.sh to attempt installation.' "$OPENCLAW_PROJECT_ROOT"
-      ;;
-    Linux)
-      printf 'Run %s/scripts/bootstrap/bootstrap_linux.sh to attempt installation.' "$OPENCLAW_PROJECT_ROOT"
-      ;;
-    *)
-      printf 'Run the appropriate bootstrap script under %s/scripts/bootstrap/.' "$OPENCLAW_PROJECT_ROOT"
-      ;;
-  esac
+  printf 'Run %s/scripts/bootstrap/bootstrap_host.sh to attempt installation.' "$OPENCLAW_PROJECT_ROOT"
 }
 
 warn_if_openclaw_missing() {
