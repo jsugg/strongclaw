@@ -15,6 +15,11 @@ Strongclaw does not enable this plugin by default. The shipped local overlays ke
 
 This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.3.13`.
 
+- Strongclaw verifies the vendored bundle in Ubuntu CI because LanceDB `0.26.2`
+  publishes Apple binaries for `darwin-arm64` but not `darwin-x64`. Intel macOS
+  hosts should treat `.github/workflows/plugin-verification.yml` as the
+  authoritative verification lane.
+
 ## Review notes
 
 - The plugin is loaded from an absolute `plugins.load.paths` entry, which matches current OpenClaw plugin-loading guidance.
