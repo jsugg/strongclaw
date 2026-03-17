@@ -13,7 +13,7 @@ This directory contains the external coding worker plane.
 ## Install
 
 ```bash
-npm install -g acpx@latest
+npm install -g acpx@0.3.0
 acpx config init
 cp platform/workers/acpx/global-config.example.json ~/.acpx/config.json
 cp platform/workers/acpx/project-config.example.json ~/Projects/openclaw-platform-bootstrap/repo/upstream/.acpxrc.json
