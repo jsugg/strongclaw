@@ -11,9 +11,13 @@ def test_root_help_is_available(capsys: object) -> None:
     assert exit_code == 0
     assert "available commands:" in captured.out
     assert "approvals" in captured.out
+    assert "memory" in captured.out
     assert "merge-json" in captured.out
+    assert "repo" in captured.out
     assert "render-openclaw-config" in captured.out
+    assert "skills" in captured.out
     assert "memory-v2" in captured.out
+    assert "worktree" in captured.out
 
 
 def test_root_without_args_prints_usage(capsys: object) -> None:

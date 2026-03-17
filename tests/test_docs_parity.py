@@ -70,9 +70,10 @@ def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:
     repo_root = _repo_root()
     memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
 
-    assert "export-memory-pro" in memory_doc
+    assert "clawops memory migrate-v2-to-pro" in memory_doc
+    assert "clawops memory verify-pro-parity" in memory_doc
     assert "openclaw memory-pro import" in memory_doc
-    assert "--include-daily" in memory_doc
+    assert "--mode openclaw" in memory_doc
 
 
 def test_operator_docs_surface_approvals_cli() -> None:
@@ -86,3 +87,21 @@ def test_operator_docs_surface_approvals_cli() -> None:
     assert "clawops approvals delegate" in usage
     assert "clawops approvals approve" in wrappers
     assert "clawops approvals delegate" in wrappers
+
+
+def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
+    repo_root = _repo_root()
+    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    repo_doc = (repo_root / "repo/README.md").read_text(encoding="utf-8")
+    ci_doc = (repo_root / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
+
+    assert "clawops memory migrate-v2-to-pro" in usage
+    assert "clawops memory verify-pro-parity" in usage
+    assert "clawops repo --repo-root" in usage
+    assert "clawops worktree --repo-root" in usage
+    assert "clawops skills scan" in usage
+    assert "clawops skills promote" in usage
+    assert "clawops repo --repo-root" in repo_doc
+    assert "clawops worktree --repo-root" in repo_doc
+    assert "dependency-submission.yml" in ci_doc
+    assert "release.yml" in ci_doc
