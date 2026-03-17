@@ -11,6 +11,12 @@ AUTOMATION_FILES = (
     pathlib.Path("scripts/bootstrap/run_harness_smoke.sh"),
 )
 
+COMPOSE_FILES = (
+    pathlib.Path("platform/compose/docker-compose.aux-stack.yaml"),
+    pathlib.Path("platform/compose/docker-compose.browser-lab.yaml"),
+    pathlib.Path("platform/compose/docker-compose.langfuse.optional.yaml"),
+)
+
 
 def test_automation_surfaces_do_not_use_obsolete_harness_subcommand() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -119,3 +125,23 @@ def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> No
         assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in script
         assert "acpx@latest" not in script
     assert "|| true" not in macos
+
+
+def test_compose_images_are_pinned_to_content_digests() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+
+    for compose_path in COMPOSE_FILES:
+        text = (repo_root / compose_path).read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("image: "):
+                continue
+            assert "@sha256:" in stripped, f"compose image must pin a digest in {compose_path}"
+
+
+def test_acpx_worker_readme_matches_reviewed_install_version() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    readme = (repo_root / "platform/workers/acpx/README.md").read_text(encoding="utf-8")
+
+    assert "npm install -g acpx@0.3.0" in readme
+    assert "acpx@latest" not in readme

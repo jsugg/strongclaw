@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
@@ -21,7 +19,7 @@ services:
     restart: unless-stopped
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-stable
+    image: ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,7 +49,7 @@ services:
     restart: unless-stopped
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.120.0
+    image: otel/opentelemetry-collector-contrib:0.120.0@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     environment:
       LANGFUSE_OTEL_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT}

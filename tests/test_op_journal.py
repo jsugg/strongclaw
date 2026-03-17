@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pathlib
+import sqlite3
+
+from pytest import MonkeyPatch
 
 from clawops.op_journal import OperationJournal
 
@@ -167,3 +170,24 @@ def test_transition_persists_execution_contract_metadata(tmp_path: pathlib.Path)
 
     assert updated.execution_contract_version == 1
     assert updated.execution_contract_json is not None
+
+
+def test_connect_retries_transient_open_error(
+    tmp_path: pathlib.Path, monkeypatch: MonkeyPatch
+) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    attempts = {"count": 0}
+    original = journal._ensure_schema
+
+    def flaky_ensure_schema(conn: sqlite3.Connection) -> None:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise sqlite3.OperationalError("unable to open database file")
+        original(conn)
+
+    monkeypatch.setattr(journal, "_ensure_schema", flaky_ensure_schema)
+
+    journal.init()
+
+    assert attempts["count"] == 2
