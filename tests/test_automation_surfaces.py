@@ -146,6 +146,20 @@ def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() 
     assert "clawops render-openclaw-config" in usage_guide
 
 
+def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
+    setup_guide = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage_guide = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+
+    assert "# Strongclaw / ClawOps" in readme
+    assert "openclaw-platform-bootstrap" not in readme
+    assert "openclaw-platform-bootstrap" not in setup_guide
+    assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
+    assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
+
+
 def test_compose_images_are_pinned_to_content_digests() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
 

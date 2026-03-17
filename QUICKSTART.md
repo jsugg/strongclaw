@@ -83,7 +83,7 @@ It runs:
 - `openclaw security audit --deep`
 - `openclaw secrets audit --check`
 - `openclaw memory status --deep`
-- `openclaw memory search --query "OpenClaw Platform Bootstrap" --max-results 1`
+- `openclaw memory search --query "ClawOps" --max-results 1`
 - `./scripts/bootstrap/verify_sidecars.sh --skip-runtime`
 - `./scripts/bootstrap/verify_observability.sh --skip-runtime`
 - `./scripts/bootstrap/verify_channels.sh`
@@ -96,10 +96,10 @@ Add these only in order:
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
 3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
-4. Opt-in local LanceDB durable memory after the default QMD flow is stable by merging
-   `platform/configs/openclaw/75-clawops-memory-pro.local.json5`
-5. Optional local smart extraction profile with Ollama-backed LLM extraction:
-   `platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5`
+4. Opt-in local LanceDB durable memory after the default QMD flow is stable by rerendering
+   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local`
+5. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
+   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart`
 6. Keep `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` only as a
    migration-source/reference overlay while you validate parity
 7. Telegram: `./scripts/bootstrap/enable_telegram.sh`
