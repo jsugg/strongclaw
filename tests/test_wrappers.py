@@ -336,6 +336,9 @@ def test_wrapper_replays_pending_approval_without_side_effect(
     assert persisted.approval_required == 1
     assert persisted.attempt == 0
     assert persisted.execution_contract_version == 1
+    assert persisted.review_mode == "manual"
+    assert persisted.review_status == "pending"
+    assert persisted.review_payload_json is not None
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])

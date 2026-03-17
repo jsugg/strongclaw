@@ -53,6 +53,9 @@ def test_approve_sets_metadata_and_validates_transition(tmp_path: pathlib.Path) 
     assert approved.status == "approved"
     assert approved.approved_by == "operator"
     assert approved.approved_at_ms is not None
+    assert approved.review_status == "approved"
+    assert approved.reviewed_by == "operator"
+    assert approved.review_note == "looks good"
 
 
 def test_approve_allows_manual_proposed_operations_without_approval_gate(
@@ -146,6 +149,86 @@ def test_transition_persists_result_metadata(tmp_path: pathlib.Path) -> None:
     assert completed.result_ok == 1
     assert completed.result_status_code == 200
     assert completed.result_body_excerpt == "ok"
+
+
+def test_queue_delegate_and_ingest_review_preserve_review_metadata(
+    tmp_path: pathlib.Path,
+) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    journal.init()
+    op = journal.begin(
+        scope="github:repo",
+        kind="github_pull_merge",
+        trust_zone="reviewer",
+        normalized_target="github://example/repo/pulls/123/merge",
+        inputs={"merge_method": "squash"},
+    )
+    pending = journal.transition(
+        op.op_id,
+        "pending_approval",
+        policy_decision="require_approval",
+        approval_required=True,
+        review_mode="delegate_recommend",
+        review_target="reviewer-acp-claude",
+        review_status="pending",
+        review_payload_json='{"delegate_to":"reviewer-acp-claude"}',
+    )
+
+    queued = journal.queue()
+    assert [item.op_id for item in queued] == [pending.op_id]
+
+    delegated = journal.delegate(
+        pending.op_id,
+        reviewed_by="operator",
+        delegate_to="reviewer-acp-claude",
+        note="needs ACP review",
+    )
+    assert delegated.status == "pending_approval"
+    assert delegated.review_status == "delegated"
+    assert delegated.review_target == "reviewer-acp-claude"
+    assert delegated.reviewed_by == "operator"
+
+    approved = journal.ingest_review(
+        pending.op_id,
+        reviewed_by="reviewer-acp-claude",
+        decision="allow",
+        note="approved by ACP reviewer",
+    )
+    assert approved.status == "approved"
+    assert approved.approved_by == "reviewer-acp-claude"
+    assert approved.review_status == "approved"
+    assert approved.review_payload_json is not None
+
+
+def test_reject_moves_pending_operation_to_terminal_review_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    journal.init()
+    op = journal.begin(
+        scope="github:repo",
+        kind="github_comment",
+        trust_zone="automation",
+        normalized_target="github://example/repo/issues/123",
+        inputs={"body": "hello"},
+    )
+    pending = journal.transition(
+        op.op_id,
+        "pending_approval",
+        policy_decision="require_approval",
+        approval_required=True,
+        review_mode="manual",
+        review_status="pending",
+    )
+
+    rejected = journal.reject(pending.op_id, reviewed_by="operator", note="denied")
+
+    assert rejected.status == "rejected"
+    assert rejected.review_status == "rejected"
+    assert rejected.reviewed_by == "operator"
+    assert rejected.last_error == "denied"
 
 
 def test_transition_persists_execution_contract_metadata(tmp_path: pathlib.Path) -> None:

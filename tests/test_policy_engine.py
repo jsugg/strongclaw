@@ -62,3 +62,48 @@ def test_policy_requires_approval_for_external_write(tmp_path: pathlib.Path) -> 
         }
     )
     assert decision.decision == "require_approval"
+    assert decision.review_mode == "manual"
+    assert decision.review_policy_id == "approval.actions.github.comment.create"
+
+
+def test_policy_review_action_overrides_defaults(tmp_path: pathlib.Path) -> None:
+    policy_path = tmp_path / "policy.yaml"
+    write_yaml(
+        policy_path,
+        {
+            "defaults": {"decision": "allow"},
+            "zones": {
+                "reviewer": {
+                    "allow_actions": ["github.pull_request.merge"],
+                    "allow_categories": ["irreversible"],
+                }
+            },
+            "approval": {"require_for_actions": ["github.pull_request.merge"]},
+            "review": {
+                "defaults": {"mode": "manual"},
+                "actions": {
+                    "github.pull_request.merge": {
+                        "mode": "delegate_recommend",
+                        "delegate_to": "reviewer-acp-claude",
+                        "reason": "route merges through the ACP reviewer lane",
+                    }
+                },
+            },
+        },
+    )
+    engine = PolicyEngine.from_file(policy_path)
+    decision = engine.evaluate(
+        {
+            "trust_zone": "reviewer",
+            "action": "github.pull_request.merge",
+            "category": "irreversible",
+            "target_kind": "github_repo",
+            "target": "example/repo",
+        }
+    )
+
+    assert decision.decision == "require_approval"
+    assert decision.review_mode == "delegate_recommend"
+    assert decision.review_target == "reviewer-acp-claude"
+    assert decision.delegate_to == "reviewer-acp-claude"
+    assert decision.review_reason == "route merges through the ACP reviewer lane"

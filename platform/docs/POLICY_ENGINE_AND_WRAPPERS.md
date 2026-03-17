@@ -21,8 +21,8 @@ Built-in tool policy is necessary but not sufficient for platform-grade side eff
 1. evaluate policy
 2. create or reuse op-journal entry
 3. stamp a wrapper-owned execution contract onto executable rows
-4. if approval is required, transition to `pending_approval` and stop
-5. record explicit approval in the journal
+4. if approval is required, transition to `pending_approval` and stamp review metadata
+5. resolve the queue through `clawops approvals` (`approve`, `reject`, `delegate`, `ingest-review`)
 6. execute the side effect from the `approved` state only
 7. record terminal state
 
@@ -35,6 +35,7 @@ Built-in tool policy is necessary but not sufficient for platform-grade side eff
 - `succeeded`
 - `failed`
 - `cancelled`
+- `rejected`
 
 ## Replay semantics
 
@@ -96,11 +97,22 @@ clawops wrapper webhook \
 Approve the operation:
 
 ```bash
-clawops op-journal approve \
+clawops approvals approve \
   --db ~/.openclaw/clawops/op_journal.sqlite \
   --op-id <op-id> \
   --approved-by operator \
   --note "approved after review"
+```
+
+Delegate the review to the ACP reviewer:
+
+```bash
+clawops approvals delegate \
+  --db ~/.openclaw/clawops/op_journal.sqlite \
+  --op-id <op-id> \
+  --reviewed-by operator \
+  --to reviewer-acp-claude \
+  --note "delegate merge recommendation"
 ```
 
 Execute the approved operation:

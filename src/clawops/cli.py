@@ -10,6 +10,7 @@ from collections.abc import Callable
 from clawops import (
     acp_runner,
     allowlist_sync,
+    approvals,
     charts,
     context_service,
     harness,
@@ -62,6 +63,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         openclaw_config.main,
         "Render OpenClaw config profiles and placeholder-backed overlays.",
     ),
+    CommandSpec("approvals", approvals.main, "Manage the review and approval queue."),
     CommandSpec("op-journal", op_journal.main, "Manage the SQLite operation journal."),
     CommandSpec("policy", policy_engine.main, "Evaluate policy payloads against YAML rules."),
     CommandSpec("context", context_service.main, "Index, query, or pack repository context."),
