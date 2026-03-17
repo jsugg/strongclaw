@@ -18,14 +18,22 @@ make test
 That script:
 
 - auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
+- runs the matching host preflight before attempting package installs
 - creates the repo-local directories under `platform/`
 - installs or verifies Homebrew prerequisites
-- attempts a best-effort install of `openclaw`, `acpx`, and `varlock`
+- fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the default QMD semantic memory backend
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
 - renders launchd templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
+
+You can rerun the host doctor directly after any local change that might affect
+the rendered config or CLI toolchain:
+
+```bash
+./scripts/bootstrap/doctor_host.sh
+```
 
 ## 3. Render and install the OpenClaw config
 

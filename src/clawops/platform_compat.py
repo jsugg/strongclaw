@@ -61,6 +61,15 @@ def resolve_bootstrap_script(host: HostPlatform) -> str:
     raise ValueError(f"unsupported host OS for bootstrap: {host.os_name}")
 
 
+def resolve_preflight_script(host: HostPlatform) -> str:
+    """Select the preflight entrypoint for the detected host."""
+    if host.os_name == "darwin":
+        return "preflight_macos.sh"
+    if host.os_name == "linux":
+        return "preflight_linux.sh"
+    raise ValueError(f"unsupported host OS for preflight: {host.os_name}")
+
+
 def resolve_memory_plugin_lancedb_version(host: HostPlatform) -> str:
     """Return the compatible LanceDB version for the vendored memory plugin."""
     if host.os_name == "darwin" and host.architecture == "x86_64":
@@ -74,6 +83,7 @@ def build_compatibility_record(host: HostPlatform) -> dict[str, object]:
     return {
         "host_os": host.os_name,
         "host_arch": host.architecture,
+        "preflight_script": resolve_preflight_script(host),
         "bootstrap_script": resolve_bootstrap_script(host),
         "openclaw_version": DEFAULT_OPENCLAW_VERSION,
         "acpx_version": DEFAULT_ACPX_VERSION,
@@ -94,6 +104,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=(
             "host_os",
             "host_arch",
+            "preflight_script",
             "bootstrap_script",
             "openclaw_version",
             "acpx_version",

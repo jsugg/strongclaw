@@ -119,6 +119,8 @@ def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
 def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     host = (repo_root / "scripts/bootstrap/bootstrap_host.sh").read_text(encoding="utf-8")
+    preflight = (repo_root / "scripts/bootstrap/preflight_host.sh").read_text(encoding="utf-8")
+    doctor = (repo_root / "scripts/bootstrap/doctor_host.sh").read_text(encoding="utf-8")
     memory_plugin = (repo_root / "scripts/bootstrap/bootstrap_memory_plugin.sh").read_text(
         encoding="utf-8"
     )
@@ -126,13 +128,21 @@ def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> No
     linux = (repo_root / "scripts/bootstrap/bootstrap_linux.sh").read_text(encoding="utf-8")
 
     assert "clawops.platform_compat --field bootstrap_script" in host
+    assert "clawops.platform_compat --field preflight_script" in preflight
+    assert 'OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"' in doctor
+    assert "openclaw --version" in doctor
+    assert "openclaw config validate" in doctor
+    assert "acpx --version" in doctor
     assert "memory_plugin_lancedb_version" in memory_plugin
     assert "@lancedb/lancedb@$RESOLVED_LANCEDB_VERSION" in memory_plugin
     for script in (macos, linux):
         assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in script
         assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in script
         assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in script
+        assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in script
         assert "acpx@latest" not in script
+    assert '"$ROOT/scripts/bootstrap/preflight_macos.sh"' in macos
+    assert '"$ROOT/scripts/bootstrap/preflight_linux.sh"' in linux
     assert "|| true" not in macos
 
 
@@ -156,6 +166,9 @@ def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
     assert "# Strongclaw / ClawOps" in readme
     assert "openclaw-platform-bootstrap" not in readme
     assert "openclaw-platform-bootstrap" not in setup_guide
+    assert "best-effort install" not in quickstart
+    assert "./scripts/bootstrap/doctor_host.sh" in quickstart
+    assert "./scripts/bootstrap/preflight_host.sh" in setup_guide
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
 

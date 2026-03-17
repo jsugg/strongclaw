@@ -24,6 +24,7 @@ launchctl kickstart -k gui/$(id -u)/ai.openclaw.sidecars
 Repository helper scripts that depend on `openclaw` now detect whether the CLI is installed. Tasks that require it fail fast with a clear message, while fallback-capable tasks warn and continue with their fallback path.
 
 ```bash
+./scripts/bootstrap/doctor_host.sh
 openclaw gateway status --json
 openclaw status --all
 openclaw doctor
