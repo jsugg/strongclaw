@@ -196,6 +196,60 @@ def test_memory_v2_benchmark_runner(tmp_path: pathlib.Path) -> None:
     assert payload["cases"][0]["passed"] is True
 
 
+def test_memory_v2_export_memory_pro_defaults_to_durable_surfaces(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    engine = MemoryV2Engine(load_config(config_path))
+    engine.reindex()
+    engine.reflect()
+    engine.store(
+        kind="reflection",
+        text="Prefer canary rollouts for gateway migrations.",
+        scope="project:strongclaw",
+    )
+
+    payload = engine.export_memory_pro_import(scope="project:strongclaw")
+
+    assert payload["provider"] == "strongclaw-memory-v2"
+    assert payload["scope"] == "project:strongclaw"
+    assert payload["includeDaily"] is False
+    assert payload["memories"]
+    assert {
+        "fact",
+        "preference",
+        "entity",
+        "other",
+    }.issubset({entry["category"] for entry in payload["memories"]})
+    assert all(
+        entry["metadata"]["memoryV2"]["sourcePath"] != "memory/2026-03-16.md"
+        for entry in payload["memories"]
+    )
+
+
+def test_memory_v2_export_memory_pro_can_include_daily_retained_notes(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    engine = MemoryV2Engine(load_config(config_path))
+
+    payload = engine.export_memory_pro_import(
+        scope="project:strongclaw",
+        include_daily=True,
+    )
+
+    daily_entries = [
+        entry
+        for entry in payload["memories"]
+        if entry["metadata"]["memoryV2"]["sourcePath"] == "memory/2026-03-16.md"
+    ]
+    assert daily_entries
+    assert any(entry["category"] == "preference" for entry in daily_entries)
+    assert all(entry["id"].startswith("strongclaw-memory-v2:") for entry in daily_entries)
+
+
 def test_memory_v2_get_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
     workspace = _build_workspace(tmp_path)
     config_path = workspace / "memory-v2.yaml"
@@ -263,3 +317,36 @@ def test_memory_v2_cli_benchmark_json(
 
     assert exit_code == 0
     assert payload["passed"] == 1
+
+
+def test_memory_v2_cli_export_memory_pro_writes_import_json(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    output_path = workspace / "memory-pro-import.json"
+
+    exit_code = main(
+        [
+            "--config",
+            str(config_path),
+            "export-memory-pro",
+            "--scope",
+            "project:strongclaw",
+            "--output",
+            str(output_path),
+            "--json",
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert summary["memories"] == len(payload["memories"])
+    assert summary["output"] == output_path.as_posix()
+    assert summary["nextCommand"] == (
+        f"openclaw memory-pro import {output_path.as_posix()} --scope project:strongclaw"
+    )
+    assert payload["scope"] == "project:strongclaw"
+    assert payload["memories"]
