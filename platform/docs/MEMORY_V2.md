@@ -112,10 +112,9 @@ expects.
 2. Export the exact scope you want to migrate:
 
    ```bash
-   PYTHONPATH=src python3 -m clawops memory-v2 export-memory-pro \
+   clawops memory migrate-v2-to-pro \
      --scope project:strongclaw \
-     --output /tmp/strongclaw-memory-pro-project.json \
-     --json
+     --output /tmp/strongclaw-memory-pro-project.json
    ```
 
 3. Import that file into the vendored plugin:
@@ -128,6 +127,21 @@ expects.
 By default the bridge exports only top-level memory files and `bank/` entries.
 If you intentionally want unreflected retained daily-log notes too, rerun the
 export with `--include-daily`.
+
+Before you switch durable writes or deprecate the old overlay, generate a
+parity report:
+
+```bash
+clawops memory verify-pro-parity \
+  --scope project:strongclaw \
+  --import-snapshot /tmp/strongclaw-memory-pro-project.json \
+  --mode import \
+  --query "deployment playbook"
+```
+
+If the `openclaw memory-pro search` path is already live on the host, rerun the
+same command with `--mode openclaw` or `--mode auto` to compare against the
+plugin-backed search surface directly.
 
 ## Rollout Notes
 

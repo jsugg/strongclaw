@@ -174,15 +174,75 @@ clawops context pack \
   --output /tmp/context-pack.md
 ```
 
+## Memory migration
+
+Treat QMD plus the context service as the repo-document retrieval lane. Use the
+vendored `memory-lancedb-pro` plugin only for opt-in durable memory, with
+`memory-v2` retained as the migration source until parity is proven.
+
+Export one scope at a time into the import JSON shape that `openclaw memory-pro
+import` expects:
+
+```bash
+clawops memory migrate-v2-to-pro \
+  --scope project:strongclaw \
+  --output ./.runs/memory/project-strongclaw-import.json
+```
+
+Generate a parity report before you cut over durable writes:
+
+```bash
+clawops memory verify-pro-parity \
+  --scope project:strongclaw \
+  --import-snapshot ./.runs/memory/project-strongclaw-import.json \
+  --mode import \
+  --query "deployment playbook"
+```
+
+If a live `openclaw memory-pro search` path is already available, switch
+`--mode` to `openclaw` or `auto` to compare against the actual plugin-backed
+search results.
+
+## Repo workspace contract
+
+Validate the repo layout that ACP workers and rendered overlays expect:
+
+```bash
+clawops repo --repo-root "$(pwd)" doctor
+```
+
+List, create, and prune managed git worktrees under `repo/worktrees`:
+
+```bash
+clawops worktree --repo-root "$(pwd)" list
+clawops worktree --repo-root "$(pwd)" new --branch feature/review-lane
+clawops worktree --repo-root "$(pwd)" prune
+```
+
 ## Skill intake
 
 Scan a new skill bundle before enabling it:
 
 ```bash
-clawops skill-scan \
+clawops skills scan \
   --source /tmp/downloaded-skill \
-  --quarantine platform/skills/quarantine \
-  --report platform/skills/quarantine/reports/scan.json
+  --quarantine-root platform/skills/quarantine \
+  --report platform/skills/manifests/downloaded-skill.json
+```
+
+Promote only after the bundle has been reviewed against its manifest and hash
+trail:
+
+```bash
+clawops skills promote \
+  --manifest platform/skills/manifests/downloaded-skill.json \
+  --skills-root platform/skills \
+  --stage reviewed
+
+clawops skills promote \
+  --manifest platform/skills/manifests/downloaded-skill.json \
+  --skills-root platform/skills \
+  --stage approved
 ```
 
 ## Harness
