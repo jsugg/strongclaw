@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import pathlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from clawops.common import load_json, write_json
+from clawops.json_merge import merge_documents
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
 HOME_PLACEHOLDER = "__HOME__"
@@ -23,6 +25,72 @@ READER_WORKSPACE_PLACEHOLDER = "__READER_WORKSPACE__"
 CODER_WORKSPACE_PLACEHOLDER = "__CODER_WORKSPACE__"
 REVIEWER_WORKSPACE_PLACEHOLDER = "__REVIEWER_WORKSPACE__"
 MESSAGING_WORKSPACE_PLACEHOLDER = "__MESSAGING_WORKSPACE__"
+OPENCLAW_CONFIG_DIR = pathlib.Path("platform/configs/openclaw")
+DEFAULT_PROFILE_NAME = "default"
+DEFAULT_OPENCLAW_CONFIG_OUTPUT = pathlib.Path.home() / ".openclaw" / "openclaw.json"
+DEFAULT_EXEC_APPROVALS_TEMPLATE = OPENCLAW_CONFIG_DIR / "exec-approvals.json"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RenderProfile:
+    """Named OpenClaw config render profile."""
+
+    name: str
+    overlays: tuple[pathlib.Path, ...]
+    description: str
+
+
+PROFILES: dict[str, RenderProfile] = {
+    "default": RenderProfile(
+        name="default",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+        ),
+        description="Baseline gateway, trust zones, and QMD-backed retrieval.",
+    ),
+    "memory-pro-local": RenderProfile(
+        name="memory-pro-local",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "75-clawops-memory-pro.local.json5",
+        ),
+        description="Default profile plus local LanceDB durable memory.",
+    ),
+    "memory-pro-local-smart": RenderProfile(
+        name="memory-pro-local-smart",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "76-clawops-memory-pro.local-smart.json5",
+        ),
+        description="Local LanceDB durable memory with Ollama-backed smart extraction.",
+    ),
+    "acp": RenderProfile(
+        name="acp",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "20-acp-workers.json5",
+        ),
+        description="Default profile plus ACP worker agents.",
+    ),
+    "browser-lab": RenderProfile(
+        name="browser-lab",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "60-browser-lab.json5",
+        ),
+        description="Default profile plus browser-lab integration.",
+    ),
+}
 
 
 def detect_local_timezone() -> str:
@@ -124,27 +192,133 @@ def render_qmd_overlay(
     )
 
 
+def _resolve_repo_relative_path(*, repo_root: pathlib.Path, path: pathlib.Path) -> pathlib.Path:
+    """Resolve a possibly repo-relative path against *repo_root*."""
+    if path.is_absolute():
+        return path.expanduser().resolve()
+    return (repo_root.expanduser().resolve() / path).resolve()
+
+
+def _resolve_profile(profile_name: str) -> RenderProfile:
+    """Look up a named render profile."""
+    try:
+        return PROFILES[profile_name]
+    except KeyError as exc:
+        available = ", ".join(sorted(PROFILES))
+        raise ValueError(
+            f"unknown OpenClaw render profile: {profile_name} (choose from {available})"
+        ) from exc
+
+
+def render_openclaw_profile(
+    *,
+    profile_name: str,
+    repo_root: pathlib.Path,
+    home_dir: pathlib.Path,
+    user_timezone: str | None = None,
+    extra_overlays: Sequence[pathlib.Path] = (),
+) -> dict[str, Any]:
+    """Render and merge a named OpenClaw config profile."""
+    profile = _resolve_profile(profile_name)
+    template_paths = [*profile.overlays, *extra_overlays]
+    rendered_documents = [
+        render_openclaw_overlay(
+            template_path=_resolve_repo_relative_path(repo_root=repo_root, path=template_path),
+            repo_root=repo_root,
+            home_dir=home_dir,
+            user_timezone=user_timezone,
+        )
+        for template_path in template_paths
+    ]
+    if not rendered_documents:
+        raise ValueError(f"OpenClaw render profile {profile_name} did not resolve any overlays")
+    base, *overlays = rendered_documents
+    merged = merge_documents(base, overlays)
+    if not isinstance(merged, dict):
+        raise TypeError("rendered OpenClaw profile must merge to a mapping")
+    return merged
+
+
+def build_profile_help() -> str:
+    """Return a compact help block for named profiles."""
+    lines = ["available profiles:"]
+    for profile_name in sorted(PROFILES):
+        profile = PROFILES[profile_name]
+        lines.append(f"  {profile.name:<23} {profile.description}")
+    return "\n".join(lines)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--template", required=True, type=pathlib.Path)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=build_profile_help(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--template", type=pathlib.Path)
+    parser.add_argument("--profile", choices=sorted(PROFILES))
+    parser.add_argument(
+        "--overlay",
+        action="append",
+        default=[],
+        type=pathlib.Path,
+        help="Additional overlay template to render and merge on top of the selected profile.",
+    )
     parser.add_argument("--repo-root", required=True, type=pathlib.Path)
-    parser.add_argument("--output", required=True, type=pathlib.Path)
+    parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OPENCLAW_CONFIG_OUTPUT)
+    parser.add_argument(
+        "--exec-approvals-output",
+        type=pathlib.Path,
+        help="Optional path for a rendered exec-approvals policy file.",
+    )
+    parser.add_argument(
+        "--exec-approvals-template",
+        type=pathlib.Path,
+        default=DEFAULT_EXEC_APPROVALS_TEMPLATE,
+    )
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--user-timezone")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.template is not None and args.profile is not None:
+        parser.error("--template and --profile are mutually exclusive")
+    if args.template is not None and args.overlay:
+        parser.error("--overlay can only be used with --profile")
+    if args.template is None and args.profile is None:
+        args.profile = DEFAULT_PROFILE_NAME
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     """Render a placeholder-backed OpenClaw overlay to JSON."""
     args = parse_args(argv)
-    rendered = render_openclaw_overlay(
-        template_path=args.template,
-        repo_root=args.repo_root,
-        home_dir=args.home_dir,
-        user_timezone=args.user_timezone,
-    )
+    if args.template is not None:
+        rendered = render_openclaw_overlay(
+            template_path=_resolve_repo_relative_path(repo_root=args.repo_root, path=args.template),
+            repo_root=args.repo_root,
+            home_dir=args.home_dir,
+            user_timezone=args.user_timezone,
+        )
+    else:
+        rendered = render_openclaw_profile(
+            profile_name=args.profile,
+            repo_root=args.repo_root,
+            home_dir=args.home_dir,
+            user_timezone=args.user_timezone,
+            extra_overlays=tuple(args.overlay),
+        )
     write_json(args.output, rendered)
+    print(f"Rendered {args.output.expanduser().resolve()}")
+    if args.exec_approvals_output is not None:
+        approvals = render_openclaw_overlay(
+            template_path=_resolve_repo_relative_path(
+                repo_root=args.repo_root, path=args.exec_approvals_template
+            ),
+            repo_root=args.repo_root,
+            home_dir=args.home_dir,
+            user_timezone=args.user_timezone,
+        )
+        write_json(args.exec_approvals_output, approvals)
+        print(f"Rendered {args.exec_approvals_output.expanduser().resolve()}")
     return 0
 
 

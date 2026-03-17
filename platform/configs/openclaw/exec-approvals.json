@@ -5,8 +5,8 @@
       "id": "workspace-tests",
       "match": {
         "cwdPrefixes": [
-          "~/Projects/openclaw-platform-bootstrap",
-          "~/Projects/openclaw-platform-bootstrap/repo/upstream"
+          "__REPO_ROOT__",
+          "__UPSTREAM_REPO_ROOT__"
         ],
         "executables": [
           "python3",
