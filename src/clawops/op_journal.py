@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS op (
   result_ok INTEGER,
   result_status_code INTEGER,
   result_body_excerpt TEXT,
+  result_error_type TEXT,
+  result_error_retryable INTEGER,
+  result_request_method TEXT,
+  result_request_url TEXT,
+  result_request_attempts INTEGER,
   UNIQUE(scope, idempotency_key)
 );
 
@@ -78,6 +83,11 @@ MIGRATION_COLUMNS: dict[str, str] = {
     "result_ok": "INTEGER",
     "result_status_code": "INTEGER",
     "result_body_excerpt": "TEXT",
+    "result_error_type": "TEXT",
+    "result_error_retryable": "INTEGER",
+    "result_request_method": "TEXT",
+    "result_request_url": "TEXT",
+    "result_request_attempts": "INTEGER",
 }
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -162,6 +172,11 @@ class Operation:
     result_ok: int | None
     result_status_code: int | None
     result_body_excerpt: str | None
+    result_error_type: str | None
+    result_error_retryable: int | None
+    result_request_method: str | None
+    result_request_url: str | None
+    result_request_attempts: int | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Operation":
@@ -330,6 +345,11 @@ class OperationJournal:
         result_ok: bool | None | object = _UNSET,
         result_status_code: int | None | object = _UNSET,
         result_body_excerpt: str | None | object = _UNSET,
+        result_error_type: str | None | object = _UNSET,
+        result_error_retryable: bool | None | object = _UNSET,
+        result_request_method: str | None | object = _UNSET,
+        result_request_url: str | None | object = _UNSET,
+        result_request_attempts: int | None | object = _UNSET,
     ) -> Operation:
         """Update operation state."""
         now = utc_now_ms()
@@ -391,6 +411,27 @@ class OperationJournal:
             next_result_body_excerpt = (
                 row["result_body_excerpt"] if result_body_excerpt is _UNSET else result_body_excerpt
             )
+            next_result_error_type = (
+                row["result_error_type"] if result_error_type is _UNSET else result_error_type
+            )
+            next_result_error_retryable = (
+                row["result_error_retryable"]
+                if result_error_retryable is _UNSET
+                else (None if result_error_retryable is None else int(bool(result_error_retryable)))
+            )
+            next_result_request_method = (
+                row["result_request_method"]
+                if result_request_method is _UNSET
+                else result_request_method
+            )
+            next_result_request_url = (
+                row["result_request_url"] if result_request_url is _UNSET else result_request_url
+            )
+            next_result_request_attempts = (
+                row["result_request_attempts"]
+                if result_request_attempts is _UNSET
+                else result_request_attempts
+            )
             conn.execute(
                 """
                 UPDATE op
@@ -399,7 +440,9 @@ class OperationJournal:
                     execution_contract_version = ?, execution_contract_json = ?,
                     approval_required = ?, review_mode = ?, review_target = ?, review_status = ?,
                     reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
-                    review_payload_json = ?, result_ok = ?, result_status_code = ?, result_body_excerpt = ?
+                    review_payload_json = ?, result_ok = ?, result_status_code = ?, result_body_excerpt = ?,
+                    result_error_type = ?, result_error_retryable = ?, result_request_method = ?,
+                    result_request_url = ?, result_request_attempts = ?
                 WHERE op_id = ?
                 """,
                 (
@@ -423,6 +466,11 @@ class OperationJournal:
                     next_result_ok,
                     next_result_status_code,
                     next_result_body_excerpt,
+                    next_result_error_type,
+                    next_result_error_retryable,
+                    next_result_request_method,
+                    next_result_request_url,
+                    next_result_request_attempts,
                     op_id,
                 ),
             )

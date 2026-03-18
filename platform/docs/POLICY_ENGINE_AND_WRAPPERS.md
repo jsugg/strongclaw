@@ -54,6 +54,18 @@ Failed replay semantics stay explicit:
 - execution-time failures replay as `ok: false`, `accepted: true`, `executed: true`
 - cached terminal failures include the persisted status/body summary when available
 
+## Transport hardening
+
+Wrapper transport remains intentionally conservative:
+
+- requests use a stable `User-Agent` and explicit timeout
+- terminal success/failure rows persist request method/url, request attempt count,
+  status code, body excerpt, and a typed transport error code when relevant
+- automatic retries are endpoint-scoped, not blanket behavior
+- current mutating wrappers (`github.comment.create`,
+  `github.issue.labels.add`, `github.pull_request.merge`, `webhook.post`) stay
+  on explicit no-retry policies until endpoint-level idempotency is proven
+
 ## Execution contract
 
 Wrappers now persist an execution contract alongside the stored policy decision.

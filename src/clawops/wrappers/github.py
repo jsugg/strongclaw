@@ -13,6 +13,7 @@ from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import (
     JsonHttpClient,
+    RetryPolicy,
     WrapperContext,
     ensure_execution_contract,
     execute_http_operation,
@@ -26,6 +27,10 @@ GITHUB_PULL_MERGE_TARGET_RE = re.compile(
 
 type MergeMethod = Literal["merge", "squash", "rebase"]
 type GitHubOperation = Literal["comment", "labels", "merge"]
+
+COMMENT_RETRY_POLICY = RetryPolicy.no_retry(name="github.comment.create")
+LABELS_RETRY_POLICY = RetryPolicy.no_retry(name="github.issue.labels.add")
+MERGE_RETRY_POLICY = RetryPolicy.no_retry(name="github.pull_request.merge")
 
 
 def _decision_payload(*, trust_zone: str, action: str, category: str, repo: str) -> dict[str, str]:
@@ -137,6 +142,7 @@ def create_comment(
             f"https://api.github.com/repos/{repo}/issues/{issue_number}/comments",
             headers=_github_headers(),
             json_body={"body": body},
+            retry_policy=COMMENT_RETRY_POLICY,
         ),
     )
 
@@ -178,6 +184,7 @@ def add_labels(
             f"https://api.github.com/repos/{repo}/issues/{issue_number}/labels",
             headers=_github_headers(),
             json_body={"labels": labels},
+            retry_policy=LABELS_RETRY_POLICY,
         ),
     )
 
@@ -226,6 +233,7 @@ def merge_pull_request(
             f"https://api.github.com/repos/{repo}/pulls/{pull_number}/merge",
             headers=_github_headers(),
             json_body=payload,
+            retry_policy=MERGE_RETRY_POLICY,
         ),
     )
 
@@ -248,6 +256,7 @@ def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any
                 f"https://api.github.com/repos/{issue_match.group('repo')}/issues/{issue_match.group('issue')}/comments",
                 headers=_github_headers(),
                 json_body={"body": body},
+                retry_policy=COMMENT_RETRY_POLICY,
             ),
         )
     if op.kind == "github_issue_labels" and issue_match is not None:
@@ -263,6 +272,7 @@ def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any
                 f"https://api.github.com/repos/{issue_match.group('repo')}/issues/{issue_match.group('issue')}/labels",
                 headers=_github_headers(),
                 json_body={"labels": list(labels)},
+                retry_policy=LABELS_RETRY_POLICY,
             ),
         )
     pull_match = GITHUB_PULL_MERGE_TARGET_RE.match(op.normalized_target)
@@ -291,6 +301,7 @@ def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any
                 f"https://api.github.com/repos/{pull_match.group('repo')}/pulls/{pull_match.group('pull')}/merge",
                 headers=_github_headers(),
                 json_body=request_body,
+                retry_policy=MERGE_RETRY_POLICY,
             ),
         )
     raise ValueError(f"operation {op_id} is not an executable GitHub operation")

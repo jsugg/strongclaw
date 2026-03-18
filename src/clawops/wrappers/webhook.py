@@ -11,11 +11,14 @@ from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import (
     JsonHttpClient,
+    RetryPolicy,
     WrapperContext,
     ensure_execution_contract,
     execute_http_operation,
     prepare_operation,
 )
+
+WEBHOOK_RETRY_POLICY = RetryPolicy.no_retry(name="webhook.post")
 
 
 def _decision_payload_from_operation(op: Operation) -> dict[str, str]:
@@ -63,7 +66,10 @@ def invoke_webhook(
         op=prepared.operation,
         decision=prepared.decision,
         request=lambda: client.post(
-            url, headers={"Content-Type": "application/json"}, json_body=payload_body
+            url,
+            headers={"Content-Type": "application/json"},
+            json_body=payload_body,
+            retry_policy=WEBHOOK_RETRY_POLICY,
         ),
     )
 
@@ -88,6 +94,7 @@ def execute_webhook_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, An
             op.normalized_target,
             headers={"Content-Type": "application/json"},
             json_body=payload_body,
+            retry_policy=WEBHOOK_RETRY_POLICY,
         ),
     )
 
