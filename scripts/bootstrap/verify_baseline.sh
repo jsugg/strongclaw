@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=../lib/openclaw.sh
+# shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
 
 require_openclaw "Baseline verification runs OpenClaw diagnostics and audits."
@@ -26,7 +26,7 @@ echo "== OpenClaw memory status =="
 openclaw memory status --deep
 
 echo "== OpenClaw memory search =="
-openclaw memory search --query "OpenClaw Platform Bootstrap" --max-results 1 >/dev/null
+openclaw memory search --query "ClawOps" --max-results 1 >/dev/null
 
 echo "== Python tests =="
 PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" pytest -q "$ROOT/tests"

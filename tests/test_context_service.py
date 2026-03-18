@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import sqlite3
 
 import pytest
 
@@ -239,3 +240,67 @@ def test_index_with_stats_skips_unchanged_files(tmp_path: pathlib.Path) -> None:
     assert second.indexed_files == 0
     assert second.skipped_files == 1
     assert second.deleted_files == 0
+
+
+def test_index_with_stats_preloads_metadata_once_for_unchanged_repos(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for index in range(3):
+        (repo / f"file_{index}.py").write_text(
+            f"def fn_{index}():\n    return {index}\n",
+            encoding="utf-8",
+        )
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+
+    service = service_from_config(config_path, repo)
+    first = service.index_with_stats()
+    statements: list[str] = []
+    original_connect = service.connect
+
+    def _connect_with_trace() -> sqlite3.Connection:
+        conn = original_connect()
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(service, "connect", _connect_with_trace)
+    second = service.index_with_stats()
+
+    assert first.indexed_files == 3
+    assert second.indexed_files == 0
+    assert second.skipped_files == 3
+    assert any(
+        "SELECT path, mtime_ns, size_bytes FROM files" in statement for statement in statements
+    )
+    assert not any(
+        "SELECT mtime_ns, size_bytes FROM files WHERE path =" in statement
+        for statement in statements
+    )
+
+
+def test_index_with_stats_reports_deleted_files_after_preloaded_metadata(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    keep = repo / "keep.py"
+    remove = repo / "remove.py"
+    keep.write_text("def keep():\n    return True\n", encoding="utf-8")
+    remove.write_text("def remove_me():\n    return True\n", encoding="utf-8")
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+
+    service = service_from_config(config_path, repo)
+    initial = service.index_with_stats()
+    remove.unlink()
+    second = service.index_with_stats()
+
+    assert initial.indexed_files == 2
+    assert second.total_files == 1
+    assert second.indexed_files == 0
+    assert second.skipped_files == 1
+    assert second.deleted_files == 1
+    assert service.query("remove_me", limit=2) == []

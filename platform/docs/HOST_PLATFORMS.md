@@ -8,22 +8,31 @@ Strongclaw supports two operator-host platforms:
 Both use the same bootstrap entrypoints, config overlays, and verification
 gates.
 
+The bootstrap contract is runtime-aware: if the host already has a
+Docker-compatible runtime that exposes `docker` plus `docker compose`,
+Strongclaw reuses it. Docker is installed only as the fallback runtime when no
+compatible backend is detected.
+
 ## Shared host contract
 
 Regardless of host OS, the baseline flow is:
 
 1. provision a dedicated non-admin runtime user with `./scripts/bootstrap/create_openclawsvc.sh`
 2. clone the repo as that user
-3. install the companion tooling with `make dev && make test`
-4. bootstrap the host with `./scripts/bootstrap/bootstrap_host.sh`
-5. render the OpenClaw config with `./scripts/bootstrap/render_openclaw_config.sh`
-6. render host service definitions with `./scripts/bootstrap/install_host_services.sh`
-7. activate the rendered services for the host-native service manager
-8. verify the baseline with `./scripts/bootstrap/verify_baseline.sh`
+3. install the runtime package with `make install`
+4. copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local` and fill the required secrets
+5. prefer `./scripts/bootstrap/install.sh` for the baseline path after the env contract is ready
+6. if Linux bootstrap just granted Docker access, start a fresh login shell and rerun `./scripts/bootstrap/install.sh --skip-bootstrap`
+7. contributors can additionally install `uv` and use `make dev && make test`
+8. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `varlock load --path platform/configs/varlock`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
 
 ## macOS host notes
 
 - Preflight requires Homebrew.
+- OrbStack, Rancher Desktop, Colima, and Docker Desktop are all acceptable as
+  long as they expose `docker` plus `docker compose`.
+- If one of those runtimes is installed but its Docker CLI integration is not
+  enabled yet, bootstrap stops instead of installing Docker over it.
 - Service definitions render into `~/Library/LaunchAgents`.
 - Activate them with `launchctl bootstrap gui/$(id -u) ...`.
 - The runtime-user and loopback-SSH flow is documented in
@@ -33,6 +42,10 @@ Regardless of host OS, the baseline flow is:
 
 - The current Linux bootstrap path targets Debian/Ubuntu-style hosts with
   `apt-get`.
+- Existing Docker-compatible runtimes are reused when they already expose
+  `docker` plus `docker compose` for the runtime user.
+- If no compatible runtime is detected, bootstrap installs Docker Engine as the
+  fallback backend.
 - Provision the runtime user with `./scripts/bootstrap/create_openclawsvc.sh`.
 - Service definitions render into `~/.config/systemd/user`.
 - Activate them with `systemctl --user daemon-reload` and

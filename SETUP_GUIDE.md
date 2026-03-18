@@ -11,12 +11,12 @@ You need:
 - Node 24+ preferred, Node 22.16+ minimum
 - a dedicated non-admin runtime user for OpenClaw
 - a supported package manager for the host bootstrap path
-- Docker backend
+- either an already installed Docker-compatible runtime or permission to install Docker as the fallback runtime
 
 Host-specific notes:
 
-- macOS: Homebrew and a Docker backend such as OrbStack or Docker Desktop
-- Linux: `apt-get`, `sudo`, `curl`, and Docker Engine or rootless Docker
+- macOS: Homebrew plus either a Docker-compatible runtime such as OrbStack, Rancher Desktop, Colima, or Docker Desktop, or permission for bootstrap to install Docker Desktop as the fallback runtime
+- Linux: `apt-get`, `sudo`, `curl`, and either a Docker-compatible runtime that exposes `docker compose` for the runtime user, or permission for bootstrap to install Docker Engine as the fallback runtime
 
 ## 1. Provision the runtime user
 
@@ -52,23 +52,46 @@ git clone <this repo> strongclaw
 cd strongclaw
 ```
 
-## 3. Install companion tooling
+## 3. Install the runtime package
+
+```bash
+make install
+```
+
+If you plan to develop on this repo, install `uv` and then use:
 
 ```bash
 make dev
 make test
 ```
 
-## 4. Install platform dependencies
+`uv` is a contributor tool only. It is not required for operator bootstrap or runtime use.
+
+## 4. Prepare the Varlock env contract
+
+Copy the example and edit values in the Varlock config directory that the launch
+wrappers use:
 
 ```bash
-./scripts/bootstrap/preflight_host.sh
-./scripts/bootstrap/bootstrap_host.sh
+cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
+$EDITOR platform/configs/varlock/.env.local
 ```
 
-`bootstrap_host.sh` runs the matching host preflight internally and finishes
-with `./scripts/bootstrap/doctor_host.sh`, so it now fails if the required
-toolchain is still missing or the rendered OpenClaw config is invalid.
+If `varlock` is already installed on the host, you can validate the contract now:
+
+```bash
+varlock load --path platform/configs/varlock
+```
+
+## 5. Preferred baseline bring-up
+
+```bash
+./scripts/bootstrap/install.sh
+```
+
+That path bootstraps the host, validates the repo-local Varlock env contract,
+renders or refreshes the host service definitions, activates the gateway plus
+sidecars, and runs the baseline verification gate.
 
 The bootstrap flow verifies or installs:
 
@@ -81,27 +104,48 @@ The bootstrap flow verifies or installs:
 - Python dependencies
 - host-compatible vendored `memory-lancedb-pro` dependencies
 
+For container backends, bootstrap first looks for an existing Docker-compatible
+runtime that already exposes `docker` plus `docker compose`. If it finds one,
+Strongclaw uses it and does not install Docker over it. If it finds an
+alternative runtime without the Docker CLI integration enabled yet, bootstrap
+stops and tells you to finish that integration instead of replacing it.
+Only when no Docker-compatible runtime is detected does bootstrap install
+Docker as the fallback runtime.
+
+If Linux bootstrap just added the runtime user to the `docker` group, start a
+fresh `sudo -iu openclawsvc` shell before rerunning:
+
+```bash
+./scripts/bootstrap/install.sh --skip-bootstrap
+```
+
+If you need a placeholder-backed profile during bring-up, rerender through the
+wrapper:
+
+```bash
+./scripts/bootstrap/install.sh --profile acp
+./scripts/bootstrap/install.sh --profile memory-pro-local
+./scripts/bootstrap/install.sh --profile memory-pro-local-smart
+```
+
 Use `./scripts/bootstrap/doctor_host.sh` again after any host-side package or
 config change that might affect the local OpenClaw runtime contract.
 
-## 5. Prepare the Varlock env contract
+## 6. Manual config and service flow
 
-Copy the example and edit values:
+If you want to control the render, service activation, or verification steps
+separately, use the lower-level entrypoints directly.
+
+Bootstrap the host:
 
 ```bash
-cp platform/configs/varlock/.env.local.example .env.local
-$EDITOR .env.local
+./scripts/bootstrap/bootstrap.sh
 ```
 
-Validate:
+Then validate the env contract and render the OpenClaw config:
 
 ```bash
-varlock load
-```
-
-## 6. Render the OpenClaw config
-
-```bash
+varlock load --path platform/configs/varlock
 ./scripts/bootstrap/render_openclaw_config.sh
 ```
 
@@ -123,13 +167,13 @@ Use profile rerenders for placeholder-backed variants:
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```
 
-## 7. Install services
+Install and activate services:
 
 ```bash
-./scripts/bootstrap/install_host_services.sh
+./scripts/bootstrap/install_host_services.sh --activate
 ```
 
-Then activate the rendered services with the native service manager.
+Equivalent manual activation commands:
 
 macOS:
 
@@ -146,7 +190,7 @@ systemctl --user enable --now openclaw-sidecars.service
 systemctl --user enable --now openclaw-gateway.service
 ```
 
-Or run manually first:
+Or run the gateway and sidecars manually first:
 
 ```bash
 ./scripts/ops/launch_gateway_with_varlock.sh
@@ -154,7 +198,10 @@ Or run manually first:
 ./scripts/bootstrap/verify_sidecars.sh
 ```
 
-## 8. Verify the secure baseline
+## 7. Verify the secure baseline
+
+If you used `./scripts/bootstrap/install.sh`, this verification already
+ran. Re-run it directly whenever you want to recheck the host baseline:
 
 ```bash
 ./scripts/bootstrap/verify_baseline.sh
@@ -162,7 +209,7 @@ Or run manually first:
 
 Do not continue until all baseline checks are clean.
 
-## 9. Enable ACP workers
+## 8. Enable ACP workers
 
 ```bash
 ./scripts/bootstrap/bootstrap_acpx.sh
@@ -183,7 +230,7 @@ Smoke test:
 ./scripts/workers/run_claude_review.sh "Review auth boundaries"
 ```
 
-## 10. Enable repo lexical context indexing and verify QMD
+## 9. Enable repo lexical context indexing and verify QMD
 
 ```bash
 ./scripts/bootstrap/bootstrap_context.sh
@@ -240,7 +287,7 @@ Markdown-canonical migration source while you validate parity.
 
 ### Telegram
 
-1. Put the bot token into `.env.local`.
+1. Put the bot token into `platform/configs/varlock/.env.local`.
 2. Merge `platform/configs/openclaw/30-channels.json5`.
 3. Start the gateway.
 4. Approve the first DM via pairing.

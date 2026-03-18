@@ -7,6 +7,8 @@ import json
 import random
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Mapping
 
 import requests
@@ -56,6 +58,7 @@ class WrapperResult:
     dry_run: bool = False
     status_code: int | None = None
     body: str | None = None
+    error: dict[str, Any] | None = None
     error_type: str | None = None
     retryable: bool | None = None
     request_method: str | None = None
@@ -79,6 +82,8 @@ class WrapperResult:
             payload["status_code"] = self.status_code
         if self.body is not None:
             payload["body"] = self.body
+        if self.error is not None:
+            payload["error"] = self.error
         if self.error_type is not None:
             payload["error_type"] = self.error_type
         if self.retryable is not None:
@@ -146,6 +151,26 @@ class HttpResponseOutcome:
     request_url: str
     request_attempts: int
     retry_policy: RetryPolicy
+    request_id: str | None = None
+    retry_after_seconds: float | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HttpTimeouts:
+    """Split connect/read timeout configuration for wrapper transports."""
+
+    connect_seconds: float
+    read_seconds: float
+
+    def __post_init__(self) -> None:
+        if self.connect_seconds <= 0:
+            raise ValueError("connect timeout must be positive")
+        if self.read_seconds <= 0:
+            raise ValueError("read timeout must be positive")
+
+    def as_requests_timeout(self) -> tuple[float, float]:
+        """Return the timeout tuple expected by `requests`."""
+        return (self.connect_seconds, self.read_seconds)
 
 
 class WrapperTransportError(RuntimeError):
@@ -162,6 +187,8 @@ class WrapperTransportError(RuntimeError):
         request_attempts: int,
         status_code: int | None = None,
         body_excerpt: str | None = None,
+        request_id: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.error_type = error_type
@@ -171,6 +198,8 @@ class WrapperTransportError(RuntimeError):
         self.request_attempts = request_attempts
         self.status_code = status_code
         self.body_excerpt = body_excerpt
+        self.request_id = request_id
+        self.retry_after_seconds = retry_after_seconds
 
     def error_message(self) -> str:
         """Return a journal-safe error summary."""
@@ -238,6 +267,8 @@ class WrapperHttpStatusError(WrapperTransportError):
             request_attempts=request_attempts,
             status_code=response.status_code,
             body_excerpt=body_excerpt or None,
+            request_id=_response_request_id(response),
+            retry_after_seconds=_parse_retry_after_seconds(response.headers.get("Retry-After")),
         )
 
 
@@ -439,6 +470,35 @@ def _sleep_before_retry(policy: RetryPolicy, attempt_number: int) -> None:
         time.sleep(delay)
 
 
+def _response_request_id(response: requests.Response) -> str | None:
+    """Return a stable request identifier from known upstream headers."""
+    for header_name in ("X-GitHub-Request-Id", "X-Request-Id"):
+        value = response.headers.get(header_name)
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
+def _parse_retry_after_seconds(value: str | None) -> float | None:
+    """Parse a Retry-After header into seconds when possible."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return max(float(stripped), 0.0)
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(stripped)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max((retry_at - datetime.now(timezone.utc)).total_seconds(), 0.0)
+
+
 def _coerce_http_outcome(result: HttpResponseOutcome | requests.Response) -> HttpResponseOutcome:
     """Normalize legacy raw responses into an outcome payload."""
     if isinstance(result, HttpResponseOutcome):
@@ -450,6 +510,53 @@ def _coerce_http_outcome(result: HttpResponseOutcome | requests.Response) -> Htt
         request_attempts=1,
         retry_policy=NO_RETRY_POLICY,
     )
+
+
+def _build_error_payload(
+    *,
+    error_type: str | None,
+    message: str | None,
+    status_code: int | None,
+    retryable: bool | None,
+    request_method: str | None,
+    request_url: str | None,
+    request_attempts: int | None,
+    request_id: str | None = None,
+    retry_after_seconds: float | None = None,
+) -> dict[str, Any] | None:
+    """Build a nested structured error payload when failure metadata exists."""
+    if (
+        error_type is None
+        and message is None
+        and status_code is None
+        and retryable is None
+        and request_method is None
+        and request_url is None
+        and request_attempts is None
+        and request_id is None
+        and retry_after_seconds is None
+    ):
+        return None
+    payload: dict[str, Any] = {}
+    if error_type is not None:
+        payload["type"] = error_type
+    if message is not None:
+        payload["message"] = message
+    if status_code is not None:
+        payload["status_code"] = status_code
+    if retryable is not None:
+        payload["retryable"] = retryable
+    if request_method is not None:
+        payload["request_method"] = request_method
+    if request_url is not None:
+        payload["request_url"] = request_url
+    if request_attempts is not None:
+        payload["request_attempts"] = request_attempts
+    if request_id is not None:
+        payload["request_id"] = request_id
+    if retry_after_seconds is not None:
+        payload["retry_after_seconds"] = retry_after_seconds
+    return payload
 
 
 def _result_error_retryable(op: Operation) -> bool | None:
@@ -512,6 +619,17 @@ def execute_http_operation(
             executed=True,
             status_code=exc.status_code,
             body=message[:1000],
+            error=_build_error_payload(
+                error_type=exc.error_type,
+                message=message[:1000],
+                status_code=exc.status_code,
+                retryable=exc.retryable,
+                request_method=exc.method,
+                request_url=exc.url,
+                request_attempts=exc.request_attempts,
+                request_id=exc.request_id,
+                retry_after_seconds=exc.retry_after_seconds,
+            ),
             error_type=exc.error_type,
             retryable=exc.retryable,
             request_method=exc.method,
@@ -546,6 +664,17 @@ def execute_http_operation(
             accepted=True,
             executed=True,
             body=message[:1000],
+            error=_build_error_payload(
+                error_type=wrapped.error_type,
+                message=message[:1000],
+                status_code=wrapped.status_code,
+                retryable=wrapped.retryable,
+                request_method=wrapped.method,
+                request_url=wrapped.url,
+                request_attempts=wrapped.request_attempts,
+                request_id=wrapped.request_id,
+                retry_after_seconds=wrapped.retry_after_seconds,
+            ),
             error_type=wrapped.error_type,
             retryable=wrapped.retryable,
             request_method=wrapped.method,
@@ -721,6 +850,7 @@ def result_from_operation(
     dry_run: bool = False,
     status_code: int | None = None,
     body: str | None = None,
+    error: dict[str, Any] | None = None,
     error_type: str | None = None,
     retryable: bool | None = None,
     request_method: str | None = None,
@@ -728,6 +858,15 @@ def result_from_operation(
     request_attempts: int | None = None,
 ) -> dict[str, Any]:
     """Build a consistent wrapper result envelope."""
+    resolved_error_type = op.result_error_type if error_type is None else error_type
+    resolved_retryable = _result_error_retryable(op) if retryable is None else retryable
+    resolved_request_method = op.result_request_method if request_method is None else request_method
+    resolved_request_url = op.result_request_url if request_url is None else request_url
+    resolved_request_attempts = (
+        op.result_request_attempts if request_attempts is None else request_attempts
+    )
+    resolved_status_code = op.result_status_code if status_code is None else status_code
+    resolved_body = op.result_body_excerpt if body is None else body
     return WrapperResult(
         ok=ok,
         accepted=accepted,
@@ -736,23 +875,42 @@ def result_from_operation(
         op_id=op.op_id,
         decision=None if decision is None else decision.to_dict(),
         dry_run=dry_run,
-        status_code=op.result_status_code if status_code is None else status_code,
-        body=op.result_body_excerpt if body is None else body,
-        error_type=op.result_error_type if error_type is None else error_type,
-        retryable=_result_error_retryable(op) if retryable is None else retryable,
-        request_method=(op.result_request_method if request_method is None else request_method),
-        request_url=op.result_request_url if request_url is None else request_url,
-        request_attempts=(
-            op.result_request_attempts if request_attempts is None else request_attempts
+        status_code=resolved_status_code,
+        body=resolved_body,
+        error=(
+            _build_error_payload(
+                error_type=resolved_error_type,
+                message=resolved_body,
+                status_code=resolved_status_code,
+                retryable=resolved_retryable,
+                request_method=resolved_request_method,
+                request_url=resolved_request_url,
+                request_attempts=resolved_request_attempts,
+            )
+            if error is None and resolved_error_type is not None
+            else error
         ),
+        error_type=resolved_error_type,
+        retryable=resolved_retryable,
+        request_method=resolved_request_method,
+        request_url=resolved_request_url,
+        request_attempts=resolved_request_attempts,
     ).to_dict()
 
 
 class JsonHttpClient:
     """Thin requests wrapper used by all external API helpers."""
 
-    def __init__(self, timeout: int = 30) -> None:
+    def __init__(self, timeout: int | float | HttpTimeouts = 30) -> None:
         self.timeout = timeout
+
+    def _requests_timeout(self) -> float | tuple[float, float]:
+        """Return a timeout value accepted by `requests`."""
+        if isinstance(self.timeout, HttpTimeouts):
+            return self.timeout.as_requests_timeout()
+        if self.timeout <= 0:
+            raise ValueError("timeout must be positive")
+        return float(self.timeout)
 
     def request(
         self,
@@ -774,7 +932,7 @@ class JsonHttpClient:
                     url=url,
                     headers=request_headers,
                     json=json_body,
-                    timeout=self.timeout,
+                    timeout=self._requests_timeout(),
                 )
             except requests.RequestException as exc:
                 retryable = (
@@ -805,6 +963,8 @@ class JsonHttpClient:
                 request_url=url,
                 request_attempts=attempt_number,
                 retry_policy=effective_policy,
+                request_id=_response_request_id(response),
+                retry_after_seconds=_parse_retry_after_seconds(response.headers.get("Retry-After")),
             )
         raise AssertionError("unreachable: request loop returned no response")
 

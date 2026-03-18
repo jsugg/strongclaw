@@ -67,17 +67,26 @@ This pack assumes:
 git clone <this repo> strongclaw
 cd strongclaw
 
-make dev
-make test
+make install
 
-./scripts/bootstrap/bootstrap_host.sh
-./scripts/bootstrap/render_openclaw_config.sh
-./scripts/bootstrap/bootstrap_sidecars.sh
-./scripts/bootstrap/verify_sidecars.sh
-./scripts/bootstrap/verify_baseline.sh
+cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
+$EDITOR platform/configs/varlock/.env.local
+
+./scripts/bootstrap/install.sh
 ```
 
+That bootstrap path reuses any existing Docker-compatible runtime that already
+provides `docker` plus `docker compose`, and only installs Docker as a fallback
+when no compatible runtime is detected.
+
 Then continue with ACP workers, repo lexical context indexing, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
+
+If Linux bootstrap just added the runtime user to the `docker` group, start a
+fresh login shell as that user and rerun:
+
+```bash
+./scripts/bootstrap/install.sh --skip-bootstrap
+```
 
 For placeholder-backed variants, rerender through the profile-aware entrypoint
 instead of merging raw overlays:
@@ -106,6 +115,7 @@ That syncs the `dev` extra into `.venv/` and installs hooks for:
 - isort import sorting
 - Black formatting
 - Ruff linting
+- ShellCheck for shell scripts
 - mypy type checking
 - Pyright type checking
 - actionlint for GitHub Actions
@@ -120,6 +130,7 @@ make lint
 make imports
 make typecheck
 make actionlint
+make shellcheck
 make precommit
 make dev-check
 ```

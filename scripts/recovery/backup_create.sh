@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=../lib/openclaw.sh
+# shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"

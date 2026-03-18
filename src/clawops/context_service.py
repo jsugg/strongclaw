@@ -265,6 +265,11 @@ class ContextService:
             return False
         return True
 
+    def _load_indexed_metadata(self, conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
+        """Load the stored file metadata used for incremental skip decisions."""
+        rows = conn.execute("SELECT path, mtime_ns, size_bytes FROM files").fetchall()
+        return {str(row["path"]): (int(row["mtime_ns"]), int(row["size_bytes"])) for row in rows}
+
     def iter_files(self, include_hidden: bool = False) -> Iterable[pathlib.Path]:
         """Yield indexable files from the repository."""
         for path in self.repo.rglob("*"):
@@ -301,6 +306,7 @@ class ContextService:
         skipped_files = 0
         seen_paths: set[str] = set()
         with self.connect() as conn:
+            existing_metadata = self._load_indexed_metadata(conn)
             for path in self.iter_files():
                 try:
                     stat_result = path.stat()
@@ -310,15 +316,8 @@ class ContextService:
                 mtime_ns = stat_result.st_mtime_ns
                 rel = str(path.relative_to(self.repo))
                 seen_paths.add(rel)
-                existing = conn.execute(
-                    "SELECT mtime_ns, size_bytes FROM files WHERE path = ?",
-                    (rel,),
-                ).fetchone()
-                if (
-                    existing is not None
-                    and int(existing["mtime_ns"]) == mtime_ns
-                    and int(existing["size_bytes"]) == size_bytes
-                ):
+                existing = existing_metadata.get(rel)
+                if existing is not None and existing == (mtime_ns, size_bytes):
                     skipped_files += 1
                     continue
                 try:
@@ -355,9 +354,7 @@ class ContextService:
                     (rel, text, "\n".join(symbols)),
                 )
                 indexed_files += 1
-            indexed_paths = {
-                str(row["path"]) for row in conn.execute("SELECT path FROM files").fetchall()
-            }
+            indexed_paths = set(existing_metadata)
             stale_paths = indexed_paths - seen_paths
             if stale_paths:
                 conn.executemany(
