@@ -40,7 +40,13 @@ The derived store lives in SQLite and is rebuilt from Markdown:
 - searchable items table for typed bullets, headings, and paragraphs
 - FTS5 virtual table for lexical recall over canonical snippets
 
-The current implementation is intentionally Markdown-canonical and local-only. It does not depend on remote embeddings or a vector service.
+Tier One extends the same Markdown-canonical design with optional dense retrieval:
+
+- SQLite remains the source for lexical recall, governance, and canonical provenance
+- Qdrant can be enabled as a loopback dense sidecar
+- embeddings can target either a local compatible HTTP endpoint or a cloud router
+
+The default shipped config keeps dense retrieval disabled until an operator enables it.
 
 ## OpenClaw Compatibility
 
@@ -82,6 +88,15 @@ openclaw memory status --json
 ```
 
 The shipped example config points the plugin at [platform/configs/memory/memory-v2.yaml](../configs/memory/memory-v2.yaml) and uses the installed `clawops` command.
+
+For the integrated context-engine + memory stack, use the combined overlay:
+
+```bash
+PYTHONPATH=src python3 -m clawops.openclaw_config \
+  --template platform/configs/openclaw/77-lossless-hypermemory-tier1.example.json5 \
+  --repo-root "$(pwd)" \
+  --output /tmp/strongclaw-lossless-memory-v2.json
+```
 
 ## Direct CLI Usage
 
@@ -158,3 +173,6 @@ plugin-backed search surface directly.
 - memory v2 is loaded through `plugins.load.paths` and `plugins.slots.memory`
 - auto-recall and auto-reflect exist in the plugin, but both default to `false`
 - plugin runtime code is trusted in-process OpenClaw code, so keep the plugin path explicitly controlled
+- dense retrieval is opt-in through `platform/configs/memory/memory-v2.yaml`
+- the Tier One sidecar surface is `platform/compose/docker-compose.aux-stack.yaml`
+- local model operators can layer `platform/compose/docker-compose.ollama.optional.yaml`

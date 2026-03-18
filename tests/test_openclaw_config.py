@@ -198,6 +198,24 @@ def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
     ]
 
 
+def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_overlay(
+        template_path=repo_root
+        / "platform/configs/openclaw/77-lossless-hypermemory-tier1.example.json5",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    assert rendered["plugins"]["slots"]["contextEngine"] == "lossless-claw"
+    assert rendered["plugins"]["slots"]["memory"] == "strongclaw-memory-v2"
+    assert rendered["plugins"]["load"]["paths"] == [
+        f"{repo_root.as_posix()}/vendor/lossless-claw",
+        f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2",
+    ]
+
+
 def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_overlay(

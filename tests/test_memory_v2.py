@@ -5,10 +5,18 @@ from __future__ import annotations
 import json
 import pathlib
 import textwrap
+from dataclasses import replace
+from typing import Any
 
 import pytest
 
-from clawops.memory_v2 import MemoryV2Engine, default_config_path, load_config, main
+from clawops.memory_v2 import (
+    DenseSearchCandidate,
+    MemoryV2Engine,
+    default_config_path,
+    load_config,
+    main,
+)
 
 
 def _write_memory_v2_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -73,6 +81,9 @@ def test_load_shipped_memory_v2_config() -> None:
     assert config.include_default_memory is True
     assert config.db_path.name == "memory-v2.sqlite"
     assert any(entry.name == "runbooks" for entry in config.corpus_paths)
+    assert config.backend.active == "sqlite_fts"
+    assert config.hybrid.fusion == "rrf"
+    assert config.qdrant.enabled is False
 
 
 def test_memory_v2_reindex_and_search(tmp_path: pathlib.Path) -> None:
@@ -257,6 +268,121 @@ def test_memory_v2_get_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
     engine = MemoryV2Engine(load_config(config_path))
 
     assert engine.read("memory/2099-01-01.md") == {"path": "memory/2099-01-01.md", "text": ""}
+
+
+class _FakeEmbeddingProvider:
+    def __init__(self, vector: list[float]) -> None:
+        self.vector = vector
+        self.calls: list[list[str]] = []
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [list(self.vector) for _ in texts]
+
+
+class _FakeQdrantBackend:
+    def __init__(self) -> None:
+        self.ensure_calls: list[int] = []
+        self.upsert_calls: list[list[dict[str, Any]]] = []
+        self.delete_calls: list[list[str]] = []
+        self.search_results: list[DenseSearchCandidate] = []
+        self.raise_on_search = False
+
+    def health(self) -> dict[str, Any]:
+        return {"enabled": True, "healthy": True, "collection": "test"}
+
+    def ensure_collection(self, *, vector_size: int) -> None:
+        self.ensure_calls.append(vector_size)
+
+    def upsert_points(self, points: list[dict[str, Any]]) -> None:
+        self.upsert_calls.append(list(points))
+
+    def delete_points(self, point_ids: list[str]) -> None:
+        self.delete_calls.append(list(point_ids))
+
+    def search(
+        self, *, vector: list[float], limit: int, mode: str, scope: str | None
+    ) -> list[DenseSearchCandidate]:
+        del vector, limit, mode, scope
+        if self.raise_on_search:
+            raise RuntimeError("dense backend unavailable")
+        return list(self.search_results)
+
+
+def test_memory_v2_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_dense_hybrid"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-test"),
+    )
+    engine = MemoryV2Engine(config)
+    fake_embedder = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._embedding_provider = fake_embedder
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+
+    hits = engine.search("credential rollover checklist", lane="all")
+
+    assert hits
+    assert hits[0].path == "docs/runbook.md"
+    assert hits[0].backend == "qdrant_dense_hybrid"
+    assert fake_qdrant.ensure_calls
+    assert fake_qdrant.upsert_calls
+
+
+def test_memory_v2_dense_backend_falls_back_to_sqlite(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-test"),
+    )
+    engine = MemoryV2Engine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    fake_qdrant.raise_on_search = True
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    hits = engine.search("gateway token", lane="all")
+
+    assert hits
+    assert hits[0].path == "docs/runbook.md"
+    assert hits[0].backend == "sqlite_fts"
 
 
 def test_memory_v2_cli_search_json(
