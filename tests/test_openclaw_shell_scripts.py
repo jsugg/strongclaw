@@ -741,7 +741,7 @@ def test_install_script_skip_bootstrap_supports_post_bootstrap_followups(
     ]
 
 
-def test_preflight_host_requires_homebrew_for_darwin(tmp_path: pathlib.Path) -> None:
+def test_preflight_requires_homebrew_for_darwin(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = _build_tool_path(tmp_path, ["dirname"])
     (bin_dir / "uname").write_text("#!/bin/bash\nprintf 'Darwin\\n'\n", encoding="utf-8")

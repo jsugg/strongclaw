@@ -6,4 +6,3 @@ paths:
 paths-ignore:
   - platform/compose/state
   - platform/skills/quarantine
-  - platform/plugins/memory-lancedb-pro
