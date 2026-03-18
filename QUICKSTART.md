@@ -6,17 +6,26 @@ For host-native runtime-user provisioning and service-manager activation, use
 [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md) alongside
 this guide.
 
-## 1. Install the repo helper package
+## 1. Install the runtime package
 
 ```bash
-python3 -m pip install -e .
-make test
+make install
 ```
 
-## 2. Bootstrap the host
+If you plan to develop on this repo, install `uv` and use `make dev` plus
+`make test` separately. `uv` is not required for operator bootstrap.
+
+## 2. Prepare the Varlock env contract
 
 ```bash
-./scripts/bootstrap/bootstrap_host.sh
+cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
+$EDITOR platform/configs/varlock/.env.local
+```
+
+## 3. Bring up the host baseline
+
+```bash
+./scripts/bootstrap/install.sh
 ```
 
 That script:
@@ -25,12 +34,16 @@ That script:
 - runs the matching host preflight before attempting package installs
 - creates the repo-local directories under `platform/`
 - installs or verifies host package prerequisites
+- uses an existing Docker-compatible runtime when one is already installed
+- installs Docker only when no Docker-compatible runtime is detected
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the default QMD semantic memory backend
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
-- renders launchd or systemd service templates
+- validates the repo-local Varlock env contract under `platform/configs/varlock`
+- renders and activates launchd or systemd service templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
+- runs the baseline verification gate
 
 You can rerun the host doctor directly after any local change that might affect
 the rendered config or CLI toolchain:
@@ -39,7 +52,14 @@ the rendered config or CLI toolchain:
 ./scripts/bootstrap/doctor_host.sh
 ```
 
-## 3. Render and install the OpenClaw config
+If Linux bootstrap just added the runtime user to the `docker` group, start a
+fresh login shell as that user and rerun:
+
+```bash
+./scripts/bootstrap/install.sh --skip-bootstrap
+```
+
+## 4. Rerender the OpenClaw config when you change profiles
 
 ```bash
 ./scripts/bootstrap/render_openclaw_config.sh
@@ -70,20 +90,7 @@ The rendered config enables QMD-backed memory retrieval by default and indexes:
 - `memory.md`
 - `platform/workspace/shared/MEMORY.md`
 
-## 4. Start sidecars
-
-```bash
-./scripts/bootstrap/bootstrap_sidecars.sh
-./scripts/bootstrap/verify_sidecars.sh
-```
-
-This starts:
-
-- Postgres
-- LiteLLM
-- OpenTelemetry Collector
-
-## 5. Verify the baseline
+## 5. Verify the baseline again on demand
 
 ```bash
 ./scripts/bootstrap/verify_baseline.sh

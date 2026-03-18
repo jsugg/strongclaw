@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_PATH="$ROOT/platform/configs/varlock"
-# shellcheck source=../lib/openclaw.sh
+# shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
 
 require_openclaw "Gateway launch requires the OpenClaw CLI."

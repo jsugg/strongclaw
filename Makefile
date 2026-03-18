@@ -11,7 +11,7 @@ CONTEXT_CONFIG ?= platform/configs/context/context-service.yaml
 REPO_DIR ?= .
 RUNS_DIR ?= ./.runs
 
-.PHONY: help install dev fmt lint imports typecheck actionlint precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: help install dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -41,12 +41,16 @@ typecheck: ## Run mypy and pyright.
 actionlint: ## Run the actionlint pre-commit hook.
 	$(PRE_COMMIT) run actionlint --all-files
 
+shellcheck: ## Run ShellCheck through the pre-commit hook.
+	$(PRE_COMMIT) run shellcheck --all-files
+
 precommit: ## Apply mutating hooks, then verify the full pre-commit stack.
 	$(PRE_COMMIT) run end-of-file-fixer --all-files
 	$(PRE_COMMIT) run trailing-whitespace --all-files
 	$(PRE_COMMIT) run isort --all-files
 	$(PRE_COMMIT) run ruff-check --all-files
 	$(PRE_COMMIT) run black --all-files
+	$(PRE_COMMIT) run shellcheck --all-files
 	$(PRE_COMMIT) run --all-files
 
 dev-check: precommit ## Run pre-commit, tests, and a compile smoke.

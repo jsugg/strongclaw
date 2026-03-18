@@ -12,6 +12,7 @@ from typing import Any, Literal, cast
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import (
+    HttpTimeouts,
     JsonHttpClient,
     RetryPolicy,
     WrapperContext,
@@ -29,8 +30,15 @@ type MergeMethod = Literal["merge", "squash", "rebase"]
 type GitHubOperation = Literal["comment", "labels", "merge"]
 
 COMMENT_RETRY_POLICY = RetryPolicy.no_retry(name="github.comment.create")
-LABELS_RETRY_POLICY = RetryPolicy.no_retry(name="github.issue.labels.add")
+LABELS_RETRY_POLICY = RetryPolicy(
+    name="github.issue.labels.add",
+    max_attempts=3,
+    retryable_status_codes=frozenset({429, 502, 503, 504}),
+    base_delay_seconds=0.25,
+    jitter_seconds=0.1,
+)
 MERGE_RETRY_POLICY = RetryPolicy.no_retry(name="github.pull_request.merge")
+DEFAULT_GITHUB_TIMEOUTS = HttpTimeouts(connect_seconds=5.0, read_seconds=25.0)
 
 
 def _decision_payload(*, trust_zone: str, action: str, category: str, repo: str) -> dict[str, str]:
@@ -133,7 +141,7 @@ def create_comment(
     if prepared.result is not None:
         return prepared.result
 
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_GITHUB_TIMEOUTS)
     return execute_http_operation(
         ctx=ctx,
         op=prepared.operation,
@@ -175,7 +183,7 @@ def add_labels(
     if prepared.result is not None:
         return prepared.result
 
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_GITHUB_TIMEOUTS)
     return execute_http_operation(
         ctx=ctx,
         op=prepared.operation,
@@ -224,7 +232,7 @@ def merge_pull_request(
     if prepared.result is not None:
         return prepared.result
 
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_GITHUB_TIMEOUTS)
     return execute_http_operation(
         ctx=ctx,
         op=prepared.operation,
@@ -241,7 +249,7 @@ def merge_pull_request(
 def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any]:
     """Execute an already-approved GitHub operation."""
     op = ctx.journal.get(op_id)
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_GITHUB_TIMEOUTS)
     issue_match = GITHUB_ISSUE_TARGET_RE.match(op.normalized_target)
     if op.kind == "github_comment" and issue_match is not None:
         payload = _load_json_object(op.inputs_json)

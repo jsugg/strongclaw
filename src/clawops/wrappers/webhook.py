@@ -10,6 +10,7 @@ from typing import Any
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import (
+    HttpTimeouts,
     JsonHttpClient,
     RetryPolicy,
     WrapperContext,
@@ -19,6 +20,7 @@ from clawops.wrappers.base import (
 )
 
 WEBHOOK_RETRY_POLICY = RetryPolicy.no_retry(name="webhook.post")
+DEFAULT_WEBHOOK_TIMEOUTS = HttpTimeouts(connect_seconds=5.0, read_seconds=25.0)
 
 
 def _decision_payload_from_operation(op: Operation) -> dict[str, str]:
@@ -60,7 +62,7 @@ def invoke_webhook(
     if prepared.result is not None:
         return prepared.result
 
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_WEBHOOK_TIMEOUTS)
     return execute_http_operation(
         ctx=ctx,
         op=prepared.operation,
@@ -85,7 +87,7 @@ def execute_webhook_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, An
         decision_payload=_decision_payload_from_operation(op),
     )
     payload_body = json.loads(op.inputs_json)
-    client = JsonHttpClient(timeout=30)
+    client = JsonHttpClient(timeout=DEFAULT_WEBHOOK_TIMEOUTS)
     return execute_http_operation(
         ctx=ctx,
         op=op,
