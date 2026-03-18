@@ -19,7 +19,7 @@ This avoids the upstream `command:new` / `command:reset` typed-hook incompatibil
   compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB
   `0.26.2` publishes Apple binaries for `darwin-arm64` but not `darwin-x64`.
 - The shared verification path still runs in GitHub Actions and through
-  `scripts/ci/run_memory_plugin_verification.sh`, but Intel macOS hosts now use
+  `scripts/ci/verify_vendored_memory_plugin.sh`, but Intel macOS hosts now use
   the same compatibility matrix locally instead of hard-failing.
 
 ## Review notes

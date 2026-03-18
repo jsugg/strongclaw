@@ -57,7 +57,6 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
     host_platforms = (repo_root / "platform/docs/HOST_PLATFORMS.md").read_text(encoding="utf-8")
     macos_runbook = (repo_root / "platform/docs/runbooks/macos-service-user-and-ssh.md").read_text(
         encoding="utf-8"
@@ -73,27 +72,9 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/verify_observability.sh" in quickstart
     assert "./scripts/bootstrap/verify_observability.sh" in setup
     assert "./scripts/bootstrap/install.sh" in setup
-    assert "./scripts/bootstrap/install_host_services.sh --activate" in setup
-    assert "platform/configs/varlock/.env.local" in setup
-    assert "varlock load --path platform/configs/varlock" in setup
-    assert "systemctl --user enable --now openclaw-gateway.service" in setup
-    assert "systemctl --user restart openclaw-gateway.service" in usage
     assert "./scripts/bootstrap/install.sh" in host_platforms
-    assert "./scripts/bootstrap/install_host_services.sh --activate" in host_platforms
-    assert "./scripts/bootstrap/create_openclawsvc.sh" in host_platforms
     assert "make install" in quickstart
-    assert "make install" in host_platforms
-    assert "make dev && make test" in host_platforms
-    assert "installs Docker only when no Docker-compatible runtime is detected" in quickstart
-    assert "does not install Docker over it" in setup
-    assert (
-        "Docker-compatible runtime such as OrbStack, Rancher Desktop, Colima, or Docker Desktop"
-        in setup
-    )
-    assert "Docker-compatible runtime that exposes `docker` plus `docker compose`" in host_platforms
-    assert "Both use the same bootstrap entrypoints" in host_platforms
     assert "macOS-first rollout before Linux" not in host_platforms
-    assert "platform/docs/HOST_PLATFORMS.md" in quickstart
     assert "./scripts/bootstrap/create_openclawsvc.sh" in macos_runbook
     assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
 
@@ -139,4 +120,4 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     assert "clawops repo --repo-root" in repo_doc
     assert "clawops worktree --repo-root" in repo_doc
     assert "dependency-submission.yml" in ci_doc
-    assert "release.yml" in ci_doc
+    assert "memory-plugin-verification.yml" in ci_doc

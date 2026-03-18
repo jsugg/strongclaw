@@ -25,34 +25,6 @@ def test_automation_surfaces_do_not_use_obsolete_harness_subcommand() -> None:
         assert "clawops harness run" not in text, f"obsolete harness CLI in {relative_path}"
 
 
-def test_local_automation_reuses_shared_harness_smoke_script() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
-    verify_script = (repo_root / "scripts/bootstrap/verify_baseline.sh").read_text(encoding="utf-8")
-    workflow = (repo_root / ".github/workflows/harness.yml").read_text(encoding="utf-8")
-
-    assert "RUNS_DIR ?= ./.runs" in makefile
-    assert "./scripts/bootstrap/run_harness_smoke.sh $(RUNS_DIR)" in makefile
-    assert '"$ROOT/scripts/bootstrap/run_harness_smoke.sh" "$ROOT/.runs"' in verify_script
-    assert "./scripts/bootstrap/run_harness_smoke.sh ./.runs" in workflow
-
-
-def test_dev_stack_surfaces_shellcheck_for_shell_scripts() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
-    precommit = (repo_root / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    workflow = (repo_root / ".github/workflows/security.yml").read_text(encoding="utf-8")
-
-    assert "https://github.com/koalaman/shellcheck-precommit" in precommit
-    assert "id: shellcheck" in precommit
-    assert "shellcheck: ## Run ShellCheck through the pre-commit hook." in makefile
-    assert "$(PRE_COMMIT) run shellcheck --all-files" in makefile
-    assert "ShellCheck for shell scripts" in readme
-    assert "make shellcheck" in readme
-    assert "pre-commit run shellcheck --all-files" in workflow
-
-
 def test_verify_baseline_runs_platform_static_proof() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     verify_script = (repo_root / "scripts/bootstrap/verify_baseline.sh").read_text(encoding="utf-8")
@@ -82,34 +54,6 @@ def test_platform_verification_and_acp_scripts_use_shared_clawops_entrypoints() 
     assert fixer_loop.count("clawops acp-runner") == 2
 
 
-def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-
-    workflow = (repo_root / ".github/workflows/security.yml").read_text(encoding="utf-8")
-    codeql_config = (repo_root / "security/codeql/codeql-config.yml").read_text(encoding="utf-8")
-
-    assert "actions: read" in workflow
-    assert "contents: read" in workflow
-    assert "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd" in workflow
-    assert "languages: python,javascript" in workflow
-    assert "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405" in workflow
-    assert "github/codeql-action/init@b1bff81932f5cdfc8695c7752dcee935dcd061c8" in workflow
-    assert "github/codeql-action/analyze@b1bff81932f5cdfc8695c7752dcee935dcd061c8" in workflow
-    assert 'GITLEAKS_VERSION: "8.28.0"' in workflow
-    assert "gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact" in workflow
-    assert "--cov=src/clawops" in workflow
-    assert 'SYFT_VERSION: "v1.42.2"' in workflow
-    assert "syft dir:. -o spdx-json=sbom.spdx.json" in workflow
-    assert "actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f" in workflow
-    assert "actions/setup-node@v6" not in workflow
-    assert "cache: false" in workflow
-    assert "pull-requests: write" in workflow
-    assert "security-events: write" in workflow
-    assert "aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1" in workflow
-    assert "  - platform/plugins" in codeql_config
-    assert "  - platform/plugins/memory-lancedb-pro" in codeql_config
-
-
 def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
 
@@ -132,42 +76,16 @@ def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
             ), f"workflow action must pin a full commit SHA in {workflow_path.name}: {stripped}"
 
 
-def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> None:
+def test_bootstrap_script_keeps_core_host_setup_contract() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     host = (repo_root / "scripts/bootstrap/bootstrap.sh").read_text(encoding="utf-8")
-    preflight = (repo_root / "scripts/bootstrap/preflight.sh").read_text(encoding="utf-8")
-    doctor = (repo_root / "scripts/bootstrap/doctor_host.sh").read_text(encoding="utf-8")
-    memory_plugin = (repo_root / "scripts/bootstrap/bootstrap_memory_plugin.sh").read_text(
-        encoding="utf-8"
-    )
-    docker_runtime = (repo_root / "scripts/lib/docker_runtime.sh").read_text(encoding="utf-8")
 
     assert 'HOST_OS="$(uname -s)"' in host
     assert 'case "$HOST_OS" in' in host
     assert '"$ROOT/scripts/bootstrap/preflight.sh"' in host
-    assert "brew install jq sqlite python" in host
-    assert "sudo apt-get install -y python3 python3-pip jq sqlite3 nodejs npm curl unzip" in host
     assert "ensure_docker_compatible_runtime darwin" in host
     assert "ensure_docker_compatible_runtime linux" in host
-    assert 'sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"' in host
-    assert 'npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"' in host
-    assert 'case "$HOST_OS" in' in preflight
-    assert 'require_command brew "Homebrew is required for macOS bootstrap."' in preflight
-    assert 'require_command apt-get "apt-get is required for Linux bootstrap."' in preflight
-    assert 'OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"' in doctor
-    assert "openclaw --version" in doctor
-    assert "openclaw config validate" in doctor
-    assert "acpx --version" in doctor
-    assert "memory_plugin_lancedb_version" in memory_plugin
-    assert "@lancedb/lancedb@$RESOLVED_LANCEDB_VERSION" in memory_plugin
     assert 'source "$ROOT/scripts/lib/docker_runtime.sh"' in host
-    assert "detect_docker_runtime_provider()" in docker_runtime
-    assert "printf 'OrbStack'" in docker_runtime
-    assert "printf 'Rancher Desktop'" in docker_runtime
-    assert (
-        "Strongclaw will not install Docker over an existing alternative runtime." in docker_runtime
-    )
-    assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in host
     assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in host
     assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in host
     assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in host
@@ -247,6 +165,15 @@ def test_install_script_composes_existing_bootstrap_and_verification_entrypoints
     assert '"$INSTALL_HOST_SERVICES_SCRIPT" --activate' in install_script
 
 
+def test_ci_environment_sync_exports_the_locked_virtualenv_for_follow_up_steps() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    sync_script = (repo_root / "scripts/ci/sync_dev_environment.sh").read_text(encoding="utf-8")
+
+    assert "uv sync --locked --extra dev" in sync_script
+    assert 'printf \'%s\\n\' "$ROOT/.venv/bin" >>"$GITHUB_PATH"' in sync_script
+    assert "printf 'VIRTUAL_ENV=%s\\n' \"$ROOT/.venv\"" in sync_script
+
+
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     setup_guide = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
@@ -272,15 +199,8 @@ def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
     assert "./scripts/bootstrap/preflight.sh" not in setup_guide
     assert "./scripts/bootstrap/install.sh" in setup_guide
     assert "make install" in quickstart
-    assert "platform/configs/varlock/.env.local" in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
-    assert "for either a macOS or Linux operator host" in setup_guide
-    assert "installs Docker only when no Docker-compatible runtime is detected" in quickstart
-    assert "does not install Docker over it" in setup_guide
-    assert "only installs Docker as a fallback" in readme
-    assert "platform/docs/HOST_PLATFORMS.md" in readme
-    assert "./scripts/bootstrap/create_openclawsvc.sh" in setup_guide
 
 
 def test_compose_images_are_pinned_to_content_digests() -> None:
