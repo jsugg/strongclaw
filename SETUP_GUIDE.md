@@ -1,36 +1,49 @@
 # Setup Guide
 
-This guide is the full bring-up order. It assumes macOS 13+ for the first host and a later Linux migration.
+This guide is the full bring-up order for either a macOS or Linux operator host.
 
 ## 0. Preconditions
 
 You need:
 
-- Homebrew
-- Docker backend (OrbStack preferred on the existing Mac)
+- a private clone of this repo
 - Python 3.12+
 - Node 24+ preferred, Node 22.16+ minimum
-- a dedicated standard macOS user for the OpenClaw runtime
-- a private clone of this repo
+- a dedicated non-admin runtime user for OpenClaw
+- a supported package manager for the host bootstrap path
+- Docker backend
 
-## 1. Create the service user
+Host-specific notes:
 
-Run:
+- macOS: Homebrew and a Docker backend such as OrbStack or Docker Desktop
+- Linux: `apt-get`, `sudo`, `curl`, and Docker Engine or rootless Docker
+
+## 1. Provision the runtime user
 
 ```bash
-sudo ./scripts/bootstrap/create_openclawsvc_macos.sh
+sudo ./scripts/bootstrap/create_openclawsvc.sh
 ```
 
-Then switch into it locally or via loopback SSH:
+Then switch into the runtime account with the host-native path.
+
+macOS:
 
 ```bash
 ssh openclawsvc@localhost
 ```
 
-The SSH loopback method is documented in:
-`platform/docs/runbooks/macos-service-user-and-ssh.md`
+Linux:
 
-## 2. Clone the repo as the service user
+```bash
+sudo -iu openclawsvc
+```
+
+Runbooks:
+
+- macOS: `platform/docs/runbooks/macos-service-user-and-ssh.md`
+- Linux: `platform/docs/runbooks/linux-runtime-user-and-systemd.md`
+
+## 2. Clone the repo as the runtime user
 
 ```bash
 mkdir -p ~/Projects
@@ -110,12 +123,27 @@ Use profile rerenders for placeholder-backed variants:
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```
 
-## 7. Install launchd services
+## 7. Install services
 
 ```bash
-./scripts/bootstrap/install_launchd_services.sh
+./scripts/bootstrap/install_host_services.sh
+```
+
+Then activate the rendered services with the native service manager.
+
+macOS:
+
+```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.gateway.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.sidecars.plist
+```
+
+Linux:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now openclaw-sidecars.service
+systemctl --user enable --now openclaw-gateway.service
 ```
 
 Or run manually first:
@@ -250,7 +278,7 @@ First start OTEL only:
 ./scripts/bootstrap/verify_observability.sh
 ```
 
-Optional: start Langfuse on a separate VM or later on Linux using:
+Optional: start Langfuse on a separate VM or separate sidecar host using:
 
 ```bash
 docker compose -f platform/compose/docker-compose.langfuse.optional.yaml up -d
@@ -313,14 +341,13 @@ Push the repo and enable branch protection. The included workflows provide:
 - nightly regression
 - upstream merge gate
 
-## 16. Linux migration
+## 16. Linux host notes
 
-When you move to Linux:
+When you run on Linux:
 
-1. install rootless Docker
-2. copy `.env` contract and config overlays
-3. reuse `platform/systemd/*`
-4. move browser lab to a separate runner
-5. keep channel ingress private/tailnet-only
+1. prefer rootless Docker or a locked-down `docker` group for the runtime user
+2. render user units with `./scripts/bootstrap/install_host_services.sh`
+3. keep browser lab on a separate runner
+4. keep channel ingress private or tailnet-only
 
-See `platform/docs/LINUX_MIGRATION.md`.
+See `platform/docs/HOST_PLATFORMS.md`.

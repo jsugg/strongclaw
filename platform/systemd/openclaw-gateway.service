@@ -5,12 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
-ExecStart=/bin/bash -lc './scripts/ops/launch_gateway_with_varlock.sh'
+WorkingDirectory=__REPO_ROOT__
+Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
+ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_gateway_with_varlock.sh'
 Restart=always
 RestartSec=5
-User=openclaw
-Group=openclaw
 NoNewPrivileges=true
 
 [Install]

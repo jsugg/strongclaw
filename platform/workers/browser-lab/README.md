@@ -4,7 +4,7 @@ This directory contains the isolated browser automation scaffolding.
 
 The browser lab must run on:
 - a separate host, or
-- a separate OS user plus isolated compose stack, preferably on Linux
+- a separate OS user plus isolated compose stack
 
 Operator access should tunnel only the gateway port:
 

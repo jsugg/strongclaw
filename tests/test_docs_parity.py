@@ -57,6 +57,14 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    host_platforms = (repo_root / "platform/docs/HOST_PLATFORMS.md").read_text(encoding="utf-8")
+    macos_runbook = (repo_root / "platform/docs/runbooks/macos-service-user-and-ssh.md").read_text(
+        encoding="utf-8"
+    )
+    linux_runbook = (
+        repo_root / "platform/docs/runbooks/linux-runtime-user-and-systemd.md"
+    ).read_text(encoding="utf-8")
 
     assert "./scripts/bootstrap/verify_sidecars.sh" in readme
     assert "./scripts/bootstrap/verify_sidecars.sh" in quickstart
@@ -64,6 +72,16 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/verify_channels.sh" in setup
     assert "./scripts/bootstrap/verify_observability.sh" in quickstart
     assert "./scripts/bootstrap/verify_observability.sh" in setup
+    assert "./scripts/bootstrap/install_host_services.sh" in setup
+    assert "systemctl --user enable --now openclaw-gateway.service" in setup
+    assert "systemctl --user restart openclaw-gateway.service" in usage
+    assert "./scripts/bootstrap/install_host_services.sh" in host_platforms
+    assert "./scripts/bootstrap/create_openclawsvc.sh" in host_platforms
+    assert "Both use the same bootstrap entrypoints" in host_platforms
+    assert "macOS-first rollout before Linux" not in host_platforms
+    assert "platform/docs/HOST_PLATFORMS.md" in quickstart
+    assert "./scripts/bootstrap/create_openclawsvc.sh" in macos_runbook
+    assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
 
 
 def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:

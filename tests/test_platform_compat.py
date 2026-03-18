@@ -10,9 +10,8 @@ from clawops.platform_compat import (
     detect_host_platform,
     normalize_architecture,
     normalize_os_name,
-    resolve_bootstrap_script,
     resolve_memory_plugin_lancedb_version,
-    resolve_preflight_script,
+    resolve_service_manager,
 )
 
 
@@ -30,14 +29,9 @@ def test_detect_host_platform_normalizes_inputs() -> None:
     assert host == HostPlatform(os_name="darwin", architecture="x86_64")
 
 
-def test_bootstrap_script_matches_supported_operating_systems() -> None:
-    assert resolve_bootstrap_script(HostPlatform("darwin", "arm64")) == "bootstrap_macos.sh"
-    assert resolve_bootstrap_script(HostPlatform("linux", "x86_64")) == "bootstrap_linux.sh"
-
-
-def test_preflight_script_matches_supported_operating_systems() -> None:
-    assert resolve_preflight_script(HostPlatform("darwin", "arm64")) == "preflight_macos.sh"
-    assert resolve_preflight_script(HostPlatform("linux", "x86_64")) == "preflight_linux.sh"
+def test_service_manager_matches_supported_operating_systems() -> None:
+    assert resolve_service_manager(HostPlatform("darwin", "arm64")) == "launchd"
+    assert resolve_service_manager(HostPlatform("linux", "x86_64")) == "systemd"
 
 
 def test_memory_plugin_lancedb_version_uses_intel_mac_fallback_only() -> None:
@@ -58,8 +52,7 @@ def test_memory_plugin_lancedb_version_uses_intel_mac_fallback_only() -> None:
 def test_build_compatibility_record_reports_when_override_is_required() -> None:
     record = build_compatibility_record(HostPlatform("darwin", "x86_64"))
 
-    assert record["preflight_script"] == "preflight_macos.sh"
-    assert record["bootstrap_script"] == "bootstrap_macos.sh"
+    assert record["service_manager"] == "launchd"
     assert record["memory_plugin_lancedb_version"] == DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_default_lancedb_version"] == DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_override_required"] is True

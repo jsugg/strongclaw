@@ -44,3 +44,24 @@ def test_plugin_verification_docs_describe_linux_ci_gate() -> None:
     assert "AWS credential env vars" in ci_doc
     assert "darwin/x86_64" in vendor_note
     assert "@lancedb/lancedb@0.22.3" in vendor_note
+
+
+def test_vendored_plugin_test_helper_supports_macos_and_linux_global_module_paths() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    helper = (
+        repo_root / "platform/plugins/memory-lancedb-pro/test/helpers/node-path.mjs"
+    ).read_text(encoding="utf-8")
+    runtime = (repo_root / "platform/plugins/memory-lancedb-pro/index.ts").read_text(
+        encoding="utf-8"
+    )
+    cli_smoke = (repo_root / "platform/plugins/memory-lancedb-pro/test/cli-smoke.mjs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/opt/homebrew/lib/node_modules" in helper
+    assert "/usr/local/lib/node_modules" in helper
+    assert "/usr/lib/node_modules" in helper
+    assert "/opt/homebrew/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
+    assert "/usr/local/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
+    assert "/usr/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
+    assert 'import { initGlobalNodePath } from "./helpers/node-path.mjs";' in cli_smoke

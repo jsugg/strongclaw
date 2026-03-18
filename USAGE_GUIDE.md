@@ -15,8 +15,14 @@ Manual:
 Service mode:
 
 ```bash
+# macOS
 launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway
 launchctl kickstart -k gui/$(id -u)/ai.openclaw.sidecars
+
+# Linux
+systemctl --user daemon-reload
+systemctl --user restart openclaw-sidecars.service
+systemctl --user restart openclaw-gateway.service
 ```
 
 ## Health checks

@@ -127,8 +127,12 @@ def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> No
     macos = (repo_root / "scripts/bootstrap/bootstrap_macos.sh").read_text(encoding="utf-8")
     linux = (repo_root / "scripts/bootstrap/bootstrap_linux.sh").read_text(encoding="utf-8")
 
-    assert "clawops.platform_compat --field bootstrap_script" in host
-    assert "clawops.platform_compat --field preflight_script" in preflight
+    assert 'case "$(uname -s)" in' in host
+    assert 'exec "$ROOT/scripts/bootstrap/bootstrap_macos.sh" "$@"' in host
+    assert 'exec "$ROOT/scripts/bootstrap/bootstrap_linux.sh" "$@"' in host
+    assert 'case "$(uname -s)" in' in preflight
+    assert 'exec "$ROOT/scripts/bootstrap/preflight_macos.sh" "$@"' in preflight
+    assert 'exec "$ROOT/scripts/bootstrap/preflight_linux.sh" "$@"' in preflight
     assert 'OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"' in doctor
     assert "openclaw --version" in doctor
     assert "openclaw config validate" in doctor
@@ -144,6 +148,41 @@ def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> No
     assert '"$ROOT/scripts/bootstrap/preflight_macos.sh"' in macos
     assert '"$ROOT/scripts/bootstrap/preflight_linux.sh"' in linux
     assert "|| true" not in macos
+
+
+def test_service_installers_render_host_specific_service_templates() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    runtime_user = (repo_root / "scripts/bootstrap/create_openclawsvc.sh").read_text(
+        encoding="utf-8"
+    )
+    host = (repo_root / "scripts/bootstrap/install_host_services.sh").read_text(encoding="utf-8")
+    gateway_unit = (repo_root / "platform/systemd/openclaw-gateway.service").read_text(
+        encoding="utf-8"
+    )
+    sidecars_unit = (repo_root / "platform/systemd/openclaw-sidecars.service").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'HOST_OS="$(uname -s)"' in runtime_user
+    assert 'sudo sysadminctl -addUser "$USERNAME" -admin NO' in runtime_user
+    assert 'loginctl enable-linger "$USERNAME"' in runtime_user
+    assert 'case "$(uname -s)" in' in host
+    assert 'LAUNCHD_DIR="${LAUNCHD_DIR:-$HOME/Library/LaunchAgents}"' in host
+    assert 'SYSTEMD_DIR="${SYSTEMD_DIR:-$HOME/.config/systemd/user}"' in host
+    assert (
+        'echo "Run: launchctl bootstrap gui/$(id -u) $LAUNCHD_DIR/ai.openclaw.gateway.plist"'
+        in host
+    )
+    assert 'echo "Run: systemctl --user enable --now openclaw-gateway.service"' in host
+    assert "WorkingDirectory=__REPO_ROOT__" in gateway_unit
+    assert (
+        "ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_gateway_with_varlock.sh'"
+        in gateway_unit
+    )
+    assert (
+        "ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_sidecars_with_varlock.sh'"
+        in sidecars_unit
+    )
 
 
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
@@ -171,6 +210,9 @@ def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
     assert "./scripts/bootstrap/preflight_host.sh" in setup_guide
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
+    assert "for either a macOS or Linux operator host" in setup_guide
+    assert "platform/docs/HOST_PLATFORMS.md" in readme
+    assert "./scripts/bootstrap/create_openclawsvc.sh" in setup_guide
 
 
 def test_compose_images_are_pinned_to_content_digests() -> None:

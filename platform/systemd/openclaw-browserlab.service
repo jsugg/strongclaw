@@ -6,11 +6,10 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
-ExecStart=/bin/bash -lc 'docker compose -f platform/compose/docker-compose.browser-lab.yaml up -d'
-ExecStop=/bin/bash -lc 'docker compose -f platform/compose/docker-compose.browser-lab.yaml down'
-User=openclaw-browser
-Group=openclaw-browser
+WorkingDirectory=__REPO_ROOT__
+Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
+ExecStart=/bin/bash -lc 'docker compose -f __REPO_ROOT__/platform/compose/docker-compose.browser-lab.yaml up -d'
+ExecStop=/bin/bash -lc 'docker compose -f __REPO_ROOT__/platform/compose/docker-compose.browser-lab.yaml down'
 
 [Install]
 WantedBy=default.target
