@@ -7,6 +7,13 @@ import pathlib
 from collections.abc import Sequence
 from typing import Any, Literal
 
+Lane = Literal["memory", "corpus"]
+SearchMode = Literal["all", "memory", "corpus"]
+SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid"]
+FusionMode = Literal["rrf", "weighted"]
+EmbeddingProviderKind = Literal["disabled", "compatible-http"]
+RerankProviderKind = Literal["none"]
+
 DEFAULT_MEMORY_FILE_NAMES = ("MEMORY.md", "memory.md")
 DEFAULT_DAILY_DIR = "memory"
 DEFAULT_BANK_DIR = "bank"
@@ -17,9 +24,12 @@ DEFAULT_DEFAULT_SCOPE = "project:strongclaw"
 DEFAULT_READABLE_SCOPE_PATTERNS = ("project:", "agent:", "user:", "global")
 DEFAULT_WRITABLE_SCOPE_PATTERNS = ("project:", "agent:")
 DEFAULT_AUTO_APPLY_SCOPE_PATTERNS = ("project:", "agent:")
-
-Lane = Literal["memory", "corpus"]
-SearchMode = Literal["all", "memory", "corpus"]
+DEFAULT_SEARCH_BACKEND: SearchBackend = "sqlite_fts"
+DEFAULT_FALLBACK_BACKEND: SearchBackend = "sqlite_fts"
+DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderKind = "disabled"
+DEFAULT_RERANK_PROVIDER: RerankProviderKind = "none"
+DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
+DEFAULT_QDRANT_COLLECTION = "strongclaw-memory-v2"
 EntryType = Literal[
     "fact",
     "reflection",
@@ -67,6 +77,76 @@ class RankingConfig:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class BackendConfig:
+    """Active and fallback search backend settings."""
+
+    active: SearchBackend = DEFAULT_SEARCH_BACKEND
+    fallback: SearchBackend = DEFAULT_FALLBACK_BACKEND
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class EmbeddingConfig:
+    """Embedding provider configuration."""
+
+    enabled: bool = False
+    provider: EmbeddingProviderKind = DEFAULT_EMBEDDING_PROVIDER
+    model: str = ""
+    base_url: str = ""
+    api_key_env: str | None = None
+    api_key: str | None = None
+    dimensions: int | None = None
+    batch_size: int = 32
+    timeout_ms: int = 15_000
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RerankConfig:
+    """Optional reranking configuration."""
+
+    enabled: bool = False
+    provider: RerankProviderKind = DEFAULT_RERANK_PROVIDER
+    model: str = ""
+    base_url: str = ""
+    api_key_env: str | None = None
+    api_key: str | None = None
+    timeout_ms: int = 15_000
+    top_k: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HybridConfig:
+    """Hybrid retrieval configuration."""
+
+    dense_candidate_pool: int = 24
+    sparse_candidate_pool: int = 24
+    vector_weight: float = 0.65
+    text_weight: float = 0.35
+    fusion: FusionMode = "rrf"
+    rrf_k: int = 60
+    rerank_top_k: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QdrantConfig:
+    """Dense vector backend configuration."""
+
+    enabled: bool = False
+    url: str = DEFAULT_QDRANT_URL
+    collection: str = DEFAULT_QDRANT_COLLECTION
+    timeout_ms: int = 3_000
+    api_key_env: str | None = None
+    api_key: str | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class InjectionConfig:
+    """Prompt injection caps for auto-recall."""
+
+    max_results: int = 3
+    max_chars_per_result: int = 280
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class MemoryV2Config:
     """Validated memory-v2 configuration."""
 
@@ -82,6 +162,12 @@ class MemoryV2Config:
     default_max_results: int
     governance: GovernanceConfig
     ranking: RankingConfig
+    backend: BackendConfig = dataclasses.field(default_factory=BackendConfig)
+    embedding: EmbeddingConfig = dataclasses.field(default_factory=EmbeddingConfig)
+    rerank: RerankConfig = dataclasses.field(default_factory=RerankConfig)
+    hybrid: HybridConfig = dataclasses.field(default_factory=HybridConfig)
+    qdrant: QdrantConfig = dataclasses.field(default_factory=QdrantConfig)
+    injection: InjectionConfig = dataclasses.field(default_factory=InjectionConfig)
 
     @property
     def proposals_path(self) -> pathlib.Path:
@@ -132,6 +218,8 @@ class SearchExplanation:
     confidence_boost: float
     recency_boost: float
     contradiction_penalty: float
+    dense_score: float = 0.0
+    fusion_score: float = 0.0
     novelty_penalty: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
@@ -144,8 +232,19 @@ class SearchExplanation:
             "confidenceBoost": round(self.confidence_boost, 6),
             "recencyBoost": round(self.recency_boost, 6),
             "contradictionPenalty": round(self.contradiction_penalty, 6),
+            "denseScore": round(self.dense_score, 6),
+            "fusionScore": round(self.fusion_score, 6),
             "noveltyPenalty": round(self.novelty_penalty, 6),
         }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DenseSearchCandidate:
+    """Dense search result from the vector backend."""
+
+    item_id: int
+    point_id: str
+    score: float
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -166,6 +265,7 @@ class SearchHit:
     evidence_count: int = 0
     contradiction_count: int = 0
     explanation: SearchExplanation | None = None
+    backend: SearchBackend = DEFAULT_SEARCH_BACKEND
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the hit to a serializable dictionary."""
@@ -178,6 +278,7 @@ class SearchHit:
             "source": self.source,
             "lane": self.lane,
             "itemType": self.item_type,
+            "backend": self.backend,
         }
         if self.confidence is not None:
             payload["confidence"] = self.confidence

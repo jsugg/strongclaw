@@ -8,6 +8,7 @@ import pathlib
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -15,14 +16,19 @@ from clawops.common import ensure_parent
 from clawops.memory_v2.config import MemoryV2Config, matches_glob, resolve_under_workspace
 from clawops.memory_v2.governance import ensure_writable_scope, should_auto_apply, validate_scope
 from clawops.memory_v2.models import (
+    DenseSearchCandidate,
+    FusionMode,
     ProposalRecord,
     ReflectionMode,
     ReflectionSummary,
     ReindexSummary,
+    SearchBackend,
     SearchHit,
     SearchMode,
 )
 from clawops.memory_v2.parser import build_document, iter_retained_notes, parse_typed_entry
+from clawops.memory_v2.providers import create_embedding_provider, create_rerank_provider
+from clawops.memory_v2.qdrant_backend import QdrantBackend
 from clawops.memory_v2.retrieval import search_index
 from clawops.memory_v2.schema import SCHEMA_VERSION, ensure_schema
 
@@ -51,6 +57,9 @@ class MemoryV2Engine:
 
     def __init__(self, config: MemoryV2Config) -> None:
         self.config = config
+        self._embedding_provider = create_embedding_provider(config.embedding)
+        self._rerank_provider = create_rerank_provider(config.rerank)
+        self._qdrant_backend = QdrantBackend(config.qdrant)
 
     def connect(self) -> sqlite3.Connection:
         """Open a configured SQLite connection."""
@@ -65,12 +74,17 @@ class MemoryV2Engine:
         with self.connect() as conn:
             document_count = self._count_rows(conn, "documents")
             item_count = self._count_rows(conn, "search_items")
+            vector_items = self._count_rows(conn, "vector_items")
             facts = self._count_rows(conn, "facts")
             opinions = self._count_rows(conn, "opinions")
             reflections = self._count_rows(conn, "reflections")
             entities = self._count_rows(conn, "entities")
             proposals = self._count_rows(conn, "proposals")
             conflicts = self._count_rows(conn, "conflicts")
+            backend_fingerprint = self._backend_state_value(conn, "config_fingerprint")
+            last_sync_at = self._backend_state_value(conn, "last_sync_at")
+            last_sync_error = self._backend_state_value(conn, "last_sync_error")
+        qdrant_health = self._qdrant_backend.health()
         return {
             "ok": True,
             "provider": "strongclaw-memory-v2",
@@ -78,14 +92,24 @@ class MemoryV2Engine:
             "workspaceRoot": self.config.workspace_root.as_posix(),
             "dbPath": self.config.db_path.as_posix(),
             "dirty": self.is_dirty(),
+            "backendActive": self.config.backend.active,
+            "backendFallback": self.config.backend.fallback,
+            "backendConfigDirty": backend_fingerprint != self._backend_fingerprint(),
             "documents": document_count,
             "searchItems": item_count,
+            "vectorItems": vector_items,
             "facts": facts,
             "opinions": opinions,
             "reflections": reflections,
             "entities": entities,
             "proposals": proposals,
             "conflicts": conflicts,
+            "embeddingEnabled": self.config.embedding.enabled,
+            "embeddingProvider": self.config.embedding.provider,
+            "embeddingModel": self.config.embedding.model,
+            "qdrant": qdrant_health,
+            "lastVectorSyncAt": last_sync_at,
+            "lastVectorSyncError": last_sync_error,
             "defaultScope": self.config.governance.default_scope,
             "readableScopes": list(self.config.governance.readable_scope_patterns),
             "writableScopes": list(self.config.governance.writable_scope_patterns),
@@ -99,17 +123,22 @@ class MemoryV2Engine:
                 str(row["rel_path"]): str(row["sha256"])
                 for row in conn.execute("SELECT rel_path, sha256 FROM documents")
             }
+            backend_fingerprint = self._backend_state_value(conn, "config_fingerprint")
         current = {document.rel_path: document.sha256 for document in self._iter_documents()}
-        return current != existing
+        return current != existing or backend_fingerprint != self._backend_fingerprint()
 
     def reindex(self) -> ReindexSummary:
         """Rebuild the derived index from canonical Markdown files."""
         documents = list(self._iter_documents())
         typed_counts: defaultdict[str, int] = defaultdict(int)
+        vector_rows: list[dict[str, Any]] = []
         with self.connect() as conn:
             existing = {
                 str(row["rel_path"]): str(row["sha256"])
                 for row in conn.execute("SELECT rel_path, sha256 FROM documents")
+            }
+            existing_point_ids = {
+                str(row["point_id"]) for row in conn.execute("SELECT point_id FROM vector_items")
             }
             current = {document.rel_path: document.sha256 for document in documents}
             dirty = current != existing
@@ -178,7 +207,7 @@ class MemoryV2Engine:
                             item.item_type,
                             item.title,
                             item.snippet,
-                            " ".join(token for token in self._normalize_text(item.snippet)),
+                            self._normalized_retrieval_text(item.title, item.snippet),
                             item.start_line,
                             item.end_line,
                             item.confidence,
@@ -205,8 +234,38 @@ class MemoryV2Engine:
                         typed_counts=typed_counts,
                         evidence=evidence,
                     )
+                    vector_rows.append(
+                        {
+                            "item_id": int(item_row_id),
+                            "point_id": self._point_id(
+                                document_rel_path=document.rel_path,
+                                item_type=item.item_type,
+                                start_line=item.start_line,
+                                end_line=item.end_line,
+                                snippet=item.snippet,
+                            ),
+                            "content": self._normalized_retrieval_text(item.title, item.snippet),
+                            "payload": {
+                                "item_id": int(item_row_id),
+                                "rel_path": document.rel_path,
+                                "lane": document.lane,
+                                "source_name": document.source_name,
+                                "item_type": item.item_type,
+                                "scope": item.scope,
+                                "start_line": item.start_line,
+                                "end_line": item.end_line,
+                                "modified_at": document.modified_at,
+                                "confidence": item.confidence,
+                            },
+                        }
+                    )
                     chunks += 1
             conn.commit()
+            self._sync_dense_backend(
+                conn=conn,
+                vector_rows=vector_rows,
+                stale_point_ids=existing_point_ids,
+            )
         return ReindexSummary(
             files=len(documents),
             chunks=chunks,
@@ -228,6 +287,10 @@ class MemoryV2Engine:
         scope: str | None = None,
         auto_index: bool = True,
         include_explain: bool = False,
+        backend: SearchBackend | None = None,
+        dense_candidate_pool: int | None = None,
+        sparse_candidate_pool: int | None = None,
+        fusion: FusionMode | None = None,
     ) -> list[SearchHit]:
         """Search the derived store through the dual-lane retrieval planner."""
         if auto_index and self.is_dirty():
@@ -235,8 +298,35 @@ class MemoryV2Engine:
         limit = max_results if max_results is not None else self.config.default_max_results
         if limit <= 0:
             raise ValueError("max_results must be positive")
+        resolved_backend = backend or self.config.backend.active
+        hybrid_config = replace(
+            self.config.hybrid,
+            dense_candidate_pool=(
+                dense_candidate_pool
+                if dense_candidate_pool is not None
+                else self.config.hybrid.dense_candidate_pool
+            ),
+            sparse_candidate_pool=(
+                sparse_candidate_pool
+                if sparse_candidate_pool is not None
+                else self.config.hybrid.sparse_candidate_pool
+            ),
+            fusion=cast(FusionMode, fusion or self.config.hybrid.fusion),
+        )
+        dense_candidates: list[DenseSearchCandidate] = []
+        if resolved_backend == "qdrant_dense_hybrid":
+            try:
+                dense_candidates = self._dense_search(
+                    query=query,
+                    lane=lane,
+                    scope=scope,
+                )
+            except Exception:
+                if self.config.backend.fallback != "sqlite_fts":
+                    raise
+                resolved_backend = self.config.backend.fallback
         with self.connect() as conn:
-            return search_index(
+            hits = search_index(
                 conn,
                 query=query,
                 max_results=limit,
@@ -244,8 +334,33 @@ class MemoryV2Engine:
                 mode=lane,
                 scope=scope,
                 ranking=self.config.ranking,
+                hybrid=hybrid_config,
+                dense_candidates=dense_candidates,
+                active_backend=resolved_backend,
                 include_explain=include_explain,
             )
+        if hybrid_config.rerank_top_k > 0 and hits:
+            reranked = self._rerank_provider.rerank(
+                query,
+                [hit.to_dict() for hit in hits[: hybrid_config.rerank_top_k]],
+            )
+            if reranked:
+                order: dict[tuple[str, int, int], int] = {}
+                for index, candidate in enumerate(reranked):
+                    path = candidate.get("path")
+                    start_line = candidate.get("startLine", 0)
+                    end_line = candidate.get("endLine", 0)
+                    if not isinstance(path, str):
+                        continue
+                    if isinstance(start_line, bool) or not isinstance(start_line, int):
+                        continue
+                    if isinstance(end_line, bool) or not isinstance(end_line, int):
+                        continue
+                    order[(path, start_line, end_line)] = index
+                hits.sort(
+                    key=lambda hit: order.get((hit.path, hit.start_line, hit.end_line), len(order))
+                )
+        return hits
 
     def read(
         self,
@@ -624,6 +739,8 @@ class MemoryV2Engine:
     def _clear_derived_rows(self, conn: sqlite3.Connection) -> None:
         """Clear the rebuildable tables before a full reindex."""
         for table_name in (
+            "backend_state",
+            "vector_items",
             "conflicts",
             "evidence_links",
             "proposals",
@@ -968,15 +1085,174 @@ class MemoryV2Engine:
             return "fact"
         return target.item_type  # type: ignore[return-value]
 
+    def _dense_search(
+        self,
+        *,
+        query: str,
+        lane: SearchMode,
+        scope: str | None,
+    ) -> list[DenseSearchCandidate]:
+        """Run a dense search query through the configured vector backend."""
+        if not self.config.qdrant.enabled or not self.config.embedding.enabled:
+            return []
+        embedding = self._embedding_provider.embed_texts([query.strip()])
+        if not embedding:
+            return []
+        return self._qdrant_backend.search(
+            vector=embedding[0],
+            limit=self.config.hybrid.dense_candidate_pool,
+            mode=lane,
+            scope=scope,
+        )
+
+    def _sync_dense_backend(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        vector_rows: list[dict[str, Any]],
+        stale_point_ids: set[str],
+    ) -> None:
+        """Synchronize dense vectors into Qdrant when the backend is enabled."""
+        conn.execute("DELETE FROM backend_state")
+        if not self.config.qdrant.enabled or not self.config.embedding.enabled:
+            self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
+            self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
+            self._write_backend_state(conn, "last_sync_error", "")
+            conn.commit()
+            return
+        if not vector_rows:
+            self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
+            self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
+            self._write_backend_state(conn, "last_sync_error", "")
+            conn.commit()
+            return
+        try:
+            points: list[dict[str, Any]] = []
+            embedded_vectors: list[tuple[dict[str, Any], list[float]]] = []
+            for batch in self._embedding_batches(vector_rows):
+                vectors = self._embedding_provider.embed_texts(
+                    [str(entry["content"]) for entry in batch]
+                )
+                for entry, vector in zip(batch, vectors, strict=True):
+                    embedded_vectors.append((entry, vector))
+            vector_dim = len(embedded_vectors[0][1])
+            self._qdrant_backend.ensure_collection(vector_size=vector_dim)
+            new_point_ids: set[str] = set()
+            for entry, vector in embedded_vectors:
+                point_id = str(entry["point_id"])
+                new_point_ids.add(point_id)
+                points.append(
+                    {
+                        "id": point_id,
+                        "vector": vector,
+                        "payload": entry["payload"],
+                    }
+                )
+            self._qdrant_backend.upsert_points(points)
+            stale_ids = sorted(stale_point_ids - new_point_ids)
+            if stale_ids:
+                self._qdrant_backend.delete_points(stale_ids)
+            conn.execute("DELETE FROM vector_items")
+            for entry, vector in embedded_vectors:
+                conn.execute(
+                    """
+                    INSERT INTO vector_items(
+                        item_id,
+                        point_id,
+                        embedding_model,
+                        embedding_dim,
+                        content_sha256,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(entry["item_id"]),
+                        str(entry["point_id"]),
+                        self.config.embedding.model,
+                        len(vector),
+                        self._sha256(str(entry["content"])),
+                        datetime.now(tz=UTC).isoformat(),
+                    ),
+                )
+            self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
+            self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
+            self._write_backend_state(conn, "last_sync_error", "")
+            conn.commit()
+        except Exception as err:
+            self._write_backend_state(conn, "last_sync_error", str(err))
+            conn.commit()
+
+    def _embedding_batches(
+        self, vector_rows: list[dict[str, Any]]
+    ) -> Iterator[list[dict[str, Any]]]:
+        """Yield embedding work in bounded batches."""
+        batch_size = max(self.config.embedding.batch_size, 1)
+        for index in range(0, len(vector_rows), batch_size):
+            yield vector_rows[index : index + batch_size]
+
+    def _backend_fingerprint(self) -> str:
+        """Return a stable fingerprint for the active dense backend config."""
+        payload = {
+            "active": self.config.backend.active,
+            "fallback": self.config.backend.fallback,
+            "embedding": {
+                "enabled": self.config.embedding.enabled,
+                "provider": self.config.embedding.provider,
+                "model": self.config.embedding.model,
+                "base_url": self.config.embedding.base_url,
+                "dimensions": self.config.embedding.dimensions,
+            },
+            "qdrant": {
+                "enabled": self.config.qdrant.enabled,
+                "url": self.config.qdrant.url,
+                "collection": self.config.qdrant.collection,
+            },
+        }
+        return self._sha256(json.dumps(payload, sort_keys=True))
+
+    def _backend_state_value(self, conn: sqlite3.Connection, key: str) -> str | None:
+        """Return the current backend state value for *key*."""
+        row = conn.execute("SELECT value FROM backend_state WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return None
+        return str(row["value"])
+
+    def _write_backend_state(self, conn: sqlite3.Connection, key: str, value: str) -> None:
+        """Persist a backend state value."""
+        conn.execute(
+            "INSERT OR REPLACE INTO backend_state(key, value) VALUES (?, ?)",
+            (key, value),
+        )
+
     def _count_rows(self, conn: sqlite3.Connection, table_name: str) -> int:
         """Count rows inside *table_name*."""
         row = conn.execute(f"SELECT COUNT(*) AS count FROM {table_name}").fetchone()
         return 0 if row is None else int(row["count"])
 
+    def _normalized_retrieval_text(self, title: str, snippet: str) -> str:
+        """Return normalized text used for lexical and dense retrieval."""
+        combined = f"{title} {snippet}"
+        return " ".join(token for token in self._normalize_text(combined))
+
     def _normalize_text(self, text: str) -> tuple[str, ...]:
         """Normalize text into lowercase search tokens."""
         collapsed = "".join(character.lower() if character.isalnum() else " " for character in text)
         return tuple(token for token in collapsed.split() if token)
+
+    def _point_id(
+        self,
+        *,
+        document_rel_path: str,
+        item_type: str,
+        start_line: int,
+        end_line: int,
+        snippet: str,
+    ) -> str:
+        """Return a stable point identifier for a search item."""
+        return self._sha256(
+            f"{document_rel_path}:{item_type}:{start_line}:{end_line}:{snippet.strip()}"
+        )
 
     def _slugify(self, value: str) -> str:
         """Return a stable slug for an entity file path."""
