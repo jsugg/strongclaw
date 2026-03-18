@@ -11,6 +11,10 @@ const SEARCH_SCHEMA = {
     minScore: { type: "number" },
     lane: { type: "string", enum: ["all", "memory", "corpus"] },
     scope: { type: "string" },
+    backend: { type: "string", enum: ["sqlite_fts", "qdrant_dense_hybrid"] },
+    denseCandidatePool: { type: "number" },
+    sparseCandidatePool: { type: "number" },
+    fusion: { type: "string", enum: ["rrf", "weighted"] },
     explain: { type: "boolean" },
   },
   required: ["query"],
@@ -220,6 +224,10 @@ function registerMemoryCli(program, pluginConfig) {
     .option("--min-score <score>", "Minimum score.")
     .option("--lane <lane>", "memory, corpus, or all.", "all")
     .option("--scope <scope>", "Exact preferred scope.")
+    .option("--backend <backend>", "sqlite_fts or qdrant_dense_hybrid.")
+    .option("--dense-candidate-pool <count>", "Dense candidate pool override.")
+    .option("--sparse-candidate-pool <count>", "Sparse candidate pool override.")
+    .option("--fusion <mode>", "rrf or weighted.")
     .option("--explain", "Include ranking explanation metadata.")
     .option("--json", "Print JSON.")
     .action(async (query, opts) => {
@@ -237,6 +245,18 @@ function registerMemoryCli(program, pluginConfig) {
       }
       if (opts.scope) {
         args.push("--scope", String(opts.scope));
+      }
+      if (opts.backend) {
+        args.push("--backend", String(opts.backend));
+      }
+      if (opts.denseCandidatePool) {
+        args.push("--dense-candidate-pool", String(opts.denseCandidatePool));
+      }
+      if (opts.sparseCandidatePool) {
+        args.push("--sparse-candidate-pool", String(opts.sparseCandidatePool));
+      }
+      if (opts.fusion) {
+        args.push("--fusion", String(opts.fusion));
       }
       if (opts.explain) {
         args.push("--explain");
@@ -377,6 +397,22 @@ const strongclawMemoryV2Plugin = {
             if (scope) {
               args.push("--scope", scope);
             }
+            const backend = readStringParam(params, "backend");
+            if (backend) {
+              args.push("--backend", backend);
+            }
+            const denseCandidatePool = readNumberParam(params, "denseCandidatePool");
+            if (denseCandidatePool !== undefined) {
+              args.push("--dense-candidate-pool", String(denseCandidatePool));
+            }
+            const sparseCandidatePool = readNumberParam(params, "sparseCandidatePool");
+            if (sparseCandidatePool !== undefined) {
+              args.push("--sparse-candidate-pool", String(sparseCandidatePool));
+            }
+            const fusion = readStringParam(params, "fusion");
+            if (fusion) {
+              args.push("--fusion", fusion);
+            }
             if (params?.explain === true) {
               args.push("--explain");
             }
@@ -511,7 +547,7 @@ const strongclawMemoryV2Plugin = {
     }, { commands: ["memory"] });
 
     if (pluginConfig.autoRecall) {
-      api.on("before_agent_start", async (event) => {
+      const registerRecall = (hookName) => api.on(hookName, async (event) => {
         const prompt = typeof event?.prompt === "string" ? event.prompt.trim() : "";
         if (prompt.length < 5) {
           return;
@@ -536,6 +572,11 @@ const strongclawMemoryV2Plugin = {
           api.logger.warn(`strongclaw-memory-v2 recall failed: ${String(error)}`);
         }
       });
+      try {
+        registerRecall("before_prompt_build");
+      } catch {
+        registerRecall("before_agent_start");
+      }
     }
 
     if (pluginConfig.autoReflect) {

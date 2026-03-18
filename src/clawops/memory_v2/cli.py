@@ -38,6 +38,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     search_parser.add_argument("--lane", choices=("all", "memory", "corpus"), default="all")
     search_parser.add_argument("--scope", help="Exact preferred scope, e.g. project:strongclaw.")
     search_parser.add_argument(
+        "--backend",
+        choices=("sqlite_fts", "qdrant_dense_hybrid"),
+        help="Override the configured search backend for this call.",
+    )
+    search_parser.add_argument(
+        "--dense-candidate-pool",
+        type=int,
+        help="Override the dense candidate pool size for this call.",
+    )
+    search_parser.add_argument(
+        "--sparse-candidate-pool",
+        type=int,
+        help="Override the sparse candidate pool size for this call.",
+    )
+    search_parser.add_argument(
+        "--fusion",
+        choices=("rrf", "weighted"),
+        help="Override the fusion strategy for this call.",
+    )
+    search_parser.add_argument(
         "--explain",
         action="store_true",
         help="Include ranking explanation metadata in JSON results.",
@@ -124,12 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             lane=args.lane,
             scope=args.scope,
             include_explain=bool(args.explain),
+            backend=args.backend,
+            dense_candidate_pool=args.dense_candidate_pool,
+            sparse_candidate_pool=args.sparse_candidate_pool,
+            fusion=args.fusion,
         )
         payload = {
             "results": [hit.to_dict() for hit in hits],
             "provider": "strongclaw-memory-v2",
-            "model": "sqlite-fts5",
+            "model": engine.config.embedding.model or "sqlite-fts5",
             "mode": args.lane,
+            "backend": args.backend or engine.config.backend.active,
         }
         _print_payload(payload, as_json=bool(args.json))
         return 0
