@@ -1,4 +1,4 @@
-name: plugin-verification
+name: memory-plugin-verification
 
 on:
   pull_request:
@@ -13,7 +13,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  memory-lancedb-pro:
+  verify-vendored-memory-plugin:
+    name: Verify vendored memory plugin
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -23,4 +24,4 @@ jobs:
           node-version: "24.13.1"
           cache: npm
           cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
-      - run: ./scripts/ci/run_memory_plugin_verification.sh
+      - run: ./scripts/ci/verify_vendored_memory_plugin.sh

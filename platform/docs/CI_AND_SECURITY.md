@@ -9,16 +9,16 @@ The repository includes:
 - harness smoke
 - nightly regression
 - dependency submission from a generated SPDX SBOM snapshot
-- `plugin-verification` for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
-- tagged release builds with GitHub Release assets, build provenance, and SBOM attestations
-- upstream merge gate
+- `memory-plugin-verification` for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
+- tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
+- upstream merge validation
 
 ## Vendored plugin verification
 
 The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on
-GitHub Actions in `.github/workflows/plugin-verification.yml`.
+GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 
-- The shared entrypoint is `scripts/ci/run_memory_plugin_verification.sh`.
+- The shared entrypoint is `scripts/ci/verify_vendored_memory_plugin.sh`.
 - That flow reuses `scripts/bootstrap/bootstrap_memory_plugin.sh`, which
   auto-detects the host and installs the default LanceDB dependency on
   supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
@@ -40,8 +40,12 @@ GitHub Actions in `.github/workflows/plugin-verification.yml`.
 - `.github/workflows/dependency-submission.yml` generates `sbom.spdx.json` with
   `anchore/sbom-action` and submits the resulting dependency snapshot to the
   GitHub dependency graph.
-- `.github/workflows/release.yml` builds the Python sdist/wheel on tag pushes,
-  publishes the release assets with `gh release create`, and emits GitHub
-  attestations for both build provenance and the generated SBOM.
+- `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds
+  the Python sdist/wheel, verifies each artifact with `twine check` plus fresh
+  install smoke tests, publishes the release assets with `gh release create`,
+  and emits GitHub attestations for both build provenance and the generated
+  SBOM.
+- `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
+  plus nightly validation steps after an upstream merge lands in the fork.
 - Operators can verify published provenance with GitHub's attestation tooling
   after a tagged release lands.

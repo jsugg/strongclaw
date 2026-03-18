@@ -1,8 +1,6 @@
-name: nightly-validation
+name: upstream-merge-validation
 
 on:
-  schedule:
-    - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,8 +10,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  run-nightly-validation:
-    name: Run nightly validation
+  validate-merged-upstream:
+    name: Validate merged upstream changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -25,11 +23,11 @@ jobs:
           version: "0.10.2"
           enable-cache: true
       - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/ci/run_nightly_validation.sh
+      - run: ./scripts/ci/run_upstream_merge_validation.sh
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always()
         with:
-          name: nightly-artifacts
+          name: upstream-merge-artifacts
           path: |
             coverage.xml
             ./.runs

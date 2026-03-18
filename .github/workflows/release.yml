@@ -14,7 +14,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  release:
+  publish-release-artifacts:
+    name: Publish release artifacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -23,10 +24,15 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.2"
+          enable-cache: true
+      - run: ./scripts/ci/sync_dev_environment.sh
       - name: Build release artifacts
-        run: |
-          python -m pip install -e .[dev] build
-          python -m build
+        run: ./scripts/ci/build_release_artifacts.sh
+      - name: Verify release artifacts
+        run: ./scripts/ci/verify_release_artifacts.sh
       - uses: anchore/sbom-action@57aae528053a48a3f6235f2d9461b05fbcb7366d # v0.23.1
         with:
           path: dist
@@ -44,13 +50,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --verify-tag --generate-notes
-          fi
+        run: ./scripts/ci/publish_github_release.sh "${GITHUB_REF_NAME}" dist/* sbom.spdx.json
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |
