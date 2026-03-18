@@ -64,6 +64,8 @@ class WrapperResult:
     request_method: str | None = None
     request_url: str | None = None
     request_attempts: int | None = None
+    request_id: str | None = None
+    retry_after_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the result to a JSON-serializable mapping."""
@@ -94,6 +96,10 @@ class WrapperResult:
             payload["request_url"] = self.request_url
         if self.request_attempts is not None:
             payload["request_attempts"] = self.request_attempts
+        if self.request_id is not None:
+            payload["request_id"] = self.request_id
+        if self.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = self.retry_after_seconds
         return payload
 
 
@@ -250,9 +256,15 @@ class WrapperHttpStatusError(WrapperTransportError):
         response: requests.Response,
         retryable: bool,
         request_attempts: int,
+        observed_request_id: str | None = None,
+        observed_retry_after_seconds: float | None = None,
     ) -> "WrapperHttpStatusError":
         """Build a typed response error from a non-success HTTP response."""
         body_excerpt = response.text[:1000]
+        response_request_id = _response_request_id(response)
+        response_retry_after_seconds = _parse_retry_after_seconds(
+            response.headers.get("Retry-After")
+        )
         message = (
             f"{method} {url} returned HTTP {response.status_code}"
             if not body_excerpt
@@ -267,8 +279,12 @@ class WrapperHttpStatusError(WrapperTransportError):
             request_attempts=request_attempts,
             status_code=response.status_code,
             body_excerpt=body_excerpt or None,
-            request_id=_response_request_id(response),
-            retry_after_seconds=_parse_retry_after_seconds(response.headers.get("Retry-After")),
+            request_id=response_request_id or observed_request_id,
+            retry_after_seconds=(
+                response_retry_after_seconds
+                if response_retry_after_seconds is not None
+                else observed_retry_after_seconds
+            ),
         )
 
 
@@ -595,6 +611,8 @@ def execute_http_operation(
                 response=response,
                 retryable=outcome.retry_policy.allows_retry_for_status(response.status_code),
                 request_attempts=outcome.request_attempts,
+                observed_request_id=outcome.request_id,
+                observed_retry_after_seconds=outcome.retry_after_seconds,
             )
     except WrapperTransportError as exc:
         message = exc.error_message()
@@ -610,6 +628,8 @@ def execute_http_operation(
             result_request_method=exc.method,
             result_request_url=exc.url,
             result_request_attempts=exc.request_attempts,
+            result_request_id=exc.request_id,
+            result_retry_after_seconds=exc.retry_after_seconds,
         )
         return result_from_operation(
             completed,
@@ -635,6 +655,8 @@ def execute_http_operation(
             request_method=exc.method,
             request_url=exc.url,
             request_attempts=exc.request_attempts,
+            request_id=exc.request_id,
+            retry_after_seconds=exc.retry_after_seconds,
         )
     except requests.RequestException as exc:
         wrapped = WrapperRequestError.from_exception(
@@ -656,6 +678,8 @@ def execute_http_operation(
             result_request_method=wrapped.method,
             result_request_url=wrapped.url,
             result_request_attempts=wrapped.request_attempts,
+            result_request_id=wrapped.request_id,
+            result_retry_after_seconds=wrapped.retry_after_seconds,
         )
         return result_from_operation(
             completed,
@@ -680,6 +704,8 @@ def execute_http_operation(
             request_method=wrapped.method,
             request_url=wrapped.url,
             request_attempts=wrapped.request_attempts,
+            request_id=wrapped.request_id,
+            retry_after_seconds=wrapped.retry_after_seconds,
         )
 
     completed = ctx.journal.transition(
@@ -691,6 +717,8 @@ def execute_http_operation(
         result_request_method=outcome.request_method,
         result_request_url=outcome.request_url,
         result_request_attempts=outcome.request_attempts,
+        result_request_id=outcome.request_id,
+        result_retry_after_seconds=outcome.retry_after_seconds,
     )
     return result_from_operation(
         completed,
@@ -703,6 +731,8 @@ def execute_http_operation(
         request_method=outcome.request_method,
         request_url=outcome.request_url,
         request_attempts=outcome.request_attempts,
+        request_id=outcome.request_id,
+        retry_after_seconds=outcome.retry_after_seconds,
     )
 
 
@@ -856,6 +886,8 @@ def result_from_operation(
     request_method: str | None = None,
     request_url: str | None = None,
     request_attempts: int | None = None,
+    request_id: str | None = None,
+    retry_after_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Build a consistent wrapper result envelope."""
     resolved_error_type = op.result_error_type if error_type is None else error_type
@@ -864,6 +896,10 @@ def result_from_operation(
     resolved_request_url = op.result_request_url if request_url is None else request_url
     resolved_request_attempts = (
         op.result_request_attempts if request_attempts is None else request_attempts
+    )
+    resolved_request_id = op.result_request_id if request_id is None else request_id
+    resolved_retry_after_seconds = (
+        op.result_retry_after_seconds if retry_after_seconds is None else retry_after_seconds
     )
     resolved_status_code = op.result_status_code if status_code is None else status_code
     resolved_body = op.result_body_excerpt if body is None else body
@@ -886,6 +922,8 @@ def result_from_operation(
                 request_method=resolved_request_method,
                 request_url=resolved_request_url,
                 request_attempts=resolved_request_attempts,
+                request_id=resolved_request_id,
+                retry_after_seconds=resolved_retry_after_seconds,
             )
             if error is None and resolved_error_type is not None
             else error
@@ -895,6 +933,8 @@ def result_from_operation(
         request_method=resolved_request_method,
         request_url=resolved_request_url,
         request_attempts=resolved_request_attempts,
+        request_id=resolved_request_id,
+        retry_after_seconds=resolved_retry_after_seconds,
     ).to_dict()
 
 
@@ -925,6 +965,8 @@ class JsonHttpClient:
         request_headers = dict(headers)
         request_headers.setdefault("User-Agent", f"clawops/{__version__}")
         effective_policy = NO_RETRY_POLICY if retry_policy is None else retry_policy
+        observed_request_id: str | None = None
+        observed_retry_after_seconds: float | None = None
         for attempt_number in range(1, effective_policy.max_attempts + 1):
             try:
                 response = requests.request(
@@ -955,16 +997,30 @@ class JsonHttpClient:
                 and effective_policy.allows_retry_for_status(response.status_code)
                 and attempt_number < effective_policy.max_attempts
             ):
+                response_request_id = _response_request_id(response)
+                response_retry_after_seconds = _parse_retry_after_seconds(
+                    response.headers.get("Retry-After")
+                )
+                if response_request_id is not None:
+                    observed_request_id = response_request_id
+                if response_retry_after_seconds is not None:
+                    observed_retry_after_seconds = response_retry_after_seconds
                 _sleep_before_retry(effective_policy, attempt_number)
                 continue
+            response_request_id = _response_request_id(response) or observed_request_id
+            response_retry_after_seconds = _parse_retry_after_seconds(
+                response.headers.get("Retry-After")
+            )
+            if response_retry_after_seconds is None:
+                response_retry_after_seconds = observed_retry_after_seconds
             return HttpResponseOutcome(
                 response=response,
                 request_method=method,
                 request_url=url,
                 request_attempts=attempt_number,
                 retry_policy=effective_policy,
-                request_id=_response_request_id(response),
-                retry_after_seconds=_parse_retry_after_seconds(response.headers.get("Retry-After")),
+                request_id=response_request_id,
+                retry_after_seconds=response_retry_after_seconds,
             )
         raise AssertionError("unreachable: request loop returned no response")
 
