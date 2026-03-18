@@ -84,7 +84,7 @@ def test_security_workflow_includes_plugin_path_for_codeql_javascript_scan() -> 
     assert "--cov=src/clawops" in workflow
     assert 'SYFT_VERSION: "v1.42.2"' in workflow
     assert "syft dir:. -o spdx-json=sbom.spdx.json" in workflow
-    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
+    assert "actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f" in workflow
     assert "actions/setup-node@v6" not in workflow
     assert "cache: false" in workflow
     assert "pull-requests: write" in workflow
