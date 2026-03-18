@@ -261,6 +261,79 @@ def test_memory_v2_export_memory_pro_can_include_daily_retained_notes(
     assert all(entry["id"].startswith("strongclaw-memory-v2:") for entry in daily_entries)
 
 
+def test_memory_v2_export_memory_pro_includes_structured_provenance(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    (workspace / "MEMORY.md").write_text(
+        """
+        # Project Memory
+
+        - Fact[evidence=docs/runbook.md#L1-L3|lcm://conversation/abc123/summary/sum_deadbeef]: Gateway rollout follows the runbook summary.
+        """.strip() + "\n",
+        encoding="utf-8",
+    )
+    engine = MemoryV2Engine(load_config(config_path))
+
+    payload = engine.export_memory_pro_import(scope="project:strongclaw")
+
+    structured_entry = next(
+        entry
+        for entry in payload["memories"]
+        if "Gateway rollout follows the runbook summary." in entry["text"]
+    )
+    evidence = structured_entry["metadata"]["memoryV2"]["evidence"]
+    assert {
+        "kind": "file",
+        "rel_path": "MEMORY.md",
+        "start_line": 3,
+        "end_line": 3,
+        "relation": "supports",
+    } in evidence
+    assert {
+        "kind": "file",
+        "rel_path": "docs/runbook.md",
+        "start_line": 1,
+        "end_line": 3,
+        "relation": "supports",
+    } in evidence
+    assert {
+        "kind": "lcm_summary",
+        "uri": "lcm://conversation/abc123/summary/sum_deadbeef",
+        "relation": "supports",
+    } in evidence
+
+
+def test_memory_v2_status_reports_dense_and_rerank_configuration(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-status"),
+        rerank=replace(config.rerank, model="rerank-test"),
+    )
+    engine = MemoryV2Engine(config)
+    engine._qdrant_backend = _FakeQdrantBackend()
+    engine.reindex()
+
+    payload = engine.status()
+
+    assert payload["backendActive"] == "sqlite_fts"
+    assert payload["backendFallback"] == "sqlite_fts"
+    assert payload["embeddingProvider"] == "disabled"
+    assert payload["rerankProvider"] == "none"
+    assert payload["rerankModel"] == "rerank-test"
+    assert payload["qdrantEnabled"] is True
+    assert payload["qdrantHealthy"] is True
+    assert payload["vectorItems"] == 0
+    assert payload["lastVectorSyncAt"]
+
+
 def test_memory_v2_get_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
     workspace = _build_workspace(tmp_path)
     config_path = workspace / "memory-v2.yaml"

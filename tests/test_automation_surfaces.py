@@ -174,6 +174,18 @@ def test_ci_environment_sync_exports_the_locked_virtualenv_for_follow_up_steps()
     assert "printf 'VIRTUAL_ENV=%s\\n' \"$ROOT/.venv\"" in sync_script
 
 
+def test_memory_plugin_workflow_covers_the_qdrant_dense_path() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    workflow = (repo_root / ".github/workflows/memory-plugin-verification.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "verify-memory-v2-qdrant:" in workflow
+    assert "qdrant:" in workflow
+    assert "TEST_QDRANT_URL=http://127.0.0.1:6333" in workflow
+    assert "tests/test_memory_v2_qdrant_integration.py" in workflow
+
+
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     setup_guide = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")

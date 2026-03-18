@@ -25,3 +25,36 @@ jobs:
           cache: npm
           cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
       - run: ./scripts/ci/verify_vendored_memory_plugin.sh
+  verify-memory-v2-qdrant:
+    name: Run Memory V2 Qdrant Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      qdrant:
+        image: qdrant/qdrant
+        ports:
+          - 6333:6333
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.2"
+          enable-cache: true
+      - run: ./scripts/ci/sync_dev_environment.sh
+      - run: |
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:6333/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant failed to become ready" >&2
+          exit 1
+      - run: >
+          PYTHONPATH=src TEST_QDRANT_URL=http://127.0.0.1:6333 uv run pytest -q
+          tests/test_memory_v2.py
+          tests/test_memory_v2_qdrant_backend.py
+          tests/test_memory_v2_qdrant_integration.py

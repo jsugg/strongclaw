@@ -7,6 +7,7 @@ import math
 import sqlite3
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, cast
 
 from clawops.memory_v2.models import (
@@ -14,6 +15,7 @@ from clawops.memory_v2.models import (
     EntryType,
     HybridConfig,
     SearchBackend,
+    SearchDiagnostics,
     SearchExplanation,
     SearchHit,
     SearchMode,
@@ -44,11 +46,12 @@ def search_index(
     dense_candidates: Sequence[DenseSearchCandidate] | None,
     active_backend: SearchBackend,
     include_explain: bool,
-) -> list[SearchHit]:
+) -> tuple[list[SearchHit], SearchDiagnostics]:
     """Run the retrieval planner against the derived SQLite index."""
     terms = normalize_text_tokens(query)
     if not terms:
-        return []
+        return [], SearchDiagnostics()
+    lexical_started_at = perf_counter()
     lexical_candidates = _lexical_candidates(
         conn,
         terms=terms,
@@ -57,6 +60,8 @@ def search_index(
         limit=max_results * max(hybrid.sparse_candidate_pool, 1),
         ranking=ranking,
     )
+    lexical_ms = (perf_counter() - lexical_started_at) * 1000.0
+    sqlite_dense_started_at = perf_counter()
     dense_ranked_candidates = _dense_candidates(
         conn,
         terms=terms,
@@ -65,8 +70,16 @@ def search_index(
         ranking=ranking,
         dense_candidates=dense_candidates or (),
     )
+    sqlite_dense_ms = (perf_counter() - sqlite_dense_started_at) * 1000.0
     if not lexical_candidates and not dense_ranked_candidates:
-        return []
+        return (
+            [],
+            SearchDiagnostics(
+                lexical_ms=lexical_ms,
+                sqlite_dense_ms=sqlite_dense_ms,
+            ),
+        )
+    fusion_started_at = perf_counter()
     merged = _merge_candidates(
         lexical_candidates=lexical_candidates,
         dense_candidates=dense_ranked_candidates,
@@ -103,7 +116,18 @@ def search_index(
                 backend=candidate["backend"],
             )
         )
-    return hits[:max_results]
+    selected_hits = hits[:max_results]
+    return (
+        selected_hits,
+        SearchDiagnostics(
+            lexical_ms=lexical_ms,
+            sqlite_dense_ms=sqlite_dense_ms,
+            fusion_ms=(perf_counter() - fusion_started_at) * 1000.0,
+            lexical_candidates=len(lexical_candidates),
+            dense_candidates=len(dense_ranked_candidates),
+            selected_candidates=len(selected_hits),
+        ),
+    )
 
 
 def _lexical_candidates(
