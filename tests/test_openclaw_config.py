@@ -80,6 +80,33 @@ def test_render_overlay_accepts_json5_comments_and_trailing_commas(tmp_path: pat
     assert rendered["memory"]["qmd"]["command"] == f"{home_dir.resolve().as_posix()}/.bun/bin/qmd"
 
 
+def test_render_overlay_accepts_full_json5_syntax(tmp_path: pathlib.Path) -> None:
+    repo_root = tmp_path / "repo"
+    home_dir = tmp_path / "home"
+    template = tmp_path / "overlay.json5"
+    template.write_text(
+        """
+        {
+          memory: {
+            backend: 'qmd',
+            qmd: { command: '__HOME__/.bun/bin/qmd' },
+          },
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    rendered = render_openclaw_overlay(
+        template_path=template,
+        repo_root=repo_root,
+        home_dir=home_dir,
+        user_timezone="UTC",
+    )
+
+    assert rendered["memory"]["backend"] == "qmd"
+    assert rendered["memory"]["qmd"]["command"] == f"{home_dir.resolve().as_posix()}/.bun/bin/qmd"
+
+
 def test_repo_qmd_template_includes_expected_default_corpus() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_qmd_overlay(

@@ -9,7 +9,7 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from clawops.common import load_json, write_json
+from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
@@ -162,7 +162,7 @@ def render_openclaw_overlay(
     user_timezone: str | None = None,
 ) -> dict[str, Any]:
     """Load an OpenClaw overlay template and replace local path placeholders."""
-    template = load_json(template_path)
+    template = load_overlay(template_path)
     rendered = _replace_placeholders(
         template,
         replacements=build_placeholder_map(

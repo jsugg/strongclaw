@@ -6,7 +6,7 @@ import argparse
 import pathlib
 from typing import Any
 
-from clawops.common import deep_merge, dump_json, load_json, write_text
+from clawops.common import deep_merge, dump_json, load_json, load_overlay, write_text
 
 
 def merge_documents(base: Any, overlays: list[Any]) -> Any:
@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     args = parse_args(argv)
     base = load_json(args.base)
-    overlays = [load_json(path) for path in args.overlay]
+    overlays = [load_overlay(path) for path in args.overlay]
     merged = merge_documents(base, overlays)
     write_text(args.output, dump_json(merged))
     return 0
