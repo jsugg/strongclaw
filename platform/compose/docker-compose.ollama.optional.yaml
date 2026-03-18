@@ -1,0 +1,10 @@
+services:
+  ollama:
+    image: ollama/ollama:0.11.11@sha256:f89a2e79a84db9f31ac36d8967fcfdc38ecbe1ed7c10296694cc224930521b13
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ./state/ollama:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

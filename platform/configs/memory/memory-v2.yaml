@@ -41,6 +41,45 @@ limits:
   max_snippet_chars: 400
   default_max_results: 8
 
+backend:
+  active: sqlite_fts
+  fallback: sqlite_fts
+
+embedding:
+  enabled: false
+  provider: disabled
+  model: ""
+  base_url: ""
+  batch_size: 32
+  timeout_ms: 15000
+
+rerank:
+  enabled: false
+  provider: none
+  model: ""
+  base_url: ""
+  timeout_ms: 15000
+  top_k: 0
+
+hybrid:
+  dense_candidate_pool: 24
+  sparse_candidate_pool: 24
+  vector_weight: 0.65
+  text_weight: 0.35
+  fusion: rrf
+  rrf_k: 60
+  rerank_top_k: 0
+
+qdrant:
+  enabled: false
+  url: http://127.0.0.1:6333
+  collection: strongclaw-memory-v2
+  timeout_ms: 3000
+
+injection:
+  max_results: 3
+  max_chars_per_result: 280
+
 governance:
   default_scope: project:strongclaw
   readable_scopes:

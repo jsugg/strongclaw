@@ -1,0 +1,37 @@
+{
+  "plugins": {
+    "allow": [
+      "lossless-claw",
+      "strongclaw-memory-v2"
+    ],
+    "enabled": true,
+    "entries": {
+      "lossless-claw": {
+        "enabled": true
+      },
+      "strongclaw-memory-v2": {
+        "enabled": true,
+        "config": {
+          "command": [
+            "clawops"
+          ],
+          "configPath": "__REPO_ROOT__/platform/configs/memory/memory-v2.yaml",
+          "autoRecall": false,
+          "autoReflect": false,
+          "recallMaxResults": 3,
+          "timeoutMs": 20000
+        }
+      }
+    },
+    "load": {
+      "paths": [
+        "__REPO_ROOT__/vendor/lossless-claw",
+        "__REPO_ROOT__/platform/plugins/strongclaw-memory-v2"
+      ]
+    },
+    "slots": {
+      "contextEngine": "lossless-claw",
+      "memory": "strongclaw-memory-v2"
+    }
+  }
+}

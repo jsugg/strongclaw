@@ -29,3 +29,5 @@ def test_memory_v2_plugin_uses_compatible_tool_names() -> None:
     assert 'commands: ["memory"]' in plugin_source
     assert "--scope" in plugin_source
     assert "--mode" in plugin_source
+    assert "before_prompt_build" in plugin_source
+    assert "--backend" in plugin_source

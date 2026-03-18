@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import pathlib
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from clawops.common import load_yaml
 from clawops.memory_v2.governance import validate_scope
@@ -14,15 +15,31 @@ from clawops.memory_v2.models import (
     DEFAULT_DAILY_DIR,
     DEFAULT_DB_PATH,
     DEFAULT_DEFAULT_SCOPE,
+    DEFAULT_EMBEDDING_PROVIDER,
+    DEFAULT_FALLBACK_BACKEND,
     DEFAULT_MEMORY_FILE_NAMES,
+    DEFAULT_QDRANT_COLLECTION,
+    DEFAULT_QDRANT_URL,
     DEFAULT_READABLE_SCOPE_PATTERNS,
+    DEFAULT_RERANK_PROVIDER,
+    DEFAULT_SEARCH_BACKEND,
     DEFAULT_SEARCH_RESULTS,
     DEFAULT_SNIPPET_CHARS,
     DEFAULT_WRITABLE_SCOPE_PATTERNS,
+    BackendConfig,
     CorpusPathConfig,
+    EmbeddingConfig,
+    EmbeddingProviderKind,
+    FusionMode,
     GovernanceConfig,
+    HybridConfig,
+    InjectionConfig,
     MemoryV2Config,
+    QdrantConfig,
     RankingConfig,
+    RerankConfig,
+    RerankProviderKind,
+    SearchBackend,
 )
 
 
@@ -53,6 +70,24 @@ def _as_bool(name: str, value: object, *, default: bool) -> bool:
     return value
 
 
+def _as_optional_string(name: str, value: object) -> str | None:
+    """Validate an optional string configuration value."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError(f"{name} must be a non-empty string when provided")
+    return value.strip()
+
+
+def _as_blankable_string(name: str, value: object, *, default: str = "") -> str:
+    """Validate a string configuration value that may be blank."""
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    return value.strip()
+
+
 def _as_positive_int(name: str, value: object, *, default: int) -> int:
     """Validate a positive integer configuration value."""
     if value is None:
@@ -74,6 +109,17 @@ def _as_positive_float(name: str, value: object, *, default: float) -> float:
     if converted <= 0:
         raise ValueError(f"{name} must be positive")
     return converted
+
+
+def _as_non_negative_int(name: str, value: object, *, default: int) -> int:
+    """Validate a non-negative integer configuration value."""
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value < 0:
+        raise ValueError(f"{name} must be zero or positive")
+    return value
 
 
 def _as_string_list(name: str, value: object, *, default: Sequence[str]) -> tuple[str, ...]:
@@ -208,6 +254,160 @@ def _load_ranking(root: Mapping[str, object]) -> RankingConfig:
     )
 
 
+def _as_search_backend(name: str, value: object, *, default: SearchBackend) -> SearchBackend:
+    """Validate a configured search backend."""
+    backend = _as_string(name, value, default=default)
+    if backend not in {"sqlite_fts", "qdrant_dense_hybrid"}:
+        raise ValueError(f"{name} must be sqlite_fts or qdrant_dense_hybrid")
+    return cast(SearchBackend, backend)
+
+
+def _as_embedding_provider(
+    name: str,
+    value: object,
+    *,
+    default: EmbeddingProviderKind,
+) -> EmbeddingProviderKind:
+    """Validate an embedding provider identifier."""
+    provider = _as_string(name, value, default=default)
+    if provider not in {"disabled", "compatible-http"}:
+        raise ValueError(f"{name} must be disabled or compatible-http")
+    return cast(EmbeddingProviderKind, provider)
+
+
+def _as_fusion_mode(name: str, value: object, *, default: FusionMode) -> FusionMode:
+    """Validate a fusion mode."""
+    fusion = _as_string(name, value, default=default)
+    if fusion not in {"rrf", "weighted"}:
+        raise ValueError(f"{name} must be rrf or weighted")
+    return cast(FusionMode, fusion)
+
+
+def _load_backend(root: Mapping[str, object]) -> BackendConfig:
+    """Load backend configuration."""
+    backend = _as_mapping("backend", root.get("backend") or {})
+    return BackendConfig(
+        active=_as_search_backend(
+            "backend.active",
+            backend.get("active"),
+            default=cast(SearchBackend, DEFAULT_SEARCH_BACKEND),
+        ),
+        fallback=_as_search_backend(
+            "backend.fallback",
+            backend.get("fallback"),
+            default=cast(SearchBackend, DEFAULT_FALLBACK_BACKEND),
+        ),
+    )
+
+
+def _load_embedding(root: Mapping[str, object]) -> EmbeddingConfig:
+    """Load embedding provider configuration."""
+    embedding = _as_mapping("embedding", root.get("embedding") or {})
+    return EmbeddingConfig(
+        enabled=_as_bool("embedding.enabled", embedding.get("enabled"), default=False),
+        provider=_as_embedding_provider(
+            "embedding.provider",
+            embedding.get("provider"),
+            default=cast(EmbeddingProviderKind, DEFAULT_EMBEDDING_PROVIDER),
+        ),
+        model=_as_blankable_string("embedding.model", embedding.get("model")),
+        base_url=_as_blankable_string("embedding.base_url", embedding.get("base_url")),
+        api_key_env=_as_optional_string("embedding.api_key_env", embedding.get("api_key_env")),
+        api_key=_as_optional_string("embedding.api_key", embedding.get("api_key")),
+        dimensions=(
+            _as_positive_int("embedding.dimensions", embedding.get("dimensions"), default=1)
+            if embedding.get("dimensions") is not None
+            else None
+        ),
+        batch_size=_as_positive_int(
+            "embedding.batch_size", embedding.get("batch_size"), default=32
+        ),
+        timeout_ms=_as_positive_int(
+            "embedding.timeout_ms", embedding.get("timeout_ms"), default=15_000
+        ),
+    )
+
+
+def _load_rerank(root: Mapping[str, object]) -> RerankConfig:
+    """Load reranking configuration."""
+    rerank = _as_mapping("rerank", root.get("rerank") or {})
+    provider = _as_string(
+        "rerank.provider", rerank.get("provider"), default=DEFAULT_RERANK_PROVIDER
+    )
+    if provider != "none":
+        raise ValueError("rerank.provider currently supports only none")
+    return RerankConfig(
+        enabled=_as_bool("rerank.enabled", rerank.get("enabled"), default=False),
+        provider=cast(RerankProviderKind, provider),
+        model=_as_blankable_string("rerank.model", rerank.get("model")),
+        base_url=_as_blankable_string("rerank.base_url", rerank.get("base_url")),
+        api_key_env=_as_optional_string("rerank.api_key_env", rerank.get("api_key_env")),
+        api_key=_as_optional_string("rerank.api_key", rerank.get("api_key")),
+        timeout_ms=_as_positive_int("rerank.timeout_ms", rerank.get("timeout_ms"), default=15_000),
+        top_k=_as_non_negative_int("rerank.top_k", rerank.get("top_k"), default=0),
+    )
+
+
+def _load_hybrid(root: Mapping[str, object]) -> HybridConfig:
+    """Load hybrid retrieval configuration."""
+    hybrid = _as_mapping("hybrid", root.get("hybrid") or {})
+    return HybridConfig(
+        dense_candidate_pool=_as_positive_int(
+            "hybrid.dense_candidate_pool",
+            hybrid.get("dense_candidate_pool"),
+            default=24,
+        ),
+        sparse_candidate_pool=_as_positive_int(
+            "hybrid.sparse_candidate_pool",
+            hybrid.get("sparse_candidate_pool"),
+            default=24,
+        ),
+        vector_weight=_as_positive_float(
+            "hybrid.vector_weight", hybrid.get("vector_weight"), default=0.65
+        ),
+        text_weight=_as_positive_float(
+            "hybrid.text_weight", hybrid.get("text_weight"), default=0.35
+        ),
+        fusion=_as_fusion_mode("hybrid.fusion", hybrid.get("fusion"), default="rrf"),
+        rrf_k=_as_positive_int("hybrid.rrf_k", hybrid.get("rrf_k"), default=60),
+        rerank_top_k=_as_non_negative_int(
+            "hybrid.rerank_top_k", hybrid.get("rerank_top_k"), default=0
+        ),
+    )
+
+
+def _load_qdrant(root: Mapping[str, object]) -> QdrantConfig:
+    """Load Qdrant backend configuration."""
+    qdrant = _as_mapping("qdrant", root.get("qdrant") or {})
+    return QdrantConfig(
+        enabled=_as_bool("qdrant.enabled", qdrant.get("enabled"), default=False),
+        url=_as_string("qdrant.url", qdrant.get("url"), default=DEFAULT_QDRANT_URL),
+        collection=_as_string(
+            "qdrant.collection",
+            qdrant.get("collection"),
+            default=DEFAULT_QDRANT_COLLECTION,
+        ),
+        timeout_ms=_as_positive_int("qdrant.timeout_ms", qdrant.get("timeout_ms"), default=3_000),
+        api_key_env=_as_optional_string("qdrant.api_key_env", qdrant.get("api_key_env")),
+        api_key=_as_optional_string("qdrant.api_key", qdrant.get("api_key")),
+    )
+
+
+def _load_injection(root: Mapping[str, object]) -> InjectionConfig:
+    """Load recall injection configuration."""
+    injection = _as_mapping("injection", root.get("injection") or {})
+    return InjectionConfig(
+        max_results=_as_positive_int(
+            "injection.max_results", injection.get("max_results"), default=3
+        ),
+        max_chars_per_result=_as_positive_int(
+            "injection.max_chars_per_result",
+            injection.get("max_chars_per_result"),
+            default=280,
+        ),
+    )
+
+
 def load_config(path: pathlib.Path) -> MemoryV2Config:
     """Load and validate a memory-v2 config file."""
     raw = load_yaml(path)
@@ -280,4 +480,10 @@ def load_config(path: pathlib.Path) -> MemoryV2Config:
         ),
         governance=_load_governance(root),
         ranking=_load_ranking(root),
+        backend=_load_backend(root),
+        embedding=_load_embedding(root),
+        rerank=_load_rerank(root),
+        hybrid=_load_hybrid(root),
+        qdrant=_load_qdrant(root),
+        injection=_load_injection(root),
     )
