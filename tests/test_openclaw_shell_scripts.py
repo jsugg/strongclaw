@@ -253,6 +253,98 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     assert "passed=3 total=3" in result.stdout
 
 
+def test_install_host_services_renders_repo_local_systemd_user_units(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    systemd_dir = home_dir / ".config" / "systemd" / "user"
+    bin_dir = _build_tool_path(tmp_path, ["dirname"])
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\nprintf 'Linux\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    env = os.environ | {
+        "HOME": str(home_dir),
+        "SYSTEMD_DIR": str(systemd_dir),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/install_host_services.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    gateway_unit = (systemd_dir / "openclaw-gateway.service").read_text(encoding="utf-8")
+    sidecars_unit = (systemd_dir / "openclaw-sidecars.service").read_text(encoding="utf-8")
+    assert f"WorkingDirectory={repo_root}" in gateway_unit
+    assert (
+        f"ExecStart=/bin/bash -lc '{repo_root}/scripts/ops/launch_gateway_with_varlock.sh'"
+        in gateway_unit
+    )
+    assert (
+        f"ExecStart=/bin/bash -lc '{repo_root}/scripts/ops/launch_sidecars_with_varlock.sh'"
+        in sidecars_unit
+    )
+    assert "/srv/openclaw" not in gateway_unit
+    assert "systemctl --user daemon-reload" in result.stdout
+    assert "systemctl --user enable --now openclaw-gateway.service" in result.stdout
+
+
+def test_install_host_services_dispatches_to_host_specific_renderer(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    bin_dir = _build_tool_path(tmp_path, ["dirname"])
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\nprintf 'Darwin\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    env = os.environ | {
+        "HOME": str(home_dir),
+        "LAUNCHD_DIR": str(home_dir / "Library" / "LaunchAgents"),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/install_host_services.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Rendered launchd plists into" in result.stdout
+    assert "launchctl bootstrap gui/" in result.stdout
+
+
+def test_create_openclawsvc_requires_root_for_linux_branch(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "id"])
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\nprintf 'Linux\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    env = os.environ | {"HOME": str(tmp_path / "home"), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    username = "openclawsvc_test_nonroot"
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/create_openclawsvc.sh"),
+            username,
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Run with sudo to create the Linux runtime user" in result.stderr
+
+
 def test_preflight_macos_requires_homebrew(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = _build_tool_path(tmp_path, ["dirname", "uname"])

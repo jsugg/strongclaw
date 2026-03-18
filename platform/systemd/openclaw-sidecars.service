@@ -6,11 +6,10 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=true
-WorkingDirectory=/srv/openclaw/platform/openclaw-platform-bootstrap
-ExecStart=/bin/bash -lc './scripts/ops/launch_sidecars_with_varlock.sh'
-ExecStop=/bin/bash -lc './scripts/ops/stop_sidecars.sh'
-User=openclaw
-Group=openclaw
+WorkingDirectory=__REPO_ROOT__
+Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
+ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_sidecars_with_varlock.sh'
+ExecStop=/bin/bash -lc '__REPO_ROOT__/scripts/ops/stop_sidecars.sh'
 
 [Install]
 WantedBy=default.target

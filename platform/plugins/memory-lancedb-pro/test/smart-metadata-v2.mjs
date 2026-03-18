@@ -5,14 +5,9 @@
  */
 
 import assert from "node:assert/strict";
-import Module from "node:module";
+import { initGlobalNodePath } from "./helpers/node-path.mjs";
 
-process.env.NODE_PATH = [
-    process.env.NODE_PATH,
-    "/opt/homebrew/lib/node_modules/openclaw/node_modules",
-    "/opt/homebrew/lib/node_modules",
-].filter(Boolean).join(":");
-Module._initPaths();
+initGlobalNodePath();
 
 import jitiFactory from "jiti";
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });

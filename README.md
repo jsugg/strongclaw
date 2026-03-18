@@ -20,9 +20,10 @@ Read these in order:
 
 1. [`QUICKSTART.md`](QUICKSTART.md)
 2. [`SETUP_GUIDE.md`](SETUP_GUIDE.md)
-3. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
-4. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
-5. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
+3. [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md)
+4. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
+5. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
+6. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
 
 ## Repository map
 
@@ -35,7 +36,7 @@ Read these in order:
 │   ├── docs/                   # architecture, runbooks, and production checklists
 │   ├── launchd/                # macOS service templates
 │   ├── skills/                 # local/reviewed/quarantine skill layout
-│   ├── systemd/                # Linux migration service units
+│   ├── systemd/                # Linux service templates
 │   ├── workers/                # acpx, QMD, and browser-lab artifacts
 │   └── workspace/              # per-role AGENTS/MEMORY bootstrap
 ├── scripts/

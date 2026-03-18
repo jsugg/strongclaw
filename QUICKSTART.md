@@ -2,6 +2,10 @@
 
 This quickstart gets you from zero to a verified secure baseline.
 
+For host-native runtime-user provisioning and service-manager activation, use
+[`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md) alongside
+this guide.
+
 ## 1. Install the repo helper package
 
 ```bash
@@ -20,11 +24,11 @@ That script:
 - auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
 - runs the matching host preflight before attempting package installs
 - creates the repo-local directories under `platform/`
-- installs or verifies Homebrew prerequisites
+- installs or verifies host package prerequisites
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the default QMD semantic memory backend
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
-- renders launchd templates
+- renders launchd or systemd service templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
 

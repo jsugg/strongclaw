@@ -2,10 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-PREFLIGHT_SCRIPT="$(
-  PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$PYTHON_BIN" -m clawops.platform_compat --field preflight_script
-)"
-
-exec "$ROOT/scripts/bootstrap/$PREFLIGHT_SCRIPT" "$@"
+case "$(uname -s)" in
+  Darwin)
+    exec "$ROOT/scripts/bootstrap/preflight_macos.sh" "$@"
+    ;;
+  Linux)
+    exec "$ROOT/scripts/bootstrap/preflight_linux.sh" "$@"
+    ;;
+  *)
+    echo "unsupported host OS for preflight: $(uname -s)" >&2
+    exit 1
+    ;;
+esac

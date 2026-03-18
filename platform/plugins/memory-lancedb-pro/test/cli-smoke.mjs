@@ -1,18 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import Module from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Command } from "commander";
 import jitiFactory from "jiti";
+import { initGlobalNodePath } from "./helpers/node-path.mjs";
 
-process.env.NODE_PATH = [
-  process.env.NODE_PATH,
-  "/opt/homebrew/lib/node_modules/openclaw/node_modules",
-  "/opt/homebrew/lib/node_modules",
-].filter(Boolean).join(":");
-Module._initPaths();
+initGlobalNodePath();
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 

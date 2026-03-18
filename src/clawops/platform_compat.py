@@ -1,4 +1,4 @@
-"""Platform compatibility helpers for bootstrap and plugin install flows."""
+"""Platform compatibility helpers for host metadata and plugin install flows."""
 
 from __future__ import annotations
 
@@ -52,22 +52,13 @@ def detect_host_platform(
     return HostPlatform(os_name=resolved_os, architecture=resolved_arch)
 
 
-def resolve_bootstrap_script(host: HostPlatform) -> str:
-    """Select the bootstrap entrypoint for the detected host."""
+def resolve_service_manager(host: HostPlatform) -> str:
+    """Return the native service manager for the detected host."""
     if host.os_name == "darwin":
-        return "bootstrap_macos.sh"
+        return "launchd"
     if host.os_name == "linux":
-        return "bootstrap_linux.sh"
-    raise ValueError(f"unsupported host OS for bootstrap: {host.os_name}")
-
-
-def resolve_preflight_script(host: HostPlatform) -> str:
-    """Select the preflight entrypoint for the detected host."""
-    if host.os_name == "darwin":
-        return "preflight_macos.sh"
-    if host.os_name == "linux":
-        return "preflight_linux.sh"
-    raise ValueError(f"unsupported host OS for preflight: {host.os_name}")
+        return "systemd"
+    raise ValueError(f"unsupported host OS for service management: {host.os_name}")
 
 
 def resolve_memory_plugin_lancedb_version(host: HostPlatform) -> str:
@@ -83,8 +74,7 @@ def build_compatibility_record(host: HostPlatform) -> dict[str, object]:
     return {
         "host_os": host.os_name,
         "host_arch": host.architecture,
-        "preflight_script": resolve_preflight_script(host),
-        "bootstrap_script": resolve_bootstrap_script(host),
+        "service_manager": resolve_service_manager(host),
         "openclaw_version": DEFAULT_OPENCLAW_VERSION,
         "acpx_version": DEFAULT_ACPX_VERSION,
         "memory_plugin_default_lancedb_version": DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
@@ -104,8 +94,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=(
             "host_os",
             "host_arch",
-            "preflight_script",
-            "bootstrap_script",
+            "service_manager",
             "openclaw_version",
             "acpx_version",
             "memory_plugin_default_lancedb_version",

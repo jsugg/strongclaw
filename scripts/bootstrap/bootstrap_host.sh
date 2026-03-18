@@ -2,10 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-BOOTSTRAP_SCRIPT="$(
-  PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$PYTHON_BIN" -m clawops.platform_compat --field bootstrap_script
-)"
-
-exec "$ROOT/scripts/bootstrap/$BOOTSTRAP_SCRIPT" "$@"
+case "$(uname -s)" in
+  Darwin)
+    exec "$ROOT/scripts/bootstrap/bootstrap_macos.sh" "$@"
+    ;;
+  Linux)
+    exec "$ROOT/scripts/bootstrap/bootstrap_linux.sh" "$@"
+    ;;
+  *)
+    echo "unsupported host OS for bootstrap: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
