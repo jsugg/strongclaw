@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 
 from clawops.acp_runner import _lock_name
@@ -101,7 +102,13 @@ def test_acp_runner_fails_preflight_when_acpx_is_missing(
     worktree = repo_root / "repo" / "upstream"
     worktree.mkdir(parents=True)
     _init_git_worktree(worktree)
-    monkeypatch.setenv("PATH", os.environ["PATH"])
+    git_bin = tmp_path / "bin"
+    git_bin.mkdir()
+    git_path = shutil.which("git")
+    if git_path is None:
+        raise AssertionError("git is required for this test")
+    (git_bin / "git").symlink_to(git_path)
+    monkeypatch.setenv("PATH", git_bin.as_posix())
 
     state_dir = repo_root / ".runs" / "acp"
     exit_code = acp_runner_main(

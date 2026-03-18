@@ -11,7 +11,7 @@
     },
     "load": {
       "paths": [
-        "__REPO_ROOT__/vendor/lossless-claw"
+        "__LOSSLESS_CLAW_PLUGIN_PATH__"
       ]
     },
     "slots": {
