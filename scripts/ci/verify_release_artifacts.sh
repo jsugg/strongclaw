@@ -21,7 +21,17 @@ if [[ -z "$wheel_path" || -z "$sdist_path" ]]; then
 fi
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-release-verify.XXXXXX")"
-trap 'rm -rf "$tmp_dir"' EXIT
+
+cleanup_tmp_dir() {
+  python3 - "$tmp_dir" <<'PY'
+import shutil
+import sys
+
+shutil.rmtree(sys.argv[1], ignore_errors=True)
+PY
+}
+
+trap cleanup_tmp_dir EXIT
 
 verify_install() {
   local artifact_path="$1"
