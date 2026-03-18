@@ -26,6 +26,18 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -e .[dev]
       - run: pytest -q --cov=src/clawops --cov-report=xml --cov-report=term-missing
+      - name: Coverage summary
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root = ET.parse("coverage.xml").getroot()
+          coverage = float(root.attrib["line-rate"]) * 100
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"Coverage: {coverage:.2f}%\n")
+          PY
       - run: python -m compileall -q src tests
       - uses: github/codeql-action/init@b1bff81932f5cdfc8695c7752dcee935dcd061c8 # v4
         with:

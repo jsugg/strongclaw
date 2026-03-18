@@ -8,10 +8,10 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import time
 from typing import Any, Mapping
 
+import json5
 import yaml
 
 
@@ -32,109 +32,18 @@ def write_text(path: pathlib.Path, content: str) -> None:
 
 
 def load_json(path: pathlib.Path) -> Any:
-    """Load JSON or JSON5-compatible content from *path*."""
-    text = load_text(path)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return json.loads(_strip_json5_comments_and_trailing_commas(text))
+    """Load strict JSON content from *path*."""
+    return json.loads(load_text(path))
 
 
-def _strip_json5_comments_and_trailing_commas(text: str) -> str:
-    """Normalize a JSON5-lite document into strict JSON.
+def load_json5(path: pathlib.Path, *, allow_duplicate_keys: bool = False) -> Any:
+    """Load full JSON5 content from *path* for human-edited overlays."""
+    return json5.loads(load_text(path), allow_duplicate_keys=allow_duplicate_keys)
 
-    The repository only relies on comment and trailing-comma support for
-    operator-edited `.json5` overlays, so the normalizer intentionally keeps a
-    narrow compatibility surface instead of implementing the full JSON5 grammar.
-    """
 
-    def _strip_comments(value: str) -> str:
-        result: list[str] = []
-        in_string = False
-        string_quote = ""
-        escape = False
-        in_line_comment = False
-        in_block_comment = False
-        index = 0
-        while index < len(value):
-            char = value[index]
-            next_char = value[index + 1] if index + 1 < len(value) else ""
-            if in_line_comment:
-                if char == "\n":
-                    in_line_comment = False
-                    result.append(char)
-                index += 1
-                continue
-            if in_block_comment:
-                if char == "*" and next_char == "/":
-                    in_block_comment = False
-                    index += 2
-                    continue
-                index += 1
-                continue
-            if in_string:
-                result.append(char)
-                if escape:
-                    escape = False
-                elif char == "\\":
-                    escape = True
-                elif char == string_quote:
-                    in_string = False
-                index += 1
-                continue
-            if char in {'"', "'"}:
-                in_string = True
-                string_quote = char
-                result.append(char)
-                index += 1
-                continue
-            if char == "/" and next_char == "/":
-                in_line_comment = True
-                index += 2
-                continue
-            if char == "/" and next_char == "*":
-                in_block_comment = True
-                index += 2
-                continue
-            result.append(char)
-            index += 1
-        return "".join(result)
-
-    def _strip_trailing_commas(value: str) -> str:
-        result: list[str] = []
-        in_string = False
-        string_quote = ""
-        escape = False
-        index = 0
-        while index < len(value):
-            char = value[index]
-            if in_string:
-                result.append(char)
-                if escape:
-                    escape = False
-                elif char == "\\":
-                    escape = True
-                elif char == string_quote:
-                    in_string = False
-                index += 1
-                continue
-            if char in {'"', "'"}:
-                in_string = True
-                string_quote = char
-                result.append(char)
-                index += 1
-                continue
-            if char == ",":
-                match = re.match(r"\s*([}\]])", value[index + 1 :], flags=re.DOTALL)
-                if match is not None:
-                    index += 1
-                    continue
-            result.append(char)
-            index += 1
-        return "".join(result)
-
-    without_comments = _strip_comments(text)
-    return _strip_trailing_commas(without_comments)
+def load_overlay(path: pathlib.Path) -> Any:
+    """Load human-edited overlay content while rejecting duplicate keys."""
+    return load_json5(path, allow_duplicate_keys=False)
 
 
 def dump_json(value: Any, *, indent: int = 2) -> str:
