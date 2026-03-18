@@ -699,14 +699,129 @@ def test_github_labels_retry_retryable_http_status_then_succeeds(
         scope="test",
         trust_zone="automation",
     )
+    replayed = add_labels(
+        ctx=ctx,
+        repo="example/repo",
+        issue_number=123,
+        labels=["needs-review"],
+        scope="test",
+        trust_zone="automation",
+    )
 
     assert result["ok"] is True
     assert result["request_attempts"] == 2
+    assert result["request_id"] == "req-123"
+    assert result["retry_after_seconds"] == 3.0
     assert calls == ["request", "request"]
+    assert replayed == result
 
     persisted = journal.get(str(result["op_id"]))
     assert persisted.status == "succeeded"
     assert persisted.result_request_attempts == 2
+    assert persisted.result_request_id == "req-123"
+    assert persisted.result_retry_after_seconds == 3.0
+
+
+def test_github_labels_retry_timeout_then_succeeds(
+    tmp_path: pathlib.Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ctx, journal = _build_context(tmp_path, SPECS[2], require_approval=False)
+    _configure_wrapper_environment(SPECS[2], monkeypatch)
+    calls: list[str] = []
+
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
+        calls.append("request")
+        if len(calls) == 1:
+            raise requests.Timeout("transient timeout")
+        return _FakeResponse(
+            ok=True,
+            status_code=200,
+            text="ok",
+            headers={"X-GitHub-Request-Id": "req-success"},
+        )
+
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+
+    result = add_labels(
+        ctx=ctx,
+        repo="example/repo",
+        issue_number=123,
+        labels=["needs-review"],
+        scope="test",
+        trust_zone="automation",
+    )
+    replayed = add_labels(
+        ctx=ctx,
+        repo="example/repo",
+        issue_number=123,
+        labels=["needs-review"],
+        scope="test",
+        trust_zone="automation",
+    )
+
+    assert result["ok"] is True
+    assert result["request_attempts"] == 2
+    assert result["request_id"] == "req-success"
+    assert "retry_after_seconds" not in result
+    assert calls == ["request", "request"]
+    assert replayed == result
+
+    persisted = journal.get(str(result["op_id"]))
+    assert persisted.status == "succeeded"
+    assert persisted.result_request_attempts == 2
+    assert persisted.result_request_id == "req-success"
+    assert persisted.result_retry_after_seconds is None
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [SPECS[0], SPECS[1], SPECS[3]],
+    ids=["webhook", "github-comment", "github-merge"],
+)
+def test_non_retry_wrappers_fail_once_on_retryable_http_status(
+    spec: WrapperSpec,
+    tmp_path: pathlib.Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ctx, journal = _build_context(tmp_path, spec, require_approval=False)
+    _configure_wrapper_environment(spec, monkeypatch)
+    calls: list[str] = []
+    _install_status_sequence(
+        monkeypatch,
+        responses=[
+            _FakeResponse(
+                ok=False,
+                status_code=503,
+                text="busy",
+                headers={"Retry-After": "5", "X-Request-Id": "req-503"},
+            )
+        ],
+        calls=calls,
+    )
+
+    first = spec.invoke(ctx, spec.allowed_input)
+    second = spec.invoke(ctx, spec.allowed_input)
+
+    assert first["ok"] is False
+    assert first["accepted"] is True
+    assert first["executed"] is True
+    assert first["status"] == "failed"
+    assert first["error_type"] == "http_status"
+    assert first["retryable"] is False
+    assert first["request_attempts"] == 1
+    assert first["request_id"] == "req-503"
+    assert first["retry_after_seconds"] == 5.0
+    assert first["error"]["request_id"] == "req-503"
+    assert first["error"]["retry_after_seconds"] == 5.0
+    assert calls == ["request"]
+    assert second == first
+
+    persisted = journal.get(str(first["op_id"]))
+    assert persisted.status == "failed"
+    assert persisted.result_request_attempts == 1
+    assert persisted.result_request_id == "req-503"
+    assert persisted.result_retry_after_seconds == 5.0
 
 
 def test_json_http_client_supports_split_timeouts(monkeypatch: MonkeyPatch) -> None:

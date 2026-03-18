@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS op (
   result_request_method TEXT,
   result_request_url TEXT,
   result_request_attempts INTEGER,
+  result_request_id TEXT,
+  result_retry_after_seconds REAL,
   UNIQUE(scope, idempotency_key)
 );
 
@@ -88,6 +90,8 @@ MIGRATION_COLUMNS: dict[str, str] = {
     "result_request_method": "TEXT",
     "result_request_url": "TEXT",
     "result_request_attempts": "INTEGER",
+    "result_request_id": "TEXT",
+    "result_retry_after_seconds": "REAL",
 }
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -177,6 +181,8 @@ class Operation:
     result_request_method: str | None
     result_request_url: str | None
     result_request_attempts: int | None
+    result_request_id: str | None
+    result_retry_after_seconds: float | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Operation":
@@ -350,6 +356,8 @@ class OperationJournal:
         result_request_method: str | None | object = _UNSET,
         result_request_url: str | None | object = _UNSET,
         result_request_attempts: int | None | object = _UNSET,
+        result_request_id: str | None | object = _UNSET,
+        result_retry_after_seconds: float | None | object = _UNSET,
     ) -> Operation:
         """Update operation state."""
         now = utc_now_ms()
@@ -432,6 +440,14 @@ class OperationJournal:
                 if result_request_attempts is _UNSET
                 else result_request_attempts
             )
+            next_result_request_id = (
+                row["result_request_id"] if result_request_id is _UNSET else result_request_id
+            )
+            next_result_retry_after_seconds = (
+                row["result_retry_after_seconds"]
+                if result_retry_after_seconds is _UNSET
+                else result_retry_after_seconds
+            )
             conn.execute(
                 """
                 UPDATE op
@@ -442,7 +458,8 @@ class OperationJournal:
                     reviewed_by = ?, reviewed_at_ms = ?, review_note = ?, review_artifact_path = ?,
                     review_payload_json = ?, result_ok = ?, result_status_code = ?, result_body_excerpt = ?,
                     result_error_type = ?, result_error_retryable = ?, result_request_method = ?,
-                    result_request_url = ?, result_request_attempts = ?
+                    result_request_url = ?, result_request_attempts = ?, result_request_id = ?,
+                    result_retry_after_seconds = ?
                 WHERE op_id = ?
                 """,
                 (
@@ -471,6 +488,8 @@ class OperationJournal:
                     next_result_request_method,
                     next_result_request_url,
                     next_result_request_attempts,
+                    next_result_request_id,
+                    next_result_retry_after_seconds,
                     op_id,
                 ),
             )
