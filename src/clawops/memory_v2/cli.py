@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             "provider": "strongclaw-memory-v2",
             "model": engine.config.embedding.model or "sqlite-fts5",
             "mode": args.lane,
-            "backend": hits[0].backend if hits else (args.backend or engine.config.backend.active),
+            "backend": args.backend or engine.config.backend.active,
         }
         _print_payload(payload, as_json=bool(args.json))
         return 0

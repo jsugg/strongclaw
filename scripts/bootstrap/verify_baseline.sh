@@ -29,7 +29,7 @@ echo "== OpenClaw memory search =="
 openclaw memory search --query "ClawOps" --max-results 1 >/dev/null
 
 echo "== Python tests =="
-PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" pytest -q "$ROOT/tests"
+uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"
 
 echo "== Harness smoke =="
 "$ROOT/scripts/bootstrap/run_harness_smoke.sh" "$ROOT/.runs"

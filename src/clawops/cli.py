@@ -23,6 +23,7 @@ from clawops import (
     policy_engine,
     repo_tools,
     skill_scanner,
+    supply_chain,
     workflow_runner,
 )
 from clawops.wrappers import github as github_wrapper
@@ -95,6 +96,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "verify-platform", platform_verify.main, "Verify sidecars, observability, and channels."
     ),
     CommandSpec("memory-v2", memory_v2.main, "Run the legacy Markdown-canonical memory v2 engine."),
+    CommandSpec(
+        "supply-chain",
+        supply_chain.main,
+        "Inventory and refresh pinned workflows, compose digests, and proposal branches.",
+    ),
     CommandSpec("wrapper", _dispatch_wrapper, "Run policy-gated external wrappers."),
 )
 

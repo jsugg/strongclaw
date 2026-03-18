@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
-from collections.abc import Mapping, Sequence
-from typing import Any, Literal, cast
+from collections.abc import Sequence
+from typing import Any, Literal
 
 Lane = Literal["memory", "corpus"]
 SearchMode = Literal["all", "memory", "corpus"]
@@ -13,7 +13,6 @@ SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid"]
 FusionMode = Literal["rrf", "weighted"]
 EmbeddingProviderKind = Literal["disabled", "compatible-http"]
 RerankProviderKind = Literal["none"]
-EvidenceKind = Literal["file", "lcm_summary", "lcm_message_range", "external_uri"]
 
 DEFAULT_MEMORY_FILE_NAMES = ("MEMORY.md", "memory.md")
 DEFAULT_DAILY_DIR = "memory"
@@ -249,124 +248,6 @@ class DenseSearchCandidate:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class EvidenceEntry:
-    """Structured provenance reference for an indexed item."""
-
-    kind: EvidenceKind
-    relation: str = "supports"
-    rel_path: str | None = None
-    start_line: int | None = None
-    end_line: int | None = None
-    uri: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the entry to a serializable mapping."""
-        payload: dict[str, Any] = {"kind": self.kind, "relation": self.relation}
-        if self.rel_path is not None:
-            payload["rel_path"] = self.rel_path
-        if self.start_line is not None:
-            payload["start_line"] = self.start_line
-        if self.end_line is not None:
-            payload["end_line"] = self.end_line
-        if self.uri is not None:
-            payload["uri"] = self.uri
-        return payload
-
-    def link_key(self) -> tuple[str, int, int, str] | None:
-        """Return the SQLite evidence-link identity for file-backed entries."""
-        if (
-            self.kind != "file"
-            or self.rel_path is None
-            or self.start_line is None
-            or self.end_line is None
-        ):
-            return None
-        return (self.rel_path, self.start_line, self.end_line, self.relation)
-
-    @classmethod
-    def from_reference(
-        cls,
-        reference: str,
-        *,
-        relation: str = "supports",
-    ) -> "EvidenceEntry":
-        """Normalize one typed-entry evidence reference."""
-        normalized = reference.strip()
-        if not normalized:
-            raise ValueError("evidence reference must not be blank")
-        if normalized.startswith("lcm://"):
-            return cls(kind=_lcm_kind(normalized), relation=relation, uri=normalized)
-        if "://" in normalized and not normalized.startswith("file://"):
-            return cls(kind="external_uri", relation=relation, uri=normalized)
-        rel_path, start_line, end_line = _parse_file_reference(normalized)
-        return cls(
-            kind="file",
-            relation=relation,
-            rel_path=rel_path,
-            start_line=start_line,
-            end_line=end_line,
-        )
-
-    @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "EvidenceEntry":
-        """Load persisted evidence JSON while remaining backward-compatible."""
-        kind = raw.get("kind")
-        relation = str(raw.get("relation", "supports")).strip() or "supports"
-        if not isinstance(kind, str):
-            uri = raw.get("uri")
-            if isinstance(uri, str) and uri.strip():
-                return cls.from_reference(uri, relation=relation)
-            rel_path = raw.get("rel_path")
-            if isinstance(rel_path, str) and rel_path.strip():
-                return cls(
-                    kind="file",
-                    relation=relation,
-                    rel_path=rel_path.strip(),
-                    start_line=_as_optional_int(raw.get("start_line")),
-                    end_line=_as_optional_int(raw.get("end_line")),
-                )
-            raise ValueError("evidence entry requires either kind, uri, or rel_path")
-        if kind == "file":
-            rel_path = raw.get("rel_path")
-            if not isinstance(rel_path, str) or not rel_path.strip():
-                raise ValueError("file evidence requires rel_path")
-            return cls(
-                kind="file",
-                relation=relation,
-                rel_path=rel_path.strip(),
-                start_line=_as_optional_int(raw.get("start_line")),
-                end_line=_as_optional_int(raw.get("end_line")),
-            )
-        uri = raw.get("uri")
-        if not isinstance(uri, str) or not uri.strip():
-            raise ValueError("external evidence requires uri")
-        return cls(kind=_as_evidence_kind(kind), relation=relation, uri=uri.strip())
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class SearchDiagnostics:
-    """Latency and candidate counts captured during one search plan."""
-
-    lexical_ms: float = 0.0
-    sqlite_dense_ms: float = 0.0
-    fusion_ms: float = 0.0
-    lexical_candidates: int = 0
-    dense_candidates: int = 0
-    selected_candidates: int = 0
-
-    def to_dict(self) -> dict[str, float | int]:
-        """Convert diagnostics to telemetry-friendly scalars."""
-        return {
-            "lexicalMs": round(self.lexical_ms, 3),
-            "sqliteDenseMs": round(self.sqlite_dense_ms, 3),
-            "fusionMs": round(self.fusion_ms, 3),
-            "lexicalCandidates": self.lexical_candidates,
-            "denseCandidates": self.dense_candidates,
-            "selectedCandidates": self.selected_candidates,
-        }
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
 class SearchHit:
     """Search result payload compatible with OpenClaw memory tools."""
 
@@ -498,51 +379,3 @@ def normalize_text_tokens(text: str) -> tuple[str, ...]:
 def evidence_labels(evidence: Sequence[str]) -> tuple[str, ...]:
     """Return deterministic evidence labels."""
     return tuple(sorted({entry.strip() for entry in evidence if entry.strip()}))
-
-
-def _as_evidence_kind(value: str) -> EvidenceKind:
-    """Validate a serialized evidence kind value."""
-    if value not in {"file", "lcm_summary", "lcm_message_range", "external_uri"}:
-        raise ValueError(f"unsupported evidence kind: {value}")
-    return cast(EvidenceKind, value)
-
-
-def _as_optional_int(value: object) -> int | None:
-    """Coerce an optional integer field from persisted JSON."""
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("evidence line coordinates must be integers")
-    return value
-
-
-def _lcm_kind(uri: str) -> EvidenceKind:
-    """Infer the structured LCM provenance kind from a URI."""
-    if "/summary/" in uri:
-        return _as_evidence_kind("lcm_summary")
-    if "/messages/" in uri or "/message-range/" in uri:
-        return _as_evidence_kind("lcm_message_range")
-    return _as_evidence_kind("external_uri")
-
-
-def _parse_file_reference(reference: str) -> tuple[str, int, int]:
-    """Parse repo-relative file evidence references."""
-    if "#" in reference:
-        rel_path, line_part = reference.split("#", 1)
-    else:
-        rel_path, line_part = reference, ""
-    rel_path = rel_path.strip()
-    if not rel_path:
-        raise ValueError("file evidence requires a relative path")
-    start_line = 0
-    end_line = 0
-    if line_part.startswith("L"):
-        line_text = line_part[1:]
-        if "-L" in line_text:
-            start_text, end_text = line_text.split("-L", 1)
-            start_line = int(start_text)
-            end_line = int(end_text)
-        else:
-            start_line = int(line_text)
-            end_line = start_line
-    return rel_path, start_line, end_line

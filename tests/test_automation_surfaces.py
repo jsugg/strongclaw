@@ -29,9 +29,35 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     verify_script = (repo_root / "scripts/bootstrap/verify_baseline.sh").read_text(encoding="utf-8")
 
+    assert (
+        'VERIFY_OPENCLAW_MODELS_SCRIPT="${VERIFY_OPENCLAW_MODELS_SCRIPT:-$ROOT/scripts/bootstrap/configure_openclaw_model_auth.sh}"'
+        in verify_script
+    )
+    assert '"$VERIFY_OPENCLAW_MODELS_SCRIPT" --check-only' in verify_script
     assert '"$ROOT/scripts/bootstrap/verify_sidecars.sh" --skip-runtime' in verify_script
     assert '"$ROOT/scripts/bootstrap/verify_observability.sh" --skip-runtime' in verify_script
     assert '"$ROOT/scripts/bootstrap/verify_channels.sh"' in verify_script
+    assert 'uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"' in verify_script
+    assert 'pytest -q "$ROOT/tests"' not in verify_script.replace(
+        'uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"',
+        "",
+    )
+
+
+def test_security_harness_smoke_uses_uv_managed_python() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    suite = (repo_root / "platform/configs/harness/security_regressions.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        '["uv", "run", "--project", ".", "python", "-m", "clawops", "merge-json", "--help"]'
+        in suite
+    )
+    assert (
+        '["uv", "run", "--project", ".", "python", "-m", "clawops", "context", "--help"]' in suite
+    )
+    assert '["python3", "-m", "clawops"' not in suite
 
 
 def test_platform_verification_and_acp_scripts_use_shared_clawops_entrypoints() -> None:
@@ -45,13 +71,22 @@ def test_platform_verification_and_acp_scripts_use_shared_clawops_entrypoints() 
     codex = (repo_root / "scripts/workers/run_codex_session.sh").read_text(encoding="utf-8")
     reviewer = (repo_root / "scripts/workers/run_claude_review.sh").read_text(encoding="utf-8")
     fixer_loop = (repo_root / "scripts/workers/reviewer_fixer_loop.sh").read_text(encoding="utf-8")
+    harness_smoke = (repo_root / "scripts/bootstrap/run_harness_smoke.sh").read_text(
+        encoding="utf-8"
+    )
 
-    assert "clawops verify-platform sidecars" in sidecars
-    assert "clawops verify-platform observability" in observability
-    assert "clawops verify-platform channels" in channels
-    assert "clawops acp-runner" in codex
-    assert "clawops acp-runner" in reviewer
-    assert fixer_loop.count("clawops acp-runner") == 2
+    assert 'resolve_clawops_bin "$ROOT"' in sidecars
+    assert "verify-platform sidecars" in sidecars
+    assert 'resolve_clawops_bin "$ROOT"' in observability
+    assert "verify-platform observability" in observability
+    assert 'resolve_clawops_bin "$ROOT"' in channels
+    assert "verify-platform channels" in channels
+    assert 'resolve_clawops_bin "$ROOT"' in codex
+    assert "acp-runner" in codex
+    assert 'resolve_clawops_bin "$ROOT"' in reviewer
+    assert "acp-runner" in reviewer
+    assert fixer_loop.count('run_clawops "$ROOT" acp-runner') == 2
+    assert harness_smoke.count('run_clawops "$ROOT" harness') == 2
 
 
 def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
@@ -85,11 +120,18 @@ def test_bootstrap_script_keeps_core_host_setup_contract() -> None:
     assert '"$ROOT/scripts/bootstrap/preflight.sh"' in host
     assert "ensure_docker_compatible_runtime darwin" in host
     assert "ensure_docker_compatible_runtime linux" in host
+    assert 'UV_VERSION="${UV_VERSION:-0.10.9}"' in host
+    assert "ensure_uv" in host
+    assert "https://astral.sh/uv/${UV_VERSION}/install.sh" in host
+    assert 'uv sync --project "$ROOT" --locked --extra dev' in host
     assert 'source "$ROOT/scripts/lib/docker_runtime.sh"' in host
     assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in host
+    assert "profile_requires_lossless_claw()" in host
+    assert '"$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh"' in host
     assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in host
     assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in host
     assert "acpx@latest" not in host
+    assert "pip install -e" not in host
     assert "|| true" not in host
 
 
@@ -129,40 +171,57 @@ def test_service_installers_render_host_specific_service_templates() -> None:
     )
 
 
-def test_install_script_composes_existing_bootstrap_and_verification_entrypoints() -> None:
+def test_setup_script_composes_existing_bootstrap_and_verification_entrypoints() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    install_script = (repo_root / "scripts/bootstrap/install.sh").read_text(encoding="utf-8")
+    setup_script = (repo_root / "scripts/bootstrap/setup.sh").read_text(encoding="utf-8")
 
     assert (
         'BOOTSTRAP_SCRIPT="${BOOTSTRAP_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap.sh}"'
-        in install_script
+        in setup_script
     )
     assert (
         'RENDER_OPENCLAW_CONFIG_SCRIPT="${RENDER_OPENCLAW_CONFIG_SCRIPT:-$ROOT/scripts/bootstrap/render_openclaw_config.sh}"'
-        in install_script
+        in setup_script
     )
     assert (
         'DOCTOR_HOST_SCRIPT="${DOCTOR_HOST_SCRIPT:-$ROOT/scripts/bootstrap/doctor_host.sh}"'
-        in install_script
+        in setup_script
     )
     assert (
         'INSTALL_HOST_SERVICES_SCRIPT="${INSTALL_HOST_SERVICES_SCRIPT:-$ROOT/scripts/bootstrap/install_host_services.sh}"'
-        in install_script
+        in setup_script
     )
     assert (
-        'VALIDATE_VARLOCK_ENV_SCRIPT="${VALIDATE_VARLOCK_ENV_SCRIPT:-$ROOT/scripts/bootstrap/validate_varlock_env.sh}"'
-        in install_script
+        'CONFIGURE_VARLOCK_ENV_SCRIPT="${CONFIGURE_VARLOCK_ENV_SCRIPT:-$ROOT/scripts/bootstrap/configure_varlock_env.sh}"'
+        in setup_script
+    )
+    assert (
+        'CONFIGURE_MODEL_AUTH_SCRIPT="${CONFIGURE_MODEL_AUTH_SCRIPT:-$ROOT/scripts/bootstrap/configure_openclaw_model_auth.sh}"'
+        in setup_script
     )
     assert (
         'VERIFY_BASELINE_SCRIPT="${VERIFY_BASELINE_SCRIPT:-$ROOT/scripts/bootstrap/verify_baseline.sh}"'
-        in install_script
+        in setup_script
     )
-    assert "--profile PROFILE" in install_script
-    assert "--skip-bootstrap" in install_script
-    assert "--no-activate-services" in install_script
-    assert "--no-verify" in install_script
-    assert '"$VALIDATE_VARLOCK_ENV_SCRIPT"' in install_script
-    assert '"$INSTALL_HOST_SERVICES_SCRIPT" --activate' in install_script
+    assert "--profile PROFILE" in setup_script
+    assert "--skip-bootstrap" in setup_script
+    assert "--no-activate-services" in setup_script
+    assert "--no-verify" in setup_script
+    assert "--non-interactive" in setup_script
+    assert "run_step" in setup_script
+    assert '"$CONFIGURE_VARLOCK_ENV_SCRIPT"' in setup_script
+    assert '"$CONFIGURE_MODEL_AUTH_SCRIPT" "${CONFIGURE_MODEL_AUTH_ARGS[@]}"' in setup_script
+    assert '"$INSTALL_HOST_SERVICES_SCRIPT" --activate' in setup_script
+
+
+def test_make_install_uses_uv_managed_environment() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+
+    assert "$(UV) sync $(DEV_SYNC_FLAGS)" in makefile
+    assert "clawops setup" in makefile
+    assert "clawops doctor" in makefile
+    assert "$(PIP) install -e ." not in makefile
 
 
 def test_ci_environment_sync_exports_the_locked_virtualenv_for_follow_up_steps() -> None:
@@ -174,16 +233,17 @@ def test_ci_environment_sync_exports_the_locked_virtualenv_for_follow_up_steps()
     assert "printf 'VIRTUAL_ENV=%s\\n' \"$ROOT/.venv\"" in sync_script
 
 
-def test_memory_plugin_workflow_covers_the_qdrant_dense_path() -> None:
+def test_ci_validation_scripts_force_safe_wrapper_retry_mode() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    workflow = (repo_root / ".github/workflows/memory-plugin-verification.yml").read_text(
+    quality_gate = (repo_root / "scripts/ci/run_repository_quality_gate.sh").read_text(
         encoding="utf-8"
     )
+    nightly = (repo_root / "scripts/ci/run_nightly_validation.sh").read_text(encoding="utf-8")
 
-    assert "verify-memory-v2-qdrant:" in workflow
-    assert "qdrant:" in workflow
-    assert "TEST_QDRANT_URL=http://127.0.0.1:6333" in workflow
-    assert "tests/test_memory_v2_qdrant_integration.py" in workflow
+    assert ': "${CLAWOPS_HTTP_RETRY_MODE:=safe}"' in quality_gate
+    assert "export CLAWOPS_HTTP_RETRY_MODE" in quality_gate
+    assert ': "${CLAWOPS_HTTP_RETRY_MODE:=safe}"' in nightly
+    assert "export CLAWOPS_HTTP_RETRY_MODE" in nightly
 
 
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
@@ -209,8 +269,10 @@ def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
     assert "best-effort install" not in quickstart
     assert "./scripts/bootstrap/doctor_host.sh" in quickstart
     assert "./scripts/bootstrap/preflight.sh" not in setup_guide
-    assert "./scripts/bootstrap/install.sh" in setup_guide
+    assert "clawops setup" in setup_guide
     assert "make install" in quickstart
+    assert "installs `uv`" in quickstart
+    assert "installs `uv`" in setup_guide
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
 

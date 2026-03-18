@@ -32,12 +32,6 @@ Daily logs can expose retained entries under a `## Retain` heading. Supported bu
 
 `clawops memory-v2 reflect` promotes those retained entries into the durable `bank/` pages and rebuilds the derived index.
 
-Typed durable entries can also carry explicit evidence metadata. File-backed proof stays in canonical Markdown coordinates and external conversation proof stays as URIs, for example:
-
-- `Fact[evidence=docs/runbook.md#L1-L3|lcm://conversation/abc123/summary/sum_deadbeef]: ...`
-
-The derived index stores those references as structured provenance so export and audit flows can preserve both canonical file lines and `lcm://...` links without coupling memory-v2 to the context-engine database.
-
 ## Derived Index
 
 The derived store lives in SQLite and is rebuilt from Markdown:
@@ -103,8 +97,6 @@ PYTHONPATH=src python3 -m clawops.openclaw_config \
   --repo-root "$(pwd)" \
   --output /tmp/strongclaw-lossless-memory-v2.json
 ```
-
-The combined lossless profile no longer assumes a vendored plugin path. Set `OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH` to the checked-out plugin directory, or vendor the plugin under `platform/plugins/lossless-claw`, before rendering either lossless overlay.
 
 ## Direct CLI Usage
 
@@ -184,15 +176,3 @@ plugin-backed search surface directly.
 - dense retrieval is opt-in through `platform/configs/memory/memory-v2.yaml`
 - the Tier One sidecar surface is `platform/compose/docker-compose.aux-stack.yaml`
 - local model operators can layer `platform/compose/docker-compose.ollama.optional.yaml`
-
-## Status and Observability
-
-`clawops memory-v2 status --json` now reports:
-
-- active and fallback backends
-- embedding and rerank provider/model metadata
-- Qdrant enabled/healthy state
-- vector item counts plus vector-sync dirty/error fields
-- the last successful vector sync timestamp
-
-When `CLAWOPS_STRUCTURED_LOGS=1` is set, memory-v2 emits compact JSON lines for embedding calls, Qdrant search, lexical planning, fusion, rerank, fallback activation, and vector sync. When OTLP tracing is enabled through `CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*` variables, the same operations emit spans through the shared ClawOps observability pipeline.

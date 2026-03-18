@@ -10,6 +10,8 @@ command -v uv >/dev/null 2>&1 || {
 }
 
 cd "$ROOT"
+: "${CLAWOPS_HTTP_RETRY_MODE:=safe}"
+export CLAWOPS_HTTP_RETRY_MODE
 PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml
 PYTHONPATH=src uv run python -m compileall -q src tests
 "$ROOT/scripts/bootstrap/run_harness_smoke.sh" "$RUNS_DIR"

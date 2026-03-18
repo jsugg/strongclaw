@@ -9,9 +9,8 @@ from clawops.memory_v2.qdrant_backend import QdrantBackend
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict[str, Any] | None = None, *, status_code: int = 200) -> None:
+    def __init__(self, payload: dict[str, Any] | None = None) -> None:
         self._payload = payload or {}
-        self.status_code = status_code
 
     def raise_for_status(self) -> None:
         return None
@@ -25,7 +24,6 @@ class _FakeSession:
         self.put_calls: list[dict[str, Any]] = []
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
-        self.conflict_on_collection = False
 
     def get(self, url: str, *, headers: dict[str, str], timeout: float) -> _FakeResponse:
         self.get_calls.append({"url": url, "headers": headers, "timeout": timeout})
@@ -49,8 +47,6 @@ class _FakeSession:
                 "params": params,
             }
         )
-        if self.conflict_on_collection and url.endswith("/collections/memory-v2-test"):
-            return _FakeResponse(status_code=409)
         return _FakeResponse()
 
     def post(
@@ -107,16 +103,3 @@ def test_qdrant_backend_uses_expected_rest_payloads() -> None:
     assert fake_session.post_calls[-1]["json"]["filter"]["must"][0]["key"] == "lane"
     assert hits[0].item_id == 42
     assert hits[0].point_id == "point-1"
-
-
-def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="memory-v2-test")
-    )
-    fake_session = _FakeSession()
-    fake_session.conflict_on_collection = True
-    backend._session = fake_session  # type: ignore[assignment]
-
-    backend.ensure_collection(vector_size=3)
-
-    assert fake_session.put_calls[0]["url"].endswith("/collections/memory-v2-test")

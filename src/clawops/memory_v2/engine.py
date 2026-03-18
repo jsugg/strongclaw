@@ -7,10 +7,9 @@ import json
 import pathlib
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
-from time import perf_counter
 from typing import Any, Literal, cast
 
 from clawops.common import ensure_parent
@@ -18,7 +17,6 @@ from clawops.memory_v2.config import MemoryV2Config, matches_glob, resolve_under
 from clawops.memory_v2.governance import ensure_writable_scope, should_auto_apply, validate_scope
 from clawops.memory_v2.models import (
     DenseSearchCandidate,
-    EvidenceEntry,
     FusionMode,
     ProposalRecord,
     ReflectionMode,
@@ -33,7 +31,6 @@ from clawops.memory_v2.providers import create_embedding_provider, create_rerank
 from clawops.memory_v2.qdrant_backend import QdrantBackend
 from clawops.memory_v2.retrieval import search_index
 from clawops.memory_v2.schema import SCHEMA_VERSION, ensure_schema
-from clawops.observability import emit_structured_log, observed_span
 
 BANK_HEADERS = {
     "fact": "# World Model\n\n## Entries\n",
@@ -110,11 +107,6 @@ class MemoryV2Engine:
             "embeddingEnabled": self.config.embedding.enabled,
             "embeddingProvider": self.config.embedding.provider,
             "embeddingModel": self.config.embedding.model,
-            "rerankEnabled": self.config.rerank.enabled,
-            "rerankProvider": self.config.rerank.provider,
-            "rerankModel": self.config.rerank.model,
-            "qdrantEnabled": bool(qdrant_health.get("enabled", False)),
-            "qdrantHealthy": bool(qdrant_health.get("healthy", False)),
             "qdrant": qdrant_health,
             "lastVectorSyncAt": last_sync_at,
             "lastVectorSyncError": last_sync_error,
@@ -140,190 +132,150 @@ class MemoryV2Engine:
         documents = list(self._iter_documents())
         typed_counts: defaultdict[str, int] = defaultdict(int)
         vector_rows: list[dict[str, Any]] = []
-        with observed_span(
-            "clawops.memory_v2.reindex",
-            attributes={
-                "documents": len(documents),
-                "backend": self.config.backend.active,
-                "qdrant_enabled": self.config.qdrant.enabled,
-            },
-        ) as span:
-            try:
-                with self.connect() as conn:
-                    existing = {
-                        str(row["rel_path"]): str(row["sha256"])
-                        for row in conn.execute("SELECT rel_path, sha256 FROM documents")
-                    }
-                    existing_point_ids = {
-                        str(row["point_id"])
-                        for row in conn.execute("SELECT point_id FROM vector_items")
-                    }
-                    current = {document.rel_path: document.sha256 for document in documents}
-                    dirty = current != existing
-                    self._clear_derived_rows(conn)
-                    indexed_at = datetime.now(tz=UTC).isoformat()
-                    chunks = 0
-                    for document in documents:
-                        doc_cursor = conn.execute(
-                            """
-                            INSERT INTO documents (
-                                rel_path, abs_path, lane, source_name, sha256, line_count, modified_at, indexed_at
-                            )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                document.rel_path,
-                                document.abs_path.as_posix(),
-                                document.lane,
-                                document.source_name,
-                                document.sha256,
-                                document.line_count,
-                                document.modified_at,
-                                indexed_at,
-                            ),
-                        )
-                        document_id = doc_cursor.lastrowid
-                        if document_id is None:
-                            raise RuntimeError("document insert did not return a rowid")
-                        for item in document.items:
-                            evidence = self._evidence_entries(
-                                document.rel_path,
-                                item.start_line,
-                                item.end_line,
-                                item.evidence,
-                            )
-                            item_cursor = conn.execute(
-                                """
-                                INSERT INTO search_items (
-                                    document_id,
-                                    rel_path,
-                                    lane,
-                                    source_name,
-                                    source_kind,
-                                    item_type,
-                                    title,
-                                    snippet,
-                                    normalized_text,
-                                    start_line,
-                                    end_line,
-                                    confidence,
-                                    scope,
-                                    modified_at,
-                                    contradiction_count,
-                                    evidence_count,
-                                    entities_json,
-                                    evidence_json
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """,
-                                (
-                                    document_id,
-                                    document.rel_path,
-                                    document.lane,
-                                    document.source_name,
-                                    "durable" if document.lane == "memory" else "corpus",
-                                    item.item_type,
-                                    item.title,
-                                    item.snippet,
-                                    self._normalized_retrieval_text(item.title, item.snippet),
-                                    item.start_line,
-                                    item.end_line,
-                                    item.confidence,
-                                    item.scope,
-                                    document.modified_at,
-                                    len(item.contradicts),
-                                    len(evidence),
-                                    json.dumps(list(item.entities), sort_keys=True),
-                                    json.dumps(
-                                        [entry.to_dict() for entry in evidence], sort_keys=True
-                                    ),
-                                ),
-                            )
-                            item_row_id = item_cursor.lastrowid
-                            if item_row_id is None:
-                                raise RuntimeError("search item insert did not return a rowid")
-                            conn.execute(
-                                "INSERT INTO search_items_fts(rowid, title, snippet, entities) VALUES (?, ?, ?, ?)",
-                                (item_row_id, item.title, item.snippet, " ".join(item.entities)),
-                            )
-                            self._insert_typed_row(
-                                conn=conn,
-                                item_id=item_row_id,
-                                document_rel_path=document.rel_path,
-                                item=item,
-                                typed_counts=typed_counts,
-                                evidence=evidence,
-                            )
-                            vector_rows.append(
-                                {
-                                    "item_id": int(item_row_id),
-                                    "point_id": self._point_id(
-                                        document_rel_path=document.rel_path,
-                                        item_type=item.item_type,
-                                        start_line=item.start_line,
-                                        end_line=item.end_line,
-                                        snippet=item.snippet,
-                                    ),
-                                    "content": self._normalized_retrieval_text(
-                                        item.title, item.snippet
-                                    ),
-                                    "payload": {
-                                        "item_id": int(item_row_id),
-                                        "rel_path": document.rel_path,
-                                        "lane": document.lane,
-                                        "source_name": document.source_name,
-                                        "item_type": item.item_type,
-                                        "scope": item.scope,
-                                        "start_line": item.start_line,
-                                        "end_line": item.end_line,
-                                        "modified_at": document.modified_at,
-                                        "confidence": item.confidence,
-                                    },
-                                }
-                            )
-                            chunks += 1
-                    conn.commit()
-                    self._sync_dense_backend(
-                        conn=conn,
-                        vector_rows=vector_rows,
-                        stale_point_ids=existing_point_ids,
+        with self.connect() as conn:
+            existing = {
+                str(row["rel_path"]): str(row["sha256"])
+                for row in conn.execute("SELECT rel_path, sha256 FROM documents")
+            }
+            existing_point_ids = {
+                str(row["point_id"]) for row in conn.execute("SELECT point_id FROM vector_items")
+            }
+            current = {document.rel_path: document.sha256 for document in documents}
+            dirty = current != existing
+            self._clear_derived_rows(conn)
+            indexed_at = datetime.now(tz=UTC).isoformat()
+            chunks = 0
+            for document in documents:
+                doc_cursor = conn.execute(
+                    """
+                    INSERT INTO documents (
+                        rel_path, abs_path, lane, source_name, sha256, line_count, modified_at, indexed_at
                     )
-                summary = ReindexSummary(
-                    files=len(documents),
-                    chunks=chunks,
-                    dirty=dirty,
-                    facts=typed_counts["fact"],
-                    opinions=typed_counts["opinion"],
-                    reflections=typed_counts["reflection"],
-                    entities=typed_counts["entity"],
-                    proposals=typed_counts["proposal"],
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        document.rel_path,
+                        document.abs_path.as_posix(),
+                        document.lane,
+                        document.source_name,
+                        document.sha256,
+                        document.line_count,
+                        document.modified_at,
+                        indexed_at,
+                    ),
                 )
-                summary_payload = {
-                    "files": summary.files,
-                    "chunks": summary.chunks,
-                    "dirty": summary.dirty,
-                    "vector_rows": len(vector_rows),
-                    "facts": summary.facts,
-                    "opinions": summary.opinions,
-                    "reflections": summary.reflections,
-                    "entities": summary.entities,
-                    "proposals": summary.proposals,
-                }
-                span.set_attributes(summary_payload)
-                emit_structured_log("clawops.memory_v2.reindex", summary_payload)
-                return summary
-            except Exception as err:
-                span.record_exception(err)
-                span.set_error(str(err))
-                emit_structured_log(
-                    "clawops.memory_v2.reindex.error",
-                    {
-                        "documents": len(documents),
-                        "backend": self.config.backend.active,
-                        "error": str(err),
-                    },
-                )
-                raise
+                document_id = doc_cursor.lastrowid
+                if document_id is None:
+                    raise RuntimeError("document insert did not return a rowid")
+                for item in document.items:
+                    evidence = self._evidence_entries(
+                        document.rel_path,
+                        item.start_line,
+                        item.end_line,
+                        item.evidence,
+                    )
+                    item_cursor = conn.execute(
+                        """
+                        INSERT INTO search_items (
+                            document_id,
+                            rel_path,
+                            lane,
+                            source_name,
+                            source_kind,
+                            item_type,
+                            title,
+                            snippet,
+                            normalized_text,
+                            start_line,
+                            end_line,
+                            confidence,
+                            scope,
+                            modified_at,
+                            contradiction_count,
+                            evidence_count,
+                            entities_json,
+                            evidence_json
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            document_id,
+                            document.rel_path,
+                            document.lane,
+                            document.source_name,
+                            "durable" if document.lane == "memory" else "corpus",
+                            item.item_type,
+                            item.title,
+                            item.snippet,
+                            self._normalized_retrieval_text(item.title, item.snippet),
+                            item.start_line,
+                            item.end_line,
+                            item.confidence,
+                            item.scope,
+                            document.modified_at,
+                            len(item.contradicts),
+                            len(evidence),
+                            json.dumps(list(item.entities), sort_keys=True),
+                            json.dumps(evidence, sort_keys=True),
+                        ),
+                    )
+                    item_row_id = item_cursor.lastrowid
+                    if item_row_id is None:
+                        raise RuntimeError("search item insert did not return a rowid")
+                    conn.execute(
+                        "INSERT INTO search_items_fts(rowid, title, snippet, entities) VALUES (?, ?, ?, ?)",
+                        (item_row_id, item.title, item.snippet, " ".join(item.entities)),
+                    )
+                    self._insert_typed_row(
+                        conn=conn,
+                        item_id=item_row_id,
+                        document_rel_path=document.rel_path,
+                        item=item,
+                        typed_counts=typed_counts,
+                        evidence=evidence,
+                    )
+                    vector_rows.append(
+                        {
+                            "item_id": int(item_row_id),
+                            "point_id": self._point_id(
+                                document_rel_path=document.rel_path,
+                                item_type=item.item_type,
+                                start_line=item.start_line,
+                                end_line=item.end_line,
+                                snippet=item.snippet,
+                            ),
+                            "content": self._normalized_retrieval_text(item.title, item.snippet),
+                            "payload": {
+                                "item_id": int(item_row_id),
+                                "rel_path": document.rel_path,
+                                "lane": document.lane,
+                                "source_name": document.source_name,
+                                "item_type": item.item_type,
+                                "scope": item.scope,
+                                "start_line": item.start_line,
+                                "end_line": item.end_line,
+                                "modified_at": document.modified_at,
+                                "confidence": item.confidence,
+                            },
+                        }
+                    )
+                    chunks += 1
+            conn.commit()
+            self._sync_dense_backend(
+                conn=conn,
+                vector_rows=vector_rows,
+                stale_point_ids=existing_point_ids,
+            )
+        return ReindexSummary(
+            files=len(documents),
+            chunks=chunks,
+            dirty=dirty,
+            facts=typed_counts["fact"],
+            opinions=typed_counts["opinion"],
+            reflections=typed_counts["reflection"],
+            entities=typed_counts["entity"],
+            proposals=typed_counts["proposal"],
+        )
 
     def search(
         self,
@@ -346,7 +298,7 @@ class MemoryV2Engine:
         limit = max_results if max_results is not None else self.config.default_max_results
         if limit <= 0:
             raise ValueError("max_results must be positive")
-        requested_backend = backend or self.config.backend.active
+        resolved_backend = backend or self.config.backend.active
         hybrid_config = replace(
             self.config.hybrid,
             dense_candidate_pool=(
@@ -361,106 +313,54 @@ class MemoryV2Engine:
             ),
             fusion=cast(FusionMode, fusion or self.config.hybrid.fusion),
         )
-        with observed_span(
-            "clawops.memory_v2.search",
-            attributes={
-                "backend": requested_backend,
-                "lane": lane,
-                "scope": scope,
-                "max_results": limit,
-                "include_explain": include_explain,
-            },
-        ) as span:
+        dense_candidates: list[DenseSearchCandidate] = []
+        if resolved_backend == "qdrant_dense_hybrid":
             try:
-                resolved_backend = requested_backend
-                dense_candidates: list[DenseSearchCandidate] = []
-                qdrant_search_ms = 0.0
-                fallback_activated = False
-                if resolved_backend == "qdrant_dense_hybrid":
-                    try:
-                        dense_candidates, qdrant_search_ms = self._dense_search(
-                            query=query,
-                            lane=lane,
-                            scope=scope,
-                        )
-                    except Exception as err:
-                        if self.config.backend.fallback != "sqlite_fts":
-                            raise
-                        resolved_backend = self.config.backend.fallback
-                        fallback_activated = True
-                        emit_structured_log(
-                            "clawops.memory_v2.search.fallback",
-                            {
-                                "requestedBackend": requested_backend,
-                                "resolvedBackend": resolved_backend,
-                                "error": str(err),
-                            },
-                        )
-                with self.connect() as conn:
-                    hits, diagnostics = search_index(
-                        conn,
-                        query=query,
-                        max_results=limit,
-                        min_score=min_score,
-                        mode=lane,
-                        scope=scope,
-                        ranking=self.config.ranking,
-                        hybrid=hybrid_config,
-                        dense_candidates=dense_candidates,
-                        active_backend=resolved_backend,
-                        include_explain=include_explain,
-                    )
-                rerank_ms = 0.0
-                if hybrid_config.rerank_top_k > 0 and hits:
-                    rerank_started_at = perf_counter()
-                    reranked = self._rerank_provider.rerank(
-                        query,
-                        [hit.to_dict() for hit in hits[: hybrid_config.rerank_top_k]],
-                    )
-                    rerank_ms = (perf_counter() - rerank_started_at) * 1000.0
-                    if reranked:
-                        order: dict[tuple[str, int, int], int] = {}
-                        for index, candidate in enumerate(reranked):
-                            path = candidate.get("path")
-                            start_line = candidate.get("startLine", 0)
-                            end_line = candidate.get("endLine", 0)
-                            if not isinstance(path, str):
-                                continue
-                            if isinstance(start_line, bool) or not isinstance(start_line, int):
-                                continue
-                            if isinstance(end_line, bool) or not isinstance(end_line, int):
-                                continue
-                            order[(path, start_line, end_line)] = index
-                        hits.sort(
-                            key=lambda hit: order.get(
-                                (hit.path, hit.start_line, hit.end_line), len(order)
-                            )
-                        )
-                telemetry_payload: dict[str, Any] = {
-                    "requestedBackend": requested_backend,
-                    "resolvedBackend": resolved_backend,
-                    "fallbackActivated": fallback_activated,
-                    "results": len(hits),
-                    "qdrantSearchMs": round(qdrant_search_ms, 3),
-                    "rerankMs": round(rerank_ms, 3),
-                }
-                telemetry_payload.update(diagnostics.to_dict())
-                span.set_attributes(telemetry_payload)
-                emit_structured_log("clawops.memory_v2.search", telemetry_payload)
-                return hits
-            except Exception as err:
-                span.record_exception(err)
-                span.set_error(str(err))
-                emit_structured_log(
-                    "clawops.memory_v2.search.error",
-                    {
-                        "backend": requested_backend,
-                        "lane": lane,
-                        "scope": scope,
-                        "error": str(err),
-                    },
+                dense_candidates = self._dense_search(
+                    query=query,
+                    lane=lane,
+                    scope=scope,
                 )
-                raise
+            except Exception:
+                if self.config.backend.fallback != "sqlite_fts":
+                    raise
+                resolved_backend = self.config.backend.fallback
+        with self.connect() as conn:
+            hits = search_index(
+                conn,
+                query=query,
+                max_results=limit,
+                min_score=min_score,
+                mode=lane,
+                scope=scope,
+                ranking=self.config.ranking,
+                hybrid=hybrid_config,
+                dense_candidates=dense_candidates,
+                active_backend=resolved_backend,
+                include_explain=include_explain,
+            )
+        if hybrid_config.rerank_top_k > 0 and hits:
+            reranked = self._rerank_provider.rerank(
+                query,
+                [hit.to_dict() for hit in hits[: hybrid_config.rerank_top_k]],
+            )
+            if reranked:
+                order: dict[tuple[str, int, int], int] = {}
+                for index, candidate in enumerate(reranked):
+                    path = candidate.get("path")
+                    start_line = candidate.get("startLine", 0)
+                    end_line = candidate.get("endLine", 0)
+                    if not isinstance(path, str):
+                        continue
+                    if isinstance(start_line, bool) or not isinstance(start_line, int):
+                        continue
+                    if isinstance(end_line, bool) or not isinstance(end_line, int):
+                        continue
+                    order[(path, start_line, end_line)] = index
+                hits.sort(
+                    key=lambda hit: order.get((hit.path, hit.start_line, hit.end_line), len(order))
+                )
+        return hits
 
     def read(
         self,
@@ -520,7 +420,6 @@ class MemoryV2Engine:
                 end_line = int(row["end_line"])
                 confidence = None if row["confidence"] is None else float(row["confidence"])
                 entities = self._load_entities_json(row["entities_json"])
-                evidence = self._load_evidence_json(row["evidence_json"])
                 source_fingerprint = (
                     f"{item_type}:{resolved_scope}:{rel_path}:{start_line}:{end_line}:{text}"
                 )
@@ -533,7 +432,6 @@ class MemoryV2Engine:
                         "startLine": start_line,
                         "endLine": end_line,
                         "entities": entities,
-                        "evidence": evidence,
                     },
                 }
                 if confidence is not None:
@@ -729,7 +627,6 @@ class MemoryV2Engine:
                     search_items.modified_at,
                     search_items.confidence,
                     search_items.entities_json,
-                    search_items.evidence_json,
                     {table_name}.text
                 FROM {table_name}
                 JOIN search_items ON search_items.id = {table_name}.item_id
@@ -762,26 +659,6 @@ class MemoryV2Engine:
         if not isinstance(payload, list):
             return []
         return [str(item) for item in payload if isinstance(item, str)]
-
-    def _load_evidence_json(self, raw_value: Any) -> list[dict[str, Any]]:
-        """Decode persisted evidence JSON into normalized provenance entries."""
-        if not isinstance(raw_value, str):
-            return []
-        try:
-            payload = json.loads(raw_value)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(payload, list):
-            return []
-        evidence_entries: list[dict[str, Any]] = []
-        for raw_entry in payload:
-            if not isinstance(raw_entry, dict):
-                continue
-            try:
-                evidence_entries.append(EvidenceEntry.from_dict(raw_entry).to_dict())
-            except ValueError:
-                continue
-        return evidence_entries
 
     def _memory_pro_importance(self, *, item_type: str, confidence: float | None) -> float:
         """Return a conservative import importance for the new memory backend."""
@@ -885,13 +762,10 @@ class MemoryV2Engine:
         document_rel_path: str,
         item: Any,
         typed_counts: dict[str, int],
-        evidence: list[EvidenceEntry],
+        evidence: list[dict[str, Any]],
     ) -> None:
         """Insert typed rows and evidence/conflict metadata."""
         for evidence_entry in evidence:
-            link_key = evidence_entry.link_key()
-            if link_key is None:
-                continue
             conn.execute(
                 """
                 INSERT INTO evidence_links(item_id, rel_path, start_line, end_line, relation)
@@ -899,10 +773,10 @@ class MemoryV2Engine:
                 """,
                 (
                     item_id,
-                    link_key[0],
-                    link_key[1],
-                    link_key[2],
-                    link_key[3],
+                    evidence_entry["rel_path"],
+                    evidence_entry["start_line"],
+                    evidence_entry["end_line"],
+                    evidence_entry["relation"],
                 ),
             )
         for target_ref in item.contradicts:
@@ -1009,25 +883,40 @@ class MemoryV2Engine:
         start_line: int,
         end_line: int,
         evidence_refs: tuple[str, ...],
-    ) -> list[EvidenceEntry]:
+    ) -> list[dict[str, Any]]:
         """Build evidence entries, always including the source line itself."""
         entries = [
-            EvidenceEntry(
-                kind="file",
-                rel_path=rel_path,
-                start_line=start_line,
-                end_line=end_line,
-                relation="supports",
-            )
+            {
+                "rel_path": rel_path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "relation": "supports",
+            }
         ]
-        dedupe_keys = {json.dumps(entries[0].to_dict(), sort_keys=True)}
         for reference in evidence_refs:
-            evidence_entry = EvidenceEntry.from_reference(reference, relation="supports")
-            dedupe_key = json.dumps(evidence_entry.to_dict(), sort_keys=True)
-            if dedupe_key in dedupe_keys:
-                continue
-            dedupe_keys.add(dedupe_key)
-            entries.append(evidence_entry)
+            if "#" in reference:
+                reference_path, line_part = reference.split("#", 1)
+            else:
+                reference_path, line_part = reference, ""
+            parsed_start = 0
+            parsed_end = 0
+            if line_part.startswith("L"):
+                line_text = line_part[1:]
+                if "-L" in line_text:
+                    start_text, end_text = line_text.split("-L", 1)
+                    parsed_start = int(start_text)
+                    parsed_end = int(end_text)
+                else:
+                    parsed_start = int(line_text)
+                    parsed_end = parsed_start
+            entries.append(
+                {
+                    "rel_path": reference_path,
+                    "start_line": parsed_start,
+                    "end_line": parsed_end,
+                    "relation": "supports",
+                }
+            )
         return entries
 
     def _resolve_read_path(self, rel_path: str) -> pathlib.Path:
@@ -1202,47 +1091,19 @@ class MemoryV2Engine:
         query: str,
         lane: SearchMode,
         scope: str | None,
-    ) -> tuple[list[DenseSearchCandidate], float]:
+    ) -> list[DenseSearchCandidate]:
         """Run a dense search query through the configured vector backend."""
         if not self.config.qdrant.enabled or not self.config.embedding.enabled:
-            return [], 0.0
-        with observed_span(
-            "clawops.memory_v2.qdrant.search",
-            attributes={
-                "lane": lane,
-                "scope": scope,
-                "candidate_limit": self.config.hybrid.dense_candidate_pool,
-            },
-        ) as span:
-            started_at = perf_counter()
-            embedding = self._embed_texts([query.strip()], purpose="query")
-            if not embedding:
-                return [], 0.0
-            try:
-                hits = self._qdrant_backend.search(
-                    vector=embedding[0],
-                    limit=self.config.hybrid.dense_candidate_pool,
-                    mode=lane,
-                    scope=scope,
-                )
-            except Exception as err:
-                span.record_exception(err)
-                span.set_error(str(err))
-                emit_structured_log(
-                    "clawops.memory_v2.qdrant.search.error",
-                    {"lane": lane, "scope": scope, "error": str(err)},
-                )
-                raise
-            elapsed_ms = (perf_counter() - started_at) * 1000.0
-            payload = {
-                "lane": lane,
-                "scope": scope,
-                "hits": len(hits),
-                "qdrantSearchMs": elapsed_ms,
-            }
-            span.set_attributes(payload)
-            emit_structured_log("clawops.memory_v2.qdrant.search", payload)
-            return hits, elapsed_ms
+            return []
+        embedding = self._embedding_provider.embed_texts([query.strip()])
+        if not embedding:
+            return []
+        return self._qdrant_backend.search(
+            vector=embedding[0],
+            limit=self.config.hybrid.dense_candidate_pool,
+            mode=lane,
+            scope=scope,
+        )
 
     def _sync_dense_backend(
         self,
@@ -1258,136 +1119,69 @@ class MemoryV2Engine:
             self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
             self._write_backend_state(conn, "last_sync_error", "")
             conn.commit()
-            emit_structured_log(
-                "clawops.memory_v2.vector_sync",
-                {"skipped": True, "reason": "disabled", "vectorRows": len(vector_rows)},
-            )
             return
         if not vector_rows:
             self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
             self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
             self._write_backend_state(conn, "last_sync_error", "")
             conn.commit()
-            emit_structured_log(
-                "clawops.memory_v2.vector_sync",
-                {"skipped": True, "reason": "empty", "vectorRows": 0},
-            )
             return
-        with observed_span(
-            "clawops.memory_v2.vector_sync",
-            attributes={"vector_rows": len(vector_rows), "stale_point_ids": len(stale_point_ids)},
-        ) as span:
-            sync_started_at = perf_counter()
-            try:
-                points: list[dict[str, Any]] = []
-                embedded_vectors: list[tuple[dict[str, Any], list[float]]] = []
-                for batch in self._embedding_batches(vector_rows):
-                    vectors = self._embed_texts(
-                        [str(entry["content"]) for entry in batch],
-                        purpose="index",
-                    )
-                    for entry, vector in zip(batch, vectors, strict=True):
-                        embedded_vectors.append((entry, vector))
-                vector_dim = len(embedded_vectors[0][1])
-                self._qdrant_backend.ensure_collection(vector_size=vector_dim)
-                new_point_ids: set[str] = set()
-                for entry, vector in embedded_vectors:
-                    point_id = str(entry["point_id"])
-                    new_point_ids.add(point_id)
-                    points.append(
-                        {
-                            "id": point_id,
-                            "vector": vector,
-                            "payload": entry["payload"],
-                        }
-                    )
-                self._qdrant_backend.upsert_points(points)
-                stale_ids = sorted(stale_point_ids - new_point_ids)
-                if stale_ids:
-                    self._qdrant_backend.delete_points(stale_ids)
-                conn.execute("DELETE FROM vector_items")
-                for entry, vector in embedded_vectors:
-                    conn.execute(
-                        """
-                        INSERT INTO vector_items(
-                            item_id,
-                            point_id,
-                            embedding_model,
-                            embedding_dim,
-                            content_sha256,
-                            updated_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            int(entry["item_id"]),
-                            str(entry["point_id"]),
-                            self.config.embedding.model,
-                            len(vector),
-                            self._sha256(str(entry["content"])),
-                            datetime.now(tz=UTC).isoformat(),
-                        ),
-                    )
-                self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
-                self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
-                self._write_backend_state(conn, "last_sync_error", "")
-                conn.commit()
-                payload = {
-                    "vectorRows": len(vector_rows),
-                    "pointsUpserted": len(points),
-                    "pointsDeleted": len(stale_ids),
-                    "vectorSyncMs": round((perf_counter() - sync_started_at) * 1000.0, 3),
-                }
-                span.set_attributes(payload)
-                emit_structured_log("clawops.memory_v2.vector_sync", payload)
-            except Exception as err:
-                self._write_backend_state(conn, "last_sync_error", str(err))
-                conn.commit()
-                span.record_exception(err)
-                span.set_error(str(err))
-                emit_structured_log(
-                    "clawops.memory_v2.vector_sync.error",
-                    {"vectorRows": len(vector_rows), "error": str(err)},
+        try:
+            points: list[dict[str, Any]] = []
+            embedded_vectors: list[tuple[dict[str, Any], list[float]]] = []
+            for batch in self._embedding_batches(vector_rows):
+                vectors = self._embedding_provider.embed_texts(
+                    [str(entry["content"]) for entry in batch]
                 )
-
-    def _embed_texts(self, texts: Sequence[str], *, purpose: str) -> list[list[float]]:
-        """Call the embedding provider while emitting structured telemetry."""
-        with observed_span(
-            "clawops.memory_v2.embedding",
-            attributes={
-                "purpose": purpose,
-                "batch_size": len(texts),
-                "provider": self.config.embedding.provider,
-                "model": self.config.embedding.model,
-            },
-        ) as span:
-            started_at = perf_counter()
-            try:
-                vectors = self._embedding_provider.embed_texts(list(texts))
-            except Exception as err:
-                elapsed_ms = (perf_counter() - started_at) * 1000.0
-                span.record_exception(err)
-                span.set_error(str(err))
-                emit_structured_log(
-                    "clawops.memory_v2.embedding.failure",
+                for entry, vector in zip(batch, vectors, strict=True):
+                    embedded_vectors.append((entry, vector))
+            vector_dim = len(embedded_vectors[0][1])
+            self._qdrant_backend.ensure_collection(vector_size=vector_dim)
+            new_point_ids: set[str] = set()
+            for entry, vector in embedded_vectors:
+                point_id = str(entry["point_id"])
+                new_point_ids.add(point_id)
+                points.append(
                     {
-                        "purpose": purpose,
-                        "batchSize": len(texts),
-                        "embeddingMs": round(elapsed_ms, 3),
-                        "error": str(err),
-                    },
+                        "id": point_id,
+                        "vector": vector,
+                        "payload": entry["payload"],
+                    }
                 )
-                raise
-            elapsed_ms = (perf_counter() - started_at) * 1000.0
-            payload: dict[str, bool | int | float | str | None] = {
-                "purpose": purpose,
-                "batchSize": len(texts),
-                "vectorCount": len(vectors),
-                "embeddingMs": round(elapsed_ms, 3),
-            }
-            span.set_attributes(payload)
-            emit_structured_log("clawops.memory_v2.embedding", payload)
-            return vectors
+            self._qdrant_backend.upsert_points(points)
+            stale_ids = sorted(stale_point_ids - new_point_ids)
+            if stale_ids:
+                self._qdrant_backend.delete_points(stale_ids)
+            conn.execute("DELETE FROM vector_items")
+            for entry, vector in embedded_vectors:
+                conn.execute(
+                    """
+                    INSERT INTO vector_items(
+                        item_id,
+                        point_id,
+                        embedding_model,
+                        embedding_dim,
+                        content_sha256,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(entry["item_id"]),
+                        str(entry["point_id"]),
+                        self.config.embedding.model,
+                        len(vector),
+                        self._sha256(str(entry["content"])),
+                        datetime.now(tz=UTC).isoformat(),
+                    ),
+                )
+            self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
+            self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
+            self._write_backend_state(conn, "last_sync_error", "")
+            conn.commit()
+        except Exception as err:
+            self._write_backend_state(conn, "last_sync_error", str(err))
+            conn.commit()
 
     def _embedding_batches(
         self, vector_rows: list[dict[str, Any]]
@@ -1456,10 +1250,9 @@ class MemoryV2Engine:
         snippet: str,
     ) -> str:
         """Return a stable point identifier for a search item."""
-        digest = self._sha256(
+        return self._sha256(
             f"{document_rel_path}:{item_type}:{start_line}:{end_line}:{snippet.strip()}"
-        )[:32]
-        return f"{digest[0:8]}-{digest[8:12]}-{digest[12:16]}-" f"{digest[16:20]}-{digest[20:32]}"
+        )
 
     def _slugify(self, value: str) -> str:
         """Return a stable slug for an entity file path."""

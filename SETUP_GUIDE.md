@@ -65,7 +65,9 @@ make dev
 make test
 ```
 
-`uv` is a contributor tool only. It is not required for operator bootstrap or runtime use.
+`make test` runs in the locked managed environment via `uv run`. The baseline
+verifier also uses that managed test path, and bootstrap installs `uv` when
+the host does not already provide it.
 
 ## 4. Prepare the Varlock env contract
 

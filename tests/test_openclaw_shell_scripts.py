@@ -65,10 +65,15 @@ def _write_fake_clawops(bin_dir: pathlib.Path) -> None:
     target.chmod(0o755)
 
 
-def _write_fake_pytest(bin_dir: pathlib.Path) -> None:
-    target = bin_dir / "pytest"
+def _write_fake_uv(bin_dir: pathlib.Path) -> None:
+    target = bin_dir / "uv"
     target.write_text(
-        "#!/usr/bin/env bash\n" "set -euo pipefail\n" "exit 0\n",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'if [[ "${1:-}" == "run" ]]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
         encoding="utf-8",
     )
     target.chmod(0o755)
@@ -167,7 +172,6 @@ def test_verify_baseline_fails_fast_when_qmd_is_missing(tmp_path: pathlib.Path) 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_openclaw(bin_dir)
-    _write_fake_pytest(bin_dir)
     home_dir = tmp_path / "home"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -271,7 +275,7 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_openclaw(bin_dir)
-    _write_fake_pytest(bin_dir)
+    _write_fake_uv(bin_dir)
     home_dir = tmp_path / "home"
     _write_fake_qmd(home_dir)
     env = os.environ | {

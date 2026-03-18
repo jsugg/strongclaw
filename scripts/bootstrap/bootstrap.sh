@@ -5,7 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOST_OS="$(uname -s)"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.13}"
 ACPX_VERSION="${ACPX_VERSION:-0.3.0}"
+UV_VERSION="${UV_VERSION:-0.10.9}"
 BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+UV_BIN_DIR="${HOME}/.local/bin"
 VARLOCK_BIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/varlock/bin"
 LEGACY_VARLOCK_BIN_DIR="$HOME/.varlock/bin"
 # shellcheck disable=SC1091
@@ -37,6 +39,21 @@ ensure_varlock() {
   }
 }
 
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" |
+    env UV_UNMANAGED_INSTALL="$UV_BIN_DIR" sh
+  prepend_path "$UV_BIN_DIR"
+
+  command -v uv >/dev/null 2>&1 || {
+    echo "uv install failed" >&2
+    exit 1
+  }
+}
+
 "$ROOT/scripts/bootstrap/preflight.sh"
 
 case "$HOST_OS" in
@@ -50,6 +67,7 @@ case "$HOST_OS" in
     brew install dmno-dev/tap/varlock
     brew install bun
     ensure_docker_compatible_runtime darwin
+    ensure_uv
     python3 -m pip install -e "$ROOT"
     npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
     ;;
@@ -63,6 +81,7 @@ case "$HOST_OS" in
     export PATH="$BUN_INSTALL/bin:$PATH"
     ensure_varlock
     ensure_docker_compatible_runtime linux
+    ensure_uv
     python3 -m pip install -e "$ROOT"
     sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
     ;;

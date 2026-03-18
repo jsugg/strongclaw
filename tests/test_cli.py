@@ -16,6 +16,7 @@ def test_root_help_is_available(capsys: object) -> None:
     assert "repo" in captured.out
     assert "render-openclaw-config" in captured.out
     assert "skills" in captured.out
+    assert "supply-chain" in captured.out
     assert "memory-v2" in captured.out
     assert "worktree" in captured.out
 

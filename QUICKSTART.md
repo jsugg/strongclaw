@@ -13,7 +13,9 @@ make install
 ```
 
 If you plan to develop on this repo, install `uv` and use `make dev` plus
-`make test` separately. `uv` is not required for operator bootstrap.
+`make test` separately. The companion-tool test entrypoints run through
+`uv run`, and the bootstrap flow installs `uv` when the host does not
+already provide it.
 
 ## 2. Prepare the Varlock env contract
 

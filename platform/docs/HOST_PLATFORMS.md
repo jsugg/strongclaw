@@ -23,7 +23,7 @@ Regardless of host OS, the baseline flow is:
 4. copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local` and fill the required secrets
 5. prefer `./scripts/bootstrap/install.sh` for the baseline path after the env contract is ready
 6. if Linux bootstrap just granted Docker access, start a fresh login shell and rerun `./scripts/bootstrap/install.sh --skip-bootstrap`
-7. contributors can additionally install `uv` and use `make dev && make test`
+7. contributors can additionally install `uv` and use `make dev && make test`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
 8. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `varlock load --path platform/configs/varlock`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
 
 ## macOS host notes
