@@ -37,6 +37,22 @@ def test_local_automation_reuses_shared_harness_smoke_script() -> None:
     assert "./scripts/bootstrap/run_harness_smoke.sh ./.runs" in workflow
 
 
+def test_dev_stack_surfaces_shellcheck_for_shell_scripts() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    precommit = (repo_root / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    workflow = (repo_root / ".github/workflows/security.yml").read_text(encoding="utf-8")
+
+    assert "https://github.com/koalaman/shellcheck-precommit" in precommit
+    assert "id: shellcheck" in precommit
+    assert "shellcheck: ## Run ShellCheck through the pre-commit hook." in makefile
+    assert "$(PRE_COMMIT) run shellcheck --all-files" in makefile
+    assert "ShellCheck for shell scripts" in readme
+    assert "make shellcheck" in readme
+    assert "pre-commit run shellcheck --all-files" in workflow
+
+
 def test_verify_baseline_runs_platform_static_proof() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     verify_script = (repo_root / "scripts/bootstrap/verify_baseline.sh").read_text(encoding="utf-8")
@@ -118,36 +134,45 @@ def test_github_workflows_pin_actions_to_full_commit_shas() -> None:
 
 def test_bootstrap_scripts_fail_fast_pin_acpx_and_render_openclaw_config() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    host = (repo_root / "scripts/bootstrap/bootstrap_host.sh").read_text(encoding="utf-8")
-    preflight = (repo_root / "scripts/bootstrap/preflight_host.sh").read_text(encoding="utf-8")
+    host = (repo_root / "scripts/bootstrap/bootstrap.sh").read_text(encoding="utf-8")
+    preflight = (repo_root / "scripts/bootstrap/preflight.sh").read_text(encoding="utf-8")
     doctor = (repo_root / "scripts/bootstrap/doctor_host.sh").read_text(encoding="utf-8")
     memory_plugin = (repo_root / "scripts/bootstrap/bootstrap_memory_plugin.sh").read_text(
         encoding="utf-8"
     )
-    macos = (repo_root / "scripts/bootstrap/bootstrap_macos.sh").read_text(encoding="utf-8")
-    linux = (repo_root / "scripts/bootstrap/bootstrap_linux.sh").read_text(encoding="utf-8")
+    docker_runtime = (repo_root / "scripts/lib/docker_runtime.sh").read_text(encoding="utf-8")
 
-    assert 'case "$(uname -s)" in' in host
-    assert 'exec "$ROOT/scripts/bootstrap/bootstrap_macos.sh" "$@"' in host
-    assert 'exec "$ROOT/scripts/bootstrap/bootstrap_linux.sh" "$@"' in host
-    assert 'case "$(uname -s)" in' in preflight
-    assert 'exec "$ROOT/scripts/bootstrap/preflight_macos.sh" "$@"' in preflight
-    assert 'exec "$ROOT/scripts/bootstrap/preflight_linux.sh" "$@"' in preflight
+    assert 'HOST_OS="$(uname -s)"' in host
+    assert 'case "$HOST_OS" in' in host
+    assert '"$ROOT/scripts/bootstrap/preflight.sh"' in host
+    assert "brew install jq sqlite python" in host
+    assert "sudo apt-get install -y python3 python3-pip jq sqlite3 nodejs npm curl unzip" in host
+    assert "ensure_docker_compatible_runtime darwin" in host
+    assert "ensure_docker_compatible_runtime linux" in host
+    assert 'sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"' in host
+    assert 'npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"' in host
+    assert 'case "$HOST_OS" in' in preflight
+    assert 'require_command brew "Homebrew is required for macOS bootstrap."' in preflight
+    assert 'require_command apt-get "apt-get is required for Linux bootstrap."' in preflight
     assert 'OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"' in doctor
     assert "openclaw --version" in doctor
     assert "openclaw config validate" in doctor
     assert "acpx --version" in doctor
     assert "memory_plugin_lancedb_version" in memory_plugin
     assert "@lancedb/lancedb@$RESOLVED_LANCEDB_VERSION" in memory_plugin
-    for script in (macos, linux):
-        assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in script
-        assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in script
-        assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in script
-        assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in script
-        assert "acpx@latest" not in script
-    assert '"$ROOT/scripts/bootstrap/preflight_macos.sh"' in macos
-    assert '"$ROOT/scripts/bootstrap/preflight_linux.sh"' in linux
-    assert "|| true" not in macos
+    assert 'source "$ROOT/scripts/lib/docker_runtime.sh"' in host
+    assert "detect_docker_runtime_provider()" in docker_runtime
+    assert "printf 'OrbStack'" in docker_runtime
+    assert "printf 'Rancher Desktop'" in docker_runtime
+    assert (
+        "Strongclaw will not install Docker over an existing alternative runtime." in docker_runtime
+    )
+    assert 'ACPX_VERSION="${ACPX_VERSION:-0.3.0}"' in host
+    assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in host
+    assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in host
+    assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in host
+    assert "acpx@latest" not in host
+    assert "|| true" not in host
 
 
 def test_service_installers_render_host_specific_service_templates() -> None:
@@ -169,6 +194,7 @@ def test_service_installers_render_host_specific_service_templates() -> None:
     assert 'case "$(uname -s)" in' in host
     assert 'LAUNCHD_DIR="${LAUNCHD_DIR:-$HOME/Library/LaunchAgents}"' in host
     assert 'SYSTEMD_DIR="${SYSTEMD_DIR:-$HOME/.config/systemd/user}"' in host
+    assert "Usage: install_host_services.sh [--activate]" in host
     assert (
         'echo "Run: launchctl bootstrap gui/$(id -u) $LAUNCHD_DIR/ai.openclaw.gateway.plist"'
         in host
@@ -183,6 +209,42 @@ def test_service_installers_render_host_specific_service_templates() -> None:
         "ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_sidecars_with_varlock.sh'"
         in sidecars_unit
     )
+
+
+def test_install_script_composes_existing_bootstrap_and_verification_entrypoints() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    install_script = (repo_root / "scripts/bootstrap/install.sh").read_text(encoding="utf-8")
+
+    assert (
+        'BOOTSTRAP_SCRIPT="${BOOTSTRAP_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap.sh}"'
+        in install_script
+    )
+    assert (
+        'RENDER_OPENCLAW_CONFIG_SCRIPT="${RENDER_OPENCLAW_CONFIG_SCRIPT:-$ROOT/scripts/bootstrap/render_openclaw_config.sh}"'
+        in install_script
+    )
+    assert (
+        'DOCTOR_HOST_SCRIPT="${DOCTOR_HOST_SCRIPT:-$ROOT/scripts/bootstrap/doctor_host.sh}"'
+        in install_script
+    )
+    assert (
+        'INSTALL_HOST_SERVICES_SCRIPT="${INSTALL_HOST_SERVICES_SCRIPT:-$ROOT/scripts/bootstrap/install_host_services.sh}"'
+        in install_script
+    )
+    assert (
+        'VALIDATE_VARLOCK_ENV_SCRIPT="${VALIDATE_VARLOCK_ENV_SCRIPT:-$ROOT/scripts/bootstrap/validate_varlock_env.sh}"'
+        in install_script
+    )
+    assert (
+        'VERIFY_BASELINE_SCRIPT="${VERIFY_BASELINE_SCRIPT:-$ROOT/scripts/bootstrap/verify_baseline.sh}"'
+        in install_script
+    )
+    assert "--profile PROFILE" in install_script
+    assert "--skip-bootstrap" in install_script
+    assert "--no-activate-services" in install_script
+    assert "--no-verify" in install_script
+    assert '"$VALIDATE_VARLOCK_ENV_SCRIPT"' in install_script
+    assert '"$INSTALL_HOST_SERVICES_SCRIPT" --activate' in install_script
 
 
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
@@ -207,10 +269,16 @@ def test_top_level_docs_use_current_repo_identity_and_search_examples() -> None:
     assert "openclaw-platform-bootstrap" not in setup_guide
     assert "best-effort install" not in quickstart
     assert "./scripts/bootstrap/doctor_host.sh" in quickstart
-    assert "./scripts/bootstrap/preflight_host.sh" in setup_guide
+    assert "./scripts/bootstrap/preflight.sh" not in setup_guide
+    assert "./scripts/bootstrap/install.sh" in setup_guide
+    assert "make install" in quickstart
+    assert "platform/configs/varlock/.env.local" in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in quickstart
     assert 'openclaw memory search --query "ClawOps" --max-results 1' in usage_guide
     assert "for either a macOS or Linux operator host" in setup_guide
+    assert "installs Docker only when no Docker-compatible runtime is detected" in quickstart
+    assert "does not install Docker over it" in setup_guide
+    assert "only installs Docker as a fallback" in readme
     assert "platform/docs/HOST_PLATFORMS.md" in readme
     assert "./scripts/bootstrap/create_openclawsvc.sh" in setup_guide
 
