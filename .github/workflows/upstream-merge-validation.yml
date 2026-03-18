@@ -1,4 +1,4 @@
-name: upstream-merge-validation
+name: Upstream Integration Validation
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ env:
 
 jobs:
   validate-merged-upstream:
-    name: Validate merged upstream changes
+    name: Validate Upstream Integration
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5

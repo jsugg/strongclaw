@@ -1,4 +1,4 @@
-name: harness-smoke
+name: Policy Harness Smoke Tests
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ env:
 
 jobs:
   run-harness-smoke:
-    name: Run harness smoke
+    name: Execute Policy Harness Smoke Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5

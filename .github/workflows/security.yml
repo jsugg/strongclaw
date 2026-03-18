@@ -1,4 +1,4 @@
-name: security-scans
+name: Repository Security Analysis
 
 on:
   pull_request:
@@ -16,7 +16,7 @@ env:
 
 jobs:
   run-security-scans:
-    name: Run security scans
+    name: Run Repository Security Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
