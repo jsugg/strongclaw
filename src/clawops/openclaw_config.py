@@ -18,6 +18,7 @@ WORKSPACE_ROOT_PLACEHOLDER = "__WORKSPACE_ROOT__"
 UPSTREAM_REPO_ROOT_PLACEHOLDER = "__UPSTREAM_REPO_ROOT__"
 WORKTREES_ROOT_PLACEHOLDER = "__WORKTREES_ROOT__"
 PLUGIN_ROOT_PLACEHOLDER = "__PLUGIN_ROOT__"
+LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER = "__LOSSLESS_CLAW_PLUGIN_PATH__"
 OPENCLAW_HOME_PLACEHOLDER = "__OPENCLAW_HOME__"
 USER_TIMEZONE_PLACEHOLDER = "__USER_TIMEZONE__"
 ADMIN_WORKSPACE_PLACEHOLDER = "__ADMIN_WORKSPACE__"
@@ -110,7 +111,11 @@ def detect_local_timezone() -> str:
 
 
 def build_placeholder_map(
-    *, repo_root: pathlib.Path, home_dir: pathlib.Path, user_timezone: str
+    *,
+    repo_root: pathlib.Path,
+    home_dir: pathlib.Path,
+    user_timezone: str,
+    lossless_claw_plugin_path: pathlib.Path | None = None,
 ) -> dict[str, str]:
     """Build the placeholder replacement table for rendered overlays."""
     resolved_repo_root = repo_root.expanduser().resolve()
@@ -120,7 +125,7 @@ def build_placeholder_map(
     worktrees_root = resolved_repo_root / "repo" / "worktrees"
     plugin_root = resolved_repo_root / "platform" / "plugins"
     openclaw_home = resolved_home_dir / ".openclaw"
-    return {
+    replacements = {
         REPO_ROOT_PLACEHOLDER: resolved_repo_root.as_posix(),
         HOME_PLACEHOLDER: resolved_home_dir.as_posix(),
         WORKSPACE_ROOT_PLACEHOLDER: workspace_root.as_posix(),
@@ -135,6 +140,11 @@ def build_placeholder_map(
         REVIEWER_WORKSPACE_PLACEHOLDER: (workspace_root / "reviewer").as_posix(),
         MESSAGING_WORKSPACE_PLACEHOLDER: (workspace_root / "messaging").as_posix(),
     }
+    if lossless_claw_plugin_path is not None:
+        replacements[LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER] = (
+            lossless_claw_plugin_path.expanduser().resolve().as_posix()
+        )
+    return replacements
 
 
 def _replace_placeholders(value: Any, *, replacements: Mapping[str, str]) -> Any:
@@ -154,6 +164,46 @@ def _replace_placeholders(value: Any, *, replacements: Mapping[str, str]) -> Any
     return value
 
 
+def _contains_placeholder(value: Any, placeholder: str) -> bool:
+    """Return whether a loaded overlay still references a specific placeholder."""
+    if isinstance(value, str):
+        return placeholder in value
+    if isinstance(value, list):
+        return any(_contains_placeholder(item, placeholder) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _contains_placeholder(key, placeholder) or _contains_placeholder(item, placeholder)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _resolve_lossless_claw_plugin_path(repo_root: pathlib.Path) -> pathlib.Path:
+    """Return the configured lossless-claw plugin path or fail loudly."""
+    configured = os.environ.get("OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH")
+    candidates: list[pathlib.Path] = []
+    if configured:
+        configured_path = pathlib.Path(configured)
+        candidates.append(
+            configured_path if configured_path.is_absolute() else repo_root / configured_path
+        )
+    candidates.extend(
+        (
+            repo_root / "platform" / "plugins" / "lossless-claw",
+            repo_root / "vendor" / "lossless-claw",
+        )
+    )
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.is_dir():
+            return resolved
+    raise ValueError(
+        "lossless-claw plugin path is not configured; set "
+        "OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH or vendor it under "
+        "platform/plugins/lossless-claw"
+    )
+
+
 def render_openclaw_overlay(
     *,
     template_path: pathlib.Path,
@@ -163,12 +213,18 @@ def render_openclaw_overlay(
 ) -> dict[str, Any]:
     """Load an OpenClaw overlay template and replace local path placeholders."""
     template = load_overlay(template_path)
+    lossless_claw_plugin_path = None
+    if _contains_placeholder(template, LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER):
+        lossless_claw_plugin_path = _resolve_lossless_claw_plugin_path(
+            repo_root.expanduser().resolve()
+        )
     rendered = _replace_placeholders(
         template,
         replacements=build_placeholder_map(
             repo_root=repo_root,
             home_dir=home_dir,
             user_timezone=detect_local_timezone() if user_timezone is None else user_timezone,
+            lossless_claw_plugin_path=lossless_claw_plugin_path,
         ),
     )
     if not isinstance(rendered, dict):

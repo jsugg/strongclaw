@@ -55,6 +55,8 @@ class QdrantBackend:
             headers=self._headers(),
             timeout=self._config.timeout_ms / 1000.0,
         )
+        if response.status_code == 409:
+            return
         response.raise_for_status()
 
     def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
