@@ -14,7 +14,7 @@ from pytest import MonkeyPatch
 from clawops.common import write_yaml
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
-from clawops.wrappers.base import WrapperContext
+from clawops.wrappers.base import JsonHttpClient, RetryPolicy, WrapperContext
 from clawops.wrappers.github import (
     add_labels,
     create_comment,
@@ -308,6 +308,10 @@ def test_wrapper_requires_explicit_approval_then_replays_terminal_result(
     assert persisted.attempt == 1
     assert persisted.execution_contract_version == 1
     assert persisted.execution_contract_json is not None
+    assert persisted.result_request_method == (
+        "PUT" if spec.kind == "github_pull_merge" else "POST"
+    )
+    assert persisted.result_request_attempts == 1
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])
@@ -362,6 +366,7 @@ def test_wrapper_replays_success_without_duplicate_side_effect(
     assert second["executed"] is True
     assert second["status"] == "succeeded"
     assert second["body"] == "ok"
+    assert second["request_attempts"] == 1
     assert calls == ["request"]
 
     persisted = journal.get(str(first["op_id"]))
@@ -370,6 +375,14 @@ def test_wrapper_replays_success_without_duplicate_side_effect(
     assert persisted.result_body_excerpt == "ok"
     assert persisted.attempt == 1
     assert persisted.execution_contract_version == 1
+    if spec.kind == "github_pull_merge":
+        assert second["request_method"] == "PUT"
+        assert persisted.result_request_method == "PUT"
+        assert second["request_url"] == "https://api.github.com/repos/example/repo/pulls/123/merge"
+    else:
+        assert second["request_method"] == "POST"
+        assert persisted.result_request_method == "POST"
+    assert persisted.result_request_attempts == 1
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])
@@ -391,6 +404,9 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     assert first["executed"] is True
     assert first["status"] == "failed"
     assert first["body"] == "simulated timeout"
+    assert first["error_type"] == "timeout"
+    assert first["retryable"] is False
+    assert first["request_attempts"] == 1
     assert second == first
     assert calls == ["request"]
 
@@ -398,6 +414,12 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     assert persisted.status == "failed"
     assert persisted.result_ok == 0
     assert persisted.result_body_excerpt == "simulated timeout"
+    assert persisted.result_error_type == "timeout"
+    assert persisted.result_error_retryable == 0
+    assert persisted.result_request_method == (
+        "PUT" if spec.kind == "github_pull_merge" else "POST"
+    )
+    assert persisted.result_request_attempts == 1
     assert persisted.attempt == 1
     assert persisted.execution_contract_version == 1
 
@@ -419,12 +441,22 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
     assert result["executed"] is True
     assert result["status"] == "failed"
     assert result["body"] == "simulated timeout"
+    assert result["error_type"] == "timeout"
+    assert result["retryable"] is False
+    assert result["request_method"] == ("PUT" if spec.kind == "github_pull_merge" else "POST")
+    assert result["request_attempts"] == 1
 
     persisted = journal.get(str(result["op_id"]))
     assert persisted.status == "failed"
     assert persisted.last_error == "simulated timeout"
     assert persisted.result_ok == 0
     assert persisted.result_body_excerpt == "simulated timeout"
+    assert persisted.result_error_type == "timeout"
+    assert persisted.result_error_retryable == 0
+    assert persisted.result_request_method == (
+        "PUT" if spec.kind == "github_pull_merge" else "POST"
+    )
+    assert persisted.result_request_attempts == 1
     assert persisted.attempt == 1
     assert journal.list_stuck(older_than_ms=0) == []
     assert persisted.execution_contract_version == 1
@@ -573,3 +605,34 @@ def test_execute_approved_can_restamp_legacy_rows_when_policy_is_supplied(
     persisted = journal.get(approved.op_id)
     assert persisted.execution_contract_version == 1
     assert persisted.execution_contract_json is not None
+
+
+def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
+        calls.append("request")
+        if len(calls) == 1:
+            raise requests.Timeout("transient timeout")
+        return _FakeResponse(text="ok")
+
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    client = JsonHttpClient(timeout=5)
+
+    outcome = client.post(
+        "https://example.internal/hooks/deploy",
+        headers={"Content-Type": "application/json"},
+        json_body={"ok": True},
+        retry_policy=RetryPolicy(
+            name="safe-test",
+            max_attempts=2,
+            base_delay_seconds=0.0,
+            jitter_seconds=0.0,
+        ),
+    )
+
+    assert outcome.request_attempts == 2
+    assert outcome.request_method == "POST"
+    assert outcome.request_url == "https://example.internal/hooks/deploy"
+    assert outcome.response.text == "ok"
+    assert calls == ["request", "request"]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import random
+import time
 from collections.abc import Callable
 from typing import Any, Mapping
 
@@ -54,6 +56,11 @@ class WrapperResult:
     dry_run: bool = False
     status_code: int | None = None
     body: str | None = None
+    error_type: str | None = None
+    retryable: bool | None = None
+    request_method: str | None = None
+    request_url: str | None = None
+    request_attempts: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the result to a JSON-serializable mapping."""
@@ -72,6 +79,16 @@ class WrapperResult:
             payload["status_code"] = self.status_code
         if self.body is not None:
             payload["body"] = self.body
+        if self.error_type is not None:
+            payload["error_type"] = self.error_type
+        if self.retryable is not None:
+            payload["retryable"] = self.retryable
+        if self.request_method is not None:
+            payload["request_method"] = self.request_method
+        if self.request_url is not None:
+            payload["request_url"] = self.request_url
+        if self.request_attempts is not None:
+            payload["request_attempts"] = self.request_attempts
         return payload
 
 
@@ -83,6 +100,145 @@ class PreparedOperation:
     decision: Decision | None
     result: dict[str, Any] | None = None
     should_execute: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RetryPolicy:
+    """Endpoint-scoped retry policy for transport requests."""
+
+    name: str
+    max_attempts: int = 1
+    retryable_status_codes: frozenset[int] = dataclasses.field(default_factory=frozenset)
+    base_delay_seconds: float = 0.25
+    jitter_seconds: float = 0.1
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError("retry max_attempts must be at least 1")
+        if self.base_delay_seconds < 0:
+            raise ValueError("retry base_delay_seconds must be non-negative")
+        if self.jitter_seconds < 0:
+            raise ValueError("retry jitter_seconds must be non-negative")
+
+    @classmethod
+    def no_retry(cls, *, name: str) -> "RetryPolicy":
+        """Return an explicit no-retry policy for unsafe endpoints."""
+        return cls(name=name, max_attempts=1)
+
+    def allows_retry_for_exception(self, exc: requests.RequestException) -> bool:
+        """Return whether the exception class is safe for automatic retry."""
+        return isinstance(exc, (requests.Timeout, requests.ConnectionError))
+
+    def allows_retry_for_status(self, status_code: int) -> bool:
+        """Return whether a status code is eligible for automatic retry."""
+        return status_code in self.retryable_status_codes
+
+
+NO_RETRY_POLICY = RetryPolicy.no_retry(name="no-retry")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HttpResponseOutcome:
+    """One HTTP attempt sequence with request metadata."""
+
+    response: requests.Response
+    request_method: str
+    request_url: str
+    request_attempts: int
+    retry_policy: RetryPolicy
+
+
+class WrapperTransportError(RuntimeError):
+    """Structured wrapper transport failure."""
+
+    def __init__(
+        self,
+        *,
+        error_type: str,
+        message: str,
+        method: str,
+        url: str,
+        retryable: bool,
+        request_attempts: int,
+        status_code: int | None = None,
+        body_excerpt: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.method = method
+        self.url = url
+        self.retryable = retryable
+        self.request_attempts = request_attempts
+        self.status_code = status_code
+        self.body_excerpt = body_excerpt
+
+    def error_message(self) -> str:
+        """Return a journal-safe error summary."""
+        if self.body_excerpt is not None and self.body_excerpt.strip():
+            return self.body_excerpt[:1000]
+        return str(self)[:1000]
+
+
+class WrapperRequestError(WrapperTransportError):
+    """Wrapped `requests` exception with stable metadata."""
+
+    @classmethod
+    def from_exception(
+        cls,
+        exc: requests.RequestException,
+        *,
+        method: str,
+        url: str,
+        retryable: bool,
+        request_attempts: int,
+    ) -> "WrapperRequestError":
+        """Build a typed request error from `requests` exceptions."""
+        if isinstance(exc, requests.Timeout):
+            error_type = "timeout"
+        elif isinstance(exc, requests.ConnectionError):
+            error_type = "connection_error"
+        else:
+            error_type = "request_error"
+        return cls(
+            error_type=error_type,
+            message=str(exc),
+            method=method,
+            url=url,
+            retryable=retryable,
+            request_attempts=request_attempts,
+        )
+
+
+class WrapperHttpStatusError(WrapperTransportError):
+    """Wrapped HTTP error response with stable metadata."""
+
+    @classmethod
+    def from_response(
+        cls,
+        *,
+        method: str,
+        url: str,
+        response: requests.Response,
+        retryable: bool,
+        request_attempts: int,
+    ) -> "WrapperHttpStatusError":
+        """Build a typed response error from a non-success HTTP response."""
+        body_excerpt = response.text[:1000]
+        message = (
+            f"{method} {url} returned HTTP {response.status_code}"
+            if not body_excerpt
+            else body_excerpt[:1000]
+        )
+        return cls(
+            error_type="http_status",
+            message=message,
+            method=method,
+            url=url,
+            retryable=retryable,
+            request_attempts=request_attempts,
+            status_code=response.status_code,
+            body_excerpt=body_excerpt or None,
+        )
 
 
 EXECUTION_CONTRACT_VERSION = 1
@@ -272,12 +428,43 @@ def ensure_execution_contract(
     return updated, decision
 
 
+def _sleep_before_retry(policy: RetryPolicy, attempt_number: int) -> None:
+    """Sleep before retrying a transport call."""
+    if attempt_number >= policy.max_attempts:
+        return
+    delay = policy.base_delay_seconds * attempt_number
+    if policy.jitter_seconds:
+        delay += random.random() * policy.jitter_seconds
+    if delay > 0:
+        time.sleep(delay)
+
+
+def _coerce_http_outcome(result: HttpResponseOutcome | requests.Response) -> HttpResponseOutcome:
+    """Normalize legacy raw responses into an outcome payload."""
+    if isinstance(result, HttpResponseOutcome):
+        return result
+    return HttpResponseOutcome(
+        response=result,
+        request_method="UNKNOWN",
+        request_url="",
+        request_attempts=1,
+        retry_policy=NO_RETRY_POLICY,
+    )
+
+
+def _result_error_retryable(op: Operation) -> bool | None:
+    """Return the persisted retryable flag, if any."""
+    if op.result_error_retryable is None:
+        return None
+    return bool(op.result_error_retryable)
+
+
 def execute_http_operation(
     *,
     ctx: WrapperContext,
     op: Operation,
     decision: Decision | None,
-    request: Callable[[], requests.Response],
+    request: Callable[[], HttpResponseOutcome | requests.Response],
 ) -> dict[str, Any]:
     """Run one journaled HTTP side effect with terminal failure handling."""
     existing = replay_result_from_operation(op, decision=decision)
@@ -292,15 +479,65 @@ def execute_http_operation(
         raise ValueError(f"operation {op.op_id} is not executable: execution contract mismatch")
     running = ctx.journal.transition(op.op_id, "running")
     try:
-        response = request()
+        outcome = _coerce_http_outcome(request())
+        response = outcome.response
+        if not response.ok:
+            raise WrapperHttpStatusError.from_response(
+                method=outcome.request_method,
+                url=outcome.request_url,
+                response=response,
+                retryable=outcome.retry_policy.allows_retry_for_status(response.status_code),
+                request_attempts=outcome.request_attempts,
+            )
+    except WrapperTransportError as exc:
+        message = exc.error_message()
+        completed = ctx.journal.transition(
+            running.op_id,
+            "failed",
+            error=message[:500],
+            result_ok=False,
+            result_status_code=exc.status_code,
+            result_body_excerpt=message[:1000],
+            result_error_type=exc.error_type,
+            result_error_retryable=exc.retryable,
+            result_request_method=exc.method,
+            result_request_url=exc.url,
+            result_request_attempts=exc.request_attempts,
+        )
+        return result_from_operation(
+            completed,
+            decision=decision,
+            ok=False,
+            accepted=True,
+            executed=True,
+            status_code=exc.status_code,
+            body=message[:1000],
+            error_type=exc.error_type,
+            retryable=exc.retryable,
+            request_method=exc.method,
+            request_url=exc.url,
+            request_attempts=exc.request_attempts,
+        )
     except requests.RequestException as exc:
-        message = str(exc)
+        wrapped = WrapperRequestError.from_exception(
+            exc,
+            method="UNKNOWN",
+            url=op.normalized_target,
+            retryable=False,
+            request_attempts=1,
+        )
+        message = wrapped.error_message()
         completed = ctx.journal.transition(
             running.op_id,
             "failed",
             error=message[:500],
             result_ok=False,
             result_body_excerpt=message[:1000],
+            result_error_type=wrapped.error_type,
+            result_error_retryable=wrapped.retryable,
+            result_request_method=wrapped.method,
+            result_request_url=wrapped.url,
+            result_request_attempts=wrapped.request_attempts,
         )
         return result_from_operation(
             completed,
@@ -309,33 +546,34 @@ def execute_http_operation(
             accepted=True,
             executed=True,
             body=message[:1000],
+            error_type=wrapped.error_type,
+            retryable=wrapped.retryable,
+            request_method=wrapped.method,
+            request_url=wrapped.url,
+            request_attempts=wrapped.request_attempts,
         )
 
-    if response.ok:
-        completed = ctx.journal.transition(
-            running.op_id,
-            "succeeded",
-            result_ok=True,
-            result_status_code=response.status_code,
-            result_body_excerpt=response.text[:1000],
-        )
-    else:
-        completed = ctx.journal.transition(
-            running.op_id,
-            "failed",
-            error=response.text[:500],
-            result_ok=False,
-            result_status_code=response.status_code,
-            result_body_excerpt=response.text[:1000],
-        )
+    completed = ctx.journal.transition(
+        running.op_id,
+        "succeeded",
+        result_ok=True,
+        result_status_code=response.status_code,
+        result_body_excerpt=response.text[:1000],
+        result_request_method=outcome.request_method,
+        result_request_url=outcome.request_url,
+        result_request_attempts=outcome.request_attempts,
+    )
     return result_from_operation(
         completed,
         decision=decision,
-        ok=response.ok,
+        ok=True,
         accepted=True,
         executed=True,
         status_code=response.status_code,
         body=response.text[:1000],
+        request_method=outcome.request_method,
+        request_url=outcome.request_url,
+        request_attempts=outcome.request_attempts,
     )
 
 
@@ -483,6 +721,11 @@ def result_from_operation(
     dry_run: bool = False,
     status_code: int | None = None,
     body: str | None = None,
+    error_type: str | None = None,
+    retryable: bool | None = None,
+    request_method: str | None = None,
+    request_url: str | None = None,
+    request_attempts: int | None = None,
 ) -> dict[str, Any]:
     """Build a consistent wrapper result envelope."""
     return WrapperResult(
@@ -493,8 +736,15 @@ def result_from_operation(
         op_id=op.op_id,
         decision=None if decision is None else decision.to_dict(),
         dry_run=dry_run,
-        status_code=status_code,
-        body=body,
+        status_code=op.result_status_code if status_code is None else status_code,
+        body=op.result_body_excerpt if body is None else body,
+        error_type=op.result_error_type if error_type is None else error_type,
+        retryable=_result_error_retryable(op) if retryable is None else retryable,
+        request_method=(op.result_request_method if request_method is None else request_method),
+        request_url=op.result_request_url if request_url is None else request_url,
+        request_attempts=(
+            op.result_request_attempts if request_attempts is None else request_attempts
+        ),
     ).to_dict()
 
 
@@ -511,26 +761,75 @@ class JsonHttpClient:
         *,
         headers: Mapping[str, str],
         json_body: Mapping[str, Any] | None = None,
-    ) -> requests.Response:
-        """Execute a JSON request with a stable User-Agent."""
+        retry_policy: RetryPolicy | None = None,
+    ) -> HttpResponseOutcome:
+        """Execute a JSON request with stable metadata and endpoint-scoped retries."""
         request_headers = dict(headers)
         request_headers.setdefault("User-Agent", f"clawops/{__version__}")
-        return requests.request(
-            method=method,
-            url=url,
-            headers=request_headers,
-            json=json_body,
-            timeout=self.timeout,
-        )
+        effective_policy = NO_RETRY_POLICY if retry_policy is None else retry_policy
+        for attempt_number in range(1, effective_policy.max_attempts + 1):
+            try:
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=request_headers,
+                    json=json_body,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                retryable = (
+                    effective_policy.max_attempts > 1
+                    and effective_policy.allows_retry_for_exception(exc)
+                )
+                if retryable and attempt_number < effective_policy.max_attempts:
+                    _sleep_before_retry(effective_policy, attempt_number)
+                    continue
+                raise WrapperRequestError.from_exception(
+                    exc,
+                    method=method,
+                    url=url,
+                    retryable=retryable,
+                    request_attempts=attempt_number,
+                ) from exc
+            if (
+                not response.ok
+                and effective_policy.max_attempts > 1
+                and effective_policy.allows_retry_for_status(response.status_code)
+                and attempt_number < effective_policy.max_attempts
+            ):
+                _sleep_before_retry(effective_policy, attempt_number)
+                continue
+            return HttpResponseOutcome(
+                response=response,
+                request_method=method,
+                request_url=url,
+                request_attempts=attempt_number,
+                retry_policy=effective_policy,
+            )
+        raise AssertionError("unreachable: request loop returned no response")
 
     def post(
-        self, url: str, *, headers: Mapping[str, str], json_body: Mapping[str, Any]
-    ) -> requests.Response:
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        json_body: Mapping[str, Any],
+        retry_policy: RetryPolicy | None = None,
+    ) -> HttpResponseOutcome:
         """Execute a JSON POST."""
-        return self.request("POST", url, headers=headers, json_body=json_body)
+        return self.request(
+            "POST", url, headers=headers, json_body=json_body, retry_policy=retry_policy
+        )
 
     def put(
-        self, url: str, *, headers: Mapping[str, str], json_body: Mapping[str, Any]
-    ) -> requests.Response:
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        json_body: Mapping[str, Any],
+        retry_policy: RetryPolicy | None = None,
+    ) -> HttpResponseOutcome:
         """Execute a JSON PUT."""
-        return self.request("PUT", url, headers=headers, json_body=json_body)
+        return self.request(
+            "PUT", url, headers=headers, json_body=json_body, retry_policy=retry_policy
+        )
