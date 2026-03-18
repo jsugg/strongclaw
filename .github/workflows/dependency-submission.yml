@@ -1,4 +1,4 @@
-name: dependency-submission
+name: Repository Dependency Snapshot
 
 on:
   push:
@@ -14,7 +14,7 @@ env:
 
 jobs:
   submit-dependency-snapshot:
-    name: Submit dependency snapshot
+    name: Generate and Submit Dependency Snapshot
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5

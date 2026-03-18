@@ -1,4 +1,4 @@
-name: memory-plugin-verification
+name: Memory Plugin Integration Checks
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ env:
 
 jobs:
   verify-vendored-memory-plugin:
-    name: Verify vendored memory plugin
+    name: Run Memory Plugin Integration Checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

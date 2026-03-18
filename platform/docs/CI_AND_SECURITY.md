@@ -6,12 +6,12 @@ The repository includes:
 - Semgrep
 - Gitleaks
 - Trivy
-- harness smoke
-- nightly regression
-- dependency submission from a generated SPDX SBOM snapshot
-- `memory-plugin-verification` for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
+- Policy Harness Smoke Tests
+- Nightly Test Run
+- Repository Dependency Snapshot from a generated SPDX SBOM snapshot
+- Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
-- upstream merge validation
+- Upstream Integration Validation
 
 ## Vendored plugin verification
 
