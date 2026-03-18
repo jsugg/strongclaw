@@ -858,7 +858,9 @@ def test_backup_verify_warns_and_uses_tar_when_openclaw_is_missing(tmp_path: pat
 
 def test_restore_openclaw_runs_from_non_repo_cwd(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    bin_dir = _build_tool_path(tmp_path, ["dirname", "uname", "ls", "head", "mkdir", "tar", "gzip"])
+    bin_dir = _build_tool_path(
+        tmp_path, ["bash", "dirname", "uname", "ls", "head", "mkdir", "tar", "gzip"]
+    )
     home = tmp_path / "home"
     backup_dir = home / ".openclaw" / "backups"
     backup_dir.mkdir(parents=True)
@@ -870,7 +872,7 @@ def test_restore_openclaw_runs_from_non_repo_cwd(tmp_path: pathlib.Path) -> None
     restore_dir = tmp_path / "restored"
     outside_cwd = tmp_path / "outside"
     outside_cwd.mkdir()
-    env = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(home)}
+    env = os.environ | {"PATH": str(bin_dir), "HOME": str(home)}
 
     result = subprocess.run(
         [
