@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEST="${1:-$HOME/Projects/openclaw-platform-bootstrap/repo/upstream}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DEST="${1:-$ROOT/repo/upstream}"
 UPSTREAM_URL="${2:-https://github.com/openclaw/openclaw.git}"
 FORK_URL="${3:-}"
 

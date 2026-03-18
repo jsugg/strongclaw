@@ -66,17 +66,31 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
         repo_root / "platform/docs/runbooks/linux-runtime-user-and-systemd.md"
     ).read_text(encoding="utf-8")
 
-    assert "./scripts/bootstrap/verify_sidecars.sh" in readme
+    assert "./scripts/bootstrap/install.sh" in readme
     assert "./scripts/bootstrap/verify_sidecars.sh" in quickstart
     assert "./scripts/bootstrap/verify_channels.sh" in quickstart
     assert "./scripts/bootstrap/verify_channels.sh" in setup
     assert "./scripts/bootstrap/verify_observability.sh" in quickstart
     assert "./scripts/bootstrap/verify_observability.sh" in setup
-    assert "./scripts/bootstrap/install_host_services.sh" in setup
+    assert "./scripts/bootstrap/install.sh" in setup
+    assert "./scripts/bootstrap/install_host_services.sh --activate" in setup
+    assert "platform/configs/varlock/.env.local" in setup
+    assert "varlock load --path platform/configs/varlock" in setup
     assert "systemctl --user enable --now openclaw-gateway.service" in setup
     assert "systemctl --user restart openclaw-gateway.service" in usage
-    assert "./scripts/bootstrap/install_host_services.sh" in host_platforms
+    assert "./scripts/bootstrap/install.sh" in host_platforms
+    assert "./scripts/bootstrap/install_host_services.sh --activate" in host_platforms
     assert "./scripts/bootstrap/create_openclawsvc.sh" in host_platforms
+    assert "make install" in quickstart
+    assert "make install" in host_platforms
+    assert "make dev && make test" in host_platforms
+    assert "installs Docker only when no Docker-compatible runtime is detected" in quickstart
+    assert "does not install Docker over it" in setup
+    assert (
+        "Docker-compatible runtime such as OrbStack, Rancher Desktop, Colima, or Docker Desktop"
+        in setup
+    )
+    assert "Docker-compatible runtime that exposes `docker` plus `docker compose`" in host_platforms
     assert "Both use the same bootstrap entrypoints" in host_platforms
     assert "macOS-first rollout before Linux" not in host_platforms
     assert "platform/docs/HOST_PLATFORMS.md" in quickstart

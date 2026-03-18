@@ -97,6 +97,52 @@ def _write_fake_qmd(home_dir: pathlib.Path) -> pathlib.Path:
     return target
 
 
+def _write_fake_varlock(bin_dir: pathlib.Path, log_path: pathlib.Path | None = None) -> None:
+    target = bin_dir / "varlock"
+    if log_path is None:
+        body = "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
+    else:
+        body = (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            f'printf "%s\\n" "$*" >> "{log_path}"\n'
+            "exit 0\n"
+        )
+    target.write_text(body, encoding="utf-8")
+    target.chmod(0o755)
+
+
+def _write_fake_docker(
+    bin_dir: pathlib.Path,
+    *,
+    compose_available: bool = True,
+    backend_ready: bool = True,
+    log_path: pathlib.Path | None = None,
+) -> None:
+    target = bin_dir / "docker"
+    lines = ["#!/bin/bash", "set -euo pipefail"]
+    if log_path is not None:
+        lines.append(f'printf "%s\\n" "$*" >> "{log_path}"')
+    lines.extend(
+        [
+            'if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then',
+            f"  exit {0 if compose_available else 1}",
+            "fi",
+            'if [[ "${1:-}" == "info" ]]; then',
+            f"  exit {0 if backend_ready else 1}",
+            "fi",
+            "exit 0",
+        ]
+    )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    target.chmod(0o755)
+
+
+def _write_recording_script(path: pathlib.Path, body: str) -> None:
+    path.write_text("#!/bin/bash\nset -euo pipefail\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+
+
 def test_verify_baseline_fails_fast_when_openclaw_is_missing(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = _build_tool_path(tmp_path, ["dirname", "uname"])
@@ -113,7 +159,7 @@ def test_verify_baseline_fails_fast_when_openclaw_is_missing(tmp_path: pathlib.P
 
     assert result.returncode == 1
     assert "ERROR: Baseline verification runs OpenClaw diagnostics and audits." in result.stderr
-    assert "bootstrap_" in result.stderr
+    assert "bootstrap.sh" in result.stderr
 
 
 def test_verify_baseline_fails_fast_when_qmd_is_missing(tmp_path: pathlib.Path) -> None:
@@ -320,6 +366,136 @@ def test_install_host_services_dispatches_to_host_specific_renderer(tmp_path: pa
     assert "launchctl bootstrap gui/" in result.stdout
 
 
+def test_install_host_services_activates_systemd_user_units_when_requested(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    systemd_dir = home_dir / ".config" / "systemd" / "user"
+    log_path = tmp_path / "systemctl.log"
+    bin_dir = _build_tool_path(tmp_path, ["dirname"])
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\nprintf 'Linux\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    _write_fake_docker(bin_dir)
+    _write_recording_script(
+        bin_dir / "systemctl",
+        f'printf "%s\\n" "$*" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "HOME": str(home_dir),
+        "SYSTEMD_DIR": str(systemd_dir),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/install_host_services.sh"), "--activate"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    logged = log_path.read_text(encoding="utf-8")
+    assert "--user daemon-reload" in logged
+    assert "--user enable --now openclaw-sidecars.service" in logged
+    assert "--user enable --now openclaw-gateway.service" in logged
+    assert "Activated user systemd services" in result.stdout
+
+
+def test_install_host_services_bootstraps_launchd_services_when_requested(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    launchd_dir = home_dir / "Library" / "LaunchAgents"
+    log_path = tmp_path / "launchctl.log"
+    bin_dir = _build_tool_path(tmp_path, ["dirname"])
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\nprintf 'Darwin\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    _write_fake_docker(bin_dir)
+    _write_recording_script(
+        bin_dir / "id",
+        'if [[ "${1:-}" == "-u" ]]; then\n  printf "501\\n"\nelse\n  /usr/bin/id "$@"\nfi\n',
+    )
+    _write_recording_script(
+        bin_dir / "launchctl",
+        f'printf "%s\\n" "$*" >> "{log_path}"\n'
+        'if [[ "${1:-}" == "print" ]]; then\n  exit 0\nfi\n',
+    )
+    env = os.environ | {
+        "HOME": str(home_dir),
+        "LAUNCHD_DIR": str(launchd_dir),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/install_host_services.sh"), "--activate"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    logged = log_path.read_text(encoding="utf-8")
+    assert "print gui/501/ai.openclaw.gateway" in logged
+    assert f"bootout gui/501 {launchd_dir / 'ai.openclaw.gateway.plist'}" in logged
+    assert f"bootstrap gui/501 {launchd_dir / 'ai.openclaw.sidecars.plist'}" in logged
+    assert "Activated launchd services for gui/501" in result.stdout
+
+
+def test_validate_varlock_env_requires_repo_local_env_file(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    env = os.environ | {"VARLOCK_ENV_DIR": str(env_dir)}
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/validate_varlock_env.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert f"Varlock local env contract not found at {env_dir / '.env.local'}" in result.stderr
+
+
+def test_validate_varlock_env_uses_directory_entrypoint_for_varlock_load(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    (env_dir / ".env.local").write_text("OPENCLAW_GATEWAY_TOKEN=test-token\n", encoding="utf-8")
+    log_path = tmp_path / "varlock.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_varlock(bin_dir, log_path)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "VARLOCK_ENV_DIR": str(env_dir),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/validate_varlock_env.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+    assert f"Validated Varlock env contract at {env_dir / '.env.local'}" in result.stdout
+
+
 def test_create_openclawsvc_requires_root_for_linux_branch(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = _build_tool_path(tmp_path, ["dirname", "id"])
@@ -345,13 +521,235 @@ def test_create_openclawsvc_requires_root_for_linux_branch(tmp_path: pathlib.Pat
     assert "Run with sudo to create the Linux runtime user" in result.stderr
 
 
-def test_preflight_macos_requires_homebrew(tmp_path: pathlib.Path) -> None:
+def test_docker_runtime_reuses_existing_docker_cli_without_installing_fallback(
+    tmp_path: pathlib.Path,
+) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    bin_dir = _build_tool_path(tmp_path, ["dirname", "uname"])
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "sudo.log"
+    _write_fake_docker(bin_dir, compose_available=True, backend_ready=False)
+    _write_recording_script(bin_dir / "sudo", f'printf "%s\\n" "$*" >> "{log_path}"\n')
     env = os.environ | {"PATH": str(bin_dir)}
 
     result = subprocess.run(
-        ["/bin/bash", str(repo_root / "scripts/bootstrap/preflight_macos.sh")],
+        [
+            "/bin/bash",
+            "-c",
+            (
+                f'source "{repo_root / "scripts/lib/docker_runtime.sh"}"; '
+                "ensure_docker_compatible_runtime linux; "
+                'printf "%s\\n" "$DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP"'
+            ),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "0"
+    assert not log_path.exists()
+
+
+def test_docker_runtime_installs_docker_only_when_no_backend_is_detected(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "apt-get.log"
+    _write_recording_script(bin_dir / "sudo", 'exec "$@"\n')
+    _write_recording_script(
+        bin_dir / "apt-get",
+        f'printf "%s\\n" "$*" >> "{log_path}"\n'
+        'if [[ "${1:-}" == "install" ]]; then\n'
+        f'  /bin/cat > "{bin_dir / "docker"}" <<\'EOF\'\n'
+        "#!/bin/bash\n"
+        "set -euo pipefail\n"
+        'if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "${1:-}" == "info" ]]; then\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n"
+        "EOF\n"
+        f'  /bin/chmod 755 "{bin_dir / "docker"}"\n'
+        "fi\n",
+    )
+    env = os.environ | {"PATH": str(bin_dir)}
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            (
+                f'source "{repo_root / "scripts/lib/docker_runtime.sh"}"; '
+                "ensure_docker_compatible_runtime linux; "
+                'printf "%s\\n" "$DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP"'
+            ),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "1"
+    assert "install -y docker.io docker-compose-plugin" in log_path.read_text(encoding="utf-8")
+
+
+def test_docker_runtime_refuses_to_install_docker_over_orbstack(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_path = tmp_path / "brew.log"
+    _write_recording_script(bin_dir / "orb", "exit 0\n")
+    _write_recording_script(bin_dir / "brew", f'printf "%s\\n" "$*" >> "{log_path}"\n')
+    env = os.environ | {"PATH": str(bin_dir)}
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            f'source "{repo_root / "scripts/lib/docker_runtime.sh"}"; ensure_docker_compatible_runtime darwin',
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "detected OrbStack" in result.stderr
+    assert "will not install Docker over an existing alternative runtime" in result.stderr
+    assert not log_path.exists()
+
+
+def test_install_script_composes_bootstrap_service_activation_and_verification(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "install.log"
+    bootstrap_script = tmp_path / "bootstrap.sh"
+    validate_script = tmp_path / "validate_varlock_env.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    verify_script = tmp_path / "verify_baseline.sh"
+    _write_recording_script(
+        bootstrap_script,
+        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        validate_script,
+        f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        verify_script,
+        f'printf "verify\\n" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "VALIDATE_VARLOCK_ENV_SCRIPT": str(validate_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+        "VERIFY_BASELINE_SCRIPT": str(verify_script),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/install.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap profile=default",
+        "validate",
+        "install --activate",
+        "verify",
+    ]
+
+
+def test_install_script_skip_bootstrap_supports_post_bootstrap_followups(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "install-profile.log"
+    bootstrap_script = tmp_path / "bootstrap.sh"
+    render_script = tmp_path / "render_openclaw_config.sh"
+    doctor_script = tmp_path / "doctor_host.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    _write_recording_script(
+        bootstrap_script,
+        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        render_script,
+        f'printf "render %s profile=%s\\n" "$*" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        doctor_script,
+        f'printf "doctor\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/install.sh"),
+            "--profile",
+            "acp",
+            "--skip-bootstrap",
+            "--no-activate-services",
+            "--no-verify",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "render --profile acp profile=acp",
+        "doctor",
+        "install ",
+    ]
+
+
+def test_preflight_host_requires_homebrew_for_darwin(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname"])
+    (bin_dir / "uname").write_text("#!/bin/bash\nprintf 'Darwin\\n'\n", encoding="utf-8")
+    (bin_dir / "uname").chmod(0o755)
+    env = os.environ | {"PATH": str(bin_dir)}
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/preflight.sh")],
         cwd=repo_root,
         env=env,
         capture_output=True,
@@ -368,6 +766,7 @@ def test_doctor_host_validates_installed_tools_and_rendered_config(tmp_path: pat
     bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
     _write_fake_openclaw(bin_dir)
     _write_fake_acpx(bin_dir)
+    _write_fake_varlock(bin_dir)
     home_dir = tmp_path / "home"
     _write_fake_qmd(home_dir)
     config_path = home_dir / ".openclaw" / "openclaw.json"

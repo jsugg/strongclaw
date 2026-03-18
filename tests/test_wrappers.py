@@ -14,7 +14,7 @@ from pytest import MonkeyPatch
 from clawops.common import write_yaml
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
-from clawops.wrappers.base import JsonHttpClient, RetryPolicy, WrapperContext
+from clawops.wrappers.base import HttpTimeouts, JsonHttpClient, RetryPolicy, WrapperContext
 from clawops.wrappers.github import (
     add_labels,
     create_comment,
@@ -48,10 +48,18 @@ class WrapperSpec:
 
 
 class _FakeResponse:
-    def __init__(self, *, ok: bool = True, status_code: int = 200, text: str = "ok") -> None:
+    def __init__(
+        self,
+        *,
+        ok: bool = True,
+        status_code: int = 200,
+        text: str = "ok",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.ok = ok
         self.status_code = status_code
         self.text = text
+        self.headers = {} if headers is None else headers
 
 
 def _identity(value: str) -> str:
@@ -236,6 +244,18 @@ def _install_transport_error(
     monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
 
 
+def _install_status_sequence(
+    monkeypatch: MonkeyPatch,
+    responses: list[_FakeResponse],
+    calls: list[str],
+) -> None:
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
+        calls.append("request")
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+
+
 def _allow_decision_json() -> str:
     return json.dumps(
         {
@@ -246,6 +266,14 @@ def _allow_decision_json() -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _expected_failure_attempts(spec: WrapperSpec) -> int:
+    return 3 if spec.name == "github-labels" else 1
+
+
+def _expected_failure_retryable(spec: WrapperSpec) -> bool:
+    return spec.name == "github-labels"
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])
@@ -405,21 +433,23 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     assert first["status"] == "failed"
     assert first["body"] == "simulated timeout"
     assert first["error_type"] == "timeout"
-    assert first["retryable"] is False
-    assert first["request_attempts"] == 1
+    assert first["retryable"] is _expected_failure_retryable(spec)
+    assert first["request_attempts"] == _expected_failure_attempts(spec)
+    assert first["error"]["type"] == "timeout"
+    assert first["error"]["message"] == "simulated timeout"
     assert second == first
-    assert calls == ["request"]
+    assert calls == ["request"] * _expected_failure_attempts(spec)
 
     persisted = journal.get(str(first["op_id"]))
     assert persisted.status == "failed"
     assert persisted.result_ok == 0
     assert persisted.result_body_excerpt == "simulated timeout"
     assert persisted.result_error_type == "timeout"
-    assert persisted.result_error_retryable == 0
+    assert persisted.result_error_retryable == int(_expected_failure_retryable(spec))
     assert persisted.result_request_method == (
         "PUT" if spec.kind == "github_pull_merge" else "POST"
     )
-    assert persisted.result_request_attempts == 1
+    assert persisted.result_request_attempts == _expected_failure_attempts(spec)
     assert persisted.attempt == 1
     assert persisted.execution_contract_version == 1
 
@@ -442,9 +472,11 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
     assert result["status"] == "failed"
     assert result["body"] == "simulated timeout"
     assert result["error_type"] == "timeout"
-    assert result["retryable"] is False
+    assert result["retryable"] is _expected_failure_retryable(spec)
     assert result["request_method"] == ("PUT" if spec.kind == "github_pull_merge" else "POST")
-    assert result["request_attempts"] == 1
+    assert result["request_attempts"] == _expected_failure_attempts(spec)
+    assert result["error"]["type"] == "timeout"
+    assert result["error"]["message"] == "simulated timeout"
 
     persisted = journal.get(str(result["op_id"]))
     assert persisted.status == "failed"
@@ -452,11 +484,11 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
     assert persisted.result_ok == 0
     assert persisted.result_body_excerpt == "simulated timeout"
     assert persisted.result_error_type == "timeout"
-    assert persisted.result_error_retryable == 0
+    assert persisted.result_error_retryable == int(_expected_failure_retryable(spec))
     assert persisted.result_request_method == (
         "PUT" if spec.kind == "github_pull_merge" else "POST"
     )
-    assert persisted.result_request_attempts == 1
+    assert persisted.result_request_attempts == _expected_failure_attempts(spec)
     assert persisted.attempt == 1
     assert journal.list_stuck(older_than_ms=0) == []
     assert persisted.execution_contract_version == 1
@@ -636,3 +668,62 @@ def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -
     assert outcome.request_url == "https://example.internal/hooks/deploy"
     assert outcome.response.text == "ok"
     assert calls == ["request", "request"]
+
+
+def test_github_labels_retry_retryable_http_status_then_succeeds(
+    tmp_path: pathlib.Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ctx, journal = _build_context(tmp_path, SPECS[2], require_approval=False)
+    _configure_wrapper_environment(SPECS[2], monkeypatch)
+    calls: list[str] = []
+    _install_status_sequence(
+        monkeypatch,
+        responses=[
+            _FakeResponse(
+                ok=False,
+                status_code=503,
+                text="busy",
+                headers={"Retry-After": "3", "X-GitHub-Request-Id": "req-123"},
+            ),
+            _FakeResponse(ok=True, status_code=200, text="ok"),
+        ],
+        calls=calls,
+    )
+
+    result = add_labels(
+        ctx=ctx,
+        repo="example/repo",
+        issue_number=123,
+        labels=["needs-review"],
+        scope="test",
+        trust_zone="automation",
+    )
+
+    assert result["ok"] is True
+    assert result["request_attempts"] == 2
+    assert calls == ["request", "request"]
+
+    persisted = journal.get(str(result["op_id"]))
+    assert persisted.status == "succeeded"
+    assert persisted.result_request_attempts == 2
+
+
+def test_json_http_client_supports_split_timeouts(monkeypatch: MonkeyPatch) -> None:
+    captured_timeouts: list[object] = []
+
+    def _request(*args: object, **kwargs: object) -> _FakeResponse:
+        captured_timeouts.append(kwargs["timeout"])
+        return _FakeResponse(text="ok")
+
+    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    client = JsonHttpClient(timeout=HttpTimeouts(connect_seconds=2.5, read_seconds=7.5))
+
+    outcome = client.post(
+        "https://example.internal/hooks/deploy",
+        headers={"Content-Type": "application/json"},
+        json_body={"ok": True},
+    )
+
+    assert outcome.response.text == "ok"
+    assert captured_timeouts == [(2.5, 7.5)]

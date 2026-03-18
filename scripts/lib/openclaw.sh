@@ -10,7 +10,7 @@ openclaw_is_available() {
 }
 
 _openclaw_install_hint() {
-  printf 'Run %s/scripts/bootstrap/bootstrap_host.sh to attempt installation.' "$OPENCLAW_PROJECT_ROOT"
+  printf 'Run %s/scripts/bootstrap/bootstrap.sh to attempt installation.' "$OPENCLAW_PROJECT_ROOT"
 }
 
 warn_if_openclaw_missing() {

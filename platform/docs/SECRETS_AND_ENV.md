@@ -13,9 +13,9 @@
 
 ## Workflow
 
-1. copy `.env.local.example`
-2. fill secrets
-3. run `varlock load`
+1. copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local`
+2. fill secrets in `platform/configs/varlock/.env.local`
+3. run `varlock load --path platform/configs/varlock`
 4. launch gateway / sidecars with `varlock run -- ...`
 
 ## Rotation
