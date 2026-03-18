@@ -165,6 +165,15 @@ def test_install_script_composes_existing_bootstrap_and_verification_entrypoints
     assert '"$INSTALL_HOST_SERVICES_SCRIPT" --activate' in install_script
 
 
+def test_ci_environment_sync_exports_the_locked_virtualenv_for_follow_up_steps() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    sync_script = (repo_root / "scripts/ci/sync_dev_environment.sh").read_text(encoding="utf-8")
+
+    assert "uv sync --locked --extra dev" in sync_script
+    assert 'printf \'%s\\n\' "$ROOT/.venv/bin" >>"$GITHUB_PATH"' in sync_script
+    assert "printf 'VIRTUAL_ENV=%s\\n' \"$ROOT/.venv\"" in sync_script
+
+
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     setup_guide = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
