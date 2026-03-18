@@ -12,8 +12,8 @@ def test_plugin_verification_workflow_runs_vendored_memory_plugin_checks() -> No
     )
     script = (repo_root / "scripts/ci/verify_vendored_memory_plugin.sh").read_text(encoding="utf-8")
 
-    assert "name: memory-plugin-verification" in workflow
-    assert "name: Verify vendored memory plugin" in workflow
+    assert "name: Memory Plugin Integration Checks" in workflow
+    assert "name: Run Memory Plugin Integration Checks" in workflow
     assert "./scripts/ci/verify_vendored_memory_plugin.sh" in workflow
 
     assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in script
@@ -27,7 +27,7 @@ def test_plugin_verification_docs_reference_current_workflow_and_script() -> Non
         repo_root / "platform/plugins/memory-lancedb-pro/STRONGCLAW_VENDOR.md"
     ).read_text(encoding="utf-8")
 
-    assert "memory-plugin-verification" in ci_doc
+    assert "Memory Plugin Integration Checks" in ci_doc
     assert "verify_vendored_memory_plugin.sh" in ci_doc
     assert "verify_vendored_memory_plugin.sh" in vendor_note
 
