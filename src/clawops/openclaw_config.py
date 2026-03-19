@@ -189,29 +189,22 @@ def _contains_placeholder(value: Any, placeholder: str) -> bool:
 
 
 def _resolve_lossless_claw_plugin_path(repo_root: pathlib.Path) -> pathlib.Path:
-    """Return the configured lossless-claw plugin path or fail loudly."""
+    """Return the configured or default lossless-claw plugin path."""
     configured = os.environ.get("OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH")
-    candidates: list[pathlib.Path] = []
     if configured:
         configured_path = pathlib.Path(configured)
-        candidates.append(
+        candidate = (
             configured_path if configured_path.is_absolute() else repo_root / configured_path
         )
-    candidates.extend(
-        (
-            repo_root / "platform" / "plugins" / "lossless-claw",
-            repo_root / "vendor" / "lossless-claw",
-        )
-    )
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved.is_dir():
-            return resolved
-    raise ValueError(
-        "lossless-claw plugin path is not configured; set "
-        "OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH or vendor it under "
-        "platform/plugins/lossless-claw"
-    )
+        return candidate.expanduser().resolve()
+
+    vendored_path = (repo_root / "vendor" / "lossless-claw").expanduser().resolve()
+    plugin_path = (repo_root / "platform" / "plugins" / "lossless-claw").expanduser().resolve()
+    if vendored_path.is_dir():
+        return vendored_path
+    if plugin_path.is_dir():
+        return plugin_path
+    return vendored_path
 
 
 def render_openclaw_overlay(

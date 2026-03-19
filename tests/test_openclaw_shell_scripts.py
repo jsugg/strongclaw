@@ -499,9 +499,11 @@ def test_verify_baseline_uses_varlock_contract_when_available_off_path(
     install_dir = home_dir / ".config" / "varlock" / "bin"
     install_dir.mkdir(parents=True)
     _write_fake_varlock(install_dir, varlock_log)
+    xdg_config_home = home_dir / ".config"
     env = os.environ | {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(home_dir),
+        "XDG_CONFIG_HOME": str(xdg_config_home),
         "CLAWOPS_PREFER_PATH": "1",
         "VERIFY_OPENCLAW_MODELS_SCRIPT": str(verify_models_script),
     }
@@ -826,9 +828,11 @@ def test_validate_varlock_env_uses_installed_varlock_when_not_on_path(
     install_dir = home_dir / ".config" / "varlock" / "bin"
     install_dir.mkdir(parents=True)
     _write_fake_varlock(install_dir, log_path)
+    xdg_config_home = home_dir / ".config"
     env = os.environ | {
-        "PATH": os.environ["PATH"],
+        "PATH": "/usr/bin:/bin",
         "HOME": str(home_dir),
+        "XDG_CONFIG_HOME": str(xdg_config_home),
         "VARLOCK_ENV_DIR": str(env_dir),
     }
 
@@ -954,9 +958,11 @@ def test_launch_gateway_with_varlock_uses_installed_varlock_when_not_on_path(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_openclaw(bin_dir)
+    xdg_config_home = home_dir / ".config"
     env = os.environ | {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(home_dir),
+        "XDG_CONFIG_HOME": str(xdg_config_home),
     }
 
     result = subprocess.run(
@@ -983,9 +989,11 @@ def test_launch_sidecars_with_varlock_uses_installed_varlock_when_not_on_path(
     install_dir = home_dir / ".config" / "varlock" / "bin"
     install_dir.mkdir(parents=True)
     _write_fake_varlock(install_dir, log_path)
+    xdg_config_home = home_dir / ".config"
     env = os.environ | {
-        "PATH": os.environ["PATH"],
+        "PATH": "/usr/bin:/bin",
         "HOME": str(home_dir),
+        "XDG_CONFIG_HOME": str(xdg_config_home),
     }
 
     result = subprocess.run(
@@ -1484,10 +1492,12 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     install_dir = home_dir / ".config" / "varlock" / "bin"
     install_dir.mkdir(parents=True)
     _write_recording_script(install_dir / "varlock", "exit 0\n")
+    xdg_config_home = home_dir / ".config"
 
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "HOME": str(home_dir),
+        "XDG_CONFIG_HOME": str(xdg_config_home),
         "BOOTSTRAP_LOG_PATH": str(log_path),
     }
 
