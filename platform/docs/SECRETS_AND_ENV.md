@@ -13,10 +13,14 @@
 
 ## Workflow
 
-1. copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local`
-2. fill secrets in `platform/configs/varlock/.env.local`
-3. run `varlock load --path platform/configs/varlock`
-4. launch gateway / sidecars with `varlock run -- ...`
+1. run `make setup` / `uv run --project . clawops setup` for the guided path, or copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local`
+2. fill or review secrets in `platform/configs/varlock/.env.local`
+   - provider auth can be stored here with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`
+   - optional model selection overrides: `OPENCLAW_DEFAULT_MODEL`, `OPENCLAW_MODEL_FALLBACKS`
+   - local-model setups require `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+3. run `./scripts/bootstrap/configure_varlock_env.sh` or `varlock load --path platform/configs/varlock`
+4. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `./scripts/bootstrap/setup.sh` do it for you
+5. launch gateway / sidecars with `varlock run -- ...`
 
 ## Rotation
 

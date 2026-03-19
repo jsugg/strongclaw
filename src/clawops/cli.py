@@ -22,6 +22,7 @@ from clawops import (
     platform_verify,
     policy_engine,
     repo_tools,
+    setup_cli,
     skill_scanner,
     supply_chain,
     workflow_runner,
@@ -76,6 +77,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "Migrate and verify the memory-v2 to memory-pro transition.",
     ),
     CommandSpec("repo", repo_tools.repo_main, "Validate the repo/upstream workspace contract."),
+    CommandSpec("setup", setup_cli.setup_main, "Run the guided StrongClaw setup workflow."),
+    CommandSpec("doctor", setup_cli.doctor_main, "Run a deep StrongClaw readiness scan."),
     CommandSpec(
         "worktree",
         repo_tools.worktree_main,

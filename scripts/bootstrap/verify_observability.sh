@@ -2,5 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/clawops.sh"
 
-exec clawops verify-platform observability --repo-root "$ROOT" "$@"
+exec "$(resolve_clawops_bin "$ROOT")" verify-platform observability --repo-root "$ROOT" "$@"

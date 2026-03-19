@@ -10,14 +10,22 @@ DEV_SYNC_FLAGS ?= --locked
 CONTEXT_CONFIG ?= platform/configs/context/context-service.yaml
 REPO_DIR ?= .
 RUNS_DIR ?= ./.runs
+SETUP_ARGS ?=
+DOCTOR_ARGS ?=
 
-.PHONY: help install dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install: ## Install the runtime package in editable mode.
-	$(PIP) install -e .
+install: ## Sync the managed project environment.
+	$(UV) sync $(DEV_SYNC_FLAGS)
+
+setup: ## Run the guided StrongClaw setup workflow.
+	PYTHONPATH=src $(RUN) clawops setup $(SETUP_ARGS)
+
+doctor: ## Run the deep StrongClaw readiness scan.
+	PYTHONPATH=src $(RUN) clawops doctor $(DOCTOR_ARGS)
 
 dev: ## Sync the locked dev environment and install pre-commit hooks.
 	$(UV) sync $(DEV_SYNC_FLAGS) --extra dev

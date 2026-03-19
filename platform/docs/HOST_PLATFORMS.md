@@ -20,11 +20,11 @@ Regardless of host OS, the baseline flow is:
 1. provision a dedicated non-admin runtime user with `./scripts/bootstrap/create_openclawsvc.sh`
 2. clone the repo as that user
 3. install the runtime package with `make install`
-4. copy `platform/configs/varlock/.env.local.example` to `platform/configs/varlock/.env.local` and fill the required secrets
-5. prefer `./scripts/bootstrap/install.sh` for the baseline path after the env contract is ready
-6. if Linux bootstrap just granted Docker access, start a fresh login shell and rerun `./scripts/bootstrap/install.sh --skip-bootstrap`
+4. either prepare `platform/configs/varlock/.env.local` manually or let `make setup` / `clawops setup` create and normalize it interactively
+5. prefer `make setup` for the baseline path after clone; it now guides Varlock env setup and OpenClaw model auth during setup
+6. if Linux bootstrap just granted Docker access, start a fresh login shell and rerun `make setup SETUP_ARGS="--skip-bootstrap"` or `clawops setup --skip-bootstrap`
 7. contributors can additionally install `uv` and use `make dev && make test`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
-8. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `varlock load --path platform/configs/varlock`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
+8. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `./scripts/bootstrap/configure_varlock_env.sh`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
 
 ## macOS host notes
 

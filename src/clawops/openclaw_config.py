@@ -71,6 +71,16 @@ PROFILES: dict[str, RenderProfile] = {
         ),
         description="Local LanceDB durable memory with Ollama-backed smart extraction.",
     ),
+    "lossless-hypermemory-tier1": RenderProfile(
+        name="lossless-hypermemory-tier1",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "77-lossless-hypermemory-tier1.example.json5",
+        ),
+        description="QMD baseline plus lossless context compaction and strongclaw-memory-v2.",
+    ),
     "acp": RenderProfile(
         name="acp",
         overlays=(

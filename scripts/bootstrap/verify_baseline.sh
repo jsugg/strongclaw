@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VERIFY_OPENCLAW_MODELS_SCRIPT="${VERIFY_OPENCLAW_MODELS_SCRIPT:-$ROOT/scripts/bootstrap/configure_openclaw_model_auth.sh}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
 
@@ -14,19 +15,22 @@ if [[ ! -x "$QMD_BIN" ]]; then
 fi
 
 echo "== OpenClaw doctor =="
-openclaw doctor
+run_openclaw doctor --non-interactive
 
 echo "== OpenClaw security audit =="
-openclaw security audit --deep
+run_openclaw security audit --deep
 
 echo "== OpenClaw secrets audit =="
-openclaw secrets audit --check
+run_openclaw secrets audit --check
 
 echo "== OpenClaw memory status =="
-openclaw memory status --deep
+run_openclaw memory status --deep
 
 echo "== OpenClaw memory search =="
-openclaw memory search --query "ClawOps" --max-results 1 >/dev/null
+run_openclaw memory search --query "ClawOps" --max-results 1 >/dev/null
+
+echo "== OpenClaw model readiness =="
+"$VERIFY_OPENCLAW_MODELS_SCRIPT" --check-only
 
 echo "== Python tests =="
 uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"

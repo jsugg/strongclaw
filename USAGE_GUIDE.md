@@ -31,6 +31,8 @@ Repository helper scripts that depend on `openclaw` now detect whether the CLI i
 
 ```bash
 ./scripts/bootstrap/doctor_host.sh
+make doctor
+uv run --project . clawops doctor --skip-runtime
 openclaw gateway status --json
 openclaw status --all
 openclaw doctor

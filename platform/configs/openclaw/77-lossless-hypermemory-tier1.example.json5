@@ -25,7 +25,7 @@
     },
     "load": {
       "paths": [
-        "__REPO_ROOT__/vendor/lossless-claw",
+        "__LOSSLESS_CLAW_PLUGIN_PATH__",
         "__REPO_ROOT__/platform/plugins/strongclaw-memory-v2"
       ]
     },

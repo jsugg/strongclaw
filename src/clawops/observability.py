@@ -53,11 +53,7 @@ def _coerce_telemetry_value(value: TelemetryValue) -> TelemetryScalar | None:
     """Convert a telemetry value into a supported scalar."""
     if value is None:
         return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
+    if isinstance(value, (bool, int, float)):
         return value
     return str(value)
 

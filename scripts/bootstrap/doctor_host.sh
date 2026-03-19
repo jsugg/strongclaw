@@ -6,6 +6,8 @@ OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
 QMD_BIN="${OPENCLAW_QMD_BIN:-$HOME/.bun/bin/qmd}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/varlock.sh"
 
 require_command() {
   local command_name="$1"
@@ -20,7 +22,7 @@ require_command() {
 require_openclaw "Bootstrap doctor requires the OpenClaw CLI."
 require_command acpx "Bootstrap doctor requires the ACPX CLI."
 require_command jq "Bootstrap doctor requires jq to validate the rendered config."
-require_command varlock "Bootstrap doctor requires the Varlock CLI."
+require_varlock "Bootstrap doctor requires the Varlock CLI."
 
 if [[ ! -x "$QMD_BIN" ]]; then
   echo "ERROR: Bootstrap doctor requires the QMD semantic memory backend at $QMD_BIN." >&2

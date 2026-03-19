@@ -42,7 +42,13 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health/liveliness >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD",
+          "/usr/bin/python3",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3).status == 200 else 1)",
+        ]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -70,13 +76,19 @@ services:
     restart: unless-stopped
 
   qdrant:
-    image: qdrant/qdrant:v1.15.5@sha256:34aa4f18d7f5f8f0502c7d5f0dcf82e20a44f779e49f47fa011d5616e4ee648e
+    image: qdrant/qdrant:v1.15.5@sha256:0fb8897412abc81d1c0430a899b9a81eb8328aa634e7242d1bc804c1fe8fe863
     ports:
       - "127.0.0.1:6333:6333"
     volumes:
       - ./state/qdrant:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:6333/healthz >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && IFS=$'\\r' read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]",
+        ]
       interval: 15s
       timeout: 5s
       retries: 10

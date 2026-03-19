@@ -41,6 +41,92 @@ def _write_fake_openclaw(bin_dir: pathlib.Path) -> None:
     target.chmod(0o755)
 
 
+def _write_fake_openclaw_model_manager(bin_dir: pathlib.Path, state_dir: pathlib.Path) -> None:
+    target = bin_dir / "openclaw"
+    target.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        f'STATE_DIR="{state_dir}"\n'
+        'mkdir -p "$STATE_DIR"\n'
+        'if [[ "${1:-}" == "agents" && "${2:-}" == "list" && "${3:-}" == "--json" ]]; then\n'
+        '  printf \'[{"id":"admin"},{"id":"reader"}]\\n\'\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "${1:-}" == "models" && "${2:-}" == "status" && "${3:-}" == "--help" ]]; then\n'
+        "  printf 'models status help\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "${1:-}" != "models" ]]; then\n'
+        "  printf 'unexpected openclaw args: %s\\n' \"$*\" >&2\n"
+        "  exit 1\n"
+        "fi\n"
+        "shift\n"
+        'agent_id="admin"\n'
+        'if [[ "${1:-}" == "--agent" ]]; then\n'
+        '  agent_id="${2:-}"\n'
+        "  shift 2\n"
+        "fi\n"
+        'primary_file="$STATE_DIR/${agent_id}.primary"\n'
+        'fallback_file="$STATE_DIR/${agent_id}.fallbacks"\n'
+        'case "${1:-}" in\n'
+        "  list)\n"
+        '    primary="openai-codex/gpt-5.4"\n'
+        '    if [[ -f "$primary_file" ]]; then\n'
+        '      primary="$(cat "$primary_file")"\n'
+        "    fi\n"
+        '    available="false"\n'
+        '    case "$primary" in\n'
+        '      openai/gpt-5.4|anthropic/claude-opus-4-6|zai/glm-5|ollama/*) available="true" ;;\n'
+        "    esac\n"
+        '    printf \'{"models":[{"key":"%s","available":%s}]}\\n\' "$primary" "$available"\n'
+        "    ;;\n"
+        "  status)\n"
+        '    if [[ "${2:-}" == "--agent" ]]; then\n'
+        '      agent_id="${3:-}"\n'
+        "      shift 3\n"
+        "    else\n"
+        "      shift\n"
+        "    fi\n"
+        '    primary="openai-codex/gpt-5.4"\n'
+        '    if [[ -f "$primary_file" ]]; then\n'
+        '      primary="$(cat "$primary_file")"\n'
+        "    fi\n"
+        '    case "$primary" in\n'
+        "      openai/gpt-5.4|anthropic/claude-opus-4-6|zai/glm-5|ollama/*) exit 0 ;;\n"
+        '      *) printf "unhealthy model: %s\\n" "$primary" >&2; exit 1 ;;\n'
+        "    esac\n"
+        "    ;;\n"
+        "  set)\n"
+        '    printf "%s" "${2:-}" > "$primary_file"\n'
+        "    ;;\n"
+        "  fallbacks)\n"
+        '    case "${2:-}" in\n'
+        "      clear)\n"
+        '        : > "$fallback_file"\n'
+        "        ;;\n"
+        "      add)\n"
+        '        printf "%s\\n" "${3:-}" >> "$fallback_file"\n'
+        "        ;;\n"
+        "      *)\n"
+        '        printf "unexpected fallback args: %s\\n" "$*" >&2\n'
+        "        exit 1\n"
+        "        ;;\n"
+        "    esac\n"
+        "    ;;\n"
+        "  configure)\n"
+        '    printf "unexpected configure invocation\\n" >&2\n'
+        "    exit 1\n"
+        "    ;;\n"
+        "  *)\n"
+        '    printf "unexpected models args: %s\\n" "$*" >&2\n'
+        "    exit 1\n"
+        "    ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    target.chmod(0o755)
+
+
 def _write_fake_acpx(bin_dir: pathlib.Path) -> None:
     target = bin_dir / "acpx"
     target.write_text(
@@ -148,6 +234,25 @@ def _write_recording_script(path: pathlib.Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _write_valid_varlock_env(path: pathlib.Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "APP_ENV=local",
+                "OPENCLAW_VERSION=2026.3.13",
+                "OPENCLAW_GATEWAY_TOKEN=test-gateway-token-1234567890",
+                "OPENCLAW_CONTROL_USER=test-user",
+                "OPENCLAW_STATE_DIR=~/.openclaw",
+                "LITELLM_MASTER_KEY=test-master-key-1234567890",
+                "LITELLM_DB_PASSWORD=test-db-password-1234",
+                "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_verify_baseline_fails_fast_when_openclaw_is_missing(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = _build_tool_path(tmp_path, ["dirname", "uname"])
@@ -190,6 +295,73 @@ def test_verify_baseline_fails_fast_when_qmd_is_missing(tmp_path: pathlib.Path) 
     assert result.returncode == 1
     assert "ERROR: Baseline verification requires the QMD semantic memory backend" in result.stderr
     assert "bootstrap_qmd.sh" in result.stderr
+
+
+def test_bootstrap_qmd_reinstalls_broken_launcher_from_published_package(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    qmd_bin = home_dir / ".bun" / "bin" / "qmd"
+    qmd_dist = (
+        home_dir
+        / ".openclaw"
+        / "vendor"
+        / "qmd"
+        / "node_modules"
+        / "@tobilu"
+        / "qmd"
+        / "dist"
+        / "cli"
+        / "qmd.js"
+    )
+    qmd_bin.parent.mkdir(parents=True, exist_ok=True)
+    qmd_bin.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'broken qmd\\n' >&2\nexit 1\n",
+        encoding="utf-8",
+    )
+    qmd_bin.chmod(0o755)
+    install_log = tmp_path / "npm.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_recording_script(
+        bin_dir / "npm",
+        f'printf "%s\\n" "$*" >> "{install_log}"\n'
+        f'mkdir -p "{qmd_dist.parent}"\n'
+        f"cat > \"{qmd_dist}\" <<'EOF'\n"
+        "console.log('qmd help');\n"
+        "EOF\n"
+        f'chmod 644 "{qmd_dist}"\n',
+    )
+    _write_recording_script(
+        bin_dir / "node",
+        f'if [[ "${{1:-}}" == "{qmd_dist}" && "${{2:-}}" == "status" ]]; then\n'
+        "  printf 'qmd status\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+    env = os.environ | {
+        "HOME": str(home_dir),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/bootstrap_qmd.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "launcher is unhealthy; reinstalling" in result.stdout
+    assert install_log.read_text(encoding="utf-8").splitlines() == [
+        f'install --prefix {home_dir / ".openclaw" / "vendor" / "qmd"} @tobilu/qmd'
+    ]
+    assert "QMD installed at:" in result.stdout
+    assert qmd_bin.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash\n")
 
 
 def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.Path) -> None:
@@ -276,11 +448,16 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     bin_dir.mkdir()
     _write_fake_openclaw(bin_dir)
     _write_fake_uv(bin_dir)
+    _write_fake_clawops(bin_dir)
+    verify_models_script = tmp_path / "verify_openclaw_models.sh"
+    _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
     home_dir = tmp_path / "home"
     _write_fake_qmd(home_dir)
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+        "VERIFY_OPENCLAW_MODELS_SCRIPT": str(verify_models_script),
     }
     outside_cwd = tmp_path / "outside"
     outside_cwd.mkdir()
@@ -298,9 +475,146 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     assert "== OpenClaw doctor ==" in result.stdout
     assert "== OpenClaw memory status ==" in result.stdout
     assert "== OpenClaw memory search ==" in result.stdout
+    assert "verify-models --check-only" in result.stdout
     assert "== Harness smoke ==" in result.stdout
-    assert "passed=2 total=2" in result.stdout
-    assert "passed=3 total=3" in result.stdout
+    assert "fake-clawops harness --suite" in result.stdout
+    assert "security_regressions.yaml" in result.stdout
+    assert "policy_regressions.yaml" in result.stdout
+
+
+def test_verify_baseline_uses_varlock_contract_when_available_off_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_openclaw(bin_dir)
+    _write_fake_uv(bin_dir)
+    _write_fake_clawops(bin_dir)
+    verify_models_script = tmp_path / "verify_openclaw_models.sh"
+    _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
+    home_dir = tmp_path / "home"
+    _write_fake_qmd(home_dir)
+    varlock_log = tmp_path / "varlock.log"
+    install_dir = home_dir / ".config" / "varlock" / "bin"
+    install_dir.mkdir(parents=True)
+    _write_fake_varlock(install_dir, varlock_log)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+        "VERIFY_OPENCLAW_MODELS_SCRIPT": str(verify_models_script),
+    }
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/verify_baseline.sh")],
+        cwd=outside_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert varlock_log.read_text(encoding="utf-8").splitlines()[:5] == [
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw doctor --non-interactive",
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw security audit --deep",
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw secrets audit --check",
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw memory status --deep",
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw memory search --query ClawOps --max-results 1",
+    ]
+
+
+def test_configure_openclaw_model_auth_fails_check_only_without_usable_models(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state_dir = tmp_path / "state"
+    _write_fake_openclaw_model_manager(bin_dir, state_dir)
+    home_dir = tmp_path / "home"
+    openclaw_dir = home_dir / ".openclaw"
+    openclaw_dir.mkdir(parents=True)
+    (openclaw_dir / "openclaw.json").write_text("{}", encoding="utf-8")
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    (env_dir / ".env.local").write_text("OPENCLAW_GATEWAY_TOKEN=test-token\n", encoding="utf-8")
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
+        "OPENCLAW_VARLOCK_ENV_PATH": str(env_dir),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_openclaw_model_auth.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "does not have a usable assistant model yet" in result.stderr
+    assert "OPENCLAW_DEFAULT_MODEL" in result.stderr
+
+
+def test_configure_openclaw_model_auth_applies_env_driven_model_chain(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state_dir = tmp_path / "state"
+    _write_fake_openclaw_model_manager(bin_dir, state_dir)
+    home_dir = tmp_path / "home"
+    openclaw_dir = home_dir / ".openclaw"
+    openclaw_dir.mkdir(parents=True)
+    (openclaw_dir / "openclaw.json").write_text("{}", encoding="utf-8")
+    env_dir = tmp_path / "env"
+    env_dir.mkdir()
+    (env_dir / ".env.local").write_text(
+        "\n".join(
+            [
+                "OPENCLAW_GATEWAY_TOKEN=test-token",
+                "OPENAI_API_KEY=test-openai-key",
+                "ANTHROPIC_API_KEY=test-anthropic-key",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
+        "OPENCLAW_VARLOCK_ENV_PATH": str(env_dir),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/configure_openclaw_model_auth.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Configured OpenClaw model chain:" in result.stdout
+    assert (state_dir / "admin.primary").read_text(encoding="utf-8") == "openai/gpt-5.4"
+    assert (state_dir / "reader.primary").read_text(encoding="utf-8") == "openai/gpt-5.4"
+    assert (state_dir / "admin.fallbacks").read_text(encoding="utf-8").splitlines() == [
+        "anthropic/claude-opus-4-6"
+    ]
 
 
 def test_install_host_services_renders_repo_local_systemd_user_units(
@@ -476,7 +790,7 @@ def test_validate_varlock_env_uses_directory_entrypoint_for_varlock_load(
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     env_dir = tmp_path / "varlock"
     env_dir.mkdir()
-    (env_dir / ".env.local").write_text("OPENCLAW_GATEWAY_TOKEN=test-token\n", encoding="utf-8")
+    _write_valid_varlock_env(env_dir / ".env.local")
     log_path = tmp_path / "varlock.log"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -498,6 +812,198 @@ def test_validate_varlock_env_uses_directory_entrypoint_for_varlock_load(
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
     assert f"Validated Varlock env contract at {env_dir / '.env.local'}" in result.stdout
+
+
+def test_validate_varlock_env_uses_installed_varlock_when_not_on_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    _write_valid_varlock_env(env_dir / ".env.local")
+    log_path = tmp_path / "varlock.log"
+    home_dir = tmp_path / "home"
+    install_dir = home_dir / ".config" / "varlock" / "bin"
+    install_dir.mkdir(parents=True)
+    _write_fake_varlock(install_dir, log_path)
+    env = os.environ | {
+        "PATH": os.environ["PATH"],
+        "HOME": str(home_dir),
+        "VARLOCK_ENV_DIR": str(env_dir),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/validate_varlock_env.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+    assert f"Validated Varlock env contract at {env_dir / '.env.local'}" in result.stdout
+
+
+def test_configure_varlock_env_creates_local_contract_and_replaces_placeholders(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    template_path = env_dir / ".env.local.example"
+    template_path.write_text(
+        "\n".join(
+            [
+                "APP_ENV=local",
+                "OPENCLAW_VERSION=2026.3.13",
+                "OPENCLAW_GATEWAY_TOKEN=replace-with-long-random-token",
+                "OPENCLAW_CONTROL_USER=openclawsvc",
+                "OPENCLAW_STATE_DIR=~/.openclaw",
+                "LITELLM_MASTER_KEY=replace-with-random-key",
+                "LITELLM_DB_PASSWORD=replace-with-db-password",
+                "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "varlock.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_varlock(bin_dir, log_path)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_ENV_TEMPLATE": str(template_path),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--non-interactive",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    local_env = (env_dir / ".env.local").read_text(encoding="utf-8")
+    assert "replace-with-long-random-token" not in local_env
+    assert "replace-with-random-key" not in local_env
+    assert "replace-with-db-password" not in local_env
+    assert "OPENCLAW_CONTROL_USER=" in local_env
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+
+
+def test_configure_varlock_env_check_only_rejects_placeholder_required_values(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    (env_dir / ".env.local").write_text(
+        "\n".join(
+            [
+                "APP_ENV=local",
+                "OPENCLAW_VERSION=2026.3.13",
+                "OPENCLAW_GATEWAY_TOKEN=replace-with-long-random-token",
+                "OPENCLAW_CONTROL_USER=openclawsvc",
+                "OPENCLAW_STATE_DIR=~/.openclaw",
+                "LITELLM_MASTER_KEY=replace-with-random-key",
+                "LITELLM_DB_PASSWORD=replace-with-db-password",
+                "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = os.environ | {"VARLOCK_ENV_DIR": str(env_dir)}
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "blank or still uses a placeholder" in result.stderr
+
+
+def test_launch_gateway_with_varlock_uses_installed_varlock_when_not_on_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "varlock.log"
+    home_dir = tmp_path / "home"
+    install_dir = home_dir / ".config" / "varlock" / "bin"
+    install_dir.mkdir(parents=True)
+    _write_fake_varlock(install_dir, log_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_openclaw(bin_dir)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/ops/launch_gateway_with_varlock.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw gateway"
+    ]
+
+
+def test_launch_sidecars_with_varlock_uses_installed_varlock_when_not_on_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "varlock.log"
+    home_dir = tmp_path / "home"
+    install_dir = home_dir / ".config" / "varlock" / "bin"
+    install_dir.mkdir(parents=True)
+    _write_fake_varlock(install_dir, log_path)
+    env = os.environ | {
+        "PATH": os.environ["PATH"],
+        "HOME": str(home_dir),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/ops/launch_sidecars_with_varlock.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        (
+            f"run --path {repo_root / 'platform/configs/varlock'} -- docker compose -f "
+            "docker-compose.aux-stack.yaml up -d"
+        )
+    ]
 
 
 def test_create_openclawsvc_requires_root_for_linux_branch(tmp_path: pathlib.Path) -> None:
@@ -638,22 +1144,27 @@ def test_docker_runtime_refuses_to_install_docker_over_orbstack(
     assert not log_path.exists()
 
 
-def test_install_script_composes_bootstrap_service_activation_and_verification(
+def test_setup_script_composes_bootstrap_service_activation_and_verification(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     log_path = tmp_path / "install.log"
     bootstrap_script = tmp_path / "bootstrap.sh"
-    validate_script = tmp_path / "validate_varlock_env.sh"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
     install_script = tmp_path / "install_host_services.sh"
     verify_script = tmp_path / "verify_baseline.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
     _write_recording_script(
         bootstrap_script,
         f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
     )
     _write_recording_script(
-        validate_script,
+        configure_varlock_env_script,
         f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
     )
     _write_recording_script(
         install_script,
@@ -665,13 +1176,14 @@ def test_install_script_composes_bootstrap_service_activation_and_verification(
     )
     env = os.environ | {
         "BOOTSTRAP_SCRIPT": str(bootstrap_script),
-        "VALIDATE_VARLOCK_ENV_SCRIPT": str(validate_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
         "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
         "VERIFY_BASELINE_SCRIPT": str(verify_script),
     }
 
     result = subprocess.run(
-        ["/bin/bash", str(repo_root / "scripts/bootstrap/install.sh")],
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/setup.sh")],
         cwd=repo_root,
         env=env,
         capture_output=True,
@@ -683,23 +1195,30 @@ def test_install_script_composes_bootstrap_service_activation_and_verification(
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "bootstrap profile=default",
         "validate",
+        "configure-model-auth --probe",
         "install --activate",
         "verify",
     ]
 
 
-def test_install_script_skip_bootstrap_supports_post_bootstrap_followups(
+def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     log_path = tmp_path / "install-profile.log"
     bootstrap_script = tmp_path / "bootstrap.sh"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
     render_script = tmp_path / "render_openclaw_config.sh"
     doctor_script = tmp_path / "doctor_host.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
     install_script = tmp_path / "install_host_services.sh"
     _write_recording_script(
         bootstrap_script,
         f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "validate %s\\n" "$*" >> "{log_path}"\n',
     )
     _write_recording_script(
         render_script,
@@ -710,20 +1229,26 @@ def test_install_script_skip_bootstrap_supports_post_bootstrap_followups(
         f'printf "doctor\\n" >> "{log_path}"\n',
     )
     _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
         install_script,
         f'printf "install %s\\n" "$*" >> "{log_path}"\n',
     )
     env = os.environ | {
         "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
         "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
         "DOCTOR_HOST_SCRIPT": str(doctor_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
         "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
     }
 
     result = subprocess.run(
         [
             "/bin/bash",
-            str(repo_root / "scripts/bootstrap/install.sh"),
+            str(repo_root / "scripts/bootstrap/setup.sh"),
             "--profile",
             "acp",
             "--skip-bootstrap",
@@ -739,9 +1264,336 @@ def test_install_script_skip_bootstrap_supports_post_bootstrap_followups(
 
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "validate ",
         "render --profile acp profile=acp",
         "doctor",
+        "configure-model-auth --probe",
         "install ",
+    ]
+
+
+def test_doctor_strongclaw_runs_deep_checks_with_model_probe_by_default(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    helper_log = tmp_path / "helpers.log"
+    openclaw_log = tmp_path / "openclaw.log"
+    clawops_log = tmp_path / "clawops.log"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    doctor_host_script = tmp_path / "doctor_host.sh"
+    configure_model_auth_script = tmp_path / "configure_openclaw_model_auth.sh"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "configure-varlock %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        doctor_host_script,
+        f'printf "doctor-host %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        configure_model_auth_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        bin_dir / "openclaw",
+        f'printf "openclaw %s\\n" "$*" >> "{openclaw_log}"\n',
+    )
+    fake_clawops = tmp_path / "clawops"
+    _write_recording_script(
+        fake_clawops,
+        f'printf "clawops %s\\n" "$*" >> "{clawops_log}"\n',
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_host_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_model_auth_script),
+        "CLAWOPS_BIN": str(fake_clawops),
+        "OPENCLAW_VARLOCK_ENV_PATH": str(tmp_path / "missing-varlock"),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/doctor_strongclaw.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert helper_log.read_text(encoding="utf-8").splitlines() == [
+        "configure-varlock --check-only",
+        "doctor-host ",
+        "configure-model-auth --check-only --probe",
+    ]
+    assert openclaw_log.read_text(encoding="utf-8").splitlines() == [
+        "openclaw doctor --non-interactive",
+        "openclaw security audit --deep",
+        "openclaw secrets audit --check",
+        "openclaw gateway status --json",
+        "openclaw memory status --deep",
+    ]
+    assert clawops_log.read_text(encoding="utf-8").splitlines() == [
+        "clawops verify-platform sidecars",
+        "clawops verify-platform observability",
+        "clawops verify-platform channels",
+    ]
+
+
+def test_doctor_strongclaw_skip_runtime_skips_runtime_only_checks(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    helper_log = tmp_path / "helpers.log"
+    openclaw_log = tmp_path / "openclaw.log"
+    clawops_log = tmp_path / "clawops.log"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    doctor_host_script = tmp_path / "doctor_host.sh"
+    configure_model_auth_script = tmp_path / "configure_openclaw_model_auth.sh"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "configure-varlock %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        doctor_host_script,
+        f'printf "doctor-host %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        configure_model_auth_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{helper_log}"\n',
+    )
+    _write_recording_script(
+        bin_dir / "openclaw",
+        f'printf "openclaw %s\\n" "$*" >> "{openclaw_log}"\n',
+    )
+    fake_clawops = tmp_path / "clawops"
+    _write_recording_script(
+        fake_clawops,
+        f'printf "clawops %s\\n" "$*" >> "{clawops_log}"\n',
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_host_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_model_auth_script),
+        "CLAWOPS_BIN": str(fake_clawops),
+        "OPENCLAW_VARLOCK_ENV_PATH": str(tmp_path / "missing-varlock"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/doctor_strongclaw.sh"),
+            "--skip-runtime",
+            "--no-model-probe",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert helper_log.read_text(encoding="utf-8").splitlines() == [
+        "configure-varlock --check-only",
+        "doctor-host ",
+        "configure-model-auth --check-only",
+    ]
+    assert openclaw_log.read_text(encoding="utf-8").splitlines() == [
+        "openclaw doctor --non-interactive",
+        "openclaw security audit --deep",
+        "openclaw secrets audit --check",
+    ]
+    assert clawops_log.read_text(encoding="utf-8").splitlines() == [
+        "clawops verify-platform sidecars --skip-runtime",
+        "clawops verify-platform observability --skip-runtime",
+        "clawops verify-platform channels",
+    ]
+
+
+def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_node(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    harness_root = tmp_path / "repo"
+    shutil.copytree(repo_root / "scripts", harness_root / "scripts")
+    log_path = tmp_path / "bootstrap.log"
+    brew_log = tmp_path / "brew.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    _write_recording_script(
+        harness_root / "scripts/lib/docker_runtime.sh",
+        "ensure_docker_compatible_runtime() { :; }\n"
+        "repair_linux_runtime_user_docker_access() { :; }\n"
+        "DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP=0\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/preflight.sh",
+        "printf 'preflight\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_qmd.sh",
+        "printf 'bootstrap_qmd\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_memory_plugin.sh",
+        "printf 'bootstrap_memory_plugin\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/render_openclaw_config.sh",
+        "printf 'render_openclaw_config\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/doctor_host.sh",
+        "printf 'doctor_host\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+
+    _write_recording_script(bin_dir / "uname", "printf 'Darwin\\n'\n")
+    _write_recording_script(bin_dir / "brew", f'printf "%s\\n" "$*" >> "{brew_log}"\n')
+    _write_recording_script(
+        bin_dir / "python3",
+        'if [[ "${1:-}" == "-c" ]]; then exit 0; fi\n'
+        'if [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then exit 0; fi\n'
+        'printf "unexpected python3 args: %s\\n" "$*" >&2\n'
+        "exit 1\n",
+    )
+    _write_recording_script(
+        bin_dir / "node",
+        'if [[ "${1:-}" == "-e" ]]; then exit 0; fi\n' "printf 'v24.13.1\\n'\n",
+    )
+    _write_recording_script(
+        bin_dir / "npm",
+        f'printf "npm %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(bin_dir / "jq", "exit 0\n")
+    _write_recording_script(bin_dir / "sqlite3", "exit 0\n")
+    _write_recording_script(bin_dir / "bun", "exit 0\n")
+    _write_recording_script(bin_dir / "uv", "exit 0\n")
+    _write_recording_script(bin_dir / "openclaw", "exit 0\n")
+    _write_recording_script(bin_dir / "acpx", "exit 0\n")
+    home_dir = tmp_path / "home"
+    install_dir = home_dir / ".config" / "varlock" / "bin"
+    install_dir.mkdir(parents=True)
+    _write_recording_script(install_dir / "varlock", "exit 0\n")
+
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "BOOTSTRAP_LOG_PATH": str(log_path),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(harness_root / "scripts/bootstrap/bootstrap.sh")],
+        cwd=harness_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "preflight",
+        "npm install -g openclaw@2026.3.13 acpx@0.3.0",
+        "bootstrap_qmd",
+        "bootstrap_memory_plugin",
+        "render_openclaw_config",
+        "doctor_host",
+    ]
+    assert not brew_log.exists()
+
+
+def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    harness_root = tmp_path / "repo"
+    shutil.copytree(repo_root / "scripts", harness_root / "scripts")
+    log_path = tmp_path / "bootstrap.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+
+    _write_recording_script(
+        harness_root / "scripts/lib/docker_runtime.sh",
+        "ensure_docker_compatible_runtime() { :; }\n"
+        "repair_linux_runtime_user_docker_access() { :; }\n"
+        "DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP=0\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/preflight.sh",
+        "printf 'preflight\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_qmd.sh",
+        "printf 'bootstrap_qmd\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_memory_plugin.sh",
+        "printf 'bootstrap_memory_plugin\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_lossless_context_engine.sh",
+        "printf 'bootstrap_lossless_context_engine\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/render_openclaw_config.sh",
+        "printf 'render_openclaw_config\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
+        harness_root / "scripts/bootstrap/doctor_host.sh",
+        "printf 'doctor_host\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+
+    _write_recording_script(bin_dir / "uname", "printf 'Darwin\\n'\n")
+    _write_recording_script(bin_dir / "python3", 'if [[ "${1:-}" == "-c" ]]; then exit 0; fi\n')
+    _write_recording_script(
+        bin_dir / "node", 'if [[ "${1:-}" == "-e" ]]; then exit 0; fi\nprintf "v24.13.1\\n"\n'
+    )
+    _write_recording_script(bin_dir / "npm", f'printf "npm %s\\n" "$*" >> "{log_path}"\n')
+    _write_recording_script(bin_dir / "jq", "exit 0\n")
+    _write_recording_script(bin_dir / "sqlite3", "exit 0\n")
+    _write_recording_script(bin_dir / "bun", "exit 0\n")
+    _write_recording_script(bin_dir / "uv", "exit 0\n")
+    _write_recording_script(bin_dir / "varlock", "exit 0\n")
+    _write_recording_script(bin_dir / "openclaw", "exit 0\n")
+    _write_recording_script(bin_dir / "acpx", "exit 0\n")
+    _write_recording_script(bin_dir / "brew", "exit 1\n")
+
+    home_dir = tmp_path / "home"
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "BOOTSTRAP_LOG_PATH": str(log_path),
+        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(harness_root / "scripts/bootstrap/bootstrap.sh")],
+        cwd=harness_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "preflight",
+        "npm install -g openclaw@2026.3.13 acpx@0.3.0",
+        "bootstrap_qmd",
+        "bootstrap_memory_plugin",
+        "bootstrap_lossless_context_engine",
+        "render_openclaw_config",
+        "doctor_host",
     ]
 
 
@@ -808,7 +1660,7 @@ def test_backup_create_warns_and_falls_back_without_openclaw(tmp_path: pathlib.P
     claw_home = home / ".openclaw"
     claw_home.mkdir(parents=True)
     (claw_home / "state.txt").write_text("ok\n", encoding="utf-8")
-    env = os.environ | {"PATH": str(bin_dir), "HOME": str(home)}
+    env = os.environ | {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)}
 
     result = subprocess.run(
         ["/bin/bash", str(repo_root / "scripts/recovery/backup_create.sh")],
@@ -841,7 +1693,7 @@ def test_backup_verify_warns_and_uses_tar_when_openclaw_is_missing(tmp_path: pat
     payload.write_text("ok\n", encoding="utf-8")
     with tarfile.open(archive, "w:gz") as tar_handle:
         tar_handle.add(payload, arcname="payload.txt")
-    env = os.environ | {"PATH": str(bin_dir), "HOME": str(home)}
+    env = os.environ | {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)}
 
     result = subprocess.run(
         ["/bin/bash", str(repo_root / "scripts/recovery/backup_verify.sh"), "latest"],
@@ -876,7 +1728,7 @@ def test_restore_openclaw_runs_from_non_repo_cwd(tmp_path: pathlib.Path) -> None
     restore_dir = tmp_path / "restored"
     outside_cwd = tmp_path / "outside"
     outside_cwd.mkdir()
-    env = os.environ | {"PATH": str(bin_dir), "HOME": str(home)}
+    env = os.environ | {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(home)}
 
     result = subprocess.run(
         [
@@ -990,6 +1842,18 @@ def test_run_workflow_resolves_repo_relative_paths_from_non_repo_cwd(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
+    harness_root = tmp_path / "repo"
+    (harness_root / "scripts/ops").mkdir(parents=True)
+    (harness_root / "scripts/lib").mkdir(parents=True)
+    (harness_root / "platform/configs/workflows").mkdir(parents=True)
+    shutil.copy2(
+        repo_root / "scripts/ops/run_workflow.sh", harness_root / "scripts/ops/run_workflow.sh"
+    )
+    shutil.copy2(repo_root / "scripts/lib/clawops.sh", harness_root / "scripts/lib/clawops.sh")
+    shutil.copy2(
+        repo_root / "platform/configs/workflows/daily_healthcheck.yaml",
+        harness_root / "platform/configs/workflows/daily_healthcheck.yaml",
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_clawops(bin_dir)
@@ -1000,7 +1864,7 @@ def test_run_workflow_resolves_repo_relative_paths_from_non_repo_cwd(
     result = subprocess.run(
         [
             "/bin/bash",
-            str(repo_root / "scripts/ops/run_workflow.sh"),
+            str(harness_root / "scripts/ops/run_workflow.sh"),
             "platform/configs/workflows/daily_healthcheck.yaml",
             "--dry-run",
         ],
@@ -1014,6 +1878,6 @@ def test_run_workflow_resolves_repo_relative_paths_from_non_repo_cwd(
     assert result.returncode == 0
     assert (
         "fake-clawops workflow --workflow "
-        f"{repo_root / 'platform/configs/workflows/daily_healthcheck.yaml'} "
-        f"--base-dir {repo_root} --dry-run"
+        f"{harness_root / 'platform/configs/workflows/daily_healthcheck.yaml'} "
+        f"--base-dir {harness_root} --dry-run"
     ) in result.stdout

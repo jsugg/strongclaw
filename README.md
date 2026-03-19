@@ -69,13 +69,18 @@ cd strongclaw
 
 make install
 
-cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
-$EDITOR platform/configs/varlock/.env.local
-
-./scripts/bootstrap/install.sh
+make setup
 ```
 
-That bootstrap path reuses any existing Docker-compatible runtime that already
+`make setup` runs the guided `clawops setup` workflow inside the managed
+environment. It bootstraps host prerequisites, creates or repairs
+`platform/configs/varlock/.env.local`, prompts for missing setup input when
+needed, configures OpenClaw model/provider auth, activates services, and runs
+the baseline verification gate. The lower-level shell entrypoint remains
+available at `./scripts/bootstrap/setup.sh` for manual or partial bring-up, and
+you can call the CLI directly with `uv run --project . clawops setup`.
+
+The bootstrap path reuses any existing Docker-compatible runtime that already
 provides `docker` plus `docker compose`, and only installs Docker as a fallback
 when no compatible runtime is detected.
 
@@ -85,7 +90,7 @@ If Linux bootstrap just added the runtime user to the `docker` group, start a
 fresh login shell as that user and rerun:
 
 ```bash
-./scripts/bootstrap/install.sh --skip-bootstrap
+make setup SETUP_ARGS="--skip-bootstrap"
 ```
 
 For placeholder-backed variants, rerender through the profile-aware entrypoint
@@ -100,6 +105,12 @@ instead of merging raw overlays:
 The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
 on the operator path: sidecars can be probed directly, while the baseline gate
 re-runs the sidecar, observability, and channel checks in static mode.
+
+For a deeper post-setup scan, run:
+
+```bash
+make doctor
+```
 
 ## Development
 
