@@ -3,7 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp)"
-clawops merge-json \
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/app_paths.sh"
+export_strongclaw_compose_state_dir
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/clawops.sh"
+run_clawops "$ROOT" merge-json \
   --base "$HOME/.openclaw/openclaw.json" \
   --overlay "$ROOT/platform/configs/openclaw/50-observability.json5" \
   --output "$TMP"

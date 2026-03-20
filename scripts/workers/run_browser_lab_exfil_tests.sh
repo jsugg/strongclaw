@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/app_paths.sh"
+export_strongclaw_compose_state_dir
 
 echo "Testing allowed domain via browser-lab proxy..."
 docker compose -f "$ROOT/platform/compose/docker-compose.browser-lab.yaml" exec -T browserlab-playwright \

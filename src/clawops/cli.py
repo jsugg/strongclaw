@@ -22,7 +22,9 @@ from clawops import (
     platform_verify,
     policy_engine,
     repo_tools,
+    setup_cli,
     skill_scanner,
+    supply_chain,
     workflow_runner,
 )
 from clawops.wrappers import github as github_wrapper
@@ -75,6 +77,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "Migrate and verify the memory-v2 to memory-pro transition.",
     ),
     CommandSpec("repo", repo_tools.repo_main, "Validate the repo/upstream workspace contract."),
+    CommandSpec("setup", setup_cli.setup_main, "Run the guided StrongClaw setup workflow."),
+    CommandSpec("doctor", setup_cli.doctor_main, "Run a deep StrongClaw readiness scan."),
     CommandSpec(
         "worktree",
         repo_tools.worktree_main,
@@ -95,6 +99,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "verify-platform", platform_verify.main, "Verify sidecars, observability, and channels."
     ),
     CommandSpec("memory-v2", memory_v2.main, "Run the legacy Markdown-canonical memory v2 engine."),
+    CommandSpec(
+        "supply-chain",
+        supply_chain.main,
+        "Inventory and refresh pinned workflows, compose digests, and proposal branches.",
+    ),
     CommandSpec("wrapper", _dispatch_wrapper, "Run policy-gated external wrappers."),
 )
 

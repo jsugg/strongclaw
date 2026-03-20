@@ -69,24 +69,33 @@ cd strongclaw
 
 make install
 
-cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
-$EDITOR platform/configs/varlock/.env.local
-
-./scripts/bootstrap/install.sh
+make setup
 ```
 
-That bootstrap path reuses any existing Docker-compatible runtime that already
+`make setup` runs the guided `clawops setup` workflow inside the managed
+environment. It bootstraps host prerequisites, creates or repairs
+`platform/configs/varlock/.env.local`, offers local or managed Varlock secret
+backends for provider auth, prompts for missing setup input when needed,
+configures OpenClaw model/provider auth, activates services, and runs the
+baseline verification gate. The lower-level shell entrypoint remains available
+at `./scripts/bootstrap/setup.sh` for manual or partial bring-up, and you can
+call the CLI directly with `uv run --project . clawops setup`.
+
+StrongClaw-generated runtime artifacts no longer default into the git checkout.
+Harness output, ACP summaries, compose sidecar state, QMD package files, and
+the managed `lossless-claw` checkout are written to OS-appropriate app
+data/state directories instead.
+
+The bootstrap path reuses any existing Docker-compatible runtime that already
 provides `docker` plus `docker compose`, and only installs Docker as a fallback
 when no compatible runtime is detected.
 
 Then continue with ACP workers, repo lexical context indexing, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
 
-If Linux bootstrap just added the runtime user to the `docker` group, start a
-fresh login shell as that user and rerun:
-
-```bash
-./scripts/bootstrap/install.sh --skip-bootstrap
-```
+If Linux bootstrap just added the runtime user to the `docker` group, setup now
+pauses with a clear message. Open a fresh login shell as that user and rerun
+the same `make setup` or `clawops setup` command; completed bootstrap work is
+detected automatically.
 
 For placeholder-backed variants, rerender through the profile-aware entrypoint
 instead of merging raw overlays:
@@ -100,6 +109,18 @@ instead of merging raw overlays:
 The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
 on the operator path: sidecars can be probed directly, while the baseline gate
 re-runs the sidecar, observability, and channel checks in static mode.
+
+For a deeper post-setup scan, run:
+
+```bash
+make doctor
+```
+
+Supported toolchain versions are documented in
+[`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The
+current validated baseline is Python `3.12` or `3.13`, Node `22.16.x` or
+`24.x`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.3.13`, ACPX `0.3.0`,
+QMD `2.0.1`, and `lossless-claw v0.3.0`.
 
 ## Development
 

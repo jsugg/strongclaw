@@ -272,3 +272,16 @@ def test_repo_aux_stack_keeps_litellm_rootfs_writable_for_prisma_sanity_check() 
     litellm_service = compose["services"]["litellm"]
 
     assert litellm_service.get("read_only") is not True
+
+
+def test_repo_aux_stack_healthchecks_use_binaries_available_in_the_pinned_images() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    compose = load_yaml(repo_root / "platform/compose/docker-compose.aux-stack.yaml")
+
+    litellm_test = compose["services"]["litellm"]["healthcheck"]["test"]
+    qdrant_test = compose["services"]["qdrant"]["healthcheck"]["test"]
+
+    assert litellm_test[:2] == ["CMD", "/usr/bin/python3"]
+    assert "urllib.request.urlopen" in litellm_test[3]
+    assert qdrant_test[:3] == ["CMD", "bash", "-lc"]
+    assert "/dev/tcp/127.0.0.1/6333" in qdrant_test[3]

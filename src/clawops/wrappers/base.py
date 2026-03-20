@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import random
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, cast
 
 import requests
 
 from clawops import __version__
 from clawops.common import canonical_json
+from clawops.observability import emit_structured_log, observed_span
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import TERMINAL_DENY, TERMINAL_REQUIRE_APPROVAL, Decision, PolicyEngine
 
@@ -146,6 +148,7 @@ class RetryPolicy:
 
 
 NO_RETRY_POLICY = RetryPolicy.no_retry(name="no-retry")
+type RetryMode = Literal["off", "safe"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -528,6 +531,22 @@ def _coerce_http_outcome(result: HttpResponseOutcome | requests.Response) -> Htt
     )
 
 
+def _http_retry_mode() -> RetryMode:
+    """Return the retry mode configured for wrapper transports."""
+    raw_value = os.environ.get("CLAWOPS_HTTP_RETRY_MODE", "off").strip().lower()
+    if raw_value not in {"off", "safe"}:
+        raise ValueError("CLAWOPS_HTTP_RETRY_MODE must be 'off' or 'safe'")
+    return cast(RetryMode, raw_value)
+
+
+def _effective_retry_policy(retry_policy: RetryPolicy | None) -> RetryPolicy:
+    """Return the active retry policy after applying the environment gate."""
+    policy = NO_RETRY_POLICY if retry_policy is None else retry_policy
+    if _http_retry_mode() == "off" and policy.max_attempts > 1:
+        return RetryPolicy.no_retry(name=policy.name)
+    return policy
+
+
 def _build_error_payload(
     *,
     error_type: str | None,
@@ -582,6 +601,50 @@ def _result_error_retryable(op: Operation) -> bool | None:
     return bool(op.result_error_retryable)
 
 
+def _wrapper_observation_payload(
+    *,
+    op: Operation,
+    ok: bool,
+    executed: bool,
+    status_code: int | None,
+    error_type: str | None,
+    retryable: bool | None,
+    request_method: str | None,
+    request_url: str | None,
+    request_attempts: int | None,
+    request_id: str | None,
+    retry_after_seconds: float | None,
+    elapsed_ms: int,
+) -> dict[str, bool | int | float | str]:
+    """Build a consistent wrapper observability payload."""
+    payload: dict[str, bool | int | float | str] = {
+        "op_id": op.op_id,
+        "kind": op.kind,
+        "target": op.normalized_target,
+        "ok": ok,
+        "executed": executed,
+        "elapsed_ms": elapsed_ms,
+        "status": op.status,
+    }
+    if status_code is not None:
+        payload["status_code"] = status_code
+    if error_type is not None:
+        payload["error_type"] = error_type
+    if retryable is not None:
+        payload["retryable"] = retryable
+    if request_method is not None:
+        payload["request_method"] = request_method
+    if request_url is not None:
+        payload["request_url"] = request_url
+    if request_attempts is not None:
+        payload["request_attempts"] = request_attempts
+    if request_id is not None:
+        payload["request_id"] = request_id
+    if retry_after_seconds is not None:
+        payload["retry_after_seconds"] = retry_after_seconds
+    return payload
+
+
 def execute_http_operation(
     *,
     ctx: WrapperContext,
@@ -600,140 +663,205 @@ def execute_http_operation(
         raise ValueError(f"operation {op.op_id} is not executable: missing execution contract")
     if not contract.matches(op):
         raise ValueError(f"operation {op.op_id} is not executable: execution contract mismatch")
-    running = ctx.journal.transition(op.op_id, "running")
-    try:
-        outcome = _coerce_http_outcome(request())
-        response = outcome.response
-        if not response.ok:
-            raise WrapperHttpStatusError.from_response(
-                method=outcome.request_method,
-                url=outcome.request_url,
-                response=response,
-                retryable=outcome.retry_policy.allows_retry_for_status(response.status_code),
-                request_attempts=outcome.request_attempts,
-                observed_request_id=outcome.request_id,
-                observed_retry_after_seconds=outcome.retry_after_seconds,
+    started_at = time.perf_counter()
+    with observed_span(
+        "clawops.wrapper.execute",
+        attributes={
+            "op_id": op.op_id,
+            "kind": op.kind,
+            "scope": op.scope,
+            "target": op.normalized_target,
+        },
+    ) as span:
+        running = ctx.journal.transition(op.op_id, "running")
+        try:
+            outcome = _coerce_http_outcome(request())
+            response = outcome.response
+            if not response.ok:
+                raise WrapperHttpStatusError.from_response(
+                    method=outcome.request_method,
+                    url=outcome.request_url,
+                    response=response,
+                    retryable=outcome.retry_policy.allows_retry_for_status(response.status_code),
+                    request_attempts=outcome.request_attempts,
+                    observed_request_id=outcome.request_id,
+                    observed_retry_after_seconds=outcome.retry_after_seconds,
+                )
+        except WrapperTransportError as exc:
+            message = exc.error_message()
+            completed = ctx.journal.transition(
+                running.op_id,
+                "failed",
+                error=message[:500],
+                result_ok=False,
+                result_status_code=exc.status_code,
+                result_body_excerpt=message[:1000],
+                result_error_type=exc.error_type,
+                result_error_retryable=exc.retryable,
+                result_request_method=exc.method,
+                result_request_url=exc.url,
+                result_request_attempts=exc.request_attempts,
+                result_request_id=exc.request_id,
+                result_retry_after_seconds=exc.retry_after_seconds,
             )
-    except WrapperTransportError as exc:
-        message = exc.error_message()
-        completed = ctx.journal.transition(
-            running.op_id,
-            "failed",
-            error=message[:500],
-            result_ok=False,
-            result_status_code=exc.status_code,
-            result_body_excerpt=message[:1000],
-            result_error_type=exc.error_type,
-            result_error_retryable=exc.retryable,
-            result_request_method=exc.method,
-            result_request_url=exc.url,
-            result_request_attempts=exc.request_attempts,
-            result_request_id=exc.request_id,
-            result_retry_after_seconds=exc.retry_after_seconds,
-        )
-        return result_from_operation(
-            completed,
-            decision=decision,
-            ok=False,
-            accepted=True,
-            executed=True,
-            status_code=exc.status_code,
-            body=message[:1000],
-            error=_build_error_payload(
-                error_type=exc.error_type,
-                message=message[:1000],
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            observation = _wrapper_observation_payload(
+                op=completed,
+                ok=False,
+                executed=True,
                 status_code=exc.status_code,
+                error_type=exc.error_type,
                 retryable=exc.retryable,
                 request_method=exc.method,
                 request_url=exc.url,
                 request_attempts=exc.request_attempts,
                 request_id=exc.request_id,
                 retry_after_seconds=exc.retry_after_seconds,
-            ),
-            error_type=exc.error_type,
-            retryable=exc.retryable,
-            request_method=exc.method,
-            request_url=exc.url,
-            request_attempts=exc.request_attempts,
-            request_id=exc.request_id,
-            retry_after_seconds=exc.retry_after_seconds,
-        )
-    except requests.RequestException as exc:
-        wrapped = WrapperRequestError.from_exception(
-            exc,
-            method="UNKNOWN",
-            url=op.normalized_target,
-            retryable=False,
-            request_attempts=1,
-        )
-        message = wrapped.error_message()
-        completed = ctx.journal.transition(
-            running.op_id,
-            "failed",
-            error=message[:500],
-            result_ok=False,
-            result_body_excerpt=message[:1000],
-            result_error_type=wrapped.error_type,
-            result_error_retryable=wrapped.retryable,
-            result_request_method=wrapped.method,
-            result_request_url=wrapped.url,
-            result_request_attempts=wrapped.request_attempts,
-            result_request_id=wrapped.request_id,
-            result_retry_after_seconds=wrapped.retry_after_seconds,
-        )
-        return result_from_operation(
-            completed,
-            decision=decision,
-            ok=False,
-            accepted=True,
-            executed=True,
-            body=message[:1000],
-            error=_build_error_payload(
-                error_type=wrapped.error_type,
-                message=message[:1000],
+                elapsed_ms=elapsed_ms,
+            )
+            span.record_exception(exc)
+            span.set_error(message[:250])
+            span.set_attributes(observation)
+            emit_structured_log("clawops.wrapper.execute", observation)
+            return result_from_operation(
+                completed,
+                decision=decision,
+                ok=False,
+                accepted=True,
+                executed=True,
+                status_code=exc.status_code,
+                body=message[:1000],
+                error=_build_error_payload(
+                    error_type=exc.error_type,
+                    message=message[:1000],
+                    status_code=exc.status_code,
+                    retryable=exc.retryable,
+                    request_method=exc.method,
+                    request_url=exc.url,
+                    request_attempts=exc.request_attempts,
+                    request_id=exc.request_id,
+                    retry_after_seconds=exc.retry_after_seconds,
+                ),
+                error_type=exc.error_type,
+                retryable=exc.retryable,
+                request_method=exc.method,
+                request_url=exc.url,
+                request_attempts=exc.request_attempts,
+                request_id=exc.request_id,
+                retry_after_seconds=exc.retry_after_seconds,
+            )
+        except requests.RequestException as exc:
+            wrapped = WrapperRequestError.from_exception(
+                exc,
+                method="UNKNOWN",
+                url=op.normalized_target,
+                retryable=False,
+                request_attempts=1,
+            )
+            message = wrapped.error_message()
+            completed = ctx.journal.transition(
+                running.op_id,
+                "failed",
+                error=message[:500],
+                result_ok=False,
+                result_body_excerpt=message[:1000],
+                result_error_type=wrapped.error_type,
+                result_error_retryable=wrapped.retryable,
+                result_request_method=wrapped.method,
+                result_request_url=wrapped.url,
+                result_request_attempts=wrapped.request_attempts,
+                result_request_id=wrapped.request_id,
+                result_retry_after_seconds=wrapped.retry_after_seconds,
+            )
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            observation = _wrapper_observation_payload(
+                op=completed,
+                ok=False,
+                executed=True,
                 status_code=wrapped.status_code,
+                error_type=wrapped.error_type,
                 retryable=wrapped.retryable,
                 request_method=wrapped.method,
                 request_url=wrapped.url,
                 request_attempts=wrapped.request_attempts,
                 request_id=wrapped.request_id,
                 retry_after_seconds=wrapped.retry_after_seconds,
-            ),
-            error_type=wrapped.error_type,
-            retryable=wrapped.retryable,
-            request_method=wrapped.method,
-            request_url=wrapped.url,
-            request_attempts=wrapped.request_attempts,
-            request_id=wrapped.request_id,
-            retry_after_seconds=wrapped.retry_after_seconds,
-        )
+                elapsed_ms=elapsed_ms,
+            )
+            span.record_exception(wrapped)
+            span.set_error(message[:250])
+            span.set_attributes(observation)
+            emit_structured_log("clawops.wrapper.execute", observation)
+            return result_from_operation(
+                completed,
+                decision=decision,
+                ok=False,
+                accepted=True,
+                executed=True,
+                body=message[:1000],
+                error=_build_error_payload(
+                    error_type=wrapped.error_type,
+                    message=message[:1000],
+                    status_code=wrapped.status_code,
+                    retryable=wrapped.retryable,
+                    request_method=wrapped.method,
+                    request_url=wrapped.url,
+                    request_attempts=wrapped.request_attempts,
+                    request_id=wrapped.request_id,
+                    retry_after_seconds=wrapped.retry_after_seconds,
+                ),
+                error_type=wrapped.error_type,
+                retryable=wrapped.retryable,
+                request_method=wrapped.method,
+                request_url=wrapped.url,
+                request_attempts=wrapped.request_attempts,
+                request_id=wrapped.request_id,
+                retry_after_seconds=wrapped.retry_after_seconds,
+            )
 
-    completed = ctx.journal.transition(
-        running.op_id,
-        "succeeded",
-        result_ok=True,
-        result_status_code=response.status_code,
-        result_body_excerpt=response.text[:1000],
-        result_request_method=outcome.request_method,
-        result_request_url=outcome.request_url,
-        result_request_attempts=outcome.request_attempts,
-        result_request_id=outcome.request_id,
-        result_retry_after_seconds=outcome.retry_after_seconds,
-    )
-    return result_from_operation(
-        completed,
-        decision=decision,
-        ok=True,
-        accepted=True,
-        executed=True,
-        status_code=response.status_code,
-        body=response.text[:1000],
-        request_method=outcome.request_method,
-        request_url=outcome.request_url,
-        request_attempts=outcome.request_attempts,
-        request_id=outcome.request_id,
-        retry_after_seconds=outcome.retry_after_seconds,
-    )
+        completed = ctx.journal.transition(
+            running.op_id,
+            "succeeded",
+            result_ok=True,
+            result_status_code=response.status_code,
+            result_body_excerpt=response.text[:1000],
+            result_request_method=outcome.request_method,
+            result_request_url=outcome.request_url,
+            result_request_attempts=outcome.request_attempts,
+            result_request_id=outcome.request_id,
+            result_retry_after_seconds=outcome.retry_after_seconds,
+        )
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        observation = _wrapper_observation_payload(
+            op=completed,
+            ok=True,
+            executed=True,
+            status_code=response.status_code,
+            error_type=None,
+            retryable=None,
+            request_method=outcome.request_method,
+            request_url=outcome.request_url,
+            request_attempts=outcome.request_attempts,
+            request_id=outcome.request_id,
+            retry_after_seconds=outcome.retry_after_seconds,
+            elapsed_ms=elapsed_ms,
+        )
+        span.set_attributes(observation)
+        emit_structured_log("clawops.wrapper.execute", observation)
+        return result_from_operation(
+            completed,
+            decision=decision,
+            ok=True,
+            accepted=True,
+            executed=True,
+            status_code=response.status_code,
+            body=response.text[:1000],
+            request_method=outcome.request_method,
+            request_url=outcome.request_url,
+            request_attempts=outcome.request_attempts,
+            request_id=outcome.request_id,
+            retry_after_seconds=outcome.retry_after_seconds,
+        )
 
 
 def prepare_operation(
@@ -964,7 +1092,7 @@ class JsonHttpClient:
         """Execute a JSON request with stable metadata and endpoint-scoped retries."""
         request_headers = dict(headers)
         request_headers.setdefault("User-Agent", f"clawops/{__version__}")
-        effective_policy = NO_RETRY_POLICY if retry_policy is None else retry_policy
+        effective_policy = _effective_retry_policy(retry_policy)
         observed_request_id: str | None = None
         observed_retry_after_seconds: float | None = None
         for attempt_number in range(1, effective_policy.max_attempts + 1):

@@ -65,12 +65,14 @@ make dev
 make test
 ```
 
-`uv` is a contributor tool only. It is not required for operator bootstrap or runtime use.
+`make test` runs in the locked managed environment via `uv run`. The baseline
+verifier also uses that managed test path, and bootstrap installs `uv` when
+the host does not already provide it.
 
 ## 4. Prepare the Varlock env contract
 
-Copy the example and edit values in the Varlock config directory that the launch
-wrappers use:
+You can let the guided setup path create and repair the repo-local Varlock env
+contract for you, or you can prepare it manually. The manual path is:
 
 ```bash
 cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
@@ -83,15 +85,33 @@ If `varlock` is already installed on the host, you can validate the contract now
 varlock load --path platform/configs/varlock
 ```
 
+Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
+StrongClaw supports both guided and env-driven setup:
+
+- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
+- env-driven: set provider keys in `platform/configs/varlock/.env.local`
+  - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
+  - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
+  - local models require both `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+
 ## 5. Preferred baseline bring-up
 
 ```bash
-./scripts/bootstrap/install.sh
+make setup
 ```
 
-That path bootstraps the host, validates the repo-local Varlock env contract,
-renders or refreshes the host service definitions, activates the gateway plus
-sidecars, and runs the baseline verification gate.
+Equivalent shell entrypoint:
+
+```bash
+./scripts/bootstrap/setup.sh
+```
+
+That path bootstraps the host, creates or repairs the repo-local Varlock env
+contract, prompts for missing setup input when interactive, supports local or
+managed Varlock secret backends for provider auth, configures or validates
+OpenClaw model/provider auth, renders or refreshes the host service
+definitions, activates the gateway plus sidecars, and runs the baseline
+verification gate.
 
 The bootstrap flow verifies or installs:
 
@@ -112,20 +132,19 @@ stops and tells you to finish that integration instead of replacing it.
 Only when no Docker-compatible runtime is detected does bootstrap install
 Docker as the fallback runtime.
 
-If Linux bootstrap just added the runtime user to the `docker` group, start a
-fresh `sudo -iu openclawsvc` shell before rerunning:
-
-```bash
-./scripts/bootstrap/install.sh --skip-bootstrap
-```
+If Linux bootstrap just added the runtime user to the `docker` group, setup
+now pauses before service activation. Open a fresh login shell as that user and
+rerun the same `make setup` or `clawops setup` command. Completed bootstrap
+work is detected automatically; `--skip-bootstrap` remains available only as a
+manual override.
 
 If you need a placeholder-backed profile during bring-up, rerender through the
 wrapper:
 
 ```bash
-./scripts/bootstrap/install.sh --profile acp
-./scripts/bootstrap/install.sh --profile memory-pro-local
-./scripts/bootstrap/install.sh --profile memory-pro-local-smart
+make setup SETUP_ARGS="--profile acp"
+make setup SETUP_ARGS="--profile memory-pro-local"
+make setup SETUP_ARGS="--profile memory-pro-local-smart"
 ```
 
 Use `./scripts/bootstrap/doctor_host.sh` again after any host-side package or
@@ -145,11 +164,18 @@ Bootstrap the host:
 Then validate the env contract and render the OpenClaw config:
 
 ```bash
-varlock load --path platform/configs/varlock
+./scripts/bootstrap/configure_varlock_env.sh
 ./scripts/bootstrap/render_openclaw_config.sh
 ```
 
 This writes the merged config to `~/.openclaw/openclaw.json`.
+
+If you bypass `make setup` / `clawops setup`, complete model/provider setup manually before
+starting services:
+
+```bash
+./scripts/bootstrap/configure_openclaw_model_auth.sh
+```
 
 By default it now enables QMD-backed memory retrieval and renders repo-local memory corpus paths for:
 
@@ -200,7 +226,7 @@ Or run the gateway and sidecars manually first:
 
 ## 7. Verify the secure baseline
 
-If you used `./scripts/bootstrap/install.sh`, this verification already
+If you used `make setup` or `clawops setup`, this verification already
 ran. Re-run it directly whenever you want to recheck the host baseline:
 
 ```bash
@@ -208,6 +234,13 @@ ran. Re-run it directly whenever you want to recheck the host baseline:
 ```
 
 Do not continue until all baseline checks are clean.
+
+For the deeper StrongClaw readiness scan, run:
+
+```bash
+make doctor
+clawops doctor
+```
 
 ## 8. Enable ACP workers
 
