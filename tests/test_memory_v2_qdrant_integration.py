@@ -5,7 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import shutil
+import socket
+import subprocess
 import textwrap
+import time
+import uuid
+from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -15,6 +21,84 @@ import requests
 from clawops.memory_v2 import MemoryV2Engine, load_config
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
+
+
+def _wait_for_qdrant(url: str) -> None:
+    """Wait for a Qdrant HTTP endpoint to report healthy."""
+    last_error: Exception | None = None
+    for _ in range(30):
+        try:
+            response = requests.get(f"{url.rstrip('/')}/healthz", timeout=1.0)
+            response.raise_for_status()
+            return
+        except requests.RequestException as err:
+            last_error = err
+            time.sleep(1.0)
+    detail = "unknown error" if last_error is None else str(last_error)
+    raise RuntimeError(f"Qdrant did not become healthy at {url}: {detail}")
+
+
+def _reserve_local_port() -> int:
+    """Reserve an ephemeral localhost port for a temporary Qdrant container."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@pytest.fixture(scope="session")
+def qdrant_url() -> Iterator[str]:
+    """Provide a live Qdrant URL for the integration suite."""
+    qdrant_url = os.environ.get(QDRANT_URL_ENV, "").strip()
+    if qdrant_url:
+        _wait_for_qdrant(qdrant_url)
+        yield qdrant_url
+        return
+
+    docker_bin = shutil.which("docker")
+    if docker_bin is None:
+        pytest.fail(
+            f"{QDRANT_URL_ENV} is unset and docker is unavailable; "
+            "live Qdrant integration tests require a reachable Qdrant instance"
+        )
+
+    port = _reserve_local_port()
+    container_name = f"strongclaw-qdrant-test-{uuid.uuid4().hex[:12]}"
+    original_env = os.environ.get(QDRANT_URL_ENV)
+    qdrant_url = f"http://127.0.0.1:{port}"
+    try:
+        result = subprocess.run(
+            [
+                docker_bin,
+                "run",
+                "--rm",
+                "-d",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:6333",
+                "qdrant/qdrant",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
+            pytest.fail(f"unable to start Qdrant test container: {detail}")
+        os.environ[QDRANT_URL_ENV] = qdrant_url
+        _wait_for_qdrant(qdrant_url)
+        yield qdrant_url
+    finally:
+        if original_env is None:
+            os.environ.pop(QDRANT_URL_ENV, None)
+        else:
+            os.environ[QDRANT_URL_ENV] = original_env
+        subprocess.run(
+            [docker_bin, "rm", "-f", container_name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 def _write_memory_v2_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -118,10 +202,7 @@ def _query_points(
     return [point for point in payload if isinstance(point, dict)]
 
 
-def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> None:
-    qdrant_url = os.environ.get(QDRANT_URL_ENV)
-    if not qdrant_url:
-        pytest.skip(f"{QDRANT_URL_ENV} is not set")
+def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path, qdrant_url: str) -> None:
 
     workspace = _build_workspace(tmp_path)
     config_path = workspace / "memory-v2.yaml"
@@ -180,11 +261,8 @@ def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> No
 
 def test_memory_v2_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     tmp_path: pathlib.Path,
+    qdrant_url: str,
 ) -> None:
-    qdrant_url = os.environ.get(QDRANT_URL_ENV)
-    if not qdrant_url:
-        pytest.skip(f"{QDRANT_URL_ENV} is not set")
-
     workspace = _build_workspace(tmp_path)
     config_path = workspace / "memory-v2.yaml"
     _write_memory_v2_config(workspace, config_path)
