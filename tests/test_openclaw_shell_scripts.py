@@ -1205,6 +1205,77 @@ def test_configure_varlock_env_check_only_rejects_stale_plugin_overlay_for_local
     assert "VARLOCK_SECRET_BACKEND=local" in result.stderr
 
 
+def test_configure_varlock_env_check_only_requires_tier1_embedding_model(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    _write_valid_varlock_env(env_dir / ".env.local")
+    env = os.environ | {
+        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "MEMORY_V2_EMBEDDING_MODEL is required" in result.stderr
+
+
+def test_configure_varlock_env_check_only_accepts_tier1_embedding_model(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    local_env = env_dir / ".env.local"
+    _write_valid_varlock_env(local_env)
+    local_env.write_text(
+        local_env.read_text(encoding="utf-8")
+        + "MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "varlock.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_varlock(bin_dir, log_path)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(local_env),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+
+
 def test_launch_gateway_with_varlock_uses_installed_varlock_when_not_on_path(
     tmp_path: pathlib.Path,
 ) -> None:
