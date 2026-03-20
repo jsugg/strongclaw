@@ -57,11 +57,9 @@ jobs:
           done
           echo "Qdrant failed to become ready" >&2
           exit 1
-      - run: >
-          PYTHONPATH=src TEST_QDRANT_URL=http://127.0.0.1:6333 uv run pytest -q
-          tests/test_memory_v2.py
-          tests/test_memory_v2_qdrant_backend.py
-          tests/test_memory_v2_qdrant_integration.py
+      - run: ./scripts/ci/verify_memory_v2_qdrant.sh
+        env:
+          TEST_QDRANT_URL: http://127.0.0.1:6333
   verify-strongclaw-memory-v2-host:
     name: Run strongclaw-memory-v2 Host Checks
     runs-on: ubuntu-latest

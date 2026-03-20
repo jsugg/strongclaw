@@ -39,7 +39,7 @@ in `.github/workflows/memory-plugin-verification.yml`.
   directory and runs `npm run test:openclaw-host` inside the plugin bundle.
 - The host-functional test creates a temporary sqlite-backed `memory-v2`
   config, loads the plugin through an OpenClaw profile, and exercises
-  `openclaw memory search` plus `openclaw memory get`.
+  `openclaw memory-v2 search` plus `openclaw memory-v2 get`.
 
 ## Policy for new code
 
