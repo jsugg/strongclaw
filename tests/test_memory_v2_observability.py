@@ -13,7 +13,12 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
 from clawops import observability
-from clawops.memory_v2 import DenseSearchCandidate, MemoryV2Engine, load_config
+from clawops.memory_v2 import (
+    DenseSearchCandidate,
+    MemoryV2Engine,
+    SparseSearchCandidate,
+    load_config,
+)
 
 
 def _write_memory_v2_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -87,6 +92,7 @@ class _FakeEmbeddingProvider:
 class _FakeQdrantBackend:
     def __init__(self) -> None:
         self.search_results: list[DenseSearchCandidate] = []
+        self.sparse_search_results: list[SparseSearchCandidate] = []
         self.raise_on_search = False
 
     def health(self) -> dict[str, object]:
@@ -117,9 +123,9 @@ class _FakeQdrantBackend:
         limit: int,
         mode: str,
         scope: str | None,
-    ) -> list[object]:
+    ) -> list[SparseSearchCandidate]:
         del vector, limit, mode, scope
-        return []
+        return list(self.sparse_search_results)
 
     def search(
         self, *, vector: list[float], limit: int, mode: str, scope: str | None
@@ -248,3 +254,58 @@ def test_memory_v2_logs_fallback_activation(
         record for record in stderr_lines if record["event"] == "clawops.memory_v2.search.fallback"
     )
     assert fallback_log["resolvedBackend"] == "sqlite_fts"
+
+
+def test_memory_v2_logs_sparse_candidate_counts_for_tier1_search(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-observability"),
+    )
+    engine = MemoryV2Engine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.93)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.4)
+    ]
+
+    hits = engine.search("gateway token", lane="all")
+    stderr_lines = [
+        json.loads(line) for line in capsys.readouterr().err.splitlines() if line.strip()
+    ]
+
+    assert hits
+    search_log = next(
+        record for record in stderr_lines if record["event"] == "clawops.memory_v2.search"
+    )
+    assert search_log["resolvedBackend"] == "qdrant_sparse_dense_hybrid"
+    assert search_log["sparseCandidates"] >= 1
+    assert search_log["qdrantSparseSearchMs"] >= 0.0

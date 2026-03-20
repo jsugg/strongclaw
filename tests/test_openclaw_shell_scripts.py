@@ -153,6 +153,34 @@ def _write_fake_clawops(bin_dir: pathlib.Path) -> None:
     target.chmod(0o755)
 
 
+def _write_fake_clawops_with_memory_v2_status(
+    bin_dir: pathlib.Path,
+    *,
+    status_payload: dict[str, object],
+    verify_payload: dict[str, object] | None = None,
+    log_path: pathlib.Path | None = None,
+) -> None:
+    target = bin_dir / "clawops"
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail"]
+    if log_path is not None:
+        lines.append(f'printf "%s\\n" "$*" >> "{log_path}"')
+    lines.extend(
+        [
+            'if [[ "${1:-}" == "memory-v2" && "${2:-}" == "status" ]]; then',
+            f"  printf '%s\\n' '{json.dumps(status_payload, sort_keys=True)}'",
+            "  exit 0",
+            "fi",
+            'if [[ "${1:-}" == "memory-v2" && "${2:-}" == "verify-tier1" ]]; then',
+            f"  printf '%s\\n' '{json.dumps(verify_payload or {'ok': True}, sort_keys=True)}'",
+            "  exit 0",
+            "fi",
+            "printf 'fake-clawops %s\\n' \"$*\"",
+        ]
+    )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    target.chmod(0o755)
+
+
 def _write_fake_uv(bin_dir: pathlib.Path) -> None:
     target = bin_dir / "uv"
     target.write_text(
@@ -538,6 +566,127 @@ def test_verify_baseline_uses_varlock_contract_when_available_off_path(
         f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw memory status --deep",
         f"run --path {repo_root / 'platform/configs/varlock'} -- openclaw memory search --query ClawOps --max-results 1",
     ]
+
+
+def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
+    _write_fake_openclaw(bin_dir)
+    _write_fake_uv(bin_dir)
+    clawops_log = tmp_path / "clawops.log"
+    _write_fake_clawops_with_memory_v2_status(
+        bin_dir,
+        status_payload={"backendActive": "qdrant_sparse_dense_hybrid"},
+        log_path=clawops_log,
+    )
+    verify_models_script = tmp_path / "verify_openclaw_models.sh"
+    _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
+    home_dir = tmp_path / "home"
+    openclaw_dir = home_dir / ".openclaw"
+    openclaw_dir.mkdir(parents=True, exist_ok=True)
+    memory_v2_config = tmp_path / "memory-v2.yaml"
+    memory_v2_config.write_text(
+        "backend:\n  active: qdrant_sparse_dense_hybrid\n", encoding="utf-8"
+    )
+    openclaw_dir.joinpath("openclaw.json").write_text(
+        json.dumps(
+            {
+                "gateway": {"bind": "loopback"},
+                "plugins": {
+                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "entries": {
+                        "strongclaw-memory-v2": {
+                            "config": {"configPath": memory_v2_config.as_posix()}
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+        "VERIFY_OPENCLAW_MODELS_SCRIPT": str(verify_models_script),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/verify_baseline.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert '"backendActive": "qdrant_sparse_dense_hybrid"' in result.stdout
+    assert clawops_log.read_text(encoding="utf-8").splitlines()[:2] == [
+        f"memory-v2 status --config {memory_v2_config} --json",
+        f"memory-v2 verify-tier1 --config {memory_v2_config} --json",
+    ]
+
+
+def test_verify_baseline_skips_tier1_verification_for_dense_only_memory_v2_backend(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
+    _write_fake_openclaw(bin_dir)
+    _write_fake_uv(bin_dir)
+    clawops_log = tmp_path / "clawops.log"
+    _write_fake_clawops_with_memory_v2_status(
+        bin_dir,
+        status_payload={"backendActive": "qdrant_dense_hybrid"},
+        log_path=clawops_log,
+    )
+    verify_models_script = tmp_path / "verify_openclaw_models.sh"
+    _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
+    home_dir = tmp_path / "home"
+    openclaw_dir = home_dir / ".openclaw"
+    openclaw_dir.mkdir(parents=True, exist_ok=True)
+    memory_v2_config = tmp_path / "memory-v2.yaml"
+    memory_v2_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
+    openclaw_dir.joinpath("openclaw.json").write_text(
+        json.dumps(
+            {
+                "gateway": {"bind": "loopback"},
+                "plugins": {
+                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "entries": {
+                        "strongclaw-memory-v2": {
+                            "config": {"configPath": memory_v2_config.as_posix()}
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+        "VERIFY_OPENCLAW_MODELS_SCRIPT": str(verify_models_script),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/verify_baseline.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert clawops_log.read_text(encoding="utf-8").splitlines()[0] == (
+        f"memory-v2 status --config {memory_v2_config} --json"
+    )
+    assert "memory-v2 verify-tier1" not in clawops_log.read_text(encoding="utf-8")
 
 
 def test_configure_openclaw_model_auth_fails_check_only_without_usable_models(
@@ -1497,6 +1646,192 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     ]
 
 
+def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_tier1(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "setup.log"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "bootstrap.env").write_text(
+        "PROFILE=default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    render_script = tmp_path / "render_openclaw_config.sh"
+    doctor_script = tmp_path / "doctor_host.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    bootstrap_qmd_script = tmp_path / "bootstrap_qmd.sh"
+    bootstrap_memory_plugin_script = tmp_path / "bootstrap_memory_plugin.sh"
+    bootstrap_lossless_context_engine_script = tmp_path / "bootstrap_lossless_context_engine.sh"
+    _write_recording_script(
+        bootstrap_qmd_script,
+        f'printf "bootstrap-qmd\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_memory_plugin_script,
+        f'printf "bootstrap-memory-plugin\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_lossless_context_engine_script,
+        f'printf "bootstrap-lossless-context\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        render_script,
+        f'printf "render %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        doctor_script,
+        f'printf "doctor\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "OPENCLAW_SETUP_STATE_DIR": str(state_dir),
+        "OPENCLAW_BOOTSTRAP_STATE_FILE": str(state_dir / "bootstrap.env"),
+        "BOOTSTRAP_QMD_SCRIPT": str(bootstrap_qmd_script),
+        "BOOTSTRAP_MEMORY_PLUGIN_SCRIPT": str(bootstrap_memory_plugin_script),
+        "BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT": str(bootstrap_lossless_context_engine_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/setup.sh"),
+            "--profile",
+            "lossless-hypermemory-tier1",
+            "--no-activate-services",
+            "--no-verify",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "auto-skipped (host bootstrap already completed)" in result.stdout
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap-memory-plugin",
+        "bootstrap-lossless-context",
+        "validate",
+        "render --profile lossless-hypermemory-tier1",
+        "doctor",
+        "configure-model-auth --probe",
+        "install ",
+    ]
+
+
+def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_back_to_default(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "setup.log"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "bootstrap.env").write_text(
+        "PROFILE=lossless-hypermemory-tier1\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    render_script = tmp_path / "render_openclaw_config.sh"
+    doctor_script = tmp_path / "doctor_host.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    bootstrap_qmd_script = tmp_path / "bootstrap_qmd.sh"
+    bootstrap_memory_plugin_script = tmp_path / "bootstrap_memory_plugin.sh"
+    bootstrap_lossless_context_engine_script = tmp_path / "bootstrap_lossless_context_engine.sh"
+    _write_recording_script(
+        bootstrap_qmd_script,
+        f'printf "bootstrap-qmd\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_memory_plugin_script,
+        f'printf "bootstrap-memory-plugin\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_lossless_context_engine_script,
+        f'printf "bootstrap-lossless-context\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        render_script,
+        f'printf "render %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        doctor_script,
+        f'printf "doctor\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "OPENCLAW_SETUP_STATE_DIR": str(state_dir),
+        "OPENCLAW_BOOTSTRAP_STATE_FILE": str(state_dir / "bootstrap.env"),
+        "BOOTSTRAP_QMD_SCRIPT": str(bootstrap_qmd_script),
+        "BOOTSTRAP_MEMORY_PLUGIN_SCRIPT": str(bootstrap_memory_plugin_script),
+        "BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT": str(bootstrap_lossless_context_engine_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/setup.sh"),
+            "--profile",
+            "default",
+            "--no-activate-services",
+            "--no-verify",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "auto-skipped (host bootstrap already completed)" in result.stdout
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap-qmd",
+        "bootstrap-memory-plugin",
+        "validate",
+        "render --profile default",
+        "doctor",
+        "configure-model-auth --probe",
+        "install ",
+    ]
+
+
 def test_setup_script_skips_baseline_when_services_are_not_activated(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -1949,6 +2284,128 @@ def test_doctor_host_validates_installed_tools_and_rendered_config(tmp_path: pat
     assert "varlock 0.5.0" in result.stdout
     assert "config ok" in result.stdout
     assert "validated " in result.stdout
+
+
+def test_doctor_host_uses_memory_v2_status_json_to_gate_tier1_verification(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
+    _write_fake_openclaw(bin_dir)
+    _write_fake_acpx(bin_dir)
+    _write_fake_varlock(bin_dir)
+    clawops_log = tmp_path / "clawops.log"
+    _write_fake_clawops_with_memory_v2_status(
+        bin_dir,
+        status_payload={"backendActive": "qdrant_sparse_dense_hybrid"},
+        log_path=clawops_log,
+    )
+    home_dir = tmp_path / "home"
+    memory_v2_config = tmp_path / "memory-v2.yaml"
+    memory_v2_config.write_text(
+        "backend:\n  active: qdrant_sparse_dense_hybrid\n", encoding="utf-8"
+    )
+    lossless_dir = tmp_path / "plugins" / "lossless-claw"
+    lossless_dir.mkdir(parents=True)
+    lossless_dir.joinpath("openclaw.plugin.json").write_text("{}", encoding="utf-8")
+    config_path = home_dir / ".openclaw" / "openclaw.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "gateway": {"bind": "loopback"},
+                "plugins": {
+                    "load": {"paths": [lossless_dir.as_posix()]},
+                    "slots": {
+                        "contextEngine": "lossless-claw",
+                        "memory": "strongclaw-memory-v2",
+                    },
+                    "entries": {
+                        "strongclaw-memory-v2": {
+                            "config": {"configPath": memory_v2_config.as_posix()}
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/doctor_host.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert clawops_log.read_text(encoding="utf-8").splitlines() == [
+        f"memory-v2 status --config {memory_v2_config} --json",
+        f"memory-v2 verify-tier1 --config {memory_v2_config} --json",
+    ]
+
+
+def test_doctor_host_skips_tier1_verification_for_dense_only_memory_v2_backend(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    bin_dir = _build_tool_path(tmp_path, ["dirname", "jq"])
+    _write_fake_openclaw(bin_dir)
+    _write_fake_acpx(bin_dir)
+    _write_fake_varlock(bin_dir)
+    clawops_log = tmp_path / "clawops.log"
+    _write_fake_clawops_with_memory_v2_status(
+        bin_dir,
+        status_payload={"backendActive": "qdrant_dense_hybrid"},
+        log_path=clawops_log,
+    )
+    home_dir = tmp_path / "home"
+    memory_v2_config = tmp_path / "memory-v2.yaml"
+    memory_v2_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
+    config_path = home_dir / ".openclaw" / "openclaw.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "gateway": {"bind": "loopback"},
+                "plugins": {
+                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "entries": {
+                        "strongclaw-memory-v2": {
+                            "config": {"configPath": memory_v2_config.as_posix()}
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home_dir),
+        "CLAWOPS_PREFER_PATH": "1",
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/doctor_host.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert clawops_log.read_text(encoding="utf-8").splitlines() == [
+        f"memory-v2 status --config {memory_v2_config} --json"
+    ]
 
 
 def test_backup_create_warns_and_falls_back_without_openclaw(tmp_path: pathlib.Path) -> None:

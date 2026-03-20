@@ -43,13 +43,11 @@ if rendered_openclaw_uses_memory_v2 "$OPENCLAW_CONFIG"; then
     exit 1
   fi
   echo "== strongclaw-memory-v2 status =="
-  run_clawops "$ROOT" memory-v2 status --config "$memory_v2_config_path" --json
-  if jq -e '
-    .backend.active == "qdrant_sparse_dense_hybrid" or
-    .backend.active == "qdrant_dense_hybrid"
-  ' "$memory_v2_config_path" >/dev/null; then
+  memory_v2_status_json="$(run_clawops "$ROOT" memory-v2 status --config "$memory_v2_config_path" --json)"
+  printf '%s\n' "$memory_v2_status_json"
+  if printf '%s\n' "$memory_v2_status_json" | jq -e '.backendActive == "qdrant_sparse_dense_hybrid"' >/dev/null; then
     echo "== strongclaw-memory-v2 tier-one verification =="
-    "$VERIFY_MEMORY_V2_TIER1_SCRIPT" --config "$memory_v2_config_path"
+    run_shell_entrypoint "$VERIFY_MEMORY_V2_TIER1_SCRIPT" --config "$memory_v2_config_path"
   fi
 fi
 
