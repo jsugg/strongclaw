@@ -13,6 +13,7 @@ export function parseJsonOutput(output) {
 export function createPluginApiStub(pluginConfig) {
   const tools = new Map();
   const cliHandlers = [];
+  const cliRegistrations = [];
   const hooks = [];
 
   return {
@@ -24,8 +25,9 @@ export function createPluginApiStub(pluginConfig) {
       registerTool(definition) {
         tools.set(definition.name, definition);
       },
-      registerCli(handler) {
+      registerCli(handler, options) {
         cliHandlers.push(handler);
+        cliRegistrations.push({ handler, options: options ?? {} });
       },
       on(name, handler) {
         hooks.push({ name, handler });
@@ -33,6 +35,7 @@ export function createPluginApiStub(pluginConfig) {
     },
     tools,
     cliHandlers,
+    cliRegistrations,
     hooks,
   };
 }
