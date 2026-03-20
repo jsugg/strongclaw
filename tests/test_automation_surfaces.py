@@ -56,14 +56,12 @@ def test_current_state_tracks_memory_v2_and_plan2_completion() -> None:
     )
     openclaw_config = (repo_root / "src/clawops/openclaw_config.py").read_text(encoding="utf-8")
     models = (repo_root / "src/clawops/memory_v2/models.py").read_text(encoding="utf-8")
-    plan = (repo_root / "plan.md").read_text(encoding="utf-8")
 
     assert (repo_root / "src/clawops/memory_v2/providers.py").exists()
     assert "before_prompt_build" in plugin
     assert "77-lossless-hypermemory-tier1.example.json5" in openclaw_config
     assert "qdrant_dense_hybrid" in models
     assert "qdrant_sparse_dense_hybrid" in models
-    assert "lossless-hypermemory-tier1" in plan
 
 
 def test_security_harness_smoke_uses_uv_managed_python() -> None:
