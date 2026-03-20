@@ -45,13 +45,6 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: ${{ matrix.node-version }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-setup-smoke-npm-${{ matrix.node-version }}-${{ hashFiles('scripts/ci/run_setup_compatibility_smoke.sh', 'scripts/bootstrap/bootstrap_lossless_context_engine.sh') }}
-          restore-keys: |
-            ${{ runner.os }}-setup-smoke-npm-${{ matrix.node-version }}-
-            ${{ runner.os }}-setup-smoke-npm-
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
