@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
+from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.openclaw_config import (
     render_openclaw_overlay,
     render_openclaw_profile,
@@ -198,20 +199,25 @@ def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
     ]
 
 
-def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths() -> None:
+def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths(
+    tmp_path: pathlib.Path,
+) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
+    home_dir = tmp_path / "home"
+    lossless_dir = strongclaw_lossless_claw_dir(home_dir=home_dir)
+    lossless_dir.mkdir(parents=True)
     rendered = render_openclaw_overlay(
         template_path=repo_root
         / "platform/configs/openclaw/77-lossless-hypermemory-tier1.example.json5",
         repo_root=repo_root,
-        home_dir=pathlib.Path.home(),
+        home_dir=home_dir,
         user_timezone="UTC",
     )
 
     assert rendered["plugins"]["slots"]["contextEngine"] == "lossless-claw"
     assert rendered["plugins"]["slots"]["memory"] == "strongclaw-memory-v2"
     assert rendered["plugins"]["load"]["paths"] == [
-        f"{repo_root.as_posix()}/vendor/lossless-claw",
+        lossless_dir.as_posix(),
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2",
     ]
 

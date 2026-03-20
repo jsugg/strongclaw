@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - ./state/postgres:/var/lib/postgresql/data
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use scripts/ops/launch_sidecars_with_varlock.sh}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
       interval: 10s
@@ -34,7 +34,7 @@ services:
       - "127.0.0.1:4000:4000"
     volumes:
       - ../configs/litellm/config.yaml:/app/config.yaml:ro
-      - ./state/litellm:/app/data
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use scripts/ops/launch_sidecars_with_varlock.sh}/litellm:/app/data
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     cap_drop:
@@ -65,7 +65,7 @@ services:
       - "127.0.0.1:9464:9464"
     volumes:
       - ../configs/otel/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
-      - ./state/otel:/var/lib/otel
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use scripts/ops/launch_sidecars_with_varlock.sh}/otel:/var/lib/otel
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
@@ -80,7 +80,7 @@ services:
     ports:
       - "127.0.0.1:6333:6333"
     volumes:
-      - ./state/qdrant:/qdrant/storage
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use scripts/ops/launch_sidecars_with_varlock.sh}/qdrant:/qdrant/storage
     healthcheck:
       test:
         [

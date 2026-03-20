@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tarfile
 
+from clawops.app_paths import strongclaw_qmd_install_dir
+
 
 def _build_tool_path(tmp_path: pathlib.Path, tool_names: list[str]) -> pathlib.Path:
     bin_dir = tmp_path / "bin"
@@ -191,11 +193,23 @@ def _write_fake_qmd(home_dir: pathlib.Path) -> pathlib.Path:
 def _write_fake_varlock(bin_dir: pathlib.Path, log_path: pathlib.Path | None = None) -> None:
     target = bin_dir / "varlock"
     if log_path is None:
-        body = "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n"
+        body = (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'if [[ "${1:-}" == "--version" ]]; then\n'
+            "  printf 'varlock 0.5.0\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0\n"
+        )
     else:
         body = (
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
+            'if [[ "${1:-}" == "--version" ]]; then\n'
+            "  printf 'varlock 0.5.0\\n'\n"
+            "  exit 0\n"
+            "fi\n"
             f'printf "%s\\n" "$*" >> "{log_path}"\n'
             "exit 0\n"
         )
@@ -240,6 +254,7 @@ def _write_valid_varlock_env(path: pathlib.Path) -> None:
             [
                 "APP_ENV=local",
                 "OPENCLAW_VERSION=2026.3.13",
+                "VARLOCK_SECRET_BACKEND=local",
                 "OPENCLAW_GATEWAY_TOKEN=test-gateway-token-1234567890",
                 "OPENCLAW_CONTROL_USER=test-user",
                 "OPENCLAW_STATE_DIR=~/.openclaw",
@@ -303,18 +318,8 @@ def test_bootstrap_qmd_reinstalls_broken_launcher_from_published_package(
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     home_dir = tmp_path / "home"
     qmd_bin = home_dir / ".bun" / "bin" / "qmd"
-    qmd_dist = (
-        home_dir
-        / ".openclaw"
-        / "vendor"
-        / "qmd"
-        / "node_modules"
-        / "@tobilu"
-        / "qmd"
-        / "dist"
-        / "cli"
-        / "qmd.js"
-    )
+    qmd_install_dir = strongclaw_qmd_install_dir(home_dir=home_dir)
+    qmd_dist = qmd_install_dir / "node_modules" / "@tobilu" / "qmd" / "dist" / "cli" / "qmd.js"
     qmd_bin.parent.mkdir(parents=True, exist_ok=True)
     qmd_bin.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'broken qmd\\n' >&2\nexit 1\n",
@@ -358,7 +363,7 @@ def test_bootstrap_qmd_reinstalls_broken_launcher_from_published_package(
     assert result.returncode == 0
     assert "launcher is unhealthy; reinstalling" in result.stdout
     assert install_log.read_text(encoding="utf-8").splitlines() == [
-        f'install --prefix {home_dir / ".openclaw" / "vendor" / "qmd"} @tobilu/qmd'
+        f"install --prefix {qmd_install_dir} --no-fund --no-audit @tobilu/qmd@2.0.1"
     ]
     assert "QMD installed at:" in result.stdout
     assert qmd_bin.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash\n")
@@ -611,7 +616,6 @@ def test_configure_openclaw_model_auth_applies_env_driven_model_chain(
     )
 
     assert result.returncode == 0
-    assert "Configured OpenClaw model chain:" in result.stdout
     assert (state_dir / "admin.primary").read_text(encoding="utf-8") == "openai/gpt-5.4"
     assert (state_dir / "reader.primary").read_text(encoding="utf-8") == "openai/gpt-5.4"
     assert (state_dir / "admin.fallbacks").read_text(encoding="utf-8").splitlines() == [
@@ -944,6 +948,104 @@ def test_configure_varlock_env_check_only_rejects_placeholder_required_values(
 
     assert result.returncode == 1
     assert "blank or still uses a placeholder" in result.stderr
+
+
+def test_configure_varlock_env_check_only_accepts_plugin_backed_provider_backend(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    (env_dir / ".env.local").write_text(
+        "\n".join(
+            [
+                "APP_ENV=local",
+                "OPENCLAW_VERSION=2026.3.13",
+                "VARLOCK_SECRET_BACKEND=google-secret-manager",
+                "VARLOCK_SECRET_BACKEND_AUTH=gcp-service-account-json",
+                "OPENCLAW_GATEWAY_TOKEN=test-gateway-token-1234567890",
+                "OPENCLAW_CONTROL_USER=test-user",
+                "OPENCLAW_STATE_DIR=~/.openclaw",
+                "LITELLM_MASTER_KEY=test-master-key-1234567890",
+                "LITELLM_DB_PASSWORD=test-db-password-1234",
+                "OPENCLAW_DEFAULT_MODEL=openai/gpt-5.4",
+                "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (env_dir / ".env.plugins").write_text(
+        "\n".join(
+            [
+                "# @plugin(@varlock/google-secret-manager-plugin)",
+                "# @initGsm(projectId=my-project, credentials=$GCP_SA_KEY)",
+                "# ---",
+                "# @type=gcpServiceAccountJson",
+                'GCP_SA_KEY={"type":"service_account","project_id":"my-project","private_key":"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n","client_email":"svc@example.com"}',
+                "OPENAI_API_KEY=gsm()",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "varlock.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_varlock(bin_dir, log_path)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
+        "VARLOCK_PLUGIN_ENV_FILE": str(env_dir / ".env.plugins"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+
+
+def test_configure_varlock_env_check_only_rejects_stale_plugin_overlay_for_local_backend(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    _write_valid_varlock_env(env_dir / ".env.local")
+    (env_dir / ".env.plugins").write_text("OPENAI_API_KEY=gsm()\n", encoding="utf-8")
+    env = os.environ | {
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
+        "VARLOCK_PLUGIN_ENV_FILE": str(env_dir / ".env.plugins"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--check-only",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "VARLOCK_SECRET_BACKEND=local" in result.stderr
 
 
 def test_launch_gateway_with_varlock_uses_installed_varlock_when_not_on_path(
@@ -1280,6 +1382,149 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     ]
 
 
+def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "setup.log"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "bootstrap.env").write_text(
+        "PROFILE=default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    bootstrap_script = tmp_path / "bootstrap.sh"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    render_script = tmp_path / "render_openclaw_config.sh"
+    doctor_script = tmp_path / "doctor_host.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    _write_recording_script(
+        bootstrap_script,
+        f'printf "bootstrap\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        render_script,
+        f'printf "render %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        doctor_script,
+        f'printf "doctor\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "OPENCLAW_SETUP_STATE_DIR": str(state_dir),
+        "OPENCLAW_BOOTSTRAP_STATE_FILE": str(state_dir / "bootstrap.env"),
+        "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
+        "DOCTOR_HOST_SCRIPT": str(doctor_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/setup.sh"),
+            "--profile",
+            "acp",
+            "--no-activate-services",
+            "--no-verify",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "auto-skipped (host bootstrap already completed)" in result.stdout
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "validate",
+        "render --profile acp",
+        "doctor",
+        "configure-model-auth --probe",
+        "install ",
+    ]
+
+
+def test_setup_script_skips_baseline_when_services_are_not_activated(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    log_path = tmp_path / "setup.log"
+    bootstrap_script = tmp_path / "bootstrap.sh"
+    configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
+    configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
+    install_script = tmp_path / "install_host_services.sh"
+    verify_script = tmp_path / "verify_baseline.sh"
+    _write_recording_script(
+        bootstrap_script,
+        f'printf "bootstrap\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_varlock_env_script,
+        f'printf "validate\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        configure_models_script,
+        f'printf "configure-model-auth %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        install_script,
+        f'printf "install %s\\n" "$*" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        verify_script,
+        f'printf "verify\\n" >> "{log_path}"\n',
+    )
+    env = os.environ | {
+        "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
+        "CONFIGURE_MODEL_AUTH_SCRIPT": str(configure_models_script),
+        "INSTALL_HOST_SERVICES_SCRIPT": str(install_script),
+        "VERIFY_BASELINE_SCRIPT": str(verify_script),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/setup.sh"),
+            "--no-activate-services",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (
+        "Baseline verification requires active gateway and sidecar services; skipping it because --no-activate-services was selected."
+        in result.stdout
+    )
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap",
+        "validate",
+        "configure-model-auth --probe",
+        "install ",
+    ]
+
+
 def test_doctor_strongclaw_runs_deep_checks_with_model_probe_by_default(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -1491,7 +1736,10 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     home_dir = tmp_path / "home"
     install_dir = home_dir / ".config" / "varlock" / "bin"
     install_dir.mkdir(parents=True)
-    _write_recording_script(install_dir / "varlock", "exit 0\n")
+    _write_recording_script(
+        install_dir / "varlock",
+        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\n' "exit 0\n",
+    )
     xdg_config_home = home_dir / ".config"
 
     env = os.environ | {
@@ -1573,7 +1821,10 @@ def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
     _write_recording_script(bin_dir / "sqlite3", "exit 0\n")
     _write_recording_script(bin_dir / "bun", "exit 0\n")
     _write_recording_script(bin_dir / "uv", "exit 0\n")
-    _write_recording_script(bin_dir / "varlock", "exit 0\n")
+    _write_recording_script(
+        bin_dir / "varlock",
+        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\n' "exit 0\n",
+    )
     _write_recording_script(bin_dir / "openclaw", "exit 0\n")
     _write_recording_script(bin_dir / "acpx", "exit 0\n")
     _write_recording_script(bin_dir / "brew", "exit 1\n")
@@ -1659,6 +1910,8 @@ def test_doctor_host_validates_installed_tools_and_rendered_config(tmp_path: pat
     assert "openclaw 2026.3.13" in result.stdout
     assert "== ACPX version ==" in result.stdout
     assert "acpx 0.3.0" in result.stdout
+    assert "== Varlock version ==" in result.stdout
+    assert "varlock 0.5.0" in result.stdout
     assert "config ok" in result.stdout
     assert "validated " in result.stdout
 

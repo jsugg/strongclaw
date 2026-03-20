@@ -88,7 +88,7 @@ varlock load --path platform/configs/varlock
 Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports both guided and env-driven setup:
 
-- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` launches `openclaw configure --section model` when no usable model is configured
+- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
 - env-driven: set provider keys in `platform/configs/varlock/.env.local`
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
@@ -107,8 +107,9 @@ Equivalent shell entrypoint:
 ```
 
 That path bootstraps the host, creates or repairs the repo-local Varlock env
-contract, prompts for missing setup input when interactive, configures or
-validates OpenClaw model/provider auth, renders or refreshes the host service
+contract, prompts for missing setup input when interactive, supports local or
+managed Varlock secret backends for provider auth, configures or validates
+OpenClaw model/provider auth, renders or refreshes the host service
 definitions, activates the gateway plus sidecars, and runs the baseline
 verification gate.
 
@@ -131,12 +132,11 @@ stops and tells you to finish that integration instead of replacing it.
 Only when no Docker-compatible runtime is detected does bootstrap install
 Docker as the fallback runtime.
 
-If Linux bootstrap just added the runtime user to the `docker` group, start a
-fresh `sudo -iu openclawsvc` shell before rerunning:
-
-```bash
-make setup SETUP_ARGS="--skip-bootstrap"
-```
+If Linux bootstrap just added the runtime user to the `docker` group, setup
+now pauses before service activation. Open a fresh login shell as that user and
+rerun the same `make setup` or `clawops setup` command. Completed bootstrap
+work is detected automatically; `--skip-bootstrap` remains available only as a
+manual override.
 
 If you need a placeholder-backed profile during bring-up, rerender through the
 wrapper:

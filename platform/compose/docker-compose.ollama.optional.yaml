@@ -4,7 +4,7 @@ services:
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
-      - ./state/ollama:/root/.ollama
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR before starting compose}/ollama:/root/.ollama
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped

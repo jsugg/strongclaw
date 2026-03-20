@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/clawops.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/docker_runtime.sh"
 BOOTSTRAP_SCRIPT="${BOOTSTRAP_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap.sh}"
 RENDER_OPENCLAW_CONFIG_SCRIPT="${RENDER_OPENCLAW_CONFIG_SCRIPT:-$ROOT/scripts/bootstrap/render_openclaw_config.sh}"
 DOCTOR_HOST_SCRIPT="${DOCTOR_HOST_SCRIPT:-$ROOT/scripts/bootstrap/doctor_host.sh}"
@@ -14,14 +16,16 @@ VERIFY_BASELINE_SCRIPT="${VERIFY_BASELINE_SCRIPT:-$ROOT/scripts/bootstrap/verify
 CONFIG_PROFILE=""
 ACTIVATE_SERVICES=1
 SKIP_BOOTSTRAP=0
+FORCE_BOOTSTRAP=0
 VERIFY_BASELINE=1
 NON_INTERACTIVE=0
+AUTO_SKIPPED_BOOTSTRAP=0
 declare -a CONFIGURE_VARLOCK_ENV_ARGS=()
 declare -a CONFIGURE_MODEL_AUTH_ARGS=()
 
 usage() {
   cat <<'EOF'
-Usage: setup.sh [--profile PROFILE] [--skip-bootstrap] [--no-activate-services] [--no-verify] [--non-interactive]
+Usage: setup.sh [--profile PROFILE] [--skip-bootstrap] [--force-bootstrap] [--no-activate-services] [--no-verify] [--non-interactive]
 
 Guided StrongClaw setup:
 
@@ -35,6 +39,7 @@ Guided StrongClaw setup:
 Options:
   --profile PROFILE       Rerender the named config profile after bootstrap.
   --skip-bootstrap        Reuse an already-bootstrapped host and continue from config/env setup.
+  --force-bootstrap       Run bootstrap even if StrongClaw already marked the host as ready.
   --no-activate-services  Render host service files without activating them.
   --no-verify             Skip baseline verification.
   --non-interactive       Fail with remediation instead of prompting for missing config.
@@ -54,6 +59,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-bootstrap)
       SKIP_BOOTSTRAP=1
+      shift
+      ;;
+    --force-bootstrap)
+      FORCE_BOOTSTRAP=1
       shift
       ;;
     --no-activate-services)
@@ -79,6 +88,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$SKIP_BOOTSTRAP" -eq 1 && "$FORCE_BOOTSTRAP" -eq 1 ]]; then
+  echo "ERROR: --skip-bootstrap and --force-bootstrap cannot be used together." >&2
+  exit 1
+fi
 
 if [[ -n "$CONFIG_PROFILE" ]]; then
   export OPENCLAW_CONFIG_PROFILE="$CONFIG_PROFILE"
@@ -113,14 +127,60 @@ run_script_step() {
   run_step "$title" "$remediation" run_shell_entrypoint "$script_path" "$@"
 }
 
+describe_bootstrap_mode() {
+  if [[ "$FORCE_BOOTSTRAP" -eq 1 ]]; then
+    printf 'forced'
+    return 0
+  fi
+  if [[ "$SKIP_BOOTSTRAP" -eq 1 ]]; then
+    if [[ "$AUTO_SKIPPED_BOOTSTRAP" -eq 1 ]]; then
+      printf 'auto-skipped (host bootstrap already completed)'
+      return 0
+    fi
+    printf 'skipped'
+    return 0
+  fi
+  printf 'enabled'
+}
+
+pause_for_linux_docker_refresh() {
+  local runtime_user
+  runtime_user="$(setup_state_value "$OPENCLAW_DOCKER_REFRESH_STATE_FILE" RUNTIME_USER)"
+  if [[ -z "$runtime_user" ]]; then
+    runtime_user="$(id -un)"
+  fi
+  cat >&2 <<EOF
+SETUP PAUSED: Docker access was granted during bootstrap, but this shell has not
+picked up the new docker-group membership yet.
+
+Next steps:
+- open a fresh login shell as $runtime_user
+- rerun: clawops setup
+
+StrongClaw will detect the completed bootstrap automatically and resume from the
+remaining setup steps without requiring --skip-bootstrap.
+EOF
+  exit 1
+}
+
+if [[ "$SKIP_BOOTSTRAP" -eq 0 && "$FORCE_BOOTSTRAP" -eq 0 ]] && bootstrap_state_ready; then
+  SKIP_BOOTSTRAP=1
+  AUTO_SKIPPED_BOOTSTRAP=1
+fi
+
+if [[ "$ACTIVATE_SERVICES" -eq 0 && "$VERIFY_BASELINE" -eq 1 ]]; then
+  echo "Baseline verification requires active gateway and sidecar services; skipping it because --no-activate-services was selected."
+  VERIFY_BASELINE=0
+fi
+
 echo "== StrongClaw setup plan =="
 printf 'profile: %s\n' "${OPENCLAW_CONFIG_PROFILE:-default}"
-printf 'bootstrap: %s\n' "$([[ "$SKIP_BOOTSTRAP" -eq 1 ]] && echo skipped || echo enabled)"
+printf 'bootstrap: %s\n' "$(describe_bootstrap_mode)"
 printf 'activate services: %s\n' "$([[ "$ACTIVATE_SERVICES" -eq 1 ]] && echo yes || echo no)"
 printf 'baseline verify: %s\n' "$([[ "$VERIFY_BASELINE" -eq 1 ]] && echo yes || echo no)"
 printf 'interactive prompts: %s\n' "$([[ "$NON_INTERACTIVE" -eq 1 ]] && echo disabled || echo enabled)"
 
-if [[ "$SKIP_BOOTSTRAP" -eq 0 ]]; then
+if [[ "$SKIP_BOOTSTRAP" -eq 0 || "$FORCE_BOOTSTRAP" -eq 1 ]]; then
   run_script_step \
     "Host bootstrap" \
     "Review the bootstrap output above, fix the missing prerequisite, and rerun: $ROOT/scripts/bootstrap/setup.sh${CONFIG_PROFILE:+ --profile $CONFIG_PROFILE}" \
@@ -154,6 +214,14 @@ run_script_step \
   "OpenClaw model/provider setup" \
   "Complete provider auth with: $ROOT/scripts/bootstrap/configure_openclaw_model_auth.sh" \
   "$CONFIGURE_MODEL_AUTH_SCRIPT" "${CONFIGURE_MODEL_AUTH_ARGS[@]}"
+
+if [[ "$ACTIVATE_SERVICES" -eq 1 && "$(uname -s)" == "Linux" ]] && docker_shell_refresh_required; then
+  if docker_backend_ready; then
+    clear_docker_shell_refresh_required
+  else
+    pause_for_linux_docker_refresh
+  fi
+fi
 
 if [[ "$ACTIVATE_SERVICES" -eq 1 ]]; then
   run_script_step \

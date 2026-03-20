@@ -7,6 +7,7 @@ import pathlib
 AUTOMATION_FILES = (
     pathlib.Path("Makefile"),
     pathlib.Path("scripts/bootstrap/verify_baseline.sh"),
+    pathlib.Path(".github/workflows/compatibility-matrix.yml"),
     pathlib.Path(".github/workflows/harness.yml"),
     pathlib.Path("scripts/bootstrap/run_harness_smoke.sh"),
 )
@@ -42,6 +43,30 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
         'uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"',
         "",
     )
+
+
+def test_plan_current_state_tracks_memory_v2_and_plan2_completion() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    plan = (repo_root / "plan.md").read_text(encoding="utf-8")
+    plugin = (repo_root / "platform/plugins/strongclaw-memory-v2/index.js").read_text(
+        encoding="utf-8"
+    )
+    openclaw_config = (repo_root / "src/clawops/openclaw_config.py").read_text(encoding="utf-8")
+    models = (repo_root / "src/clawops/memory_v2/models.py").read_text(encoding="utf-8")
+
+    assert (repo_root / "src/clawops/memory_v2/providers.py").exists()
+    assert "before_prompt_build" in plugin
+    assert "77-lossless-hypermemory-tier1.example.json5" in openclaw_config
+    assert "qdrant_dense_hybrid" in models
+
+    assert "before_prompt_build" in plan
+    assert "qdrant_dense_hybrid" in plan
+    assert "providers.py" in plan
+    assert "77-lossless-hypermemory-tier1.example.json5" in plan
+    assert "wrapper transport completion" in plan
+    assert "metadata preload optimization" in plan
+    assert "naming cleanup for the old repository identity" in plan
+    assert "already implemented in the live code" in plan
 
 
 def test_security_harness_smoke_uses_uv_managed_python() -> None:
@@ -121,13 +146,22 @@ def test_bootstrap_script_keeps_core_host_setup_contract() -> None:
     assert "ensure_docker_compatible_runtime darwin" in host
     assert "ensure_docker_compatible_runtime linux" in host
     assert 'UV_VERSION="${UV_VERSION:-0.10.9}"' in host
+    assert 'VARLOCK_VERSION="${VARLOCK_VERSION:-0.5.0}"' in host
     assert "ensure_uv" in host
     assert "https://astral.sh/uv/${UV_VERSION}/install.sh" in host
+    assert 'ensure_varlock_installed "$VARLOCK_VERSION"' in host
     assert 'uv sync --project "$ROOT" --locked --extra dev' in host
+    assert (
+        'mkdir -p "$(strongclaw_data_dir)" "$(strongclaw_state_dir)" "$(strongclaw_log_dir)" "$(strongclaw_compose_state_dir)"'
+        in host
+    )
     assert 'source "$ROOT/scripts/lib/docker_runtime.sh"' in host
+    assert 'source "$ROOT/scripts/lib/app_paths.sh"' in host
+    assert 'source "$ROOT/scripts/lib/varlock.sh"' in host
     assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in host
     assert "profile_requires_lossless_claw()" in host
     assert '"$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh"' in host
+    assert "ensure_command_or_brew bun bun" not in host
     assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in host
     assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in host
     assert "acpx@latest" not in host
@@ -244,6 +278,25 @@ def test_ci_validation_scripts_force_safe_wrapper_retry_mode() -> None:
     assert "export CLAWOPS_HTTP_RETRY_MODE" in quality_gate
     assert ': "${CLAWOPS_HTTP_RETRY_MODE:=safe}"' in nightly
     assert "export CLAWOPS_HTTP_RETRY_MODE" in nightly
+
+
+def test_ci_compatibility_matrix_tracks_supported_python_and_node_versions() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    compatibility = (repo_root / ".github/workflows/compatibility-matrix.yml").read_text(
+        encoding="utf-8"
+    )
+    memory_plugin = (repo_root / ".github/workflows/memory-plugin-verification.yml").read_text(
+        encoding="utf-8"
+    )
+    harness = (repo_root / ".github/workflows/harness.yml").read_text(encoding="utf-8")
+    nightly = (repo_root / ".github/workflows/nightly.yml").read_text(encoding="utf-8")
+
+    assert 'python-version: ["3.12", "3.13"]' in compatibility
+    assert 'node-version: ["22.16.0", "24.13.1"]' in compatibility
+    assert "./scripts/ci/run_setup_compatibility_smoke.sh" in compatibility
+    assert 'node-version: ["22.16.0", "24.13.1"]' in memory_plugin
+    assert "${{ runner.temp }}/strongclaw/harness" in harness
+    assert "${{ runner.temp }}/strongclaw/nightly" in nightly
 
 
 def test_setup_guide_uses_profile_renderer_for_placeholder_backed_acp_overlay() -> None:

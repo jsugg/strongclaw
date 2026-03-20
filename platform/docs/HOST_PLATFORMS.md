@@ -13,6 +13,51 @@ Docker-compatible runtime that exposes `docker` plus `docker compose`,
 Strongclaw reuses it. Docker is installed only as the fallback runtime when no
 compatible backend is detected.
 
+## Compatibility matrix
+
+StrongClaw's supported baseline is derived from the codebase constraints plus
+the pinned external tools that setup installs.
+
+| Component | Supported / pinned version | Why |
+| --- | --- | --- |
+| Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
+| Node.js | `22.16.x`, `24.x` | OpenClaw `2026.3.13` requires `>=22.16.0`; ACPX `0.3.0`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
+| `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
+| Varlock | `0.5.0` | Setup installs and verifies this exact version. |
+| OpenClaw | `2026.3.13` | Setup installs this exact CLI version. |
+| ACPX | `0.3.0` | Setup installs this exact CLI version. |
+| QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
+| `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
+
+CI enforces this support statement through:
+
+- a Python matrix on `3.12` and `3.13`
+- a setup/install smoke matrix on Node `22.16.0` and `24.13.1`
+- a vendored memory-plugin integration matrix on Node `22.16.0` and `24.13.1`
+
+## Runtime data locations
+
+StrongClaw-generated runtime artifacts should not live inside the repository
+checkout. The setup, doctor, harness, ACP runner, workflow context-pack, and
+compose helper scripts now default to OS-appropriate app directories instead.
+
+| Kind | Linux default | macOS default |
+| --- | --- | --- |
+| StrongClaw data | `~/.local/share/strongclaw` | `~/Library/Application Support/StrongClaw` |
+| StrongClaw state | `~/.local/state/strongclaw` | `~/Library/Application Support/StrongClaw/state` |
+| StrongClaw logs | `~/.local/state/strongclaw/logs` | `~/Library/Logs/StrongClaw` |
+| Compose sidecar state | `<state>/compose` | `<state>/compose` |
+| Harness output | `<state>/runs/harness` | `<state>/runs/harness` |
+| ACP session summaries | `<state>/workspaces/<scope>/acp` | `<state>/workspaces/<scope>/acp` |
+| Workflow context packs | `<state>/workspaces/<scope>/context-packs` | `<state>/workspaces/<scope>/context-packs` |
+| QMD package files | `<data>/qmd` | `<data>/qmd` |
+| `lossless-claw` checkout | `<data>/plugins/lossless-claw` | `<data>/plugins/lossless-claw` |
+
+Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`,
+`STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs
+to override those defaults. The provided shell wrappers export
+`STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
+
 ## Shared host contract
 
 Regardless of host OS, the baseline flow is:
@@ -21,8 +66,8 @@ Regardless of host OS, the baseline flow is:
 2. clone the repo as that user
 3. install the runtime package with `make install`
 4. either prepare `platform/configs/varlock/.env.local` manually or let `make setup` / `clawops setup` create and normalize it interactively
-5. prefer `make setup` for the baseline path after clone; it now guides Varlock env setup and OpenClaw model auth during setup
-6. if Linux bootstrap just granted Docker access, start a fresh login shell and rerun `make setup SETUP_ARGS="--skip-bootstrap"` or `clawops setup --skip-bootstrap`
+5. prefer `make setup` for the baseline path after clone; it now guides Varlock env setup, managed secret backend selection, and OpenClaw model auth during setup
+6. if Linux bootstrap just granted Docker access, open a fresh login shell and rerun the same `make setup` / `clawops setup` command; completed bootstrap work is auto-detected and skipped
 7. contributors can additionally install `uv` and use `make dev && make test`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
 8. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `./scripts/bootstrap/configure_varlock_env.sh`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
 

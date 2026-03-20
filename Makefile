@@ -9,7 +9,7 @@ PYTEST ?= $(UV) run --locked --extra dev pytest
 DEV_SYNC_FLAGS ?= --locked
 CONTEXT_CONFIG ?= platform/configs/context/context-service.yaml
 REPO_DIR ?= .
-RUNS_DIR ?= ./.runs
+RUNS_DIR ?=
 SETUP_ARGS ?=
 DOCTOR_ARGS ?=
 

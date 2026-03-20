@@ -56,7 +56,6 @@ That setup flow:
 
 - auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
 - runs the matching host preflight before attempting package installs
-- creates the repo-local directories under `platform/`
 - installs or verifies host package prerequisites
 - uses an existing Docker-compatible runtime when one is already installed
 - installs Docker only when no Docker-compatible runtime is detected
@@ -64,12 +63,17 @@ That setup flow:
 - provisions the default QMD semantic memory backend
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
 - creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
-- prompts for missing Varlock runtime/provider settings when needed
+- prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
 - configures or validates OpenClaw model/provider auth before services are activated
 - renders and activates launchd or systemd service templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
 - runs the baseline verification gate
+
+StrongClaw-generated runtime data does not default into the repository checkout.
+Setup now places compose state, harness artifacts, ACP summaries, the managed
+`lossless-claw` checkout, and QMD package files under OS-appropriate app
+data/state directories instead.
 
 You can rerun the host doctor directly after any local change that might affect
 the rendered config or CLI toolchain:
@@ -84,12 +88,10 @@ For the full post-bootstrap readiness sweep, run:
 clawops doctor
 ```
 
-If Linux bootstrap just added the runtime user to the `docker` group, start a
-fresh login shell as that user and rerun:
-
-```bash
-make setup SETUP_ARGS="--skip-bootstrap"
-```
+If Linux bootstrap just added the runtime user to the `docker` group, setup
+pauses with clear remediation. Open a fresh login shell as that user and rerun
+the same `make setup` or `clawops setup` command; completed bootstrap work is
+auto-detected and skipped.
 
 ## 4. Rerender the OpenClaw config when you change profiles
 

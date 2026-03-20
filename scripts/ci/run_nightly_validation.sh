@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUNS_DIR="${RUNS_DIR:-$ROOT/.runs}"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/app_paths.sh"
+RUNS_DIR="${RUNS_DIR:-$(strongclaw_runs_dir)/nightly}"
 
 command -v uv >/dev/null 2>&1 || {
   echo "uv is required to run nightly validation." >&2

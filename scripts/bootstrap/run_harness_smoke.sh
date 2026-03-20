@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTPUT_DIR="${1:-$ROOT/.runs}"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/app_paths.sh"
+OUTPUT_DIR="${1:-$(strongclaw_runs_dir)/harness}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/clawops.sh"
 

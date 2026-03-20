@@ -13,6 +13,7 @@ CHECK_ONLY=0
 PROBE=0
 PROBE_MAX_TOKENS="${OPENCLAW_MODEL_PROBE_MAX_TOKENS:-16}"
 MODELS_STATUS_SUPPORTED=0
+VARLOCK_ENV_SNAPSHOT=""
 declare -a MODEL_CHAIN=()
 
 usage() {
@@ -80,6 +81,37 @@ get_env_value() {
   fi
   grep -E "^${key}=" "$VARLOCK_LOCAL_ENV_FILE" | tail -n 1 | cut -d= -f2- || true
 }
+
+capture_varlock_env_snapshot() {
+  if [[ -n "$VARLOCK_ENV_SNAPSHOT" ]]; then
+    return 0
+  fi
+  if ! varlock_is_available || [[ ! -d "$VARLOCK_ENV_DIR" ]]; then
+    return 0
+  fi
+  VARLOCK_ENV_SNAPSHOT="$(mktemp)"
+  if ! run_varlock run --path "$VARLOCK_ENV_DIR" -- env >"$VARLOCK_ENV_SNAPSHOT" 2>/dev/null; then
+    rm -f "$VARLOCK_ENV_SNAPSHOT"
+    VARLOCK_ENV_SNAPSHOT=""
+    return 0
+  fi
+}
+
+get_effective_env_value() {
+  local key="$1"
+  local resolved_value=""
+  capture_varlock_env_snapshot
+  if [[ -n "$VARLOCK_ENV_SNAPSHOT" && -f "$VARLOCK_ENV_SNAPSHOT" ]]; then
+    resolved_value="$(grep -E "^${key}=" "$VARLOCK_ENV_SNAPSHOT" | tail -n 1 | cut -d= -f2- || true)"
+    if [[ -n "$resolved_value" ]]; then
+      printf '%s' "$resolved_value"
+      return 0
+    fi
+  fi
+  get_env_value "$key"
+}
+
+trap 'if [[ -n "${VARLOCK_ENV_SNAPSHOT:-}" ]]; then rm -f "$VARLOCK_ENV_SNAPSHOT"; fi' EXIT
 
 list_agent_ids() {
   run_openclaw agents list --json | jq -r '.[].id'
@@ -161,25 +193,25 @@ split_csv_candidates() {
 
 build_model_chain() {
   local default_model fallback_csv
-  default_model="$(get_env_value OPENCLAW_DEFAULT_MODEL)"
-  fallback_csv="$(get_env_value OPENCLAW_MODEL_FALLBACKS)"
+  default_model="$(get_effective_env_value OPENCLAW_DEFAULT_MODEL)"
+  fallback_csv="$(get_effective_env_value OPENCLAW_MODEL_FALLBACKS)"
   if [[ -n "$default_model" ]]; then
     append_model_candidate "$default_model"
     split_csv_candidates "$fallback_csv"
     return 0
   fi
-  if [[ -n "$(get_env_value OPENAI_API_KEY)" ]]; then
+  if [[ -n "$(get_effective_env_value OPENAI_API_KEY)" ]]; then
     append_model_candidate "openai/gpt-5.4"
   fi
-  if [[ -n "$(get_env_value ANTHROPIC_API_KEY)" ]]; then
+  if [[ -n "$(get_effective_env_value ANTHROPIC_API_KEY)" ]]; then
     append_model_candidate "anthropic/claude-opus-4-6"
   fi
-  if [[ -n "$(get_env_value ZAI_API_KEY)" ]]; then
+  if [[ -n "$(get_effective_env_value ZAI_API_KEY)" ]]; then
     append_model_candidate "zai/glm-5"
   fi
-  if [[ -n "$(get_env_value OLLAMA_API_KEY)" ]]; then
+  if [[ -n "$(get_effective_env_value OLLAMA_API_KEY)" ]]; then
     local ollama_model
-    ollama_model="$(get_env_value OPENCLAW_OLLAMA_MODEL)"
+    ollama_model="$(get_effective_env_value OPENCLAW_OLLAMA_MODEL)"
     if [[ -n "$ollama_model" ]]; then
       append_model_candidate "ollama/$ollama_model"
     fi

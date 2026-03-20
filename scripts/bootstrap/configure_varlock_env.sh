@@ -4,7 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VARLOCK_ENV_DIR="${VARLOCK_ENV_DIR:-$ROOT/platform/configs/varlock}"
 VARLOCK_LOCAL_ENV_FILE="${VARLOCK_LOCAL_ENV_FILE:-$VARLOCK_ENV_DIR/.env.local}"
+VARLOCK_PLUGIN_ENV_FILE="${VARLOCK_PLUGIN_ENV_FILE:-$VARLOCK_ENV_DIR/.env.plugins}"
 VARLOCK_ENV_TEMPLATE="${VARLOCK_ENV_TEMPLATE:-$VARLOCK_ENV_DIR/.env.local.example}"
+VARLOCK_PLUGIN_VERSION_1PASSWORD="${VARLOCK_PLUGIN_VERSION_1PASSWORD:-0.3.0}"
+VARLOCK_PLUGIN_VERSION_AWS="${VARLOCK_PLUGIN_VERSION_AWS:-0.0.5}"
+VARLOCK_PLUGIN_VERSION_AZURE="${VARLOCK_PLUGIN_VERSION_AZURE:-0.0.5}"
+VARLOCK_PLUGIN_VERSION_BITWARDEN="${VARLOCK_PLUGIN_VERSION_BITWARDEN:-0.0.5}"
+VARLOCK_PLUGIN_VERSION_GCP="${VARLOCK_PLUGIN_VERSION_GCP:-0.2.0}"
+VARLOCK_PLUGIN_VERSION_INFISICAL="${VARLOCK_PLUGIN_VERSION_INFISICAL:-0.0.5}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/varlock.sh"
 
@@ -13,6 +20,8 @@ NON_INTERACTIVE=0
 ENV_FILE_CREATED=0
 MERGED_KEYS=0
 AUTO_FILLED_VALUES=0
+declare -a CONFIGURED_PROVIDER_KEYS=()
+declare -a CONFIGURED_MODEL_CHAIN=()
 
 usage() {
   cat <<'EOF'
@@ -24,7 +33,8 @@ StrongClaw. In normal mode the script will:
 1. create .env.local from the shipped example when missing
 2. merge in newly added keys for older env files
 3. generate safe defaults for required local secrets when blank
-4. validate the final contract with Varlock when available
+4. optionally configure a managed Varlock secret backend for provider auth
+5. validate the final contract with Varlock when available
 
 Use --check-only to report readiness without mutating files.
 EOF
@@ -108,18 +118,25 @@ ensure_env_file_exists() {
   echo "Created Varlock env contract at $VARLOCK_LOCAL_ENV_FILE from the shipped example."
 }
 
-get_env_value() {
-  local key="$1"
-  if [[ ! -f "$VARLOCK_LOCAL_ENV_FILE" ]]; then
+get_env_value_from_file() {
+  local target_file="$1"
+  local key="$2"
+  if [[ ! -f "$target_file" ]]; then
     return 0
   fi
-  grep -E "^${key}=" "$VARLOCK_LOCAL_ENV_FILE" | tail -n 1 | cut -d= -f2- || true
+  grep -E "^${key}=" "$target_file" | tail -n 1 | cut -d= -f2- || true
 }
 
-set_env_value() {
+get_env_value() {
   local key="$1"
-  local value="$2"
-  python3 - "$VARLOCK_LOCAL_ENV_FILE" "$key" "$value" <<'PY'
+  get_env_value_from_file "$VARLOCK_LOCAL_ENV_FILE" "$key"
+}
+
+set_env_value_in_file() {
+  local target_file="$1"
+  local key="$2"
+  local value="$3"
+  python3 - "$target_file" "$key" "$value" <<'PY'
 from pathlib import Path
 import sys
 
@@ -138,6 +155,17 @@ if not updated:
     lines.append(f"{needle}{value}")
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  set_env_value_in_file "$VARLOCK_LOCAL_ENV_FILE" "$key" "$value"
+}
+
+clear_env_value() {
+  local key="$1"
+  set_env_value "$key" ""
 }
 
 merge_missing_keys_from_template() {
@@ -266,6 +294,7 @@ ensure_core_defaults() {
   current_user="${USER:-$(id -un)}"
   ensure_non_empty_value "APP_ENV" "local" "APP_ENV=local"
   ensure_non_empty_value "OPENCLAW_VERSION" "${OPENCLAW_VERSION:-2026.3.13}" "OpenClaw version"
+  ensure_non_empty_value "VARLOCK_SECRET_BACKEND" "local" "Varlock secret backend"
   ensure_non_empty_value "OPENCLAW_GATEWAY_TOKEN" "$(generate_secret)" "gateway token"
   ensure_non_empty_value "OPENCLAW_CONTROL_USER" "$current_user" "runtime user"
   ensure_non_empty_value "OPENCLAW_STATE_DIR" "$default_state_dir" "OpenClaw state directory"
@@ -301,7 +330,16 @@ prompt_core_settings_review() {
   set_or_prompt_value "OPENCLAW_STATE_DIR" "OpenClaw state directory" "$default_state_dir"
 }
 
-provider_env_present() {
+current_secret_backend() {
+  local backend
+  backend="$(effective_env_value VARLOCK_SECRET_BACKEND)"
+  if [[ -z "$backend" ]]; then
+    backend="local"
+  fi
+  printf '%s' "$backend"
+}
+
+local_provider_credentials_present() {
   local key
   for key in \
     OPENAI_API_KEY \
@@ -310,14 +348,48 @@ provider_env_present() {
     OPENROUTER_API_KEY \
     MOONSHOT_API_KEY \
     OLLAMA_API_KEY \
-    OPENCLAW_OLLAMA_MODEL \
-    OPENCLAW_DEFAULT_MODEL \
-    OPENCLAW_MODEL_FALLBACKS; do
+    OPENCLAW_OLLAMA_MODEL; do
     if value_is_effective "$(get_env_value "$key")"; then
       return 0
     fi
   done
   return 1
+}
+
+trim_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+append_unique_model() {
+  local candidate
+  local existing
+  candidate="$(trim_value "$1")"
+  [[ -n "$candidate" ]] || return 0
+  if [[ "${#CONFIGURED_MODEL_CHAIN[@]}" -gt 0 ]]; then
+    for existing in "${CONFIGURED_MODEL_CHAIN[@]}"; do
+      if [[ "$existing" == "$candidate" ]]; then
+        return 0
+      fi
+    done
+  fi
+  CONFIGURED_MODEL_CHAIN+=("$candidate")
+}
+
+append_unique_provider_key() {
+  local candidate="$1"
+  local existing
+  [[ -n "$candidate" ]] || return 0
+  if [[ "${#CONFIGURED_PROVIDER_KEYS[@]}" -gt 0 ]]; then
+    for existing in "${CONFIGURED_PROVIDER_KEYS[@]}"; do
+      if [[ "$existing" == "$candidate" ]]; then
+        return 0
+      fi
+    done
+  fi
+  CONFIGURED_PROVIDER_KEYS+=("$candidate")
 }
 
 provider_key_for_model_ref() {
@@ -331,6 +403,43 @@ provider_key_for_model_ref() {
     ollama) printf 'OLLAMA_API_KEY' ;;
     *) printf '' ;;
   esac
+}
+
+rebuild_model_chain_from_env() {
+  local default_model fallback_csv item
+  CONFIGURED_MODEL_CHAIN=()
+  default_model="$(effective_env_value OPENCLAW_DEFAULT_MODEL)"
+  fallback_csv="$(effective_env_value OPENCLAW_MODEL_FALLBACKS)"
+  append_unique_model "$default_model"
+  if [[ -n "$fallback_csv" ]]; then
+    IFS=',' read -r -a _fallback_items <<<"$fallback_csv"
+    for item in "${_fallback_items[@]}"; do
+      append_unique_model "$item"
+    done
+  fi
+}
+
+rebuild_provider_keys_from_model_chain() {
+  local model_ref provider_key
+  CONFIGURED_PROVIDER_KEYS=()
+  rebuild_model_chain_from_env
+  if [[ "${#CONFIGURED_MODEL_CHAIN[@]}" -gt 0 ]]; then
+    for model_ref in "${CONFIGURED_MODEL_CHAIN[@]}"; do
+      provider_key="$(provider_key_for_model_ref "$model_ref")"
+      if [[ -n "$provider_key" && "$provider_key" != "OLLAMA_API_KEY" ]]; then
+        append_unique_provider_key "$provider_key"
+      fi
+    done
+  fi
+}
+
+clear_backend_managed_local_values() {
+  local provider_key
+  if [[ "${#CONFIGURED_PROVIDER_KEYS[@]}" -gt 0 ]]; then
+    for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do
+      clear_env_value "$provider_key"
+    done
+  fi
 }
 
 ensure_provider_credentials_for_model_ref() {
@@ -387,95 +496,535 @@ EOF
   esac
 }
 
-prompt_provider_auth_setup() {
-  local selection primary_model fallback_models fallback_model
+write_plugin_file() {
+  local tmp_file="$VARLOCK_PLUGIN_ENV_FILE.tmp"
+  mkdir -p "$(dirname "$VARLOCK_PLUGIN_ENV_FILE")"
+  cat >"$tmp_file"
+  mv "$tmp_file" "$VARLOCK_PLUGIN_ENV_FILE"
+  chmod 600 "$VARLOCK_PLUGIN_ENV_FILE"
+}
+
+remove_plugin_file() {
+  rm -f "$VARLOCK_PLUGIN_ENV_FILE"
+}
+
+plugin_config_present() {
+  [[ -f "$VARLOCK_PLUGIN_ENV_FILE" ]]
+}
+
+configure_backend_local() {
+  set_env_value "VARLOCK_SECRET_BACKEND" "local"
+  clear_env_value "VARLOCK_SECRET_BACKEND_MODE"
+  clear_env_value "VARLOCK_SECRET_BACKEND_AUTH"
+  remove_plugin_file
+}
+
+configure_backend_1password() {
+  local environment_id op_token account allow_app_auth
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: 1Password backend selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: 1Password =="
+  echo "Recommended: use a 1Password Environment with a service account token."
+  if prompt_yes_no "Use desktop app auth via the local op CLI instead?" "n"; then
+    allow_app_auth="true"
+    op_token=""
+    account="$(prompt_value "Optional 1Password account shorthand" "")"
+    environment_id="$(prompt_value "1Password Environment ID")"
+    set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "desktop-app"
+  else
+    allow_app_auth="false"
+    op_token="$(prompt_value "1Password service account token" "" 1)"
+    account="$(prompt_value "Optional 1Password account shorthand" "")"
+    environment_id="$(prompt_value "1Password Environment ID")"
+    set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "service-account"
+  fi
+  set_env_value "VARLOCK_SECRET_BACKEND" "1password"
+  set_env_value "VARLOCK_SECRET_BACKEND_MODE" "environment"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/1password-plugin@${VARLOCK_PLUGIN_VERSION_1PASSWORD})
+# @initOp(token=\$OP_TOKEN, allowAppAuth=${allow_app_auth}${account:+, account=${account}})
+# @setValuesBulk(opLoadEnvironment(${environment_id}))
+# ---
+# @type=opServiceAccountToken
+OP_TOKEN=${op_token}
+$(for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do printf '%s=\n' "$provider_key"; done)
+EOF
+}
+
+configure_backend_aws() {
+  local store_type region name_prefix auth_mode access_key_id secret_access_key session_token profile resolver
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: AWS backend selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: AWS =="
+  echo "  1. Secrets Manager"
+  echo "  2. Systems Manager Parameter Store"
+  while true; do
+    store_type="$(prompt_value "Selection" "1")"
+    case "$store_type" in
+      1)
+        set_env_value "VARLOCK_SECRET_BACKEND" "aws-secrets-manager"
+        resolver="awsSecret"
+        break
+        ;;
+      2)
+        set_env_value "VARLOCK_SECRET_BACKEND" "aws-parameter-store"
+        resolver="awsParam"
+        break
+        ;;
+      *)
+        echo "Please choose 1 or 2." >&2
+        ;;
+    esac
+  done
+  region="$(prompt_value "AWS region" "us-east-1")"
+  name_prefix="$(prompt_value "Optional secret name prefix" "")"
+  echo "Choose AWS auth mode:"
+  echo "  1. Named profile from ~/.aws/credentials"
+  echo "  2. Explicit access keys"
+  while true; do
+    auth_mode="$(prompt_value "Selection" "1")"
+    case "$auth_mode" in
+      1)
+        profile="$(prompt_value "AWS profile name" "default")"
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "aws-profile"
+        break
+        ;;
+      2)
+        access_key_id="$(prompt_value "AWS access key ID")"
+        secret_access_key="$(prompt_value "AWS secret access key" "" 1)"
+        session_token="$(prompt_value "Optional AWS session token" "" 1)"
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "aws-access-key"
+        break
+        ;;
+      *)
+        echo "Please choose 1 or 2." >&2
+        ;;
+    esac
+  done
+  set_env_value "VARLOCK_SECRET_BACKEND_MODE" "$([[ "$resolver" == "awsSecret" ]] && echo secrets-manager || echo parameter-store)"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/aws-secrets-plugin@${VARLOCK_PLUGIN_VERSION_AWS})
+# @initAws(region=${region}${name_prefix:+, namePrefix="${name_prefix}"}${profile:+, profile="${profile}"}${access_key_id:+, accessKeyId=\$AWS_ACCESS_KEY_ID}${secret_access_key:+, secretAccessKey=\$AWS_SECRET_ACCESS_KEY}${session_token:+, sessionToken=\$AWS_SESSION_TOKEN})
+# ---
+$(if [[ -n "$access_key_id" ]]; then cat <<'AUTH'
+# @type=awsAccessKey
+AWS_ACCESS_KEY_ID=
+# @type=awsSecretKey
+AWS_SECRET_ACCESS_KEY=
+AUTH
+fi)
+$(if [[ -n "$session_token" ]]; then printf 'AWS_SESSION_TOKEN=\n'; fi)
+$(for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do printf '%s=%s()\n' "$provider_key" "$resolver"; done)
+EOF
+  if [[ -n "$access_key_id" ]]; then
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AWS_ACCESS_KEY_ID" "$access_key_id"
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AWS_SECRET_ACCESS_KEY" "$secret_access_key"
+    if [[ -n "$session_token" ]]; then
+      set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AWS_SESSION_TOKEN" "$session_token"
+    fi
+  fi
+}
+
+configure_backend_azure() {
+  local vault_url auth_mode tenant_id client_id client_secret
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: Azure backend selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: Azure Key Vault =="
+  vault_url="$(prompt_value "Azure Key Vault URL" "")"
+  echo "Choose Azure auth mode:"
+  echo "  1. Service principal"
+  echo "  2. Azure CLI / managed identity"
+  while true; do
+    auth_mode="$(prompt_value "Selection" "1")"
+    case "$auth_mode" in
+      1)
+        tenant_id="$(prompt_value "Azure tenant ID")"
+        client_id="$(prompt_value "Azure client ID")"
+        client_secret="$(prompt_value "Azure client secret" "" 1)"
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "service-principal"
+        break
+        ;;
+      2)
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "azure-cli"
+        break
+        ;;
+      *)
+        echo "Please choose 1 or 2." >&2
+        ;;
+    esac
+  done
+  set_env_value "VARLOCK_SECRET_BACKEND" "azure-key-vault"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/azure-key-vault-plugin@${VARLOCK_PLUGIN_VERSION_AZURE})
+# @initAzure(vaultUrl="${vault_url}"${tenant_id:+, tenantId=\$AZURE_TENANT_ID}${client_id:+, clientId=\$AZURE_CLIENT_ID}${client_secret:+, clientSecret=\$AZURE_CLIENT_SECRET})
+# ---
+$(if [[ -n "$tenant_id" ]]; then cat <<'AUTH'
+# @type=azureTenantId
+AZURE_TENANT_ID=
+# @type=azureClientId
+AZURE_CLIENT_ID=
+# @type=azureClientSecret
+AZURE_CLIENT_SECRET=
+AUTH
+fi)
+$(for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do printf '%s=azureSecret()\n' "$provider_key"; done)
+EOF
+  if [[ -n "$tenant_id" ]]; then
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AZURE_TENANT_ID" "$tenant_id"
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AZURE_CLIENT_ID" "$client_id"
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "AZURE_CLIENT_SECRET" "$client_secret"
+  fi
+  clear_env_value "VARLOCK_SECRET_BACKEND_MODE"
+}
+
+configure_backend_google() {
+  local project_id auth_mode service_account_json
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: Google Secret Manager selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: Google Secret Manager =="
+  project_id="$(prompt_value "Google Cloud project ID" "")"
+  echo "Choose Google auth mode:"
+  echo "  1. Application Default Credentials"
+  echo "  2. Service account JSON"
+  while true; do
+    auth_mode="$(prompt_value "Selection" "1")"
+    case "$auth_mode" in
+      1)
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "gcp-adc"
+        break
+        ;;
+      2)
+        service_account_json="$(prompt_value "GCP service account JSON" "" 1)"
+        set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "gcp-service-account-json"
+        break
+        ;;
+      *)
+        echo "Please choose 1 or 2." >&2
+        ;;
+    esac
+  done
+  set_env_value "VARLOCK_SECRET_BACKEND" "google-secret-manager"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/google-secret-manager-plugin@${VARLOCK_PLUGIN_VERSION_GCP})
+# @initGsm(projectId=${project_id}${service_account_json:+, credentials=\$GCP_SA_KEY})
+# ---
+$(if [[ -n "$service_account_json" ]]; then cat <<'AUTH'
+# @type=gcpServiceAccountJson
+GCP_SA_KEY=
+AUTH
+fi)
+$(for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do printf '%s=gsm()\n' "$provider_key"; done)
+EOF
+  if [[ -n "$service_account_json" ]]; then
+    set_env_value_in_file "$VARLOCK_PLUGIN_ENV_FILE" "GCP_SA_KEY" "$service_account_json"
+  fi
+  clear_env_value "VARLOCK_SECRET_BACKEND_MODE"
+}
+
+configure_backend_infisical() {
+  local project_id environment_name client_id client_secret site_url secret_path
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: Infisical backend selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: Infisical =="
+  project_id="$(prompt_value "Infisical project ID" "")"
+  environment_name="$(prompt_value "Infisical environment" "dev")"
+  client_id="$(prompt_value "Infisical client ID")"
+  client_secret="$(prompt_value "Infisical client secret" "" 1)"
+  site_url="$(prompt_value "Optional Infisical site URL" "")"
+  secret_path="$(prompt_value "Optional default secret path" "/")"
+  set_env_value "VARLOCK_SECRET_BACKEND" "infisical"
+  set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "universal-auth"
+  clear_env_value "VARLOCK_SECRET_BACKEND_MODE"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/infisical-plugin@${VARLOCK_PLUGIN_VERSION_INFISICAL})
+# @initInfisical(projectId=${project_id}, environment=${environment_name}, clientId=\$INFISICAL_CLIENT_ID, clientSecret=\$INFISICAL_CLIENT_SECRET${site_url:+, siteUrl="${site_url}"}${secret_path:+, secretPath="${secret_path}"})
+# @setValuesBulk(infisicalBulk())
+# ---
+# @type=infisicalClientId
+INFISICAL_CLIENT_ID=${client_id}
+# @type=infisicalClientSecret
+INFISICAL_CLIENT_SECRET=${client_secret}
+$(for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do printf '%s=\n' "$provider_key"; done)
+EOF
+}
+
+configure_backend_bitwarden() {
+  local access_token api_url identity_url provider_key secret_uuid
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    return 0
+  fi
+  if ! interactive_mode; then
+    echo "ERROR: Bitwarden backend selection requires an interactive terminal to generate $VARLOCK_PLUGIN_ENV_FILE." >&2
+    exit 1
+  fi
+  echo "== Varlock backend: Bitwarden =="
+  access_token="$(prompt_value "Bitwarden machine account access token" "" 1)"
+  api_url="$(prompt_value "Optional Bitwarden API URL" "")"
+  identity_url="$(prompt_value "Optional Bitwarden identity URL" "")"
+  set_env_value "VARLOCK_SECRET_BACKEND" "bitwarden"
+  set_env_value "VARLOCK_SECRET_BACKEND_AUTH" "machine-account"
+  clear_env_value "VARLOCK_SECRET_BACKEND_MODE"
+  clear_backend_managed_local_values
+  write_plugin_file <<EOF
+# @plugin(@varlock/bitwarden-plugin@${VARLOCK_PLUGIN_VERSION_BITWARDEN})
+# @initBitwarden(accessToken=\$BITWARDEN_ACCESS_TOKEN${api_url:+, apiUrl="${api_url}"}${identity_url:+, identityUrl="${identity_url}"})
+# ---
+# @type=bitwardenAccessToken
+BITWARDEN_ACCESS_TOKEN=${access_token}
+EOF
+  for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do
+    secret_uuid="$(prompt_value "Bitwarden secret UUID for ${provider_key}" "")"
+    if [[ -n "$secret_uuid" ]]; then
+      printf '%s=bitwarden("%s")\n' "$provider_key" "$secret_uuid" >>"$VARLOCK_PLUGIN_ENV_FILE"
+    fi
+  done
+}
+
+configure_selected_secret_backend() {
+  local backend
+  backend="$(current_secret_backend)"
+  rebuild_provider_keys_from_model_chain
+  case "$backend" in
+    local) return 0 ;;
+    1password) configure_backend_1password ;;
+    aws-secrets-manager|aws-parameter-store) configure_backend_aws ;;
+    azure-key-vault) configure_backend_azure ;;
+    google-secret-manager) configure_backend_google ;;
+    infisical) configure_backend_infisical ;;
+    bitwarden) configure_backend_bitwarden ;;
+    *)
+      echo "ERROR: Unsupported VARLOCK_SECRET_BACKEND=${backend}." >&2
+      exit 1
+      ;;
+  esac
+}
+
+plugin_file_covers_configured_provider_keys() {
+  local provider_key
+  if [[ ! -f "$VARLOCK_PLUGIN_ENV_FILE" ]]; then
+    return 1
+  fi
+  for provider_key in "${CONFIGURED_PROVIDER_KEYS[@]}"; do
+    if ! grep -q -E "^${provider_key}=" "$VARLOCK_PLUGIN_ENV_FILE"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+prompt_secret_backend_setup() {
+  local selection backend
+  backend="$(current_secret_backend)"
   if ! interactive_mode; then
     return 0
   fi
-  if provider_env_present; then
+  if [[ "$backend" != "local" && -f "$VARLOCK_PLUGIN_ENV_FILE" ]]; then
+    echo "Varlock secret backend: $backend"
+    if ! prompt_yes_no "Review or change the configured secret backend?" "n"; then
+      return 0
+    fi
+  elif local_provider_credentials_present; then
+    if ! prompt_yes_no "Provider auth is already configured locally. Switch to a managed secret backend instead?" "n"; then
+      return 0
+    fi
+  else
+    echo "== Secret backend for provider auth =="
+    echo "StrongClaw can keep provider keys in .env.local or fetch them via a supported Varlock plugin."
+  fi
+
+  echo "Choose the provider secret backend:"
+  echo "  1. Repo-local .env.local"
+  echo "  2. 1Password"
+  echo "  3. AWS Secrets Manager"
+  echo "  4. AWS Parameter Store"
+  echo "  5. Azure Key Vault"
+  echo "  6. Bitwarden Secrets Manager"
+  echo "  7. Google Secret Manager"
+  echo "  8. Infisical"
+
+  while true; do
+    selection="$(prompt_value "Selection" "1")"
+    case "$selection" in
+      1) configure_backend_local; return 0 ;;
+      2) set_env_value "VARLOCK_SECRET_BACKEND" "1password"; return 0 ;;
+      3) set_env_value "VARLOCK_SECRET_BACKEND" "aws-secrets-manager"; return 0 ;;
+      4) set_env_value "VARLOCK_SECRET_BACKEND" "aws-parameter-store"; return 0 ;;
+      5) set_env_value "VARLOCK_SECRET_BACKEND" "azure-key-vault"; return 0 ;;
+      6) set_env_value "VARLOCK_SECRET_BACKEND" "bitwarden"; return 0 ;;
+      7) set_env_value "VARLOCK_SECRET_BACKEND" "google-secret-manager"; return 0 ;;
+      8) set_env_value "VARLOCK_SECRET_BACKEND" "infisical"; return 0 ;;
+      *) echo "Please choose 1-8." >&2 ;;
+    esac
+  done
+}
+
+prompt_model_provider_setup() {
+  local selection primary_model fallback_models fallback_model backend
+  backend="$(current_secret_backend)"
+  if ! interactive_mode; then
+    return 0
+  fi
+  if [[ "$backend" == "local" ]] && local_provider_credentials_present; then
+    return 0
+  fi
+  if value_is_effective "$(effective_env_value OPENCLAW_DEFAULT_MODEL)"; then
+    rebuild_provider_keys_from_model_chain
     return 0
   fi
 
-  echo "== Provider auth in Varlock =="
-  cat <<'EOF'
+  if [[ "$backend" == "local" ]]; then
+    echo "== Provider auth in Varlock =="
+    cat <<'EOF'
 No model/provider auth is stored in the repo-local Varlock env yet.
 
 You can:
 - save API-key-based or Ollama auth into platform/configs/varlock/.env.local now
 - or leave auth out of Varlock and continue to OpenClaw's interactive model setup next
 EOF
-  if ! prompt_yes_no "Configure env-based provider auth now?" "n"; then
-    return 0
+    if ! prompt_yes_no "Configure env-based provider auth now?" "n"; then
+      return 0
+    fi
+  else
+    echo "== Model provider selection =="
+    echo "Select the primary model chain. StrongClaw will wire the matching provider keys through $(current_secret_backend)."
   fi
 
-  echo "Choose the primary provider for env-based auth:"
-  echo "  1. OpenAI API key"
-  echo "  2. Anthropic API key"
-  echo "  3. Z.AI / GLM API key"
-  echo "  4. OpenRouter API key"
-  echo "  5. Moonshot API key"
+  echo "Choose the primary provider:"
+  echo "  1. OpenAI"
+  echo "  2. Anthropic"
+  echo "  3. Z.AI / GLM"
+  echo "  4. OpenRouter"
+  echo "  5. Moonshot"
   echo "  6. Ollama local model"
-  echo "  7. Skip env-based auth and continue to OpenClaw model setup"
+  echo "  7. Skip and rely on OpenClaw's interactive model setup"
 
   while true; do
     selection="$(prompt_value "Selection" "7")"
     case "$selection" in
-      1)
-        primary_model="openai/gpt-5.4"
-        break
-        ;;
-      2)
-        primary_model="anthropic/claude-opus-4-6"
-        break
-        ;;
-      3)
-        primary_model="zai/glm-5"
-        break
-        ;;
-      4)
-        primary_model="$(prompt_value "OpenRouter primary model ref")"
-        break
-        ;;
-      5)
-        primary_model="$(prompt_value "Moonshot primary model ref")"
-        break
-        ;;
-      6)
-        primary_model="ollama/$(prompt_value "Ollama primary model" "$(effective_env_value OPENCLAW_OLLAMA_MODEL)")"
-        break
-        ;;
-      7)
-        return 0
-        ;;
-      *)
-        echo "Please choose 1-7." >&2
-        ;;
+      1) primary_model="openai/gpt-5.4"; break ;;
+      2) primary_model="anthropic/claude-opus-4-6"; break ;;
+      3) primary_model="zai/glm-5"; break ;;
+      4) primary_model="$(prompt_value "OpenRouter primary model ref")"; break ;;
+      5) primary_model="$(prompt_value "Moonshot primary model ref")"; break ;;
+      6) primary_model="ollama/$(prompt_value "Ollama primary model" "$(effective_env_value OPENCLAW_OLLAMA_MODEL)")"; break ;;
+      7) return 0 ;;
+      *) echo "Please choose 1-7." >&2 ;;
     esac
   done
 
   if [[ -z "$primary_model" || "$primary_model" == "ollama/" ]]; then
-    echo "ERROR: A concrete primary model ref is required for env-based provider auth." >&2
+    echo "ERROR: A concrete primary model ref is required." >&2
     return 1
   fi
 
   set_env_value "OPENCLAW_DEFAULT_MODEL" "$primary_model"
-  ensure_provider_credentials_for_model_ref "$primary_model"
-
   fallback_models="$(prompt_value "Optional fallback model refs (comma-separated, blank to skip)" "$(effective_env_value OPENCLAW_MODEL_FALLBACKS)")"
   set_env_value "OPENCLAW_MODEL_FALLBACKS" "$fallback_models"
-  if [[ -n "$fallback_models" ]]; then
-    IFS=',' read -r -a _fallback_items <<<"$fallback_models"
-    for fallback_model in "${_fallback_items[@]}"; do
-      fallback_model="${fallback_model#"${fallback_model%%[![:space:]]*}"}"
-      fallback_model="${fallback_model%"${fallback_model##*[![:space:]]}"}"
-      ensure_provider_credentials_for_model_ref "$fallback_model"
-    done
-  fi
+  rebuild_provider_keys_from_model_chain
 
-  cat <<EOF
+  if [[ "$backend" == "local" ]]; then
+    ensure_provider_credentials_for_model_ref "$primary_model"
+    if [[ -n "$fallback_models" ]]; then
+      IFS=',' read -r -a _fallback_items <<<"$fallback_models"
+      for fallback_model in "${_fallback_items[@]}"; do
+        fallback_model="$(trim_value "$fallback_model")"
+        ensure_provider_credentials_for_model_ref "$fallback_model"
+      done
+    fi
+    cat <<EOF
 Stored provider auth hints in $VARLOCK_LOCAL_ENV_FILE.
 OpenClaw model setup will use OPENCLAW_DEFAULT_MODEL=${primary_model}.
 EOF
+    return 0
+  fi
+
+  clear_backend_managed_local_values
+}
+
+validate_secret_backend_configuration() {
+  local backend auth_mode
+  backend="$(current_secret_backend)"
+  auth_mode="$(effective_env_value VARLOCK_SECRET_BACKEND_AUTH)"
+  rebuild_provider_keys_from_model_chain
+  if [[ "$backend" == "local" ]]; then
+    if [[ -f "$VARLOCK_PLUGIN_ENV_FILE" ]]; then
+      if [[ "$CHECK_ONLY" -eq 1 ]] || ! interactive_mode; then
+        echo "ERROR: VARLOCK_SECRET_BACKEND=local, but $VARLOCK_PLUGIN_ENV_FILE still exists." >&2
+        echo "Remove the plugin overlay or rerun $ROOT/scripts/bootstrap/configure_varlock_env.sh interactively to switch back to local secrets cleanly." >&2
+        exit 1
+      fi
+      remove_plugin_file
+      echo "Removed stale managed-backend overlay at $VARLOCK_PLUGIN_ENV_FILE."
+    fi
+    return 0
+  fi
+  if [[ ! -f "$VARLOCK_PLUGIN_ENV_FILE" ]]; then
+    if [[ "$CHECK_ONLY" -eq 1 ]] || ! interactive_mode; then
+      echo "ERROR: VARLOCK_SECRET_BACKEND=${backend}, but $VARLOCK_PLUGIN_ENV_FILE is missing." >&2
+      echo "Run $ROOT/scripts/bootstrap/configure_varlock_env.sh in an interactive terminal to finish backend setup." >&2
+      exit 1
+    fi
+    configure_selected_secret_backend
+    return 0
+  fi
+  if ! plugin_file_covers_configured_provider_keys; then
+    if [[ "$CHECK_ONLY" -eq 1 ]] || ! interactive_mode; then
+      echo "ERROR: $VARLOCK_PLUGIN_ENV_FILE does not define resolver entries for the configured provider model chain." >&2
+      echo "Run $ROOT/scripts/bootstrap/configure_varlock_env.sh to refresh the backend mapping." >&2
+      exit 1
+    fi
+    configure_selected_secret_backend
+  fi
+  case "$auth_mode" in
+    desktop-app)
+      if ! command -v op >/dev/null 2>&1; then
+        echo "ERROR: 1Password desktop app auth requires the \`op\` CLI on PATH." >&2
+        exit 1
+      fi
+      ;;
+    azure-cli)
+      if ! command -v az >/dev/null 2>&1; then
+        echo "ERROR: Azure CLI auth requires the \`az\` CLI on PATH." >&2
+        exit 1
+      fi
+      ;;
+    gcp-adc)
+      if ! command -v gcloud >/dev/null 2>&1; then
+        echo "ERROR: Google ADC auth requires the \`gcloud\` CLI on PATH." >&2
+        exit 1
+      fi
+      ;;
+  esac
 }
 
 validate_with_varlock() {
@@ -490,7 +1039,7 @@ validate_with_varlock() {
   fi
   if ! run_varlock load --path "$VARLOCK_ENV_DIR" >/dev/null; then
     echo "ERROR: Varlock failed to validate the env contract in $VARLOCK_ENV_DIR." >&2
-    echo "Review $VARLOCK_LOCAL_ENV_FILE and rerun:" >&2
+    echo "Review $VARLOCK_LOCAL_ENV_FILE${VARLOCK_PLUGIN_ENV_FILE:+ and $VARLOCK_PLUGIN_ENV_FILE} and rerun:" >&2
     echo "  varlock load --path $VARLOCK_ENV_DIR" >&2
     exit 1
   fi
@@ -501,7 +1050,9 @@ ensure_env_file_exists
 merge_missing_keys_from_template
 ensure_core_defaults
 prompt_core_settings_review
-prompt_provider_auth_setup
+prompt_secret_backend_setup
+prompt_model_provider_setup
+validate_secret_backend_configuration
 validate_with_varlock
 
 if interactive_mode; then
@@ -511,6 +1062,6 @@ Varlock env contract is ready.
 What happens next:
 - OpenClaw model/provider auth will be configured or verified during setup
 - Host services can be activated safely with the prepared env contract
-- You can edit $VARLOCK_LOCAL_ENV_FILE manually at any time and rerun setup
+- You can edit $VARLOCK_LOCAL_ENV_FILE and $VARLOCK_PLUGIN_ENV_FILE manually at any time and rerun setup
 EOF
 fi

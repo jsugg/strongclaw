@@ -6,13 +6,17 @@ HOST_OS="$(uname -s)"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.3.13}"
 ACPX_VERSION="${ACPX_VERSION:-0.3.0}"
 UV_VERSION="${UV_VERSION:-0.10.9}"
+VARLOCK_VERSION="${VARLOCK_VERSION:-0.5.0}"
 OPENCLAW_CONFIG_PROFILE="${OPENCLAW_CONFIG_PROFILE:-default}"
-BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
 UV_BIN_DIR="${HOME}/.local/bin"
-VARLOCK_BIN_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/varlock/bin"
-LEGACY_VARLOCK_BIN_DIR="$HOME/.varlock/bin"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/docker_runtime.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/setup_state.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/app_paths.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/varlock.sh"
 
 prepend_path() {
   local candidate="$1"
@@ -78,17 +82,22 @@ ensure_node_runtime() {
   }
 }
 
-ensure_varlock() {
-  prepend_path "$VARLOCK_BIN_DIR"
-  prepend_path "$LEGACY_VARLOCK_BIN_DIR"
-  if command -v varlock >/dev/null 2>&1; then
+ensure_linux_node_runtime() {
+  if node_satisfies_minimum; then
     return 0
   fi
-
-  curl -sSfL https://varlock.dev/install.sh | sh -s -- --force-no-brew
-
-  command -v varlock >/dev/null 2>&1 || {
-    echo "varlock install failed" >&2
+  command -v sudo >/dev/null 2>&1 || {
+    echo "sudo is required to install node >= 22.16 on Linux." >&2
+    exit 1
+  }
+  command -v apt-get >/dev/null 2>&1 || {
+    echo "apt-get is required to install node >= 22.16 on Linux." >&2
+    exit 1
+  }
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  node_satisfies_minimum || {
+    echo "node >= 22.16 is required" >&2
     exit 1
   }
 }
@@ -127,8 +136,7 @@ case "$HOST_OS" in
     ensure_command_or_brew sqlite3 sqlite
     ensure_python_runtime
     ensure_node_runtime
-    ensure_varlock
-    ensure_command_or_brew bun bun
+    ensure_varlock_installed "$VARLOCK_VERSION"
     ensure_docker_compatible_runtime darwin
     ensure_uv
     uv sync --project "$ROOT" --locked --extra dev
@@ -137,16 +145,12 @@ case "$HOST_OS" in
     ;;
   Linux)
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip jq sqlite3 nodejs npm curl unzip
-    if ! command -v bun >/dev/null 2>&1; then
-      curl -fsSL https://bun.sh/install | bash
-    fi
-    export BUN_INSTALL
-    export PATH="$BUN_INSTALL/bin:$PATH"
-    ensure_varlock
+    sudo apt-get install -y python3 python3-pip jq sqlite3 curl unzip ca-certificates gnupg
+    ensure_linux_node_runtime
+    ensure_varlock_installed "$VARLOCK_VERSION"
     ensure_docker_compatible_runtime linux
     ensure_uv
-    uv sync --project "$ROOT" --locked --extra dev
+    uv sync --project "$ROOT" --python 3.12 --locked --extra dev
     prepend_path "$ROOT/.venv/bin"
     sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
     ;;
@@ -166,9 +170,10 @@ if [[ "$HOST_OS" == "Linux" && "$DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP" -eq 1 ]]
   repair_linux_runtime_user_docker_access "$(id -un)"
 fi
 
-mkdir -p "$HOME/.openclaw/clawops" "$HOME/.openclaw/logs" "$ROOT/platform/compose/state"
+mkdir -p "$(strongclaw_data_dir)" "$(strongclaw_state_dir)" "$(strongclaw_log_dir)" "$(strongclaw_compose_state_dir)"
 command -v openclaw >/dev/null 2>&1 || { echo "openclaw install failed" >&2; exit 1; }
 command -v acpx >/dev/null 2>&1 || { echo "acpx install failed" >&2; exit 1; }
 "$ROOT/scripts/bootstrap/render_openclaw_config.sh"
 "$ROOT/scripts/bootstrap/doctor_host.sh"
+mark_bootstrap_complete "$OPENCLAW_CONFIG_PROFILE" "$HOST_OS" "$(id -un)"
 echo "Bootstrap complete."

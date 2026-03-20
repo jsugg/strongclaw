@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_yaml
 from clawops.workflow_runner import WorkflowRunner, main
 
@@ -113,7 +114,9 @@ def test_workflow_main_allows_untrusted_paths_with_explicit_override(
 
 def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "state"))
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "module.py").write_text("def run_review():\n    return 'ok'\n", encoding="utf-8")
@@ -173,7 +176,7 @@ def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     assert [item.ok for item in results] == [True, True, True]
     assert (repo / ".clawops" / "op_journal.sqlite").exists()
     assert (repo / ".clawops" / "context.sqlite").exists()
-    context_pack = repo / ".runs" / "context-packs" / "context.md"
+    context_pack = scoped_state_dir(repo, category="context-packs") / "context.md"
     assert context_pack.exists()
     assert "run_review" in context_pack.read_text(encoding="utf-8")
     assert results[2].message.endswith(str(context_pack))

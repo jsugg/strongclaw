@@ -36,7 +36,7 @@ echo "== Python tests =="
 uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"
 
 echo "== Harness smoke =="
-"$ROOT/scripts/bootstrap/run_harness_smoke.sh" "$ROOT/.runs"
+"$ROOT/scripts/bootstrap/run_harness_smoke.sh"
 
 echo "== Sidecar static verification =="
 "$ROOT/scripts/bootstrap/verify_sidecars.sh" --skip-runtime

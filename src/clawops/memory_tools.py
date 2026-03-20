@@ -11,6 +11,7 @@ import shutil
 from collections import Counter
 from typing import Any, Final
 
+from clawops.app_paths import scoped_state_dir
 from clawops.common import ResultSummary, load_json, write_json
 from clawops.memory_v2 import MemoryV2Engine, default_config_path, load_config
 from clawops.process_runner import run_command
@@ -53,7 +54,7 @@ def _scope_slug(scope: str) -> str:
 
 def _artifact_dir(engine: MemoryV2Engine) -> pathlib.Path:
     """Return the default directory for migration artifacts."""
-    return engine.config.workspace_root / ".runs" / "memory"
+    return scoped_state_dir(engine.config.workspace_root, category="memory")
 
 
 def _default_import_output(engine: MemoryV2Engine, scope: str) -> pathlib.Path:

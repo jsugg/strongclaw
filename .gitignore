@@ -18,4 +18,11 @@ build/
 .DS_Store
 .tmp/
 .serena/
-plan2.md
+.local/
+plan.md
+platform/compose/state/
+platform/workspace/*/.openclaw/workspace-state.json
+platform/configs/varlock/varlock.types.d.ts
+platform/configs/varlock/.env.plugins
+vendor/lossless-claw/
+.coverage

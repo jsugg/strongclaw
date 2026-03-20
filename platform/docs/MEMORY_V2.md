@@ -104,7 +104,11 @@ PYTHONPATH=src python3 -m clawops.openclaw_config \
   --output /tmp/strongclaw-lossless-memory-v2.json
 ```
 
-The combined lossless profile no longer assumes a vendored plugin path. Set `OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH` to the checked-out plugin directory, or vendor the plugin under `platform/plugins/lossless-claw`, before rendering either lossless overlay.
+The combined lossless profile now resolves the managed `lossless-claw` checkout
+from the StrongClaw app-data directory first, then falls back to
+`OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH`, `vendor/lossless-claw`, and finally
+`platform/plugins/lossless-claw`. Set `OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH`
+explicitly when you want to override that default.
 
 ## Direct CLI Usage
 

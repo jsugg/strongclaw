@@ -9,6 +9,8 @@ CONFIGURE_MODEL_AUTH_SCRIPT="${CONFIGURE_MODEL_AUTH_SCRIPT:-$ROOT/scripts/bootst
 source "$ROOT/scripts/lib/openclaw.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/clawops.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/docker_runtime.sh"
 
 SKIP_RUNTIME=0
 PROBE_MODEL_AUTH=1
@@ -76,8 +78,19 @@ run_check \
 
 run_check \
   "Host toolchain and rendered config" \
-  "$ROOT/scripts/bootstrap/setup.sh --skip-bootstrap" \
+  "clawops setup" \
   run_shell_entrypoint "$DOCTOR_HOST_SCRIPT"
+
+if [[ "$SKIP_RUNTIME" -eq 0 && "$(uname -s)" == "Linux" ]] && docker_shell_refresh_required; then
+  if docker_backend_ready; then
+    clear_docker_shell_refresh_required
+  else
+    run_check \
+      "Linux docker session refresh" \
+      "Open a fresh login shell, then rerun clawops setup" \
+      false
+  fi
+fi
 
 run_check \
   "OpenClaw model readiness" \
