@@ -174,6 +174,9 @@ async function main() {
     assert.match(infoOutput, /CLI commands:\s+memory-v2/i);
     assert.match(infoOutput, /\bmemory\b/i);
 
+    const builtinStatusOutput = stripPluginLogs(await runOpenClaw(profile, ["memory", "status", "--json"]));
+    assert.doesNotMatch(builtinStatusOutput, /backendActive|schemaVersion/);
+
     const statusOutput = stripPluginLogs(await runOpenClaw(profile, ["memory-v2", "status", "--json"]));
     assert.match(statusOutput, /backendActive|schemaVersion/);
 
