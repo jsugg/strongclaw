@@ -258,10 +258,17 @@ def verify_sidecars(
         container_port=9464,
         require_healthcheck=False,
     )
+    qdrant_checks, qdrant_port = _check_required_service(
+        compose,
+        service_name="qdrant",
+        container_port=6333,
+        require_healthcheck=True,
+    )
     checks.extend(postgres_checks)
     checks.extend(litellm_checks)
     checks.extend(otlp_checks)
     checks.extend(metrics_checks)
+    checks.extend(qdrant_checks)
 
     if skip_runtime:
         checks.append(_ok("runtime-probes", "runtime probes skipped"))
@@ -287,10 +294,17 @@ def verify_sidecars(
                 f"http://{metrics_port.host}:{metrics_port.host_port}/metrics",
             )
         )
+    if qdrant_port is not None:
+        checks.append(
+            _check_http_endpoint(
+                "qdrant-runtime",
+                f"http://{qdrant_port.host}:{qdrant_port.host_port}/healthz",
+            )
+        )
     if loopback_script is not None:
         discovered_ports = [
             published.host_port
-            for published in (postgres_port, litellm_port, otlp_port, metrics_port)
+            for published in (postgres_port, litellm_port, otlp_port, metrics_port, qdrant_port)
             if published is not None
         ]
         checks.append(_check_loopback_probe(loopback_script, discovered_ports))

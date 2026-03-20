@@ -359,13 +359,16 @@ class _FakeQdrantBackend:
         self.upsert_calls: list[list[dict[str, Any]]] = []
         self.delete_calls: list[list[str]] = []
         self.search_results: list[DenseSearchCandidate] = []
+        self.sparse_search_results: list[Any] = []
         self.raise_on_search = False
+        self.include_sparse_calls: list[bool] = []
 
     def health(self) -> dict[str, Any]:
         return {"enabled": True, "healthy": True, "collection": "test"}
 
-    def ensure_collection(self, *, vector_size: int) -> None:
+    def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
         self.ensure_calls.append(vector_size)
+        self.include_sparse_calls.append(include_sparse)
 
     def upsert_points(self, points: list[dict[str, Any]]) -> None:
         self.upsert_calls.append(list(points))
@@ -373,13 +376,29 @@ class _FakeQdrantBackend:
     def delete_points(self, point_ids: list[str]) -> None:
         self.delete_calls.append(list(point_ids))
 
-    def search(
+    def search_dense(
         self, *, vector: list[float], limit: int, mode: str, scope: str | None
     ) -> list[DenseSearchCandidate]:
         del vector, limit, mode, scope
         if self.raise_on_search:
             raise RuntimeError("dense backend unavailable")
         return list(self.search_results)
+
+    def search_sparse(
+        self,
+        *,
+        vector: dict[str, list[int] | list[float]],
+        limit: int,
+        mode: str,
+        scope: str | None,
+    ) -> list[Any]:
+        del vector, limit, mode, scope
+        return list(self.sparse_search_results)
+
+    def search(
+        self, *, vector: list[float], limit: int, mode: str, scope: str | None
+    ) -> list[DenseSearchCandidate]:
+        return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
 
 
 def test_memory_v2_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) -> None:
@@ -456,6 +475,86 @@ def test_memory_v2_dense_backend_falls_back_to_sqlite(tmp_path: pathlib.Path) ->
     assert hits
     assert hits[0].path == "docs/runbook.md"
     assert hits[0].backend == "sqlite_fts"
+
+
+def test_memory_v2_load_config_resolves_required_env_backed_strings(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2-env.yaml"
+    config_path.write_text(
+        textwrap.dedent("""
+            storage:
+              db_path: .openclaw/test-memory-v2.sqlite
+            workspace:
+              root: .
+              include_default_memory: true
+              memory_file_names:
+                - MEMORY.md
+              daily_dir: memory
+              bank_dir: bank
+            corpus:
+              paths: []
+            limits:
+              max_snippet_chars: 240
+              default_max_results: 6
+            backend:
+              active: qdrant_sparse_dense_hybrid
+            embedding:
+              enabled: true
+              provider: compatible-http
+              model: os.environ/TEST_MEMORY_V2_EMBED_MODEL
+              base_url: os.environ/TEST_MEMORY_V2_EMBED_URL
+            qdrant:
+              enabled: true
+              url: os.environ/TEST_MEMORY_V2_QDRANT_URL
+            """).strip() + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TEST_MEMORY_V2_EMBED_MODEL", "memory-v2-embedding")
+    monkeypatch.setenv("TEST_MEMORY_V2_EMBED_URL", "http://127.0.0.1:4000/v1")
+    monkeypatch.setenv("TEST_MEMORY_V2_QDRANT_URL", "http://127.0.0.1:6333")
+
+    config = load_config(config_path)
+
+    assert config.embedding.model == "memory-v2-embedding"
+    assert config.embedding.base_url == "http://127.0.0.1:4000/v1"
+    assert config.qdrant.url == "http://127.0.0.1:6333"
+
+
+def test_memory_v2_load_config_rejects_missing_required_env_backed_strings(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2-env.yaml"
+    config_path.write_text(
+        textwrap.dedent("""
+            storage:
+              db_path: .openclaw/test-memory-v2.sqlite
+            workspace:
+              root: os.environ/TEST_MEMORY_V2_WORKSPACE_ROOT
+              include_default_memory: true
+              memory_file_names:
+                - MEMORY.md
+              daily_dir: memory
+              bank_dir: bank
+            corpus:
+              paths:
+                - name: docs
+                  path: os.environ/TEST_MEMORY_V2_CORPUS_PATH
+                  pattern: "**/*.md"
+            limits:
+              max_snippet_chars: 240
+              default_max_results: 6
+            """).strip() + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("TEST_MEMORY_V2_CORPUS_PATH", raising=False)
+
+    with pytest.raises(TypeError, match="corpus.paths\\[0\\]\\.path"):
+        load_config(config_path)
 
 
 def test_memory_v2_cli_search_json(

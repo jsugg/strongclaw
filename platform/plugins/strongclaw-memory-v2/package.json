@@ -12,6 +12,9 @@
       "optional": true
     }
   },
+  "scripts": {
+    "test:openclaw-host": "node test/openclaw-host-functional.mjs"
+  },
   "openclaw": {
     "extensions": [
       "./index.js"

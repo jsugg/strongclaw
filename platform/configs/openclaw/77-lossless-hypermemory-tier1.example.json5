@@ -15,8 +15,8 @@
           "command": [
             "clawops"
           ],
-          "configPath": "__REPO_ROOT__/platform/configs/memory/memory-v2.yaml",
-          "autoRecall": false,
+          "configPath": "__REPO_ROOT__/platform/configs/memory/memory-v2.tier1.yaml",
+          "autoRecall": true,
           "autoReflect": false,
           "recallMaxResults": 3,
           "timeoutMs": 20000

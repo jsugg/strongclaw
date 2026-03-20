@@ -26,3 +26,4 @@ platform/configs/varlock/varlock.types.d.ts
 platform/configs/varlock/.env.plugins
 vendor/lossless-claw/
 .coverage*
+turn.sh

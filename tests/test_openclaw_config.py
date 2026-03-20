@@ -231,12 +231,18 @@ def test_render_lossless_hypermemory_tier1_profile_merges_baseline_and_plugin_sl
         user_timezone="UTC",
     )
 
-    assert rendered["memory"]["backend"] == "qmd"
     assert rendered["gateway"]["bind"] == "loopback"
     assert rendered["plugins"]["slots"] == {
         "contextEngine": "lossless-claw",
         "memory": "strongclaw-memory-v2",
     }
+    plugin_config = rendered["plugins"]["entries"]["strongclaw-memory-v2"]["config"]
+    assert (
+        plugin_config["configPath"]
+        == f"{repo_root.as_posix()}/platform/configs/memory/memory-v2.tier1.yaml"
+    )
+    assert plugin_config["autoRecall"] is True
+    assert plugin_config["autoReflect"] is False
 
 
 def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:

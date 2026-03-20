@@ -81,6 +81,15 @@ baseline verification gate. The lower-level shell entrypoint remains available
 at `./scripts/bootstrap/setup.sh` for manual or partial bring-up, and you can
 call the CLI directly with `uv run --project . clawops setup`.
 
+For the supported sparse+dense tier-one path, set one embedding model name and
+run the profile-aware setup directly:
+
+```bash
+export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
+uv run --project . clawops setup --profile lossless-hypermemory-tier1
+clawops doctor
+```
+
 StrongClaw-generated runtime artifacts no longer default into the git checkout.
 Harness output, ACP summaries, compose sidecar state, QMD package files, and
 the managed `lossless-claw` checkout are written to OS-appropriate app
@@ -102,6 +111,7 @@ instead of merging raw overlays:
 
 ```bash
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
+./scripts/bootstrap/render_openclaw_config.sh --profile lossless-hypermemory-tier1
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```

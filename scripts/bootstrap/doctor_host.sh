@@ -5,8 +5,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
 QMD_BIN="${OPENCLAW_QMD_BIN:-$HOME/.bun/bin/qmd}"
 VARLOCK_VERSION="${VARLOCK_VERSION:-0.5.0}"
+VERIFY_MEMORY_V2_TIER1_SCRIPT="${VERIFY_MEMORY_V2_TIER1_SCRIPT:-$ROOT/scripts/bootstrap/verify_memory_v2_tier1.sh}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/clawops.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/rendered_openclaw_contract.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/varlock.sh"
 
@@ -29,11 +34,6 @@ varlock_version_matches "$VARLOCK_VERSION" || {
   exit 1
 }
 
-if [[ ! -x "$QMD_BIN" ]]; then
-  echo "ERROR: Bootstrap doctor requires the QMD semantic memory backend at $QMD_BIN." >&2
-  exit 1
-fi
-
 if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
   echo "ERROR: Rendered OpenClaw config not found at $OPENCLAW_CONFIG." >&2
   exit 1
@@ -55,3 +55,39 @@ echo "== Rendered config =="
 OPENCLAW_CONFIG_PATH="$OPENCLAW_CONFIG" openclaw config validate
 jq empty "$OPENCLAW_CONFIG"
 printf 'validated %s\n' "$OPENCLAW_CONFIG"
+
+if rendered_openclaw_uses_qmd "$OPENCLAW_CONFIG"; then
+  if [[ ! -x "$QMD_BIN" ]]; then
+    echo "ERROR: Bootstrap doctor requires the QMD semantic memory backend at $QMD_BIN." >&2
+    exit 1
+  fi
+  echo "== QMD binary =="
+  printf '%s\n' "$QMD_BIN"
+fi
+
+if rendered_openclaw_uses_lossless_claw "$OPENCLAW_CONFIG"; then
+  lossless_plugin_path="$(rendered_openclaw_lossless_plugin_path "$OPENCLAW_CONFIG")"
+  if [[ -z "$lossless_plugin_path" || ! -f "$lossless_plugin_path/openclaw.plugin.json" ]]; then
+    echo "ERROR: Rendered config enables lossless-claw, but the plugin path is missing or invalid." >&2
+    exit 1
+  fi
+  echo "== Lossless context engine =="
+  printf '%s\n' "$lossless_plugin_path"
+fi
+
+if rendered_openclaw_uses_memory_v2 "$OPENCLAW_CONFIG"; then
+  memory_v2_config_path="$(rendered_openclaw_memory_v2_config_path "$OPENCLAW_CONFIG")"
+  if [[ -z "$memory_v2_config_path" || ! -f "$memory_v2_config_path" ]]; then
+    echo "ERROR: strongclaw-memory-v2 is enabled, but its configPath is missing or unreadable." >&2
+    exit 1
+  fi
+  echo "== strongclaw-memory-v2 config =="
+  printf '%s\n' "$memory_v2_config_path"
+  run_clawops "$ROOT" memory-v2 status --config "$memory_v2_config_path" --json >/dev/null
+  if jq -e '
+    .backend.active == "qdrant_sparse_dense_hybrid" or
+    .backend.active == "qdrant_dense_hybrid"
+  ' "$memory_v2_config_path" >/dev/null; then
+    run_shell_entrypoint "$VERIFY_MEMORY_V2_TIER1_SCRIPT" --config "$memory_v2_config_path" >/dev/null
+  fi
+fi

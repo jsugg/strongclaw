@@ -6,7 +6,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/scripts/lib/clawops.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/docker_runtime.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/bootstrap_profiles.sh"
 BOOTSTRAP_SCRIPT="${BOOTSTRAP_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap.sh}"
+BOOTSTRAP_QMD_SCRIPT="${BOOTSTRAP_QMD_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_qmd.sh}"
+BOOTSTRAP_MEMORY_PLUGIN_SCRIPT="${BOOTSTRAP_MEMORY_PLUGIN_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh}"
+BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT="${BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh}"
 RENDER_OPENCLAW_CONFIG_SCRIPT="${RENDER_OPENCLAW_CONFIG_SCRIPT:-$ROOT/scripts/bootstrap/render_openclaw_config.sh}"
 DOCTOR_HOST_SCRIPT="${DOCTOR_HOST_SCRIPT:-$ROOT/scripts/bootstrap/doctor_host.sh}"
 INSTALL_HOST_SERVICES_SCRIPT="${INSTALL_HOST_SERVICES_SCRIPT:-$ROOT/scripts/bootstrap/install_host_services.sh}"
@@ -143,6 +148,27 @@ describe_bootstrap_mode() {
   printf 'enabled'
 }
 
+reconcile_profile_assets() {
+  if profile_requires_qmd "${OPENCLAW_CONFIG_PROFILE:-default}"; then
+    run_script_step \
+      "QMD profile assets" \
+      "Install the QMD runtime with: $BOOTSTRAP_QMD_SCRIPT" \
+      "$BOOTSTRAP_QMD_SCRIPT"
+  fi
+
+  run_script_step \
+    "Memory plugin assets" \
+    "Install the vendored memory plugin with: $BOOTSTRAP_MEMORY_PLUGIN_SCRIPT" \
+    "$BOOTSTRAP_MEMORY_PLUGIN_SCRIPT"
+
+  if profile_requires_lossless_claw "${OPENCLAW_CONFIG_PROFILE:-default}"; then
+    run_script_step \
+      "Lossless context assets" \
+      "Install the lossless-claw plugin with: $BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT" \
+      "$BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT"
+  fi
+}
+
 pause_for_linux_docker_refresh() {
   local runtime_user
   runtime_user="$(setup_state_value "$OPENCLAW_DOCKER_REFRESH_STATE_FILE" RUNTIME_USER)"
@@ -185,6 +211,8 @@ if [[ "$SKIP_BOOTSTRAP" -eq 0 || "$FORCE_BOOTSTRAP" -eq 1 ]]; then
     "Host bootstrap" \
     "Review the bootstrap output above, fix the missing prerequisite, and rerun: $ROOT/scripts/bootstrap/setup.sh${CONFIG_PROFILE:+ --profile $CONFIG_PROFILE}" \
     "$BOOTSTRAP_SCRIPT"
+else
+  reconcile_profile_assets
 fi
 
 if [[ "${#CONFIGURE_VARLOCK_ENV_ARGS[@]}" -gt 0 ]]; then

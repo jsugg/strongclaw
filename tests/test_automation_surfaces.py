@@ -35,6 +35,10 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
         in verify_script
     )
     assert '"$VERIFY_OPENCLAW_MODELS_SCRIPT" --check-only' in verify_script
+    assert (
+        'VERIFY_MEMORY_V2_TIER1_SCRIPT="${VERIFY_MEMORY_V2_TIER1_SCRIPT:-$ROOT/scripts/bootstrap/verify_memory_v2_tier1.sh}"'
+        in verify_script
+    )
     assert '"$ROOT/scripts/bootstrap/verify_sidecars.sh" --skip-runtime' in verify_script
     assert '"$ROOT/scripts/bootstrap/verify_observability.sh" --skip-runtime' in verify_script
     assert '"$ROOT/scripts/bootstrap/verify_channels.sh"' in verify_script
@@ -52,11 +56,14 @@ def test_current_state_tracks_memory_v2_and_plan2_completion() -> None:
     )
     openclaw_config = (repo_root / "src/clawops/openclaw_config.py").read_text(encoding="utf-8")
     models = (repo_root / "src/clawops/memory_v2/models.py").read_text(encoding="utf-8")
+    plan = (repo_root / "plan.md").read_text(encoding="utf-8")
 
     assert (repo_root / "src/clawops/memory_v2/providers.py").exists()
     assert "before_prompt_build" in plugin
     assert "77-lossless-hypermemory-tier1.example.json5" in openclaw_config
     assert "qdrant_dense_hybrid" in models
+    assert "qdrant_sparse_dense_hybrid" in models
+    assert "lossless-hypermemory-tier1" in plan
 
 
 def test_security_harness_smoke_uses_uv_managed_python() -> None:
@@ -148,9 +155,15 @@ def test_bootstrap_script_keeps_core_host_setup_contract() -> None:
     assert 'source "$ROOT/scripts/lib/docker_runtime.sh"' in host
     assert 'source "$ROOT/scripts/lib/app_paths.sh"' in host
     assert 'source "$ROOT/scripts/lib/varlock.sh"' in host
-    assert '"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"' in host
-    assert "profile_requires_lossless_claw()" in host
-    assert '"$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh"' in host
+    assert (
+        'BOOTSTRAP_MEMORY_PLUGIN_SCRIPT="${BOOTSTRAP_MEMORY_PLUGIN_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh}"'
+        in host
+    )
+    assert 'if profile_requires_lossless_claw "$OPENCLAW_CONFIG_PROFILE"; then' in host
+    assert (
+        'BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT="${BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh}"'
+        in host
+    )
     assert "ensure_command_or_brew bun bun" not in host
     assert '"$ROOT/scripts/bootstrap/render_openclaw_config.sh"' in host
     assert '"$ROOT/scripts/bootstrap/doctor_host.sh"' in host

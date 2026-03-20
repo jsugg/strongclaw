@@ -183,11 +183,26 @@ clawops context pack \
   --output /tmp/context-pack.md
 ```
 
+## Tier-one memory path
+
+Bring up the supported sparse+dense memory stack with:
+
+```bash
+export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
+clawops setup --profile lossless-hypermemory-tier1
+./scripts/bootstrap/verify_memory_v2_tier1.sh
+clawops doctor
+```
+
+That profile enables the combined `lossless-claw` + `strongclaw-memory-v2`
+runtime, keeps `autoRecall` on, keeps `autoReflect` off, and verifies the
+Qdrant dense+sparse backend rather than the default QMD path.
+
 ## Memory migration
 
-Treat QMD plus the context service as the repo-document retrieval lane. Use the
-vendored `memory-lancedb-pro` plugin only for opt-in durable memory, with
-`memory-v2` retained as the migration source until parity is proven.
+Treat QMD plus the context service as the repo-document retrieval lane for the
+default profile. Use this section only when you need to migrate a standalone or
+tier-one `memory-v2` corpus into the vendored `memory-lancedb-pro` plugin.
 
 Export one scope at a time into the import JSON shape that `openclaw memory-pro
 import` expects. When you omit `--output` or `--report`, StrongClaw now writes
