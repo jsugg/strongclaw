@@ -23,5 +23,6 @@ PYTHONPATH=src uv run --project "$ROOT" --locked --extra dev python -m clawops r
 
 test -x "$HOME/.bun/bin/qmd"
 test -f "$STRONGCLAW_DATA_DIR/plugins/lossless-claw/openclaw.plugin.json"
+# shellcheck disable=SC1091
 source "$ROOT/scripts/lib/varlock.sh"
 varlock_version_matches "$VARLOCK_VERSION"

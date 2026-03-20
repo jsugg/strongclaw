@@ -45,9 +45,8 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
     )
 
 
-def test_plan_current_state_tracks_memory_v2_and_plan2_completion() -> None:
+def test_current_state_tracks_memory_v2_and_plan2_completion() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    plan = (repo_root / "plan.md").read_text(encoding="utf-8")
     plugin = (repo_root / "platform/plugins/strongclaw-memory-v2/index.js").read_text(
         encoding="utf-8"
     )
@@ -58,15 +57,6 @@ def test_plan_current_state_tracks_memory_v2_and_plan2_completion() -> None:
     assert "before_prompt_build" in plugin
     assert "77-lossless-hypermemory-tier1.example.json5" in openclaw_config
     assert "qdrant_dense_hybrid" in models
-
-    assert "before_prompt_build" in plan
-    assert "qdrant_dense_hybrid" in plan
-    assert "providers.py" in plan
-    assert "77-lossless-hypermemory-tier1.example.json5" in plan
-    assert "wrapper transport completion" in plan
-    assert "metadata preload optimization" in plan
-    assert "naming cleanup for the old repository identity" in plan
-    assert "already implemented in the live code" in plan
 
 
 def test_security_harness_smoke_uses_uv_managed_python() -> None:

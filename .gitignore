@@ -25,4 +25,4 @@ platform/workspace/*/.openclaw/workspace-state.json
 platform/configs/varlock/varlock.types.d.ts
 platform/configs/varlock/.env.plugins
 vendor/lossless-claw/
-.coverage
+.coverage*
