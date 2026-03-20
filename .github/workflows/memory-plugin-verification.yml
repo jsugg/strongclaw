@@ -71,6 +71,13 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "24.13.1"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-strongclaw-memory-v2-host-npm-24.13.1-${{ hashFiles('scripts/ci/verify_strongclaw_memory_v2_plugin.sh', 'platform/plugins/strongclaw-memory-v2/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-strongclaw-memory-v2-host-npm-24.13.1-
+            ${{ runner.os }}-strongclaw-memory-v2-host-npm-
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
