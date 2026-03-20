@@ -40,6 +40,11 @@ StrongClaw supports two setup paths:
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
 
+If you plan to use `lossless-hypermemory-tier1`, also set
+`MEMORY_V2_EMBEDDING_MODEL=<upstream embedding model>`. The tier-one setup path
+uses loopback defaults for `MEMORY_V2_EMBEDDING_BASE_URL` and
+`MEMORY_V2_QDRANT_URL` unless you override them.
+
 ## 3. Bring up the host baseline
 
 ```bash
@@ -52,6 +57,13 @@ Equivalent shell entrypoint:
 ./scripts/bootstrap/setup.sh
 ```
 
+Supported sparse+dense tier-one path:
+
+```bash
+clawops setup --profile lossless-hypermemory-tier1
+./scripts/bootstrap/verify_memory_v2_tier1.sh
+```
+
 That setup flow:
 
 - auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
@@ -60,7 +72,7 @@ That setup flow:
 - uses an existing Docker-compatible runtime when one is already installed
 - installs Docker only when no Docker-compatible runtime is detected
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
-- provisions the default QMD semantic memory backend
+- provisions the selected profile's memory and plugin assets
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
 - creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
 - prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
@@ -112,6 +124,7 @@ JSON5 overlays:
 
 ```bash
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
+./scripts/bootstrap/render_openclaw_config.sh --profile lossless-hypermemory-tier1
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```
@@ -123,6 +136,11 @@ The rendered config enables QMD-backed memory retrieval by default and indexes:
 - top-level operator guides
 - `memory.md`
 - `platform/workspace/shared/MEMORY.md`
+
+The `lossless-hypermemory-tier1` profile instead enables the combined
+`lossless-claw` + `strongclaw-memory-v2` runtime, points the plugin at
+`platform/configs/memory/memory-v2.tier1.yaml`, enables `autoRecall`, keeps
+`autoReflect` disabled, and does not inherit the QMD overlay.
 
 ## 5. Verify the baseline again on demand
 
@@ -157,16 +175,18 @@ Add these only in order:
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
 3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
-4. Opt-in local LanceDB durable memory after the default QMD flow is stable by rerendering
+4. Supported sparse+dense tier-one path:
+   `clawops setup --profile lossless-hypermemory-tier1`
+5. Opt-in local LanceDB durable memory after the default QMD flow is stable by rerendering
    `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local`
-5. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
+6. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
    `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart`
-6. Keep `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` only as a
-   migration-source/reference overlay while you validate parity
-7. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-8. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-9. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-10. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+7. Migration-only standalone overlay reference:
+   `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5`
+8. Telegram: `./scripts/bootstrap/enable_telegram.sh`
+9. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
+10. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
+11. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
 
 After each layer is enabled, run the matching verification entrypoint:
 

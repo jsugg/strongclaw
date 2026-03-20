@@ -1,8 +1,14 @@
 # Strongclaw Memory V2
 
-`strongclaw memory v2` is an opt-in memory stack for OpenClaw that keeps Markdown as the source of truth while adding a richer derived index and explicit durable-memory operations.
+`strongclaw memory v2` is StrongClaw's Markdown-canonical durable memory engine.
+It remains opt-in for the default OpenClaw profile, and it is the supported
+memory backend for the `lossless-hypermemory-tier1` profile.
 
-It does **not** replace the default QMD-backed memory path automatically. The default rendered OpenClaw config still uses `memory-core` plus the QMD backend overlay. Memory v2 only becomes active when you explicitly switch the OpenClaw memory slot to the `strongclaw-memory-v2` plugin.
+It does **not** replace the default QMD-backed memory path automatically. The
+default rendered OpenClaw config still uses `memory-core` plus the QMD backend
+overlay. Memory v2 becomes active either when you explicitly switch the
+OpenClaw memory slot to the `strongclaw-memory-v2` plugin or when you select
+the combined `lossless-hypermemory-tier1` profile.
 
 ## Design Goals
 
@@ -46,13 +52,18 @@ The derived store lives in SQLite and is rebuilt from Markdown:
 - searchable items table for typed bullets, headings, and paragraphs
 - FTS5 virtual table for lexical recall over canonical snippets
 
-Tier One extends the same Markdown-canonical design with optional dense retrieval:
+Tier One extends the same Markdown-canonical design with supported sparse+dense
+retrieval:
 
-- SQLite remains the source for lexical recall, governance, and canonical provenance
-- Qdrant can be enabled as a loopback dense sidecar
-- embeddings can target either a local compatible HTTP endpoint or a cloud router
+- SQLite remains the source for canonical content, governance, provenance, and degraded fallback
+- Qdrant stores one named dense vector lane and one named sparse vector lane per point
+- sparse vectors are generated locally from normalized retrieval text with a deterministic BM25-style encoder
+- dense embeddings use the loopback LiteLLM route configured in `platform/configs/litellm/config.yaml`
+- the tier-one config keeps `backend.active: qdrant_sparse_dense_hybrid` and `backend.fallback: sqlite_fts`
 
-The default shipped config keeps dense retrieval disabled until an operator enables it.
+The generic shipped config at `platform/configs/memory/memory-v2.yaml` keeps
+dense retrieval disabled until an operator enables it. The tier-one profile
+uses `platform/configs/memory/memory-v2.tier1.yaml`.
 
 ## OpenClaw Compatibility
 
@@ -71,7 +82,29 @@ By default, existing trust zones and policy still only expose read-side memory t
 
 The plugin also proxies the `openclaw memory ...` CLI to `clawops memory-v2 ...` when the `strongclaw-memory-v2` slot is active.
 
-## Opt-In Setup
+## Supported setup
+
+Supported tier-one path:
+
+```bash
+export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
+clawops setup --profile lossless-hypermemory-tier1
+./scripts/bootstrap/verify_memory_v2_tier1.sh
+```
+
+That flow keeps the OpenClaw-facing contract stable while enabling:
+
+- `plugins.slots.contextEngine = "lossless-claw"`
+- `plugins.slots.memory = "strongclaw-memory-v2"`
+- `autoRecall: true`
+- `autoReflect: false`
+- `platform/configs/memory/memory-v2.tier1.yaml`
+
+The tier-one env contract requires `MEMORY_V2_EMBEDDING_MODEL`. The guided
+setup flow backfills loopback defaults for `MEMORY_V2_EMBEDDING_BASE_URL` and
+`MEMORY_V2_QDRANT_URL`.
+
+## Standalone overlay setup
 
 1. Render the example overlay with local paths:
 
@@ -93,7 +126,9 @@ openclaw plugins list
 openclaw memory status --json
 ```
 
-The shipped example config points the plugin at [platform/configs/memory/memory-v2.yaml](../configs/memory/memory-v2.yaml) and uses the installed `clawops` command.
+The shipped standalone example points the plugin at
+[platform/configs/memory/memory-v2.yaml](../configs/memory/memory-v2.yaml) and
+uses the installed `clawops` command.
 
 For the integrated context-engine + memory stack, use the combined overlay:
 
@@ -116,6 +151,7 @@ You can work with the engine directly without enabling the OpenClaw plugin:
 
 ```bash
 PYTHONPATH=src python3 -m clawops memory-v2 status --json
+PYTHONPATH=src python3 -m clawops memory-v2 verify-tier1 --json --config platform/configs/memory/memory-v2.tier1.yaml
 PYTHONPATH=src python3 -m clawops memory-v2 index --json
 PYTHONPATH=src python3 -m clawops memory-v2 search --query "deployment playbook" --json
 PYTHONPATH=src python3 -m clawops memory-v2 store --type fact --text "Deploy approvals require two reviewers." --json
@@ -181,11 +217,12 @@ plugin-backed search surface directly.
 
 ## Rollout Notes
 
-- default QMD-backed retrieval remains unchanged
+- default QMD-backed retrieval remains unchanged for the default profile
 - memory v2 is loaded through `plugins.load.paths` and `plugins.slots.memory`
-- auto-recall and auto-reflect exist in the plugin, but both default to `false`
+- the combined tier-one profile enables `autoRecall` and keeps `autoReflect` off
 - plugin runtime code is trusted in-process OpenClaw code, so keep the plugin path explicitly controlled
 - dense retrieval is opt-in through `platform/configs/memory/memory-v2.yaml`
+- supported sparse+dense tier-one retrieval is configured through `platform/configs/memory/memory-v2.tier1.yaml`
 - the Tier One sidecar surface is `platform/compose/docker-compose.aux-stack.yaml`
 - local model operators can layer `platform/compose/docker-compose.ollama.optional.yaml`
 

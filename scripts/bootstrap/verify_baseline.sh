@@ -3,14 +3,18 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_OPENCLAW_MODELS_SCRIPT="${VERIFY_OPENCLAW_MODELS_SCRIPT:-$ROOT/scripts/bootstrap/configure_openclaw_model_auth.sh}"
+VERIFY_MEMORY_V2_TIER1_SCRIPT="${VERIFY_MEMORY_V2_TIER1_SCRIPT:-$ROOT/scripts/bootstrap/verify_memory_v2_tier1.sh}"
+OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/clawops.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/rendered_openclaw_contract.sh"
 
 require_openclaw "Baseline verification runs OpenClaw diagnostics and audits."
-
-QMD_BIN="$HOME/.bun/bin/qmd"
-if [[ ! -x "$QMD_BIN" ]]; then
-  echo "ERROR: Baseline verification requires the QMD semantic memory backend at $QMD_BIN. Run $ROOT/scripts/bootstrap/bootstrap_qmd.sh." >&2
+if [[ ! -f "$OPENCLAW_CONFIG" ]]; then
+  echo "ERROR: Rendered OpenClaw config not found at $OPENCLAW_CONFIG." >&2
   exit 1
 fi
 
@@ -31,6 +35,23 @@ run_openclaw memory search --query "ClawOps" --max-results 1 >/dev/null
 
 echo "== OpenClaw model readiness =="
 "$VERIFY_OPENCLAW_MODELS_SCRIPT" --check-only
+
+if rendered_openclaw_uses_memory_v2 "$OPENCLAW_CONFIG"; then
+  memory_v2_config_path="$(rendered_openclaw_memory_v2_config_path "$OPENCLAW_CONFIG")"
+  if [[ -z "$memory_v2_config_path" || ! -f "$memory_v2_config_path" ]]; then
+    echo "ERROR: strongclaw-memory-v2 is enabled, but its configPath is missing or unreadable." >&2
+    exit 1
+  fi
+  echo "== strongclaw-memory-v2 status =="
+  run_clawops "$ROOT" memory-v2 status --config "$memory_v2_config_path" --json
+  if jq -e '
+    .backend.active == "qdrant_sparse_dense_hybrid" or
+    .backend.active == "qdrant_dense_hybrid"
+  ' "$memory_v2_config_path" >/dev/null; then
+    echo "== strongclaw-memory-v2 tier-one verification =="
+    "$VERIFY_MEMORY_V2_TIER1_SCRIPT" --config "$memory_v2_config_path"
+  fi
+fi
 
 echo "== Python tests =="
 uv run --project "$ROOT" --locked --extra dev pytest -q "$ROOT/tests"

@@ -108,30 +108,35 @@ def test_verify_sidecars_supports_runtime_probes(tmp_path: pathlib.Path) -> None
         with _http_server(b"alive\n") as (litellm_host, litellm_port):
             with _tcp_listener() as (otlp_host, otlp_port):
                 with _http_server(b"otel metrics\n") as (metrics_host, metrics_port):
-                    write_yaml(
-                        compose_path,
-                        {
-                            "services": {
-                                "postgres": {
-                                    "ports": [f"{postgres_host}:{postgres_port}:5432"],
-                                    "healthcheck": {"test": ["CMD", "true"]},
-                                },
-                                "litellm": {
-                                    "ports": [f"{litellm_host}:{litellm_port}:4000"],
-                                    "healthcheck": {"test": ["CMD", "true"]},
-                                },
-                                "otel-collector": {
-                                    "ports": [
-                                        f"{otlp_host}:{otlp_port}:4318",
-                                        f"{metrics_host}:{metrics_port}:9464",
-                                    ]
-                                },
-                            }
-                        },
-                    )
+                    with _http_server(b"ok\n") as (qdrant_host, qdrant_port):
+                        write_yaml(
+                            compose_path,
+                            {
+                                "services": {
+                                    "postgres": {
+                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "litellm": {
+                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "otel-collector": {
+                                        "ports": [
+                                            f"{otlp_host}:{otlp_port}:4318",
+                                            f"{metrics_host}:{metrics_port}:9464",
+                                        ]
+                                    },
+                                    "qdrant": {
+                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                }
+                            },
+                        )
 
-                    report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
-                    assert report.ok is True
+                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+                        assert report.ok is True
 
 
 def test_verify_sidecars_reports_http_disconnects_without_crashing(
@@ -142,35 +147,82 @@ def test_verify_sidecars_reports_http_disconnects_without_crashing(
         with _disconnecting_listener() as (litellm_host, litellm_port):
             with _tcp_listener() as (otlp_host, otlp_port):
                 with _http_server(b"otel metrics\n") as (metrics_host, metrics_port):
-                    write_yaml(
-                        compose_path,
-                        {
-                            "services": {
-                                "postgres": {
-                                    "ports": [f"{postgres_host}:{postgres_port}:5432"],
-                                    "healthcheck": {"test": ["CMD", "true"]},
-                                },
-                                "litellm": {
-                                    "ports": [f"{litellm_host}:{litellm_port}:4000"],
-                                    "healthcheck": {"test": ["CMD", "true"]},
-                                },
-                                "otel-collector": {
-                                    "ports": [
-                                        f"{otlp_host}:{otlp_port}:4318",
-                                        f"{metrics_host}:{metrics_port}:9464",
-                                    ]
-                                },
-                            }
-                        },
-                    )
+                    with _http_server(b"ok\n") as (qdrant_host, qdrant_port):
+                        write_yaml(
+                            compose_path,
+                            {
+                                "services": {
+                                    "postgres": {
+                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "litellm": {
+                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "otel-collector": {
+                                        "ports": [
+                                            f"{otlp_host}:{otlp_port}:4318",
+                                            f"{metrics_host}:{metrics_port}:9464",
+                                        ]
+                                    },
+                                    "qdrant": {
+                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                }
+                            },
+                        )
 
-                    report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
-                    assert report.ok is False
-                    litellm_check = next(
-                        check for check in report.checks if check.name == "litellm-runtime"
-                    )
-                    assert litellm_check.ok is False
-                    assert "http reachability failed" in litellm_check.message
+                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+                        assert report.ok is False
+                        litellm_check = next(
+                            check for check in report.checks if check.name == "litellm-runtime"
+                        )
+                        assert litellm_check.ok is False
+                        assert "http reachability failed" in litellm_check.message
+
+
+def test_verify_sidecars_reports_qdrant_runtime_failures(tmp_path: pathlib.Path) -> None:
+    compose_path = tmp_path / "compose.yaml"
+    with _tcp_listener() as (postgres_host, postgres_port):
+        with _http_server(b"alive\n") as (litellm_host, litellm_port):
+            with _tcp_listener() as (otlp_host, otlp_port):
+                with _http_server(b"otel metrics\n") as (metrics_host, metrics_port):
+                    with _disconnecting_listener() as (qdrant_host, qdrant_port):
+                        write_yaml(
+                            compose_path,
+                            {
+                                "services": {
+                                    "postgres": {
+                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "litellm": {
+                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                    "otel-collector": {
+                                        "ports": [
+                                            f"{otlp_host}:{otlp_port}:4318",
+                                            f"{metrics_host}:{metrics_port}:9464",
+                                        ]
+                                    },
+                                    "qdrant": {
+                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
+                                        "healthcheck": {"test": ["CMD", "true"]},
+                                    },
+                                }
+                            },
+                        )
+
+                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+                        assert report.ok is False
+                        qdrant_check = next(
+                            check for check in report.checks if check.name == "qdrant-runtime"
+                        )
+                        assert qdrant_check.ok is False
+                        assert "http reachability failed" in qdrant_check.message
 
 
 def test_verify_observability_supports_runtime_probes(tmp_path: pathlib.Path) -> None:

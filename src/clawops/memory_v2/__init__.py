@@ -23,6 +23,7 @@ from clawops.memory_v2.models import (
     SearchBackend,
     SearchExplanation,
     SearchHit,
+    SparseSearchCandidate,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "load_config",
     "main",
     "parse_args",
+    "SparseSearchCandidate",
 ]

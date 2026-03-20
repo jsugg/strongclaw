@@ -9,7 +9,7 @@ from typing import Any, Literal, cast
 
 Lane = Literal["memory", "corpus"]
 SearchMode = Literal["all", "memory", "corpus"]
-SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid"]
+SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"]
 FusionMode = Literal["rrf", "weighted"]
 EmbeddingProviderKind = Literal["disabled", "compatible-http"]
 RerankProviderKind = Literal["none"]
@@ -27,10 +27,13 @@ DEFAULT_WRITABLE_SCOPE_PATTERNS = ("project:", "agent:")
 DEFAULT_AUTO_APPLY_SCOPE_PATTERNS = ("project:", "agent:")
 DEFAULT_SEARCH_BACKEND: SearchBackend = "sqlite_fts"
 DEFAULT_FALLBACK_BACKEND: SearchBackend = "sqlite_fts"
+DEFAULT_TIER1_SEARCH_BACKEND: SearchBackend = "qdrant_sparse_dense_hybrid"
 DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderKind = "disabled"
 DEFAULT_RERANK_PROVIDER: RerankProviderKind = "none"
 DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
 DEFAULT_QDRANT_COLLECTION = "strongclaw-memory-v2"
+DEFAULT_QDRANT_DENSE_VECTOR_NAME = "dense"
+DEFAULT_QDRANT_SPARSE_VECTOR_NAME = "sparse"
 EntryType = Literal[
     "fact",
     "reflection",
@@ -129,11 +132,13 @@ class HybridConfig:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class QdrantConfig:
-    """Dense vector backend configuration."""
+    """Dense and sparse Qdrant backend configuration."""
 
     enabled: bool = False
     url: str = DEFAULT_QDRANT_URL
     collection: str = DEFAULT_QDRANT_COLLECTION
+    dense_vector_name: str = DEFAULT_QDRANT_DENSE_VECTOR_NAME
+    sparse_vector_name: str = DEFAULT_QDRANT_SPARSE_VECTOR_NAME
     timeout_ms: int = 3_000
     api_key_env: str | None = None
     api_key: str | None = None
@@ -249,6 +254,15 @@ class DenseSearchCandidate:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class SparseSearchCandidate:
+    """Sparse search result from the vector backend."""
+
+    item_id: int
+    point_id: str
+    score: float
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class EvidenceEntry:
     """Structured provenance reference for an indexed item."""
 
@@ -349,8 +363,11 @@ class SearchDiagnostics:
 
     lexical_ms: float = 0.0
     sqlite_dense_ms: float = 0.0
+    qdrant_dense_ms: float = 0.0
+    qdrant_sparse_ms: float = 0.0
     fusion_ms: float = 0.0
     lexical_candidates: int = 0
+    sparse_candidates: int = 0
     dense_candidates: int = 0
     selected_candidates: int = 0
 
@@ -359,8 +376,11 @@ class SearchDiagnostics:
         return {
             "lexicalMs": round(self.lexical_ms, 3),
             "sqliteDenseMs": round(self.sqlite_dense_ms, 3),
+            "qdrantDenseMs": round(self.qdrant_dense_ms, 3),
+            "qdrantSparseMs": round(self.qdrant_sparse_ms, 3),
             "fusionMs": round(self.fusion_ms, 3),
             "lexicalCandidates": self.lexical_candidates,
+            "sparseCandidates": self.sparse_candidates,
             "denseCandidates": self.dense_candidates,
             "selectedCandidates": self.selected_candidates,
         }

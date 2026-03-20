@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import pathlib
 from collections.abc import Mapping, Sequence
 from typing import cast
@@ -19,6 +20,8 @@ from clawops.memory_v2.models import (
     DEFAULT_FALLBACK_BACKEND,
     DEFAULT_MEMORY_FILE_NAMES,
     DEFAULT_QDRANT_COLLECTION,
+    DEFAULT_QDRANT_DENSE_VECTOR_NAME,
+    DEFAULT_QDRANT_SPARSE_VECTOR_NAME,
     DEFAULT_QDRANT_URL,
     DEFAULT_READABLE_SCOPE_PATTERNS,
     DEFAULT_RERANK_PROVIDER,
@@ -50,15 +53,29 @@ def _as_mapping(name: str, value: object) -> Mapping[str, object]:
     return value
 
 
+def _resolve_env_reference(value: object) -> object:
+    """Resolve `os.environ/KEY` references inside string configuration values."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped.startswith("os.environ/"):
+        return stripped
+    env_key = stripped.removeprefix("os.environ/").strip()
+    if not env_key:
+        raise ValueError("environment-backed config reference must name a variable")
+    return os.environ.get(env_key, "").strip()
+
+
 def _as_string(name: str, value: object, *, default: str | None = None) -> str:
     """Validate a string configuration value."""
-    if value is None:
+    resolved = _resolve_env_reference(value)
+    if resolved is None or resolved == "":
         if default is None:
             raise TypeError(f"{name} must be a string")
         return default
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(resolved, str):
         raise TypeError(f"{name} must be a non-empty string")
-    return value.strip()
+    return resolved
 
 
 def _as_bool(name: str, value: object, *, default: bool) -> bool:
@@ -72,20 +89,22 @@ def _as_bool(name: str, value: object, *, default: bool) -> bool:
 
 def _as_optional_string(name: str, value: object) -> str | None:
     """Validate an optional string configuration value."""
-    if value is None:
+    resolved = _resolve_env_reference(value)
+    if resolved is None or resolved == "":
         return None
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(resolved, str):
         raise TypeError(f"{name} must be a non-empty string when provided")
-    return value.strip()
+    return resolved
 
 
 def _as_blankable_string(name: str, value: object, *, default: str = "") -> str:
     """Validate a string configuration value that may be blank."""
-    if value is None:
+    resolved = _resolve_env_reference(value)
+    if resolved is None or resolved == "":
         return default
-    if not isinstance(value, str):
+    if not isinstance(resolved, str):
         raise TypeError(f"{name} must be a string")
-    return value.strip()
+    return resolved
 
 
 def _as_positive_int(name: str, value: object, *, default: int) -> int:
@@ -257,8 +276,10 @@ def _load_ranking(root: Mapping[str, object]) -> RankingConfig:
 def _as_search_backend(name: str, value: object, *, default: SearchBackend) -> SearchBackend:
     """Validate a configured search backend."""
     backend = _as_string(name, value, default=default)
-    if backend not in {"sqlite_fts", "qdrant_dense_hybrid"}:
-        raise ValueError(f"{name} must be sqlite_fts or qdrant_dense_hybrid")
+    if backend not in {"sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"}:
+        raise ValueError(
+            f"{name} must be sqlite_fts, qdrant_dense_hybrid, or qdrant_sparse_dense_hybrid"
+        )
     return cast(SearchBackend, backend)
 
 
@@ -386,6 +407,16 @@ def _load_qdrant(root: Mapping[str, object]) -> QdrantConfig:
             "qdrant.collection",
             qdrant.get("collection"),
             default=DEFAULT_QDRANT_COLLECTION,
+        ),
+        dense_vector_name=_as_string(
+            "qdrant.dense_vector_name",
+            qdrant.get("dense_vector_name"),
+            default=DEFAULT_QDRANT_DENSE_VECTOR_NAME,
+        ),
+        sparse_vector_name=_as_string(
+            "qdrant.sparse_vector_name",
+            qdrant.get("sparse_vector_name"),
+            default=DEFAULT_QDRANT_SPARSE_VECTOR_NAME,
         ),
         timeout_ms=_as_positive_int("qdrant.timeout_ms", qdrant.get("timeout_ms"), default=3_000),
         api_key_env=_as_optional_string("qdrant.api_key_env", qdrant.get("api_key_env")),

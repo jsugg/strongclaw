@@ -98,7 +98,9 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "verify-platform", platform_verify.main, "Verify sidecars, observability, and channels."
     ),
-    CommandSpec("memory-v2", memory_v2.main, "Run the legacy Markdown-canonical memory v2 engine."),
+    CommandSpec(
+        "memory-v2", memory_v2.main, "Run the Markdown-canonical sparse+dense memory v2 engine."
+    ),
     CommandSpec(
         "supply-chain",
         supply_chain.main,

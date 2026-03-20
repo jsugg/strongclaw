@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "3.0"
+SCHEMA_VERSION = "4.0"
 
 DROP_STATEMENTS = (
     "DROP TABLE IF EXISTS backend_state",
     "DROP TABLE IF EXISTS vector_items",
+    "DROP TABLE IF EXISTS sparse_terms",
     "DROP TABLE IF EXISTS conflicts",
     "DROP TABLE IF EXISTS evidence_links",
     "DROP TABLE IF EXISTS proposals",
@@ -73,12 +74,22 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS sparse_terms (
+        term TEXT PRIMARY KEY,
+        term_id INTEGER NOT NULL UNIQUE,
+        document_freq INTEGER NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS vector_items (
         item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
         point_id TEXT NOT NULL UNIQUE,
         embedding_model TEXT NOT NULL,
         embedding_dim INTEGER NOT NULL,
         content_sha256 TEXT NOT NULL,
+        sparse_term_count INTEGER NOT NULL DEFAULT 0,
+        sparse_content_sha256 TEXT NOT NULL DEFAULT '',
+        sparse_updated_at TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL
     )
     """,

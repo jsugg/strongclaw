@@ -92,7 +92,8 @@ class _FakeQdrantBackend:
     def health(self) -> dict[str, object]:
         return {"enabled": True, "healthy": True, "collection": "test"}
 
-    def ensure_collection(self, *, vector_size: int) -> None:
+    def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
+        assert isinstance(include_sparse, bool)
         assert vector_size > 0
 
     def upsert_points(self, points: list[dict[str, object]]) -> None:
@@ -101,13 +102,29 @@ class _FakeQdrantBackend:
     def delete_points(self, point_ids: list[str]) -> None:
         assert isinstance(point_ids, list)
 
-    def search(
+    def search_dense(
         self, *, vector: list[float], limit: int, mode: str, scope: str | None
     ) -> list[DenseSearchCandidate]:
         del vector, limit, mode, scope
         if self.raise_on_search:
             raise RuntimeError("dense backend unavailable")
         return list(self.search_results)
+
+    def search_sparse(
+        self,
+        *,
+        vector: dict[str, list[int] | list[float]],
+        limit: int,
+        mode: str,
+        scope: str | None,
+    ) -> list[object]:
+        del vector, limit, mode, scope
+        return []
+
+    def search(
+        self, *, vector: list[float], limit: int, mode: str, scope: str | None
+    ) -> list[DenseSearchCandidate]:
+        return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
 
 
 def _configure_engine(tmp_path: pathlib.Path) -> tuple[MemoryV2Engine, _FakeQdrantBackend]:
@@ -174,7 +191,7 @@ def test_memory_v2_emits_structured_logs_for_dense_search(
     assert hits
     event_names = {record["event"] for record in stderr_lines}
     assert "clawops.memory_v2.embedding" in event_names
-    assert "clawops.memory_v2.qdrant.search" in event_names
+    assert "clawops.memory_v2.qdrant.search.dense" in event_names
     assert "clawops.memory_v2.search" in event_names
     assert "clawops.memory_v2.vector_sync" in event_names
 
@@ -204,7 +221,7 @@ def test_memory_v2_search_exports_trace_spans(
     assert "clawops.memory_v2.reindex" in span_names
     assert "clawops.memory_v2.vector_sync" in span_names
     assert "clawops.memory_v2.search" in span_names
-    assert "clawops.memory_v2.qdrant.search" in span_names
+    assert "clawops.memory_v2.qdrant.search.dense" in span_names
     search_span = next(span for span in exporter.spans if span.name == "clawops.memory_v2.search")
     assert search_span.attributes["resolvedBackend"] == "qdrant_dense_hybrid"
     assert search_span.attributes["results"] >= 1

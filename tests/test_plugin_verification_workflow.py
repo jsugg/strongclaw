@@ -20,6 +20,25 @@ def test_plugin_verification_workflow_runs_vendored_memory_plugin_checks() -> No
     assert "npm run test:openclaw-host" in script
 
 
+def test_plugin_verification_workflow_runs_strongclaw_memory_v2_host_checks() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    workflow = (repo_root / ".github/workflows/memory-plugin-verification.yml").read_text(
+        encoding="utf-8"
+    )
+    script = (repo_root / "scripts/ci/verify_strongclaw_memory_v2_plugin.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Run strongclaw-memory-v2 Host Checks" in workflow
+    assert "./scripts/ci/verify_strongclaw_memory_v2_plugin.sh" in workflow
+    assert 'PLUGIN_DIR="$ROOT/platform/plugins/strongclaw-memory-v2"' in script
+    assert (
+        'npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@${OPENCLAW_VERSION}"'
+        in script
+    )
+    assert "npm run test:openclaw-host" in script
+
+
 def test_plugin_verification_docs_reference_current_workflow_and_script() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     ci_doc = (repo_root / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
@@ -29,6 +48,7 @@ def test_plugin_verification_docs_reference_current_workflow_and_script() -> Non
 
     assert "Memory Plugin Integration Checks" in ci_doc
     assert "verify_vendored_memory_plugin.sh" in ci_doc
+    assert "verify_strongclaw_memory_v2_plugin.sh" in ci_doc
     assert "verify_vendored_memory_plugin.sh" in vendor_note
 
 

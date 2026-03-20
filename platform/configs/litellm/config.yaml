@@ -19,6 +19,10 @@ model_list:
       model: openrouter/anthropic/claude-sonnet-4.6
       api_key: os.environ/OPENROUTER_API_KEY
 
+  - model_name: memory-v2-embedding
+    litellm_params:
+      model: os.environ/MEMORY_V2_EMBEDDING_MODEL
+
 litellm_settings:
   callbacks: ["otel"]
   service_callbacks: ["prometheus"]
