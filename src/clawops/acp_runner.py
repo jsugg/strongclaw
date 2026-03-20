@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Final
 
+from clawops.app_paths import scoped_state_dir
 from clawops.common import dump_json, sha256_hex, write_json, write_text
 from clawops.process_runner import run_command
 
@@ -309,7 +310,9 @@ def main(argv: list[str] | None = None) -> int:
         else _default_worktree(repo_root, args.branch).resolve()
     )
     state_dir = (
-        args.state_dir.resolve() if args.state_dir is not None else (repo_root / ".runs" / "acp")
+        args.state_dir.resolve()
+        if args.state_dir is not None
+        else scoped_state_dir(repo_root, category="acp")
     )
     spec = SessionSpec(
         backend=args.backend,

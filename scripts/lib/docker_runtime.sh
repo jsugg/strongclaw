@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # shellcheck disable=SC2034
 DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP=0
+DOCKER_RUNTIME_LIB_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
+# shellcheck disable=SC1091
+source "$DOCKER_RUNTIME_LIB_DIR/setup_state.sh"
 
 detect_docker_runtime_provider() {
   local host_os="$1"
@@ -150,6 +155,7 @@ ensure_docker_compatible_runtime() {
       ;;
   esac
 
+  # shellcheck disable=SC2034
   DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP=1
   if docker_compose_available; then
     return 0
@@ -169,6 +175,7 @@ ensure_docker_compatible_runtime() {
 
 repair_linux_runtime_user_docker_access() {
   local runtime_user="${1:-$(id -un)}"
+  local membership_added=0
 
   if ! getent group docker >/dev/null 2>&1; then
     echo "ERROR: docker group is missing after Docker install." >&2
@@ -177,8 +184,10 @@ repair_linux_runtime_user_docker_access() {
 
   if ! id -nG "$runtime_user" | tr ' ' '\n' | grep -qx docker; then
     sudo usermod -aG docker "$runtime_user"
+    mark_docker_shell_refresh_required "$runtime_user" "docker-group-membership-updated"
+    membership_added=1
     echo "Added $runtime_user to the docker group."
-    echo "Start a fresh login shell as $runtime_user before activating sidecar services." >&2
+    echo "A fresh login shell is required before this user session can activate Docker-backed services." >&2
   fi
 
   if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files docker.service >/dev/null 2>&1; then
@@ -187,9 +196,23 @@ repair_linux_runtime_user_docker_access() {
     echo "WARNING: docker.service was not found under systemd; ensure the Docker daemon is running before activating sidecars." >&2
   fi
 
+  if docker_backend_ready; then
+    clear_docker_shell_refresh_required
+    return 0
+  fi
+
+  if [[ "$membership_added" -eq 1 ]]; then
+    echo "Setup will resume automatically after you open a fresh login shell and rerun \`clawops setup\`." >&2
+    return 0
+  fi
+
   if ! docker_backend_ready; then
     echo "WARNING: Docker is installed but not reachable from this shell yet." >&2
-    echo "Start a fresh login shell as $runtime_user before activating sidecar services." >&2
+    if docker_shell_refresh_required; then
+      echo "Start a fresh login shell as $runtime_user, then rerun \`clawops setup\`." >&2
+    else
+      echo "Ensure the Docker daemon is running before activating sidecar services." >&2
+    fi
   fi
 }
 
@@ -206,10 +229,21 @@ require_docker_backend_ready() {
   fi
 
   if docker_backend_ready; then
+    clear_docker_shell_refresh_required
     return 0
   fi
 
   echo "ERROR: Docker is not ready for the current user." >&2
-  echo "Ensure the Docker backend is running. On Linux, if docker access was just granted, start a fresh login shell as $(id -un) before rerunning with --activate." >&2
+  if docker_shell_refresh_required; then
+    local runtime_user
+    runtime_user="$(setup_state_value "$OPENCLAW_DOCKER_REFRESH_STATE_FILE" RUNTIME_USER)"
+    if [[ -z "$runtime_user" ]]; then
+      runtime_user="$(id -un)"
+    fi
+    echo "Docker access was granted during bootstrap, but this shell has not picked up the new group membership yet." >&2
+    echo "Start a fresh login shell as $runtime_user, then rerun \`clawops setup\`." >&2
+    exit 1
+  fi
+  echo "Ensure the Docker backend is running, then rerun the activation step." >&2
   exit 1
 }

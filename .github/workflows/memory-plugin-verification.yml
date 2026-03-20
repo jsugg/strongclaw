@@ -14,14 +14,18 @@ env:
 
 jobs:
   verify-vendored-memory-plugin:
-    name: Run Memory Plugin Integration Checks
+    name: Run Memory Plugin Integration Checks (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22.16.0", "24.13.1"]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
-          node-version: "24.13.1"
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
       - run: ./scripts/ci/verify_vendored_memory_plugin.sh
@@ -41,7 +45,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
-          version: "0.10.2"
+          version: "0.10.9"
           enable-cache: true
       - run: ./scripts/ci/sync_dev_environment.sh
       - run: |

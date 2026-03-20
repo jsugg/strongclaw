@@ -31,6 +31,8 @@ Repository helper scripts that depend on `openclaw` now detect whether the CLI i
 
 ```bash
 ./scripts/bootstrap/doctor_host.sh
+make doctor
+uv run --project . clawops doctor --skip-runtime
 openclaw gateway status --json
 openclaw status --all
 openclaw doctor
@@ -188,12 +190,14 @@ vendored `memory-lancedb-pro` plugin only for opt-in durable memory, with
 `memory-v2` retained as the migration source until parity is proven.
 
 Export one scope at a time into the import JSON shape that `openclaw memory-pro
-import` expects:
+import` expects. When you omit `--output` or `--report`, StrongClaw now writes
+those artifacts under its OS-specific state directory instead of into the git
+checkout.
 
 ```bash
 clawops memory migrate-v2-to-pro \
   --scope project:strongclaw \
-  --output ./.runs/memory/project-strongclaw-import.json
+  --output /tmp/project-strongclaw-import.json
 ```
 
 Apply that snapshot through the same upstream `openclaw memory-pro import`
@@ -201,7 +205,7 @@ command shape, but with a ClawOps-managed report artifact:
 
 ```bash
 clawops memory import-pro-snapshot \
-  --input ./.runs/memory/project-strongclaw-import.json
+  --input /tmp/project-strongclaw-import.json
 ```
 
 Generate a parity report before you cut over durable writes:
@@ -209,7 +213,7 @@ Generate a parity report before you cut over durable writes:
 ```bash
 clawops memory verify-pro-parity \
   --scope project:strongclaw \
-  --import-snapshot ./.runs/memory/project-strongclaw-import.json \
+  --import-snapshot /tmp/project-strongclaw-import.json \
   --mode import \
   --query "deployment playbook"
 ```
@@ -267,19 +271,19 @@ Run the default suites:
 ```bash
 clawops harness \
   --suite platform/configs/harness/security_regressions.yaml \
-  --output ./.runs/security.jsonl
+  --output /tmp/security.jsonl
 
 clawops harness \
   --suite platform/configs/harness/policy_regressions.yaml \
-  --output ./.runs/policy.jsonl
+  --output /tmp/policy.jsonl
 ```
 
 Chart results:
 
 ```bash
 clawops charts \
-  --input ./.runs/security.jsonl \
-  --output ./.runs/security.png
+  --input /tmp/security.jsonl \
+  --output /tmp/security.png
 ```
 
 ## Workflows

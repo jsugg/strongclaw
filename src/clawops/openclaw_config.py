@@ -9,6 +9,7 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
 
@@ -70,6 +71,16 @@ PROFILES: dict[str, RenderProfile] = {
             OPENCLAW_CONFIG_DIR / "76-clawops-memory-pro.local-smart.json5",
         ),
         description="Local LanceDB durable memory with Ollama-backed smart extraction.",
+    ),
+    "lossless-hypermemory-tier1": RenderProfile(
+        name="lossless-hypermemory-tier1",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
+            OPENCLAW_CONFIG_DIR / "77-lossless-hypermemory-tier1.example.json5",
+        ),
+        description="QMD baseline plus lossless context compaction and strongclaw-memory-v2.",
     ),
     "acp": RenderProfile(
         name="acp",
@@ -178,30 +189,28 @@ def _contains_placeholder(value: Any, placeholder: str) -> bool:
     return False
 
 
-def _resolve_lossless_claw_plugin_path(repo_root: pathlib.Path) -> pathlib.Path:
-    """Return the configured lossless-claw plugin path or fail loudly."""
+def _resolve_lossless_claw_plugin_path(
+    repo_root: pathlib.Path, *, home_dir: pathlib.Path | None = None
+) -> pathlib.Path:
+    """Return the configured or default lossless-claw plugin path."""
     configured = os.environ.get("OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH")
-    candidates: list[pathlib.Path] = []
     if configured:
         configured_path = pathlib.Path(configured)
-        candidates.append(
+        candidate = (
             configured_path if configured_path.is_absolute() else repo_root / configured_path
         )
-    candidates.extend(
-        (
-            repo_root / "platform" / "plugins" / "lossless-claw",
-            repo_root / "vendor" / "lossless-claw",
-        )
-    )
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved.is_dir():
-            return resolved
-    raise ValueError(
-        "lossless-claw plugin path is not configured; set "
-        "OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH or vendor it under "
-        "platform/plugins/lossless-claw"
-    )
+        return candidate.expanduser().resolve()
+
+    app_data_path = strongclaw_lossless_claw_dir(home_dir=home_dir)
+    vendored_path = (repo_root / "vendor" / "lossless-claw").expanduser().resolve()
+    plugin_path = (repo_root / "platform" / "plugins" / "lossless-claw").expanduser().resolve()
+    if app_data_path.is_dir():
+        return app_data_path
+    if vendored_path.is_dir():
+        return vendored_path
+    if plugin_path.is_dir():
+        return plugin_path
+    return app_data_path
 
 
 def render_openclaw_overlay(
@@ -216,7 +225,7 @@ def render_openclaw_overlay(
     lossless_claw_plugin_path = None
     if _contains_placeholder(template, LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER):
         lossless_claw_plugin_path = _resolve_lossless_claw_plugin_path(
-            repo_root.expanduser().resolve()
+            repo_root.expanduser().resolve(), home_dir=home_dir
         )
     rendered = _replace_placeholders(
         template,

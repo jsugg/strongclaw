@@ -9,6 +9,8 @@ command -v uv >/dev/null 2>&1 || {
 }
 
 cd "$ROOT"
+: "${CLAWOPS_HTTP_RETRY_MODE:=safe}"
+export CLAWOPS_HTTP_RETRY_MODE
 uv run pre-commit run actionlint --all-files
 uv run pre-commit run shellcheck --all-files
 PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml --cov-report=term-missing

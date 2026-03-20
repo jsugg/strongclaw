@@ -11,6 +11,7 @@ __all__ = [
     "policy_engine",
     "context_service",
     "skill_scanner",
+    "supply_chain",
     "harness",
     "charts",
     "allowlist_sync",

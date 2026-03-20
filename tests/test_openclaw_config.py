@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-import pytest
-
+from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.openclaw_config import (
     render_openclaw_overlay,
     render_openclaw_profile,
@@ -202,52 +201,42 @@ def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
 
 def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    lossless_root = tmp_path / "lossless-claw"
-    lossless_root.mkdir()
-    monkeypatch.setenv("OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH", lossless_root.as_posix())
+    home_dir = tmp_path / "home"
+    lossless_dir = strongclaw_lossless_claw_dir(home_dir=home_dir)
+    lossless_dir.mkdir(parents=True)
     rendered = render_openclaw_overlay(
         template_path=repo_root
         / "platform/configs/openclaw/77-lossless-hypermemory-tier1.example.json5",
         repo_root=repo_root,
-        home_dir=pathlib.Path.home(),
+        home_dir=home_dir,
         user_timezone="UTC",
     )
 
     assert rendered["plugins"]["slots"]["contextEngine"] == "lossless-claw"
     assert rendered["plugins"]["slots"]["memory"] == "strongclaw-memory-v2"
     assert rendered["plugins"]["load"]["paths"] == [
-        lossless_root.as_posix(),
+        lossless_dir.as_posix(),
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2",
     ]
 
 
-def test_lossless_overlay_requires_explicit_plugin_path(
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    template = tmp_path / "lossless.json5"
-    template.write_text(
-        """
-        {
-          plugins: {
-            load: { paths: ["__LOSSLESS_CLAW_PLUGIN_PATH__"] },
-          },
-        }
-        """.strip(),
-        encoding="utf-8",
+def test_render_lossless_hypermemory_tier1_profile_merges_baseline_and_plugin_slots() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_profile(
+        profile_name="lossless-hypermemory-tier1",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
     )
-    monkeypatch.delenv("OPENCLAW_LOSSLESS_CLAW_PLUGIN_PATH", raising=False)
 
-    with pytest.raises(ValueError, match="lossless-claw plugin path is not configured"):
-        render_openclaw_overlay(
-            template_path=template,
-            repo_root=tmp_path,
-            home_dir=tmp_path / "home",
-            user_timezone="UTC",
-        )
+    assert rendered["memory"]["backend"] == "qmd"
+    assert rendered["gateway"]["bind"] == "loopback"
+    assert rendered["plugins"]["slots"] == {
+        "contextEngine": "lossless-claw",
+        "memory": "strongclaw-memory-v2",
+    }
 
 
 def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:

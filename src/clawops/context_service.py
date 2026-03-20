@@ -10,10 +10,12 @@ import pathlib
 import re
 import sqlite3
 import subprocess
+import time
 from collections.abc import Iterable
 from typing import Literal, cast
 
 from clawops.common import expand, load_yaml, sha256_hex, utc_now_ms, write_text
+from clawops.observability import emit_structured_log, observed_span
 
 DEFAULT_TEXT_EXTENSIONS = {
     ".md",
@@ -305,71 +307,87 @@ class ContextService:
         indexed_files = 0
         skipped_files = 0
         seen_paths: set[str] = set()
-        with self.connect() as conn:
-            existing_metadata = self._load_indexed_metadata(conn)
-            for path in self.iter_files():
-                try:
-                    stat_result = path.stat()
-                except OSError:
-                    continue
-                size_bytes = stat_result.st_size
-                mtime_ns = stat_result.st_mtime_ns
-                rel = str(path.relative_to(self.repo))
-                seen_paths.add(rel)
-                existing = existing_metadata.get(rel)
-                if existing is not None and existing == (mtime_ns, size_bytes):
-                    skipped_files += 1
-                    continue
-                try:
-                    text = path.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                sha = sha256_hex(text)
-                symbols = extract_symbols(path, text)
-                conn.execute(
-                    """
-                    INSERT INTO files(path, sha256, language, mtime_ns, size_bytes, symbols, content)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(path) DO UPDATE SET
-                        sha256 = excluded.sha256,
-                        language = excluded.language,
-                        mtime_ns = excluded.mtime_ns,
-                        size_bytes = excluded.size_bytes,
-                        symbols = excluded.symbols,
-                        content = excluded.content
-                    """,
-                    (
-                        rel,
-                        sha,
-                        detect_language(path),
-                        mtime_ns,
-                        size_bytes,
-                        "\n".join(symbols),
-                        text,
-                    ),
-                )
-                conn.execute("DELETE FROM files_fts WHERE path = ?", (rel,))
-                conn.execute(
-                    "INSERT INTO files_fts(path, content, symbols) VALUES (?, ?, ?)",
-                    (rel, text, "\n".join(symbols)),
-                )
-                indexed_files += 1
-            indexed_paths = set(existing_metadata)
-            stale_paths = indexed_paths - seen_paths
-            if stale_paths:
-                conn.executemany(
-                    "DELETE FROM files WHERE path = ?", ((path,) for path in stale_paths)
-                )
-                conn.executemany(
-                    "DELETE FROM files_fts WHERE path = ?", ((path,) for path in stale_paths)
-                )
-            conn.commit()
-        return IndexStats(
-            total_files=len(seen_paths),
-            indexed_files=indexed_files,
-            skipped_files=skipped_files,
-            deleted_files=len(stale_paths),
-        )
+        started_at = time.perf_counter()
+        with observed_span(
+            "clawops.context.index", attributes={"repo": self.repo.as_posix()}
+        ) as span:
+            with self.connect() as conn:
+                existing_metadata = self._load_indexed_metadata(conn)
+                for path in self.iter_files():
+                    try:
+                        stat_result = path.stat()
+                    except OSError:
+                        continue
+                    size_bytes = stat_result.st_size
+                    mtime_ns = stat_result.st_mtime_ns
+                    rel = str(path.relative_to(self.repo))
+                    seen_paths.add(rel)
+                    existing = existing_metadata.get(rel)
+                    if existing is not None and existing == (mtime_ns, size_bytes):
+                        skipped_files += 1
+                        continue
+                    try:
+                        text = path.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    sha = sha256_hex(text)
+                    symbols = extract_symbols(path, text)
+                    conn.execute(
+                        """
+                        INSERT INTO files(path, sha256, language, mtime_ns, size_bytes, symbols, content)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(path) DO UPDATE SET
+                            sha256 = excluded.sha256,
+                            language = excluded.language,
+                            mtime_ns = excluded.mtime_ns,
+                            size_bytes = excluded.size_bytes,
+                            symbols = excluded.symbols,
+                            content = excluded.content
+                        """,
+                        (
+                            rel,
+                            sha,
+                            detect_language(path),
+                            mtime_ns,
+                            size_bytes,
+                            "\n".join(symbols),
+                            text,
+                        ),
+                    )
+                    conn.execute("DELETE FROM files_fts WHERE path = ?", (rel,))
+                    conn.execute(
+                        "INSERT INTO files_fts(path, content, symbols) VALUES (?, ?, ?)",
+                        (rel, text, "\n".join(symbols)),
+                    )
+                    indexed_files += 1
+                indexed_paths = set(existing_metadata)
+                stale_paths = indexed_paths - seen_paths
+                if stale_paths:
+                    conn.executemany(
+                        "DELETE FROM files WHERE path = ?", ((path,) for path in stale_paths)
+                    )
+                    conn.executemany(
+                        "DELETE FROM files_fts WHERE path = ?", ((path,) for path in stale_paths)
+                    )
+                conn.commit()
+            stats = IndexStats(
+                total_files=len(seen_paths),
+                indexed_files=indexed_files,
+                skipped_files=skipped_files,
+                deleted_files=len(stale_paths),
+            )
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            observation: dict[str, bool | int | float | str] = {
+                "repo": self.repo.as_posix(),
+                "total_files": stats.total_files,
+                "indexed_files": stats.indexed_files,
+                "skipped_files": stats.skipped_files,
+                "deleted_files": stats.deleted_files,
+                "elapsed_ms": elapsed_ms,
+            }
+            span.set_attributes(observation)
+            emit_structured_log("clawops.context.index", observation)
+            return stats
 
     def index(self) -> int:
         """Index repository contents into the lexical store."""

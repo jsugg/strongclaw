@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import sqlite3
 
@@ -304,3 +305,26 @@ def test_index_with_stats_reports_deleted_files_after_preloaded_metadata(
     assert second.skipped_files == 1
     assert second.deleted_files == 1
     assert service.query("remove_me", limit=2) == []
+
+
+def test_index_with_stats_emits_structured_log_when_enabled(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "auth.py").write_text("def validate_jwt():\n    return True\n", encoding="utf-8")
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
+
+    service = service_from_config(config_path, repo)
+    stats = service.index_with_stats()
+
+    payload = json.loads(capsys.readouterr().err.strip())
+    assert stats.indexed_files == 1
+    assert payload["event"] == "clawops.context.index"
+    assert payload["repo"] == repo.resolve().as_posix()
+    assert payload["indexed_files"] == 1
+    assert payload["total_files"] == 1

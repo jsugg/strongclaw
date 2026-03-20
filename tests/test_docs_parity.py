@@ -65,14 +65,16 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
         repo_root / "platform/docs/runbooks/linux-runtime-user-and-systemd.md"
     ).read_text(encoding="utf-8")
 
-    assert "./scripts/bootstrap/install.sh" in readme
+    assert "clawops setup" in readme
     assert "./scripts/bootstrap/verify_sidecars.sh" in quickstart
     assert "./scripts/bootstrap/verify_channels.sh" in quickstart
     assert "./scripts/bootstrap/verify_channels.sh" in setup
     assert "./scripts/bootstrap/verify_observability.sh" in quickstart
     assert "./scripts/bootstrap/verify_observability.sh" in setup
-    assert "./scripts/bootstrap/install.sh" in setup
-    assert "./scripts/bootstrap/install.sh" in host_platforms
+    assert "clawops setup" in setup
+    assert "clawops setup" in host_platforms
+    assert "make doctor" in quickstart
+    assert "make doctor" in setup
     assert "make install" in quickstart
     assert "macOS-first rollout before Linux" not in host_platforms
     assert "./scripts/bootstrap/create_openclawsvc.sh" in macos_runbook

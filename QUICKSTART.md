@@ -13,37 +13,67 @@ make install
 ```
 
 If you plan to develop on this repo, install `uv` and use `make dev` plus
-`make test` separately. `uv` is not required for operator bootstrap.
+`make test` separately. The companion-tool test entrypoints run through
+`uv run`, and the bootstrap flow installs `uv` when the host does not
+already provide it.
 
 ## 2. Prepare the Varlock env contract
+
+You can prepare the env contract either manually or through the guided setup
+flow. `clawops setup` will create `platform/configs/varlock/.env.local`,
+repair missing keys, generate required local secrets, and prompt for missing
+runtime or provider-auth input when needed.
+
+Manual path:
 
 ```bash
 cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
 $EDITOR platform/configs/varlock/.env.local
 ```
 
+Before you continue, decide how OpenClaw should authenticate to an LLM provider.
+StrongClaw supports two setup paths:
+
+- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` can launch `openclaw configure --section model`
+- env-driven: set provider keys plus optional model overrides in `platform/configs/varlock/.env.local`
+  - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
+  - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
+  - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+
 ## 3. Bring up the host baseline
 
 ```bash
-./scripts/bootstrap/install.sh
+make setup
 ```
 
-That script:
+Equivalent shell entrypoint:
+
+```bash
+./scripts/bootstrap/setup.sh
+```
+
+That setup flow:
 
 - auto-detects the host OS/architecture and dispatches to the compatible bootstrap path
 - runs the matching host preflight before attempting package installs
-- creates the repo-local directories under `platform/`
 - installs or verifies host package prerequisites
 - uses an existing Docker-compatible runtime when one is already installed
 - installs Docker only when no Docker-compatible runtime is detected
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the default QMD semantic memory backend
 - installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
-- validates the repo-local Varlock env contract under `platform/configs/varlock`
+- creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
+- prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
+- configures or validates OpenClaw model/provider auth before services are activated
 - renders and activates launchd or systemd service templates
 - prepares the hardened OpenClaw config overlays
 - prepares sidecar config and service manifests
 - runs the baseline verification gate
+
+StrongClaw-generated runtime data does not default into the repository checkout.
+Setup now places compose state, harness artifacts, ACP summaries, the managed
+`lossless-claw` checkout, and QMD package files under OS-appropriate app
+data/state directories instead.
 
 You can rerun the host doctor directly after any local change that might affect
 the rendered config or CLI toolchain:
@@ -52,12 +82,16 @@ the rendered config or CLI toolchain:
 ./scripts/bootstrap/doctor_host.sh
 ```
 
-If Linux bootstrap just added the runtime user to the `docker` group, start a
-fresh login shell as that user and rerun:
+For the full post-bootstrap readiness sweep, run:
 
 ```bash
-./scripts/bootstrap/install.sh --skip-bootstrap
+clawops doctor
 ```
+
+If Linux bootstrap just added the runtime user to the `docker` group, setup
+pauses with clear remediation. Open a fresh login shell as that user and rerun
+the same `make setup` or `clawops setup` command; completed bootstrap work is
+auto-detected and skipped.
 
 ## 4. Rerender the OpenClaw config when you change profiles
 
@@ -103,10 +137,18 @@ It runs:
 - `openclaw secrets audit --check`
 - `openclaw memory status --deep`
 - `openclaw memory search --query "ClawOps" --max-results 1`
+- `./scripts/bootstrap/configure_openclaw_model_auth.sh --check-only`
 - `./scripts/bootstrap/verify_sidecars.sh --skip-runtime`
 - `./scripts/bootstrap/verify_observability.sh --skip-runtime`
 - `./scripts/bootstrap/verify_channels.sh`
 - companion-tool smoke tests
+
+For the deeper StrongClaw readiness scan, including model/provider validation
+and platform verification in one place, run:
+
+```bash
+make doctor
+```
 
 ## 6. Optional staged layers
 

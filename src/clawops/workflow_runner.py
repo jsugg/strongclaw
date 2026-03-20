@@ -9,6 +9,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_text
 from clawops.context_service import service_from_config
 from clawops.op_journal import OperationJournal
@@ -62,7 +63,7 @@ def _default_context_pack_output(*, base_dir: pathlib.Path, step_name: str) -> p
     """Return the default on-disk path for a workflow-generated context pack."""
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", step_name.strip()).strip("-")
     slug = safe_name or "context-pack"
-    return base_dir / ".runs" / "context-packs" / f"{slug}.md"
+    return scoped_state_dir(base_dir, category="context-packs") / f"{slug}.md"
 
 
 TRUSTED_WORKFLOW_ROOTS: tuple[pathlib.Path, ...] = (

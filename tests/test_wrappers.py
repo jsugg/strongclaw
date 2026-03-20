@@ -162,7 +162,7 @@ SPECS = (
         invoke=_invoke_github_labels,
         execute=_execute_github,
         allowlist_value=_identity,
-        env={"GITHUB_TOKEN": "test-token"},
+        env={"GITHUB_TOKEN": "test-token", "CLAWOPS_HTTP_RETRY_MODE": "safe"},
     ),
     WrapperSpec(
         name="github-merge",
@@ -649,6 +649,7 @@ def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -
         return _FakeResponse(text="ok")
 
     monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
     client = JsonHttpClient(timeout=5)
 
     outcome = client.post(
@@ -670,12 +671,42 @@ def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -
     assert calls == ["request", "request"]
 
 
+def test_retry_mode_off_disables_safe_label_retries(
+    tmp_path: pathlib.Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ctx, journal = _build_context(tmp_path, SPECS[2], require_approval=False)
+    _configure_wrapper_environment(SPECS[2], monkeypatch)
+    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "off")
+    calls: list[str] = []
+    _install_transport_error(monkeypatch, "simulated timeout", calls)
+
+    result = add_labels(
+        ctx=ctx,
+        repo="example/repo",
+        issue_number=123,
+        labels=["needs-review"],
+        scope="test",
+        trust_zone="automation",
+    )
+
+    assert result["ok"] is False
+    assert result["retryable"] is False
+    assert result["request_attempts"] == 1
+    assert calls == ["request"]
+
+    persisted = journal.get(str(result["op_id"]))
+    assert persisted.result_error_retryable == 0
+    assert persisted.result_request_attempts == 1
+
+
 def test_github_labels_retry_retryable_http_status_then_succeeds(
     tmp_path: pathlib.Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     ctx, journal = _build_context(tmp_path, SPECS[2], require_approval=False)
     _configure_wrapper_environment(SPECS[2], monkeypatch)
+    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
     calls: list[str] = []
     _install_status_sequence(
         monkeypatch,
@@ -728,6 +759,7 @@ def test_github_labels_retry_timeout_then_succeeds(
 ) -> None:
     ctx, journal = _build_context(tmp_path, SPECS[2], require_approval=False)
     _configure_wrapper_environment(SPECS[2], monkeypatch)
+    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
     calls: list[str] = []
 
     def _request(*args: object, **kwargs: object) -> _FakeResponse:
@@ -822,6 +854,35 @@ def test_non_retry_wrappers_fail_once_on_retryable_http_status(
     assert persisted.result_request_attempts == 1
     assert persisted.result_request_id == "req-503"
     assert persisted.result_retry_after_seconds == 5.0
+
+
+def test_wrapper_emits_structured_log_when_enabled(
+    tmp_path: pathlib.Path,
+    monkeypatch: MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    ctx, _ = _build_context(tmp_path, SPECS[0], require_approval=False)
+    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
+    calls: list[str] = []
+    _install_success_response(monkeypatch, calls)
+
+    result = invoke_webhook(
+        ctx=ctx,
+        url="https://example.internal/hooks/deploy",
+        payload_body={"ok": True},
+        scope="test",
+        trust_zone="automation",
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err.strip())
+    assert result["ok"] is True
+    assert payload["event"] == "clawops.wrapper.execute"
+    assert payload["kind"] == "webhook_post"
+    assert payload["op_id"] == result["op_id"]
+    assert payload["request_attempts"] == 1
+    assert payload["status_code"] == 200
+    assert calls == ["request"]
 
 
 def test_json_http_client_supports_split_timeouts(monkeypatch: MonkeyPatch) -> None:
