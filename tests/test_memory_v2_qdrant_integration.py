@@ -91,10 +91,22 @@ class _DeterministicEmbeddingProvider:
         return [value / norm for value in vector]
 
 
-def _query_points(*, base_url: str, collection: str, vector: list[float]) -> list[dict[str, Any]]:
+def _query_points(
+    *,
+    base_url: str,
+    collection: str,
+    vector: list[float],
+    using: str = "dense",
+) -> list[dict[str, Any]]:
     response = requests.post(
         f"{base_url.rstrip('/')}/collections/{collection}/points/query",
-        json={"query": vector, "limit": 8, "with_payload": True, "with_vector": False},
+        json={
+            "query": vector,
+            "using": using,
+            "limit": 8,
+            "with_payload": True,
+            "with_vector": False,
+        },
         timeout=5.0,
     )
     response.raise_for_status()
@@ -146,6 +158,7 @@ def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> No
         base_url=qdrant_url,
         collection=collection,
         vector=[1.0, 0.0, 0.0],
+        using=config.qdrant.dense_vector_name,
     )
     assert any(
         point.get("payload", {}).get("rel_path") == "docs/runbook.md" for point in points_before
@@ -158,6 +171,7 @@ def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> No
         base_url=qdrant_url,
         collection=collection,
         vector=[1.0, 0.0, 0.0],
+        using=config.qdrant.dense_vector_name,
     )
     assert all(
         point.get("payload", {}).get("rel_path") != "docs/runbook.md" for point in points_after
