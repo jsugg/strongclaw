@@ -16,6 +16,9 @@ def test_memory_v2_plugin_manifest_and_package_metadata() -> None:
     assert manifest["kind"] == "memory"
     assert "configPath" in manifest["configSchema"]["properties"]
     assert package["openclaw"]["extensions"] == ["./index.js"]
+    assert package["scripts"]["test:openclaw-host"] == "node test/openclaw-host-functional.mjs"
+    assert (plugin_root / "test" / "openclaw-host-functional.mjs").exists()
+    assert (plugin_root / "test" / "helpers" / "openclaw-plugin-sdk-stub.mjs").exists()
 
 
 def test_memory_v2_plugin_uses_compatible_tool_names() -> None:

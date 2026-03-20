@@ -20,6 +20,7 @@ from clawops.memory_v2.models import (
     DenseSearchCandidate,
     EvidenceEntry,
     FusionMode,
+    IndexedDocument,
     ProposalRecord,
     ReflectionMode,
     ReflectionSummary,
@@ -27,12 +28,14 @@ from clawops.memory_v2.models import (
     SearchBackend,
     SearchHit,
     SearchMode,
+    SparseSearchCandidate,
 )
 from clawops.memory_v2.parser import build_document, iter_retained_notes, parse_typed_entry
 from clawops.memory_v2.providers import create_embedding_provider, create_rerank_provider
 from clawops.memory_v2.qdrant_backend import QdrantBackend
 from clawops.memory_v2.retrieval import search_index
 from clawops.memory_v2.schema import SCHEMA_VERSION, ensure_schema
+from clawops.memory_v2.sparse import SparseEncoder, build_sparse_encoder
 from clawops.observability import emit_structured_log, observed_span
 
 BANK_HEADERS = {
@@ -74,10 +77,13 @@ class MemoryV2Engine:
 
     def status(self) -> dict[str, Any]:
         """Return index and governance status."""
+        sparse_fingerprint_current: str | None = None
         with self.connect() as conn:
             document_count = self._count_rows(conn, "documents")
             item_count = self._count_rows(conn, "search_items")
             vector_items = self._count_rows(conn, "vector_items")
+            sparse_vector_items = self._count_sparse_vector_items(conn)
+            sparse_vocabulary_size = self._count_rows(conn, "sparse_terms")
             facts = self._count_rows(conn, "facts")
             opinions = self._count_rows(conn, "opinions")
             reflections = self._count_rows(conn, "reflections")
@@ -87,6 +93,11 @@ class MemoryV2Engine:
             backend_fingerprint = self._backend_state_value(conn, "config_fingerprint")
             last_sync_at = self._backend_state_value(conn, "last_sync_at")
             last_sync_error = self._backend_state_value(conn, "last_sync_error")
+            sparse_fingerprint = self._backend_state_value(conn, "sparse_fingerprint")
+            sparse_doc_count = self._backend_state_value(conn, "sparse_doc_count")
+            sparse_avg_doc_length = self._backend_state_value(conn, "sparse_avg_doc_length")
+            if self._backend_uses_sparse_vectors():
+                sparse_fingerprint_current = self._current_sparse_fingerprint()
         qdrant_health = self._qdrant_backend.health()
         return {
             "ok": True,
@@ -101,6 +112,8 @@ class MemoryV2Engine:
             "documents": document_count,
             "searchItems": item_count,
             "vectorItems": vector_items,
+            "sparseVectorItems": sparse_vector_items,
+            "sparseVocabularySize": sparse_vocabulary_size,
             "facts": facts,
             "opinions": opinions,
             "reflections": reflections,
@@ -118,6 +131,13 @@ class MemoryV2Engine:
             "qdrant": qdrant_health,
             "lastVectorSyncAt": last_sync_at,
             "lastVectorSyncError": last_sync_error,
+            "sparseFingerprint": sparse_fingerprint,
+            "sparseFingerprintDirty": (
+                sparse_fingerprint_current is not None
+                and sparse_fingerprint != sparse_fingerprint_current
+            ),
+            "sparseDocumentCount": int(sparse_doc_count or "0"),
+            "sparseAverageDocumentLength": float(sparse_avg_doc_length or "0"),
             "defaultScope": self.config.governance.default_scope,
             "readableScopes": list(self.config.governance.readable_scope_patterns),
             "writableScopes": list(self.config.governance.writable_scope_patterns),
@@ -132,12 +152,22 @@ class MemoryV2Engine:
                 for row in conn.execute("SELECT rel_path, sha256 FROM documents")
             }
             backend_fingerprint = self._backend_state_value(conn, "config_fingerprint")
-        current = {document.rel_path: document.sha256 for document in self._iter_documents()}
-        return current != existing or backend_fingerprint != self._backend_fingerprint()
+            sparse_fingerprint = self._backend_state_value(conn, "sparse_fingerprint")
+        documents = list(self._iter_documents())
+        current = {document.rel_path: document.sha256 for document in documents}
+        sparse_dirty = False
+        if self._backend_uses_sparse_vectors():
+            sparse_dirty = sparse_fingerprint != self._sparse_fingerprint_for_documents(documents)
+        return (
+            current != existing
+            or backend_fingerprint != self._backend_fingerprint()
+            or sparse_dirty
+        )
 
     def reindex(self) -> ReindexSummary:
         """Rebuild the derived index from canonical Markdown files."""
         documents = list(self._iter_documents())
+        sparse_encoder = self._sparse_encoder_for_documents(documents)
         typed_counts: defaultdict[str, int] = defaultdict(int)
         vector_rows: list[dict[str, Any]] = []
         with observed_span(
@@ -160,6 +190,11 @@ class MemoryV2Engine:
                     }
                     current = {document.rel_path: document.sha256 for document in documents}
                     dirty = current != existing
+                    if self._backend_uses_sparse_vectors():
+                        dirty = dirty or (
+                            self._backend_state_value(conn, "sparse_fingerprint")
+                            != sparse_encoder.fingerprint
+                        )
                     self._clear_derived_rows(conn)
                     indexed_at = datetime.now(tz=UTC).isoformat()
                     chunks = 0
@@ -287,6 +322,7 @@ class MemoryV2Engine:
                         conn=conn,
                         vector_rows=vector_rows,
                         stale_point_ids=existing_point_ids,
+                        sparse_encoder=sparse_encoder,
                     )
                 summary = ReindexSummary(
                     files=len(documents),
@@ -374,29 +410,43 @@ class MemoryV2Engine:
             try:
                 resolved_backend = requested_backend
                 dense_candidates: list[DenseSearchCandidate] = []
-                qdrant_search_ms = 0.0
+                sparse_candidates: list[SparseSearchCandidate] = []
+                qdrant_dense_search_ms = 0.0
+                qdrant_sparse_search_ms = 0.0
                 fallback_activated = False
-                if resolved_backend == "qdrant_dense_hybrid":
-                    try:
-                        dense_candidates, qdrant_search_ms = self._dense_search(
-                            query=query,
-                            lane=lane,
-                            scope=scope,
-                        )
-                    except Exception as err:
-                        if self.config.backend.fallback != "sqlite_fts":
-                            raise
-                        resolved_backend = self.config.backend.fallback
-                        fallback_activated = True
-                        emit_structured_log(
-                            "clawops.memory_v2.search.fallback",
-                            {
-                                "requestedBackend": requested_backend,
-                                "resolvedBackend": resolved_backend,
-                                "error": str(err),
-                            },
-                        )
                 with self.connect() as conn:
+                    if resolved_backend in {
+                        "qdrant_dense_hybrid",
+                        "qdrant_sparse_dense_hybrid",
+                    }:
+                        try:
+                            dense_candidates, qdrant_dense_search_ms = self._dense_search(
+                                query=query,
+                                lane=lane,
+                                scope=scope,
+                            )
+                            if resolved_backend == "qdrant_sparse_dense_hybrid":
+                                sparse_candidates, qdrant_sparse_search_ms = self._sparse_search(
+                                    conn=conn,
+                                    query=query,
+                                    lane=lane,
+                                    scope=scope,
+                                )
+                        except Exception as err:
+                            if self.config.backend.fallback != "sqlite_fts":
+                                raise
+                            resolved_backend = self.config.backend.fallback
+                            fallback_activated = True
+                            dense_candidates = []
+                            sparse_candidates = []
+                            emit_structured_log(
+                                "clawops.memory_v2.search.fallback",
+                                {
+                                    "requestedBackend": requested_backend,
+                                    "resolvedBackend": resolved_backend,
+                                    "error": str(err),
+                                },
+                            )
                     hits, diagnostics = search_index(
                         conn,
                         query=query,
@@ -407,6 +457,7 @@ class MemoryV2Engine:
                         ranking=self.config.ranking,
                         hybrid=hybrid_config,
                         dense_candidates=dense_candidates,
+                        sparse_candidates=sparse_candidates,
                         active_backend=resolved_backend,
                         include_explain=include_explain,
                     )
@@ -441,7 +492,8 @@ class MemoryV2Engine:
                     "resolvedBackend": resolved_backend,
                     "fallbackActivated": fallback_activated,
                     "results": len(hits),
-                    "qdrantSearchMs": round(qdrant_search_ms, 3),
+                    "qdrantDenseSearchMs": round(qdrant_dense_search_ms, 3),
+                    "qdrantSparseSearchMs": round(qdrant_sparse_search_ms, 3),
                     "rerankMs": round(rerank_ms, 3),
                 }
                 telemetry_payload.update(diagnostics.to_dict())
@@ -461,6 +513,80 @@ class MemoryV2Engine:
                     },
                 )
                 raise
+
+    def verify_tier1(self) -> dict[str, Any]:
+        """Verify the supported tier-one sparse+dense backend contract."""
+        errors: list[str] = []
+        lane_checks: dict[str, Any] = {}
+        if self.config.backend.active != "qdrant_sparse_dense_hybrid":
+            errors.append(
+                "backend.active must be qdrant_sparse_dense_hybrid for tier-one verification"
+            )
+        status = self.status()
+        if status["dirty"]:
+            errors.append("memory-v2 index is dirty")
+        if status["lastVectorSyncError"]:
+            errors.append(f"vector sync error: {status['lastVectorSyncError']}")
+        if not status["qdrantEnabled"] or not status["qdrantHealthy"]:
+            errors.append("Qdrant must be enabled and healthy")
+        if int(status["vectorItems"]) <= 0:
+            errors.append("no dense vector items are indexed")
+        if int(status["sparseVectorItems"]) <= 0:
+            errors.append("no sparse vector items are indexed")
+        if bool(status["sparseFingerprintDirty"]):
+            errors.append("sparse fingerprint is dirty")
+
+        collection_details: dict[str, Any] = {}
+        if status["qdrantEnabled"] and status["qdrantHealthy"]:
+            try:
+                collection_details = self._qdrant_backend.collection_details()
+            except Exception as err:
+                errors.append(f"unable to read Qdrant collection details: {err}")
+            else:
+                if not self._collection_has_tier1_vector_lanes(collection_details):
+                    errors.append(
+                        "Qdrant collection is missing the named dense or sparse vector lane"
+                    )
+
+        with self.connect() as conn:
+            probe_query = self._tier1_probe_query(conn)
+            lane_checks["probeQuery"] = probe_query or ""
+            if not probe_query:
+                errors.append("unable to build a tier-one probe query from indexed content")
+            else:
+                try:
+                    dense_hits, dense_ms = self._dense_search(
+                        query=probe_query,
+                        lane="all",
+                        scope=None,
+                    )
+                    lane_checks["dense"] = {"hits": len(dense_hits), "ms": round(dense_ms, 3)}
+                    if not dense_hits:
+                        errors.append("dense lane returned no candidates")
+                except Exception as err:
+                    errors.append(f"dense lane failed: {err}")
+                try:
+                    sparse_hits, sparse_ms = self._sparse_search(
+                        conn=conn,
+                        query=probe_query,
+                        lane="all",
+                        scope=None,
+                    )
+                    lane_checks["sparse"] = {"hits": len(sparse_hits), "ms": round(sparse_ms, 3)}
+                    if not sparse_hits:
+                        errors.append("sparse lane returned no candidates")
+                except Exception as err:
+                    errors.append(f"sparse lane failed: {err}")
+
+        return {
+            "ok": not errors,
+            "provider": "strongclaw-memory-v2",
+            "backend": self.config.backend.active,
+            "status": status,
+            "collection": collection_details,
+            "laneChecks": lane_checks,
+            "errors": errors,
+        }
 
     def read(
         self,
@@ -1207,7 +1333,7 @@ class MemoryV2Engine:
         if not self.config.qdrant.enabled or not self.config.embedding.enabled:
             return [], 0.0
         with observed_span(
-            "clawops.memory_v2.qdrant.search",
+            "clawops.memory_v2.qdrant.search.dense",
             attributes={
                 "lane": lane,
                 "scope": scope,
@@ -1219,7 +1345,7 @@ class MemoryV2Engine:
             if not embedding:
                 return [], 0.0
             try:
-                hits = self._qdrant_backend.search(
+                hits = self._qdrant_backend.search_dense(
                     vector=embedding[0],
                     limit=self.config.hybrid.dense_candidate_pool,
                     mode=lane,
@@ -1229,7 +1355,7 @@ class MemoryV2Engine:
                 span.record_exception(err)
                 span.set_error(str(err))
                 emit_structured_log(
-                    "clawops.memory_v2.qdrant.search.error",
+                    "clawops.memory_v2.qdrant.search.dense.error",
                     {"lane": lane, "scope": scope, "error": str(err)},
                 )
                 raise
@@ -1241,7 +1367,59 @@ class MemoryV2Engine:
                 "qdrantSearchMs": elapsed_ms,
             }
             span.set_attributes(payload)
-            emit_structured_log("clawops.memory_v2.qdrant.search", payload)
+            emit_structured_log("clawops.memory_v2.qdrant.search.dense", payload)
+            return hits, elapsed_ms
+
+    def _sparse_search(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        query: str,
+        lane: SearchMode,
+        scope: str | None,
+    ) -> tuple[list[SparseSearchCandidate], float]:
+        """Run a sparse search query through the configured vector backend."""
+        if not self._backend_uses_sparse_vectors():
+            return [], 0.0
+        encoder = self._load_sparse_encoder(conn)
+        if encoder is None:
+            raise RuntimeError("sparse encoder state is missing")
+        sparse_vector = encoder.encode_query(query.strip())
+        if sparse_vector.is_empty:
+            return [], 0.0
+        with observed_span(
+            "clawops.memory_v2.qdrant.search.sparse",
+            attributes={
+                "lane": lane,
+                "scope": scope,
+                "candidate_limit": self.config.hybrid.sparse_candidate_pool,
+            },
+        ) as span:
+            started_at = perf_counter()
+            try:
+                hits = self._qdrant_backend.search_sparse(
+                    vector=sparse_vector.to_qdrant(),
+                    limit=self.config.hybrid.sparse_candidate_pool,
+                    mode=lane,
+                    scope=scope,
+                )
+            except Exception as err:
+                span.record_exception(err)
+                span.set_error(str(err))
+                emit_structured_log(
+                    "clawops.memory_v2.qdrant.search.sparse.error",
+                    {"lane": lane, "scope": scope, "error": str(err)},
+                )
+                raise
+            elapsed_ms = (perf_counter() - started_at) * 1000.0
+            payload = {
+                "lane": lane,
+                "scope": scope,
+                "hits": len(hits),
+                "qdrantSearchMs": elapsed_ms,
+            }
+            span.set_attributes(payload)
+            emit_structured_log("clawops.memory_v2.qdrant.search.sparse", payload)
             return hits, elapsed_ms
 
     def _sync_dense_backend(
@@ -1250,13 +1428,21 @@ class MemoryV2Engine:
         conn: sqlite3.Connection,
         vector_rows: list[dict[str, Any]],
         stale_point_ids: set[str],
+        sparse_encoder: SparseEncoder,
     ) -> None:
-        """Synchronize dense vectors into Qdrant when the backend is enabled."""
+        """Synchronize dense and sparse vectors into Qdrant when the backend is enabled."""
         conn.execute("DELETE FROM backend_state")
+        conn.execute("DELETE FROM sparse_terms")
+        self._write_sparse_state(conn, sparse_encoder)
         if not self.config.qdrant.enabled or not self.config.embedding.enabled:
+            conn.execute("DELETE FROM vector_items")
             self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
             self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
-            self._write_backend_state(conn, "last_sync_error", "")
+            self._write_backend_state(
+                conn,
+                "last_sync_error",
+                "qdrant backend disabled" if self._backend_uses_qdrant() else "",
+            )
             conn.commit()
             emit_structured_log(
                 "clawops.memory_v2.vector_sync",
@@ -1264,6 +1450,7 @@ class MemoryV2Engine:
             )
             return
         if not vector_rows:
+            conn.execute("DELETE FROM vector_items")
             self._write_backend_state(conn, "config_fingerprint", self._backend_fingerprint())
             self._write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
             self._write_backend_state(conn, "last_sync_error", "")
@@ -1279,25 +1466,43 @@ class MemoryV2Engine:
         ) as span:
             sync_started_at = perf_counter()
             try:
+                include_sparse = self._backend_uses_sparse_vectors()
                 points: list[dict[str, Any]] = []
-                embedded_vectors: list[tuple[dict[str, Any], list[float]]] = []
+                embedded_vectors: list[
+                    tuple[dict[str, Any], list[float], dict[str, Any] | None]
+                ] = []
                 for batch in self._embedding_batches(vector_rows):
                     vectors = self._embed_texts(
                         [str(entry["content"]) for entry in batch],
                         purpose="index",
                     )
                     for entry, vector in zip(batch, vectors, strict=True):
-                        embedded_vectors.append((entry, vector))
+                        sparse_payload = None
+                        if include_sparse:
+                            sparse_vector = sparse_encoder.encode_document(str(entry["content"]))
+                            sparse_payload = sparse_vector.to_qdrant()
+                            entry["sparse_term_count"] = len(sparse_vector.indices)
+                        else:
+                            entry["sparse_term_count"] = 0
+                        embedded_vectors.append((entry, vector, sparse_payload))
                 vector_dim = len(embedded_vectors[0][1])
-                self._qdrant_backend.ensure_collection(vector_size=vector_dim)
+                self._qdrant_backend.ensure_collection(
+                    vector_size=vector_dim,
+                    include_sparse=include_sparse,
+                )
                 new_point_ids: set[str] = set()
-                for entry, vector in embedded_vectors:
+                for entry, vector, sparse_payload in embedded_vectors:
                     point_id = str(entry["point_id"])
                     new_point_ids.add(point_id)
+                    vector_payload: dict[str, Any] = {
+                        self.config.qdrant.dense_vector_name: vector,
+                    }
+                    if include_sparse and sparse_payload is not None:
+                        vector_payload[self.config.qdrant.sparse_vector_name] = sparse_payload
                     points.append(
                         {
                             "id": point_id,
-                            "vector": vector,
+                            "vector": vector_payload,
                             "payload": entry["payload"],
                         }
                     )
@@ -1306,7 +1511,7 @@ class MemoryV2Engine:
                 if stale_ids:
                     self._qdrant_backend.delete_points(stale_ids)
                 conn.execute("DELETE FROM vector_items")
-                for entry, vector in embedded_vectors:
+                for entry, vector, _sparse_payload in embedded_vectors:
                     conn.execute(
                         """
                         INSERT INTO vector_items(
@@ -1315,9 +1520,12 @@ class MemoryV2Engine:
                             embedding_model,
                             embedding_dim,
                             content_sha256,
+                            sparse_term_count,
+                            sparse_content_sha256,
+                            sparse_updated_at,
                             updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             int(entry["item_id"]),
@@ -1325,6 +1533,9 @@ class MemoryV2Engine:
                             self.config.embedding.model,
                             len(vector),
                             self._sha256(str(entry["content"])),
+                            int(entry.get("sparse_term_count", 0)),
+                            sparse_encoder.fingerprint if include_sparse else "",
+                            datetime.now(tz=UTC).isoformat() if include_sparse else "",
                             datetime.now(tz=UTC).isoformat(),
                         ),
                     )
@@ -1397,6 +1608,139 @@ class MemoryV2Engine:
         for index in range(0, len(vector_rows), batch_size):
             yield vector_rows[index : index + batch_size]
 
+    def _count_sparse_vector_items(self, conn: sqlite3.Connection) -> int:
+        """Count indexed rows that carry sparse vector state."""
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM vector_items WHERE sparse_term_count > 0"
+        ).fetchone()
+        return 0 if row is None else int(row["count"])
+
+    def _canonical_backend(self, backend: SearchBackend) -> SearchBackend:
+        """Return the backend identifier unchanged."""
+        return backend
+
+    def _backend_uses_qdrant(self) -> bool:
+        """Return whether the configured active backend uses Qdrant."""
+        return self.config.backend.active in {
+            "qdrant_dense_hybrid",
+            "qdrant_sparse_dense_hybrid",
+        }
+
+    def _backend_uses_sparse_vectors(self) -> bool:
+        """Return whether the configured active backend expects sparse vectors."""
+        return self.config.backend.active == "qdrant_sparse_dense_hybrid"
+
+    def _vector_rows_for_documents(
+        self, documents: Sequence[IndexedDocument]
+    ) -> list[dict[str, str]]:
+        """Build deterministic retrieval rows from indexed documents."""
+        vector_rows: list[dict[str, str]] = []
+        for document in documents:
+            for item in document.items:
+                vector_rows.append(
+                    {
+                        "content": self._normalized_retrieval_text(item.title, item.snippet),
+                    }
+                )
+        return vector_rows
+
+    def _sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
+        """Build the sparse encoder for the current indexed corpus."""
+        if not self._backend_uses_sparse_vectors():
+            return build_sparse_encoder(())
+        return build_sparse_encoder(
+            [str(entry["content"]) for entry in self._vector_rows_for_documents(documents)]
+        )
+
+    def _sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
+        """Return the sparse fingerprint for *documents*."""
+        return self._sparse_encoder_for_documents(documents).fingerprint
+
+    def _current_sparse_fingerprint(self) -> str:
+        """Return the sparse fingerprint for the current canonical corpus."""
+        return self._sparse_fingerprint_for_documents(list(self._iter_documents()))
+
+    def _write_sparse_state(self, conn: sqlite3.Connection, sparse_encoder: SparseEncoder) -> None:
+        """Persist sparse vocabulary metadata into the derived SQLite state."""
+        if not self._backend_uses_sparse_vectors():
+            self._write_backend_state(conn, "sparse_fingerprint", "")
+            self._write_backend_state(conn, "sparse_doc_count", "0")
+            self._write_backend_state(conn, "sparse_avg_doc_length", "0")
+            return
+        for term, term_id in sorted(sparse_encoder.term_to_id.items(), key=lambda item: item[1]):
+            conn.execute(
+                "INSERT INTO sparse_terms(term, term_id, document_freq) VALUES (?, ?, ?)",
+                (term, term_id, int(sparse_encoder.document_frequency.get(term, 0))),
+            )
+        self._write_backend_state(conn, "sparse_fingerprint", sparse_encoder.fingerprint)
+        self._write_backend_state(
+            conn,
+            "sparse_doc_count",
+            str(sparse_encoder.document_count),
+        )
+        self._write_backend_state(
+            conn,
+            "sparse_avg_doc_length",
+            f"{sparse_encoder.average_document_length:.8f}",
+        )
+
+    def _load_sparse_encoder(self, conn: sqlite3.Connection) -> SparseEncoder | None:
+        """Load the persisted sparse vocabulary from SQLite."""
+        if not self._backend_uses_sparse_vectors():
+            return None
+        rows = conn.execute(
+            "SELECT term, term_id, document_freq FROM sparse_terms ORDER BY term_id ASC"
+        ).fetchall()
+        if not rows:
+            return None
+        term_to_id = {str(row["term"]): int(row["term_id"]) for row in rows}
+        document_frequency = {str(row["term"]): int(row["document_freq"]) for row in rows}
+        document_count = int(self._backend_state_value(conn, "sparse_doc_count") or "0")
+        average_document_length = float(
+            self._backend_state_value(conn, "sparse_avg_doc_length") or "0"
+        )
+        fingerprint = self._backend_state_value(conn, "sparse_fingerprint") or ""
+        return SparseEncoder(
+            term_to_id=term_to_id,
+            document_frequency=document_frequency,
+            document_count=document_count,
+            average_document_length=average_document_length,
+            fingerprint=fingerprint,
+        )
+
+    def _collection_has_tier1_vector_lanes(self, collection_details: dict[str, Any]) -> bool:
+        """Return whether the live Qdrant collection exposes both named vector lanes."""
+        config = collection_details.get("config")
+        if not isinstance(config, dict):
+            return False
+        params = config.get("params")
+        if not isinstance(params, dict):
+            return False
+        vectors = params.get("vectors")
+        sparse_vectors = params.get("sparse_vectors")
+        if not isinstance(vectors, dict) or not isinstance(sparse_vectors, dict):
+            return False
+        return (
+            self.config.qdrant.dense_vector_name in vectors
+            and self.config.qdrant.sparse_vector_name in sparse_vectors
+        )
+
+    def _tier1_probe_query(self, conn: sqlite3.Connection) -> str | None:
+        """Return a deterministic probe query for tier-one backend verification."""
+        row = conn.execute("""
+            SELECT normalized_text
+            FROM search_items
+            WHERE normalized_text != ''
+            ORDER BY length(normalized_text) DESC
+            LIMIT 1
+            """).fetchone()
+        if row is None:
+            return None
+        text = str(row["normalized_text"]).strip()
+        if not text:
+            return None
+        return " ".join(text.split()[:8])
+
     def _backend_fingerprint(self) -> str:
         """Return a stable fingerprint for the active dense backend config."""
         payload = {
@@ -1413,6 +1757,8 @@ class MemoryV2Engine:
                 "enabled": self.config.qdrant.enabled,
                 "url": self.config.qdrant.url,
                 "collection": self.config.qdrant.collection,
+                "dense_vector_name": self.config.qdrant.dense_vector_name,
+                "sparse_vector_name": self.config.qdrant.sparse_vector_name,
             },
         }
         return self._sha256(json.dumps(payload, sort_keys=True))

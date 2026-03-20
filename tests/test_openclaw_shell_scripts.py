@@ -260,6 +260,8 @@ def _write_valid_varlock_env(path: pathlib.Path) -> None:
                 "OPENCLAW_STATE_DIR=~/.openclaw",
                 "LITELLM_MASTER_KEY=test-master-key-1234567890",
                 "LITELLM_DB_PASSWORD=test-db-password-1234",
+                "MEMORY_V2_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
+                "MEMORY_V2_QDRANT_URL=http://127.0.0.1:6333",
                 "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
             ]
         )
@@ -287,15 +289,14 @@ def test_verify_baseline_fails_fast_when_openclaw_is_missing(tmp_path: pathlib.P
     assert "bootstrap.sh" in result.stderr
 
 
-def test_verify_baseline_fails_fast_when_qmd_is_missing(tmp_path: pathlib.Path) -> None:
+def test_verify_baseline_requires_a_rendered_openclaw_config(tmp_path: pathlib.Path) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_openclaw(bin_dir)
-    home_dir = tmp_path / "home"
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "HOME": str(home_dir),
+        "HOME": str(tmp_path / "home"),
     }
 
     result = subprocess.run(
@@ -308,8 +309,7 @@ def test_verify_baseline_fails_fast_when_qmd_is_missing(tmp_path: pathlib.Path) 
     )
 
     assert result.returncode == 1
-    assert "ERROR: Baseline verification requires the QMD semantic memory backend" in result.stderr
-    assert "bootstrap_qmd.sh" in result.stderr
+    assert "ERROR: Rendered OpenClaw config not found" in result.stderr
 
 
 def test_bootstrap_qmd_reinstalls_broken_launcher_from_published_package(
@@ -457,6 +457,9 @@ def test_verify_baseline_runs_from_non_repo_cwd_when_dependencies_exist(
     verify_models_script = tmp_path / "verify_openclaw_models.sh"
     _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
     home_dir = tmp_path / "home"
+    config_path = home_dir / ".openclaw" / "openclaw.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"gateway":{"bind":"loopback"}}\n', encoding="utf-8")
     _write_fake_qmd(home_dir)
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -499,6 +502,9 @@ def test_verify_baseline_uses_varlock_contract_when_available_off_path(
     verify_models_script = tmp_path / "verify_openclaw_models.sh"
     _write_recording_script(verify_models_script, "printf 'verify-models %s\\n' \"$*\"\n")
     home_dir = tmp_path / "home"
+    config_path = home_dir / ".openclaw" / "openclaw.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text('{"gateway":{"bind":"loopback"}}\n', encoding="utf-8")
     _write_fake_qmd(home_dir)
     varlock_log = tmp_path / "varlock.log"
     install_dir = home_dir / ".config" / "varlock" / "bin"
@@ -968,6 +974,8 @@ def test_configure_varlock_env_check_only_accepts_plugin_backed_provider_backend
                 "OPENCLAW_STATE_DIR=~/.openclaw",
                 "LITELLM_MASTER_KEY=test-master-key-1234567890",
                 "LITELLM_DB_PASSWORD=test-db-password-1234",
+                "MEMORY_V2_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
+                "MEMORY_V2_QDRANT_URL=http://127.0.0.1:6333",
                 "OPENCLAW_DEFAULT_MODEL=openai/gpt-5.4",
                 "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
             ]
@@ -1322,9 +1330,19 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     doctor_script = tmp_path / "doctor_host.sh"
     configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
     install_script = tmp_path / "install_host_services.sh"
+    bootstrap_qmd_script = tmp_path / "bootstrap_qmd.sh"
+    bootstrap_memory_plugin_script = tmp_path / "bootstrap_memory_plugin.sh"
     _write_recording_script(
         bootstrap_script,
         f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_qmd_script,
+        f'printf "bootstrap-qmd\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_memory_plugin_script,
+        f'printf "bootstrap-memory-plugin\\n" >> "{log_path}"\n',
     )
     _write_recording_script(
         configure_varlock_env_script,
@@ -1348,6 +1366,8 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     )
     env = os.environ | {
         "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "BOOTSTRAP_QMD_SCRIPT": str(bootstrap_qmd_script),
+        "BOOTSTRAP_MEMORY_PLUGIN_SCRIPT": str(bootstrap_memory_plugin_script),
         "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
         "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
         "DOCTOR_HOST_SCRIPT": str(doctor_script),
@@ -1374,6 +1394,8 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
 
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap-qmd",
+        "bootstrap-memory-plugin",
         "validate ",
         "render --profile acp profile=acp",
         "doctor",
@@ -1399,9 +1421,19 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     doctor_script = tmp_path / "doctor_host.sh"
     configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
     install_script = tmp_path / "install_host_services.sh"
+    bootstrap_qmd_script = tmp_path / "bootstrap_qmd.sh"
+    bootstrap_memory_plugin_script = tmp_path / "bootstrap_memory_plugin.sh"
     _write_recording_script(
         bootstrap_script,
         f'printf "bootstrap\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_qmd_script,
+        f'printf "bootstrap-qmd\\n" >> "{log_path}"\n',
+    )
+    _write_recording_script(
+        bootstrap_memory_plugin_script,
+        f'printf "bootstrap-memory-plugin\\n" >> "{log_path}"\n',
     )
     _write_recording_script(
         configure_varlock_env_script,
@@ -1427,6 +1459,8 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
         "OPENCLAW_SETUP_STATE_DIR": str(state_dir),
         "OPENCLAW_BOOTSTRAP_STATE_FILE": str(state_dir / "bootstrap.env"),
         "BOOTSTRAP_SCRIPT": str(bootstrap_script),
+        "BOOTSTRAP_QMD_SCRIPT": str(bootstrap_qmd_script),
+        "BOOTSTRAP_MEMORY_PLUGIN_SCRIPT": str(bootstrap_memory_plugin_script),
         "CONFIGURE_VARLOCK_ENV_SCRIPT": str(configure_varlock_env_script),
         "RENDER_OPENCLAW_CONFIG_SCRIPT": str(render_script),
         "DOCTOR_HOST_SCRIPT": str(doctor_script),
@@ -1453,6 +1487,8 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     assert result.returncode == 0
     assert "auto-skipped (host bootstrap already completed)" in result.stdout
     assert log_path.read_text(encoding="utf-8").splitlines() == [
+        "bootstrap-qmd",
+        "bootstrap-memory-plugin",
         "validate",
         "render --profile acp",
         "doctor",
@@ -1850,7 +1886,6 @@ def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "preflight",
         "npm install -g openclaw@2026.3.13 acpx@0.3.0",
-        "bootstrap_qmd",
         "bootstrap_memory_plugin",
         "bootstrap_lossless_context_engine",
         "render_openclaw_config",

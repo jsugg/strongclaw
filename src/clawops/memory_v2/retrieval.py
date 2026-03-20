@@ -19,6 +19,7 @@ from clawops.memory_v2.models import (
     SearchExplanation,
     SearchHit,
     SearchMode,
+    SparseSearchCandidate,
     normalize_text_tokens,
 )
 
@@ -44,6 +45,7 @@ def search_index(
     ranking: Any,
     hybrid: HybridConfig,
     dense_candidates: Sequence[DenseSearchCandidate] | None,
+    sparse_candidates: Sequence[SparseSearchCandidate] | None,
     active_backend: SearchBackend,
     include_explain: bool,
 ) -> tuple[list[SearchHit], SearchDiagnostics]:
@@ -51,16 +53,28 @@ def search_index(
     terms = normalize_text_tokens(query)
     if not terms:
         return [], SearchDiagnostics()
-    lexical_started_at = perf_counter()
-    lexical_candidates = _lexical_candidates(
-        conn,
-        terms=terms,
-        mode=mode,
-        scope=scope,
-        limit=max_results * max(hybrid.sparse_candidate_pool, 1),
-        ranking=ranking,
-    )
-    lexical_ms = (perf_counter() - lexical_started_at) * 1000.0
+    lexical_candidates: list[dict[str, Any]]
+    lexical_ms = 0.0
+    if active_backend == "qdrant_sparse_dense_hybrid":
+        lexical_candidates = _sparse_candidates(
+            conn,
+            terms=terms,
+            mode=mode,
+            scope=scope,
+            ranking=ranking,
+            sparse_candidates=sparse_candidates or (),
+        )
+    else:
+        lexical_started_at = perf_counter()
+        lexical_candidates = _lexical_candidates(
+            conn,
+            terms=terms,
+            mode=mode,
+            scope=scope,
+            limit=max_results * max(hybrid.sparse_candidate_pool, 1),
+            ranking=ranking,
+        )
+        lexical_ms = (perf_counter() - lexical_started_at) * 1000.0
     sqlite_dense_started_at = perf_counter()
     dense_ranked_candidates = _dense_candidates(
         conn,
@@ -77,6 +91,7 @@ def search_index(
             SearchDiagnostics(
                 lexical_ms=lexical_ms,
                 sqlite_dense_ms=sqlite_dense_ms,
+                sparse_candidates=len(lexical_candidates),
             ),
         )
     fusion_started_at = perf_counter()
@@ -124,6 +139,9 @@ def search_index(
             sqlite_dense_ms=sqlite_dense_ms,
             fusion_ms=(perf_counter() - fusion_started_at) * 1000.0,
             lexical_candidates=len(lexical_candidates),
+            sparse_candidates=(
+                len(lexical_candidates) if active_backend == "qdrant_sparse_dense_hybrid" else 0
+            ),
             dense_candidates=len(dense_ranked_candidates),
             selected_candidates=len(selected_hits),
         ),
@@ -285,6 +303,44 @@ def _dense_candidates(
     return ranked_candidates
 
 
+def _sparse_candidates(
+    conn: sqlite3.Connection,
+    *,
+    terms: Sequence[str],
+    mode: SearchMode,
+    scope: str | None,
+    ranking: Any,
+    sparse_candidates: Sequence[SparseSearchCandidate],
+) -> list[dict[str, Any]]:
+    """Load sparse candidate rows from SQLite for ranked Qdrant sparse hits."""
+    if not sparse_candidates:
+        return []
+    item_ids = [candidate.item_id for candidate in sparse_candidates]
+    rows = _load_rows_by_item_ids(conn, item_ids)
+    rows_by_id = {int(row["id"]): row for row in rows}
+    lanes = set(_lanes_for_mode(mode))
+    ranked_candidates: list[dict[str, Any]] = []
+    for rank, sparse_hit in enumerate(sparse_candidates, start=1):
+        row = rows_by_id.get(sparse_hit.item_id)
+        if row is None:
+            continue
+        if str(row["lane"]) not in lanes:
+            continue
+        row_scope = str(row["scope"])
+        if scope and row_scope not in {scope, "global"}:
+            continue
+        candidate = _score_candidate(
+            row,
+            terms=terms,
+            ranking=ranking,
+            text_score=_normalize_sparse_score(sparse_hit.score),
+        )
+        candidate["lexical_rank"] = rank
+        ranked_candidates.append(candidate)
+    ranked_candidates.sort(key=lambda item: item["text_score"], reverse=True)
+    return ranked_candidates
+
+
 def _load_rows_by_item_ids(conn: sqlite3.Connection, item_ids: Sequence[int]) -> list[sqlite3.Row]:
     """Load search rows for the requested item IDs."""
     if not item_ids:
@@ -364,7 +420,10 @@ def _merge_candidates(
         candidate["score"] = final_score
         candidate["backend"] = (
             active_backend
-            if dense_rank is not None and active_backend == "qdrant_dense_hybrid"
+            if (
+                (dense_rank is not None or text_rank is not None)
+                and active_backend in {"qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"}
+            )
             else "sqlite_fts"
         )
         candidate["explanation"] = SearchExplanation(
@@ -465,6 +524,13 @@ def _rank_value(value: object) -> int | None:
 def _normalize_dense_score(raw_score: float) -> float:
     """Clamp dense similarity into a 0..1 range."""
     return max(0.0, min(raw_score, 1.0))
+
+
+def _normalize_sparse_score(raw_score: float) -> float:
+    """Compress sparse scores into a 0..1 range while preserving ordering."""
+    if raw_score <= 0.0:
+        return 0.0
+    return raw_score / (1.0 + raw_score)
 
 
 def _lexical_score(rank: float, *, is_fts: bool) -> float:

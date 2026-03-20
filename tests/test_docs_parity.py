@@ -81,6 +81,27 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
 
 
+def test_operator_docs_surface_supported_tier_one_memory_path() -> None:
+    repo_root = _repo_root()
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
+    setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
+    secrets = (repo_root / "platform/docs/SECRETS_AND_ENV.md").read_text(encoding="utf-8")
+    routing = (repo_root / "platform/docs/MODEL_ROUTING.md").read_text(encoding="utf-8")
+
+    assert "lossless-hypermemory-tier1" in readme
+    assert "lossless-hypermemory-tier1" in quickstart
+    assert "lossless-hypermemory-tier1" in setup
+    assert "lossless-hypermemory-tier1" in usage
+    assert "clawops setup --profile lossless-hypermemory-tier1" in memory_doc
+    assert "./scripts/bootstrap/verify_memory_v2_tier1.sh" in memory_doc
+    assert "MEMORY_V2_EMBEDDING_MODEL" in quickstart
+    assert "MEMORY_V2_EMBEDDING_MODEL" in secrets
+    assert "memory-v2-embedding" in routing
+
+
 def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:
     repo_root = _repo_root()
     memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")

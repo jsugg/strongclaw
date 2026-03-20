@@ -27,6 +27,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     status_parser = subparsers.add_parser("status", help="Show index status.")
     status_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
+    verify_tier1_parser = subparsers.add_parser(
+        "verify-tier1",
+        help="Verify the supported sparse+dense tier-one backend contract.",
+    )
+    verify_tier1_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
     index_parser = subparsers.add_parser("index", help="Rebuild the derived index.")
     index_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
@@ -39,7 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     search_parser.add_argument("--scope", help="Exact preferred scope, e.g. project:strongclaw.")
     search_parser.add_argument(
         "--backend",
-        choices=("sqlite_fts", "qdrant_dense_hybrid"),
+        choices=("sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"),
         help="Override the configured search backend for this call.",
     )
     search_parser.add_argument(
@@ -130,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         _print_payload(engine.status(), as_json=bool(args.json))
         return 0
+    if args.command == "verify-tier1":
+        payload = engine.verify_tier1()
+        _print_payload(payload, as_json=bool(args.json))
+        return 0 if payload.get("ok") else 1
     if args.command == "index":
         _print_payload(engine.reindex().to_dict(), as_json=bool(args.json))
         return 0
