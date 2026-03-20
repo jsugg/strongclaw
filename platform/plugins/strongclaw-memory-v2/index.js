@@ -195,7 +195,7 @@ function formatRecallContext(results) {
 }
 
 function registerMemoryCli(program, pluginConfig) {
-  const memory = program.command("memory").description("Use strongclaw memory v2.");
+  const memory = program.command("memory-v2").description("Use strongclaw memory v2.");
   memory
     .command("status")
     .description("Show strongclaw memory v2 status.")
@@ -544,7 +544,7 @@ const strongclawMemoryV2Plugin = {
 
     api.registerCli(({ program }) => {
       registerMemoryCli(program, pluginConfig);
-    }, { commands: ["memory"] });
+    }, { commands: ["memory-v2"] });
 
     if (pluginConfig.autoRecall) {
       const registerRecall = (hookName) => api.on(hookName, async (event) => {

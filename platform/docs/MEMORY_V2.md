@@ -80,7 +80,8 @@ It also adds gated durable-memory tools:
 
 By default, existing trust zones and policy still only expose read-side memory tools. If you want agents to write memory through the plugin, update your OpenClaw trust-zone and policy config explicitly.
 
-The plugin also proxies the `openclaw memory ...` CLI to `clawops memory-v2 ...` when the `strongclaw-memory-v2` slot is active.
+The plugin also exposes a dedicated `openclaw memory-v2 ...` CLI proxy to
+`clawops memory-v2 ...` when the `strongclaw-memory-v2` slot is active.
 
 ## Supported setup
 
@@ -123,7 +124,7 @@ PYTHONPATH=src python3 -m clawops.openclaw_config \
 
 ```bash
 openclaw plugins list
-openclaw memory status --json
+openclaw memory-v2 status --json
 ```
 
 The shipped standalone example points the plugin at

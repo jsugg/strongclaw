@@ -16,6 +16,14 @@ const __dirname = path.dirname(__filename);
 const pluginRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(__dirname, "../../../..");
 
+function stripPluginLogs(output) {
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith("[plugins]"))
+    .join("\n")
+    .trim();
+}
+
 function writeMemoryV2Config(workspaceDir, configPath) {
   mkdirSync(workspaceDir, { recursive: true });
   writeFileSync(
@@ -163,7 +171,23 @@ async function main() {
 
     const infoOutput = await runOpenClaw(profile, ["plugins", "info", "strongclaw-memory-v2"]);
     assert.match(infoOutput, /Status:\s+loaded/i);
+    assert.match(infoOutput, /CLI commands:\s+memory-v2/i);
     assert.match(infoOutput, /\bmemory\b/i);
+
+    const statusOutput = stripPluginLogs(await runOpenClaw(profile, ["memory-v2", "status", "--json"]));
+    assert.match(statusOutput, /backendActive|schemaVersion/);
+
+    const hostSearchOutput = stripPluginLogs(
+      await runOpenClaw(profile, ["memory-v2", "search", "--query", "gateway token", "--json"]),
+    );
+    assert.match(hostSearchOutput, /docs\/runbook\.md/);
+    assert.match(hostSearchOutput, /Gateway Runbook|gateway token/i);
+
+    const hostGetOutput = stripPluginLogs(
+      await runOpenClaw(profile, ["memory-v2", "get", "docs/runbook.md", "--json"]),
+    );
+    assert.match(hostGetOutput, /docs\/runbook\.md/);
+    assert.match(hostGetOutput, /Gateway Runbook/);
 
     const stub = createPluginApiStub({
       configPath: memoryConfigPath,
