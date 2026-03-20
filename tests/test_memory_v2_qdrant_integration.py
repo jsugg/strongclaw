@@ -1,4 +1,4 @@
-"""Qdrant-backed integration tests for the memory-v2 dense path."""
+"""Qdrant-backed integration tests for the memory-v2 dense and sparse+dense paths."""
 
 from __future__ import annotations
 
@@ -95,13 +95,13 @@ def _query_points(
     *,
     base_url: str,
     collection: str,
-    vector: list[float],
+    query: list[float] | dict[str, list[int] | list[float]],
     using: str = "dense",
 ) -> list[dict[str, Any]]:
     response = requests.post(
         f"{base_url.rstrip('/')}/collections/{collection}/points/query",
         json={
-            "query": vector,
+            "query": query,
             "using": using,
             "limit": 8,
             "with_payload": True,
@@ -157,7 +157,7 @@ def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> No
     points_before = _query_points(
         base_url=qdrant_url,
         collection=collection,
-        vector=[1.0, 0.0, 0.0],
+        query=[1.0, 0.0, 0.0],
         using=config.qdrant.dense_vector_name,
     )
     assert any(
@@ -170,9 +170,71 @@ def test_memory_v2_qdrant_reindex_search_and_prune(tmp_path: pathlib.Path) -> No
     points_after = _query_points(
         base_url=qdrant_url,
         collection=collection,
-        vector=[1.0, 0.0, 0.0],
+        query=[1.0, 0.0, 0.0],
         using=config.qdrant.dense_vector_name,
     )
     assert all(
         point.get("payload", {}).get("rel_path") != "docs/runbook.md" for point in points_after
     )
+
+
+def test_memory_v2_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
+    tmp_path: pathlib.Path,
+) -> None:
+    qdrant_url = os.environ.get(QDRANT_URL_ENV)
+    if not qdrant_url:
+        pytest.skip(f"{QDRANT_URL_ENV} is not set")
+
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+    config = load_config(config_path)
+    collection = f"memory-v2-sparse-{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:12]}"
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
+    )
+
+    engine = MemoryV2Engine(config)
+    engine._embedding_provider = _DeterministicEmbeddingProvider()
+    engine.reindex()
+
+    collection_response = requests.get(
+        f"{qdrant_url.rstrip('/')}/collections/{collection}",
+        timeout=5.0,
+    )
+    collection_response.raise_for_status()
+    params = collection_response.json()["result"]["config"]["params"]
+    assert config.qdrant.dense_vector_name in params["vectors"]
+    assert config.qdrant.sparse_vector_name in params["sparse_vectors"]
+
+    with engine.connect() as conn:
+        encoder = engine._load_sparse_encoder(conn)
+        assert encoder is not None
+        conn.execute("DELETE FROM search_items_fts")
+        conn.commit()
+
+    sparse_hits = _query_points(
+        base_url=qdrant_url,
+        collection=collection,
+        query=encoder.encode_query("gateway token").to_qdrant(),
+        using=config.qdrant.sparse_vector_name,
+    )
+    assert any(hit.get("payload", {}).get("rel_path") == "docs/runbook.md" for hit in sparse_hits)
+
+    hits = engine.search("gateway token", lane="all", auto_index=False)
+    assert hits
+    assert hits[0].path == "docs/runbook.md"
+    assert hits[0].backend == "qdrant_sparse_dense_hybrid"
+
+    verification = engine.verify_tier1()
+    assert verification["ok"] is True
+    assert verification["laneChecks"]["sparse"]["hits"] >= 1

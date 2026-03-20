@@ -13,6 +13,7 @@ import pytest
 from clawops.memory_v2 import (
     DenseSearchCandidate,
     MemoryV2Engine,
+    SparseSearchCandidate,
     default_config_path,
     load_config,
     main,
@@ -362,9 +363,20 @@ class _FakeQdrantBackend:
         self.sparse_search_results: list[Any] = []
         self.raise_on_search = False
         self.include_sparse_calls: list[bool] = []
+        self.collection_details_payload = {
+            "config": {
+                "params": {
+                    "vectors": {"dense": {"size": 3, "distance": "Cosine"}},
+                    "sparse_vectors": {"sparse": {"index": {"on_disk": False}}},
+                }
+            }
+        }
 
     def health(self) -> dict[str, Any]:
         return {"enabled": True, "healthy": True, "collection": "test"}
+
+    def collection_details(self) -> dict[str, Any]:
+        return dict(self.collection_details_payload)
 
     def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
         self.ensure_calls.append(vector_size)
@@ -475,6 +487,107 @@ def test_memory_v2_dense_backend_falls_back_to_sqlite(tmp_path: pathlib.Path) ->
     assert hits
     assert hits[0].path == "docs/runbook.md"
     assert hits[0].backend == "sqlite_fts"
+
+
+def test_memory_v2_status_and_verify_tier1_report_sparse_backend_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-tier1"),
+    )
+    engine = MemoryV2Engine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.7)
+    ]
+
+    status = engine.status()
+    verification = engine.verify_tier1()
+
+    assert status["backendActive"] == "qdrant_sparse_dense_hybrid"
+    assert status["sparseVectorItems"] >= 1
+    assert status["sparseFingerprint"]
+    assert status["sparseFingerprintDirty"] is False
+    assert verification["ok"] is True
+    assert verification["laneChecks"]["dense"]["hits"] >= 1
+    assert verification["laneChecks"]["sparse"]["hits"] >= 1
+    assert fake_qdrant.include_sparse_calls == [True]
+
+
+def test_memory_v2_verify_tier1_fails_when_sparse_state_is_stale(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "memory-v2.yaml"
+    _write_memory_v2_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="memory-v2-tier1"),
+    )
+    engine = MemoryV2Engine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+        conn.execute(
+            "INSERT OR REPLACE INTO backend_state(key, value) VALUES ('sparse_fingerprint', 'stale')"
+        )
+        conn.commit()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.7)
+    ]
+
+    verification = engine.verify_tier1()
+
+    assert verification["ok"] is False
+    assert "sparse fingerprint is dirty" in verification["errors"]
 
 
 def test_memory_v2_load_config_resolves_required_env_backed_strings(
