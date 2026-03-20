@@ -11,7 +11,7 @@ const SEARCH_SCHEMA = {
     minScore: { type: "number" },
     lane: { type: "string", enum: ["all", "memory", "corpus"] },
     scope: { type: "string" },
-    backend: { type: "string", enum: ["sqlite_fts", "qdrant_dense_hybrid"] },
+    backend: { type: "string", enum: ["sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"] },
     denseCandidatePool: { type: "number" },
     sparseCandidatePool: { type: "number" },
     fusion: { type: "string", enum: ["rrf", "weighted"] },
@@ -224,7 +224,7 @@ function registerMemoryCli(program, pluginConfig) {
     .option("--min-score <score>", "Minimum score.")
     .option("--lane <lane>", "memory, corpus, or all.", "all")
     .option("--scope <scope>", "Exact preferred scope.")
-    .option("--backend <backend>", "sqlite_fts or qdrant_dense_hybrid.")
+    .option("--backend <backend>", "sqlite_fts, qdrant_dense_hybrid, or qdrant_sparse_dense_hybrid.")
     .option("--dense-candidate-pool <count>", "Dense candidate pool override.")
     .option("--sparse-candidate-pool <count>", "Sparse candidate pool override.")
     .option("--fusion <mode>", "rrf or weighted.")

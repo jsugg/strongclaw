@@ -93,17 +93,32 @@ def test_qdrant_backend_uses_expected_rest_payloads() -> None:
     fake_session = _FakeSession()
     backend._session = fake_session  # type: ignore[assignment]
 
-    backend.ensure_collection(vector_size=3)
+    backend.ensure_collection(vector_size=3, include_sparse=True)
     backend.upsert_points(
-        [{"id": "point-1", "vector": [1.0, 0.0, 0.0], "payload": {"item_id": 42}}]
+        [
+            {
+                "id": "point-1",
+                "vector": {
+                    "dense": [1.0, 0.0, 0.0],
+                    "sparse": {"indices": [0, 3], "values": [0.7, 0.2]},
+                },
+                "payload": {"item_id": 42},
+            }
+        ]
     )
-    hits = backend.search(
+    hits = backend.search_dense(
         vector=[1.0, 0.0, 0.0], limit=5, mode="memory", scope="project:strongclaw"
     )
 
     assert fake_session.put_calls[0]["url"].endswith("/collections/memory-v2-test")
-    assert fake_session.put_calls[0]["json"]["vectors"]["size"] == 3
+    assert fake_session.put_calls[0]["json"]["vectors"]["dense"]["size"] == 3
+    assert (
+        fake_session.put_calls[0]["json"]["sparse_vectors"]["sparse"]["index"]["on_disk"] is False
+    )
+    assert fake_session.put_calls[1]["json"]["points"][0]["vector"]["dense"] == [1.0, 0.0, 0.0]
+    assert fake_session.put_calls[1]["json"]["points"][0]["vector"]["sparse"]["indices"] == [0, 3]
     assert fake_session.post_calls[-1]["url"].endswith("/points/query")
+    assert fake_session.post_calls[-1]["json"]["using"] == "dense"
     assert fake_session.post_calls[-1]["json"]["filter"]["must"][0]["key"] == "lane"
     assert hits[0].item_id == 42
     assert hits[0].point_id == "point-1"
@@ -120,3 +135,25 @@ def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
     backend.ensure_collection(vector_size=3)
 
     assert fake_session.put_calls[0]["url"].endswith("/collections/memory-v2-test")
+
+
+def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="memory-v2-test")
+    )
+    fake_session = _FakeSession()
+    backend._session = fake_session  # type: ignore[assignment]
+
+    hits = backend.search_sparse(
+        vector={"indices": [1, 4], "values": [0.9, 0.4]},
+        limit=4,
+        mode="all",
+        scope=None,
+    )
+
+    assert fake_session.post_calls[-1]["json"]["query"] == {
+        "indices": [1, 4],
+        "values": [0.9, 0.4],
+    }
+    assert fake_session.post_calls[-1]["json"]["using"] == "sparse"
+    assert hits[0].item_id == 42

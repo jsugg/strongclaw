@@ -9,10 +9,15 @@ UV_VERSION="${UV_VERSION:-0.10.9}"
 VARLOCK_VERSION="${VARLOCK_VERSION:-0.5.0}"
 OPENCLAW_CONFIG_PROFILE="${OPENCLAW_CONFIG_PROFILE:-default}"
 UV_BIN_DIR="${HOME}/.local/bin"
+BOOTSTRAP_QMD_SCRIPT="${BOOTSTRAP_QMD_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_qmd.sh}"
+BOOTSTRAP_MEMORY_PLUGIN_SCRIPT="${BOOTSTRAP_MEMORY_PLUGIN_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh}"
+BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT="${BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/docker_runtime.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/setup_state.sh"
+# shellcheck disable=SC1091
+source "$ROOT/scripts/lib/bootstrap_profiles.sh"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/app_paths.sh"
 # shellcheck disable=SC1091
@@ -117,11 +122,14 @@ ensure_uv() {
   }
 }
 
-profile_requires_lossless_claw() {
-  case "$OPENCLAW_CONFIG_PROFILE" in
-    lossless-hypermemory-tier1) return 0 ;;
-    *) return 1 ;;
-  esac
+install_profile_assets() {
+  if profile_requires_qmd "$OPENCLAW_CONFIG_PROFILE"; then
+    "$BOOTSTRAP_QMD_SCRIPT"
+  fi
+  "$BOOTSTRAP_MEMORY_PLUGIN_SCRIPT"
+  if profile_requires_lossless_claw "$OPENCLAW_CONFIG_PROFILE"; then
+    "$BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT"
+  fi
 }
 
 "$ROOT/scripts/bootstrap/preflight.sh"
@@ -160,11 +168,7 @@ case "$HOST_OS" in
     ;;
 esac
 
-"$ROOT/scripts/bootstrap/bootstrap_qmd.sh"
-"$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh"
-if profile_requires_lossless_claw; then
-  "$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh"
-fi
+install_profile_assets
 
 if [[ "$HOST_OS" == "Linux" && "$DOCKER_RUNTIME_INSTALLED_BY_BOOTSTRAP" -eq 1 ]]; then
   repair_linux_runtime_user_docker_access "$(id -un)"
@@ -175,5 +179,9 @@ command -v openclaw >/dev/null 2>&1 || { echo "openclaw install failed" >&2; exi
 command -v acpx >/dev/null 2>&1 || { echo "acpx install failed" >&2; exit 1; }
 "$ROOT/scripts/bootstrap/render_openclaw_config.sh"
 "$ROOT/scripts/bootstrap/doctor_host.sh"
-mark_bootstrap_complete "$OPENCLAW_CONFIG_PROFILE" "$HOST_OS" "$(id -un)"
+mark_bootstrap_complete \
+  "$OPENCLAW_CONFIG_PROFILE" \
+  "$HOST_OS" \
+  "$(id -un)" \
+  "$(profile_bootstrap_capabilities "$OPENCLAW_CONFIG_PROFILE")"
 echo "Bootstrap complete."

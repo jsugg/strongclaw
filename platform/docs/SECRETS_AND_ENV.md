@@ -22,6 +22,9 @@
    - provider auth can be stored here with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`
    - optional model selection overrides: `OPENCLAW_DEFAULT_MODEL`, `OPENCLAW_MODEL_FALLBACKS`
    - local-model setups require `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+   - tier-one memory-v2 requires `MEMORY_V2_EMBEDDING_MODEL`
+   - tier-one defaults `MEMORY_V2_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1`
+   - tier-one defaults `MEMORY_V2_QDRANT_URL=http://127.0.0.1:6333`
 4. if you chose a managed backend, let guided setup generate `platform/configs/varlock/.env.plugins`, or maintain that file manually for hybrid setups
 5. run `./scripts/bootstrap/configure_varlock_env.sh` or `varlock load --path platform/configs/varlock`
 6. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `./scripts/bootstrap/setup.sh` do it for you
@@ -31,6 +34,9 @@
 
 - StrongClaw keeps core machine-local secrets such as the gateway token and LiteLLM bootstrap secrets in `.env.local` by default.
 - Managed backends are primarily used for LLM provider credentials and similar integration tokens.
+- `MEMORY_V2_EMBEDDING_MODEL` is the only tier-one memory-v2 env key that
+  normally needs operator input; the loopback base URLs are backfilled by
+  guided setup unless you override them.
 - `.env.plugins` is ignored by git and imported from `.env.schema`, so manual and guided setup can be mixed safely. If you author it by hand, keep explicit plugin version specifiers in each `@plugin(...)` decorator.
 
 ## Rotation

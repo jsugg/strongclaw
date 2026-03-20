@@ -28,3 +28,19 @@ def test_varlock_schema_and_examples_use_varlock_compatible_home_paths() -> None
     for path in files:
         text = path.read_text(encoding="utf-8")
         assert "$HOME/.openclaw" not in text
+
+
+def test_varlock_schema_and_examples_surface_memory_v2_tier_one_keys() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    files = (
+        repo_root / "platform/configs/varlock/.env.schema",
+        repo_root / "platform/configs/varlock/.env.local.example",
+        repo_root / "platform/configs/varlock/.env.prod.example",
+        repo_root / "platform/configs/varlock/.env.ci.example",
+    )
+
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert "MEMORY_V2_EMBEDDING_MODEL" in text
+        assert "MEMORY_V2_EMBEDDING_BASE_URL" in text
+        assert "MEMORY_V2_QDRANT_URL" in text

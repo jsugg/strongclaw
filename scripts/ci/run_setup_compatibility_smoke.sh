@@ -14,15 +14,15 @@ export STRONGCLAW_STATE_DIR="${STRONGCLAW_STATE_DIR:-$TMP_ROOT/state}"
 
 cd "$ROOT"
 "$ROOT/scripts/bootstrap/bootstrap_varlock.sh"
-"$ROOT/scripts/bootstrap/bootstrap_qmd.sh"
 "$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh"
 PYTHONPATH=src uv run --project "$ROOT" --locked --extra dev python -m clawops render-openclaw-config \
   --profile lossless-hypermemory-tier1 \
   --repo-root "$ROOT" \
   --output "$TMP_ROOT/openclaw.json"
 
-test -x "$HOME/.bun/bin/qmd"
 test -f "$STRONGCLAW_DATA_DIR/plugins/lossless-claw/openclaw.plugin.json"
+test "$(jq -r '.plugins.entries["strongclaw-memory-v2"].config.configPath' "$TMP_ROOT/openclaw.json")" = "$ROOT/platform/configs/memory/memory-v2.tier1.yaml"
+test "$(jq -r '.plugins.entries["strongclaw-memory-v2"].config.autoRecall' "$TMP_ROOT/openclaw.json")" = "true"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/varlock.sh"
 varlock_version_matches "$VARLOCK_VERSION"
