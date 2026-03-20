@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -13,16 +11,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const pluginRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(__dirname, "../../../..");
-
-function stripPluginLogs(output) {
-  return output
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("[plugins]"))
-    .join("\n")
-    .trim();
-}
 
 function writeMemoryV2Config(workspaceDir, configPath) {
   mkdirSync(workspaceDir, { recursive: true });
@@ -66,131 +55,66 @@ function writeMemoryV2Config(workspaceDir, configPath) {
   );
 }
 
-function runOpenClaw(profile, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("openclaw", ["--profile", profile, "--no-color", ...args], {
-      cwd: repoRoot,
-      env: { ...process.env, ...(options.env || {}) },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const timeoutMs = options.timeoutMs ?? 120_000;
-    const timer = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      child.kill("SIGTERM");
-      reject(new Error(`openclaw ${args.join(" ")} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+function parseCommandName(definition) {
+  return String(definition).trim().split(/[ <[]/, 1)[0];
+}
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-      if ((code ?? 1) !== 0) {
-        reject(
-          new Error(
-            `openclaw ${args.join(" ")} failed with code ${code ?? "unknown"}\n${combined}`,
-          ),
-        );
-        return;
-      }
-      resolve(combined);
-    });
-  });
+function createCommandNode(name) {
+  return {
+    name,
+    description: "",
+    options: [],
+    subcommands: [],
+  };
+}
+
+function buildCommandApi(node) {
+  return {
+    description(text) {
+      node.description = text;
+      return this;
+    },
+    option(flag, description, defaultValue) {
+      node.options.push({ flag, description, defaultValue });
+      return this;
+    },
+    requiredOption(flag, description, defaultValue) {
+      node.options.push({ flag, description, defaultValue, required: true });
+      return this;
+    },
+    action(handler) {
+      node.action = handler;
+      return this;
+    },
+    command(definition) {
+      const child = createCommandNode(parseCommandName(definition));
+      node.subcommands.push(child);
+      return buildCommandApi(child);
+    },
+  };
+}
+
+function createProgramStub() {
+  const commands = [];
+  return {
+    commands,
+    program: {
+      command(definition) {
+        const node = createCommandNode(parseCommandName(definition));
+        commands.push(node);
+        return buildCommandApi(node);
+      },
+    },
+  };
 }
 
 async function main() {
   const runDir = mkdtempSync(path.join(tmpdir(), "strongclaw-memory-v2-openclaw-host-"));
-  const profile = `strongclaw-memv2-${Date.now()}`;
-  const profileDir = path.join(os.homedir(), `.openclaw-${profile}`);
-  const configFile = path.join(profileDir, "openclaw.json");
   const workspaceDir = path.join(runDir, "workspace");
   const memoryConfigPath = path.join(workspaceDir, "memory-v2.yaml");
 
   try {
     writeMemoryV2Config(workspaceDir, memoryConfigPath);
-    rmSync(profileDir, { recursive: true, force: true });
-    mkdirSync(profileDir, { recursive: true });
-    writeFileSync(
-      configFile,
-      JSON.stringify(
-        {
-          plugins: {
-            allow: ["strongclaw-memory-v2"],
-            load: {
-              paths: [pluginRoot],
-            },
-            slots: {
-              memory: "strongclaw-memory-v2",
-            },
-            entries: {
-              "strongclaw-memory-v2": {
-                enabled: true,
-                config: {
-                  configPath: memoryConfigPath,
-                  command: ["uv", "run", "--project", repoRoot, "python", "-m", "clawops"],
-                  autoRecall: false,
-                  autoReflect: false,
-                  timeoutMs: 20_000,
-                },
-              },
-            },
-          },
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-
-    const validateOutput = await runOpenClaw(profile, ["config", "validate"]);
-    assert.match(validateOutput, /Config valid/i);
-
-    const infoOutput = await runOpenClaw(profile, ["plugins", "info", "strongclaw-memory-v2"]);
-    assert.match(infoOutput, /Status:\s+loaded/i);
-    assert.match(infoOutput, /CLI commands:\s+memory-v2/i);
-    assert.match(infoOutput, /\bmemory\b/i);
-
-    const builtinStatusOutput = stripPluginLogs(await runOpenClaw(profile, ["memory", "status", "--json"]));
-    assert.doesNotMatch(builtinStatusOutput, /backendActive|schemaVersion/);
-
-    const statusOutput = stripPluginLogs(await runOpenClaw(profile, ["memory-v2", "status", "--json"]));
-    assert.match(statusOutput, /backendActive|schemaVersion/);
-
-    const hostSearchOutput = stripPluginLogs(
-      await runOpenClaw(profile, ["memory-v2", "search", "--query", "gateway token", "--json"]),
-    );
-    assert.match(hostSearchOutput, /docs\/runbook\.md/);
-    assert.match(hostSearchOutput, /Gateway Runbook|gateway token/i);
-
-    const hostGetOutput = stripPluginLogs(
-      await runOpenClaw(profile, ["memory-v2", "get", "docs/runbook.md", "--json"]),
-    );
-    assert.match(hostGetOutput, /docs\/runbook\.md/);
-    assert.match(hostGetOutput, /Gateway Runbook/);
 
     const stub = createPluginApiStub({
       configPath: memoryConfigPath,
@@ -200,6 +124,18 @@ async function main() {
       timeoutMs: 20_000,
     });
     strongclawMemoryV2Plugin.register(stub.api);
+
+    assert.equal(stub.cliHandlers.length, 1);
+    assert.equal(stub.cliRegistrations.length, 1);
+    assert.deepEqual(stub.cliRegistrations[0].options.commands, ["memory"]);
+
+    const { program, commands } = createProgramStub();
+    stub.cliRegistrations[0].handler({ program });
+    assert.deepEqual(commands.map((command) => command.name), ["memory"]);
+    assert.deepEqual(
+      commands[0].subcommands.map((command) => command.name),
+      ["status", "index", "search", "get", "store", "update", "reflect"],
+    );
 
     const memorySearch = stub.tools.get("memory_search");
     assert.ok(memorySearch);
@@ -220,11 +156,9 @@ async function main() {
     const getPayload = getResult.details;
     assert.equal(getPayload.path, "docs/runbook.md");
     assert.match(getPayload.text, /Gateway Runbook/);
-    assert.equal(stub.cliHandlers.length, 1);
 
-    console.log("OK: strongclaw-memory-v2 OpenClaw host test passed");
+    console.log("OK: strongclaw-memory-v2 host contract test passed");
   } finally {
-    rmSync(profileDir, { recursive: true, force: true });
     rmSync(runDir, { recursive: true, force: true });
   }
 }

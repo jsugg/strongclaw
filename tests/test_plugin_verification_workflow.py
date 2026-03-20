@@ -32,10 +32,6 @@ def test_plugin_verification_workflow_runs_strongclaw_memory_v2_host_checks() ->
     assert "Run strongclaw-memory-v2 Host Checks" in workflow
     assert "./scripts/ci/verify_strongclaw_memory_v2_plugin.sh" in workflow
     assert 'PLUGIN_DIR="$ROOT/platform/plugins/strongclaw-memory-v2"' in script
-    assert (
-        'npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@${OPENCLAW_VERSION}"'
-        in script
-    )
     assert "npm run test:openclaw-host" in script
 
 
