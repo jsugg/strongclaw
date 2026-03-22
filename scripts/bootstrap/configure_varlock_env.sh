@@ -275,6 +275,24 @@ effective_env_value() {
   fi
 }
 
+local_ollama_model_available() {
+  local requested_model="$1"
+  local normalized_requested_model="${requested_model%:latest}"
+  local listed_model normalized_listed_model
+  if ! command -v ollama >/dev/null 2>&1; then
+    return 1
+  fi
+  while IFS= read -r listed_model; do
+    listed_model="$(trim_value "$listed_model")"
+    [[ -n "$listed_model" ]] || continue
+    normalized_listed_model="${listed_model%:latest}"
+    if [[ "$normalized_listed_model" == "$normalized_requested_model" ]]; then
+      return 0
+    fi
+  done < <(ollama list 2>/dev/null | awk 'NR > 1 {print $1}')
+  return 1
+}
+
 set_or_prompt_value() {
   local key="$1"
   local prompt="$2"
@@ -984,6 +1002,17 @@ ensure_hypermemory_embedding_model() {
   current_model="$(effective_env_value HYPERMEMORY_EMBEDDING_MODEL)"
   if [[ -n "$current_model" ]]; then
     return 0
+  fi
+
+  if [[ "$CHECK_ONLY" -eq 0 ]] && ([[ "$NON_INTERACTIVE" -eq 1 ]] || ! interactive_mode); then
+    if local_ollama_model_available "nomic-embed-text"; then
+      set_env_value "HYPERMEMORY_EMBEDDING_MODEL" "ollama/nomic-embed-text"
+      set_env_value "HYPERMEMORY_EMBEDDING_API_BASE" "http://host.docker.internal:11434"
+      AUTO_FILLED_VALUES=$((AUTO_FILLED_VALUES + 1))
+      echo "Configured HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text from local Ollama."
+      echo "Configured HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434 for the LiteLLM sidecar."
+      return 0
+    fi
   fi
 
   if [[ "$CHECK_ONLY" -eq 1 || "$NON_INTERACTIVE" -eq 1 ]] || ! interactive_mode; then

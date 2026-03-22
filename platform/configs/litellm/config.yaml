@@ -22,6 +22,7 @@ model_list:
   - model_name: hypermemory-embedding
     litellm_params:
       model: os.environ/HYPERMEMORY_EMBEDDING_MODEL
+      api_base: os.environ/HYPERMEMORY_EMBEDDING_API_BASE
 
 litellm_settings:
   callbacks: ["otel"]

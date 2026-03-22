@@ -42,5 +42,6 @@ def test_varlock_schema_and_examples_surface_hypermemory_hypermemory_keys() -> N
     for path in files:
         text = path.read_text(encoding="utf-8")
         assert "HYPERMEMORY_EMBEDDING_MODEL" in text
+        assert "HYPERMEMORY_EMBEDDING_API_BASE" in text
         assert "HYPERMEMORY_EMBEDDING_BASE_URL" in text
         assert "HYPERMEMORY_QDRANT_URL" in text

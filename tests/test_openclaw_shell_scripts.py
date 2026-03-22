@@ -251,11 +251,16 @@ def _write_fake_docker(
     compose_available: bool = True,
     backend_ready: bool = True,
     log_path: pathlib.Path | None = None,
+    env_log_path: pathlib.Path | None = None,
 ) -> None:
     target = bin_dir / "docker"
     lines = ["#!/bin/bash", "set -euo pipefail"]
     if log_path is not None:
         lines.append(f'printf "%s\\n" "$*" >> "{log_path}"')
+    if env_log_path is not None:
+        lines.append(
+            f'printf "STRONGCLAW_COMPOSE_STATE_DIR=%s\\n" "${{STRONGCLAW_COMPOSE_STATE_DIR:-}}" >> "{env_log_path}"'
+        )
     lines.extend(
         [
             'if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then',
@@ -273,6 +278,45 @@ def _write_fake_docker(
 
 def _write_recording_script(path: pathlib.Path, body: str) -> None:
     path.write_text("#!/bin/bash\nset -euo pipefail\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _write_fake_qdrant_curl(
+    path: pathlib.Path, *, payload: dict[str, object], delete_log: pathlib.Path
+) -> None:
+    payload_json = json.dumps(payload)
+    path.write_text(
+        "\n".join(
+            [
+                "#!/bin/bash",
+                "set -euo pipefail",
+                'method="GET"',
+                'url=""',
+                "while [[ $# -gt 0 ]]; do",
+                '  case "$1" in',
+                "    -X)",
+                '      method="${2:-GET}"',
+                "      shift 2",
+                "      ;;",
+                "    -f|-s|-S|-fsS)",
+                "      shift",
+                "      ;;",
+                "    *)",
+                '      url="$1"',
+                "      shift",
+                "      ;;",
+                "  esac",
+                "done",
+                'if [[ "$method" == "DELETE" ]]; then',
+                f'  printf "%s\\n" "$url" >> "{delete_log}"',
+                "  exit 0",
+                "fi",
+                f"cat <<'EOF'\n{payload_json}\nEOF",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     path.chmod(0o755)
 
 
@@ -1322,6 +1366,63 @@ def test_configure_varlock_env_check_only_accepts_hypermemory_embedding_model(
     assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
 
 
+def test_configure_varlock_env_non_interactive_uses_local_ollama_embedding_model(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+    local_env = env_dir / ".env.local"
+    _write_valid_varlock_env(local_env)
+    log_path = tmp_path / "varlock.log"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_varlock(bin_dir, log_path)
+    _write_recording_script(
+        bin_dir / "ollama",
+        (
+            "cat <<'EOF'\n"
+            "NAME                       ID              SIZE      MODIFIED      \n"
+            "nomic-embed-text:latest    0a109f422b47    274 MB    20 months ago\n"
+            "llama3:latest              a6990ed6be41    4.7 GB    22 months ago\n"
+            "EOF\n"
+        ),
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "OPENCLAW_CONFIG_PROFILE": "hypermemory",
+        "VARLOCK_ENV_DIR": str(env_dir),
+        "VARLOCK_LOCAL_ENV_FILE": str(local_env),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/configure_varlock_env.sh"),
+            "--non-interactive",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    rendered = local_env.read_text(encoding="utf-8")
+    assert "HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text" in rendered
+    assert "HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434" in rendered
+    assert (
+        "Configured HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text from local Ollama."
+        in result.stdout
+    )
+    assert (
+        "Configured HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434 for the LiteLLM sidecar."
+        in result.stdout
+    )
+    assert log_path.read_text(encoding="utf-8").splitlines() == [f"load --path {env_dir}"]
+
+
 def test_launch_gateway_with_varlock_uses_installed_varlock_when_not_on_path(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -1388,6 +1489,198 @@ def test_launch_sidecars_with_varlock_uses_installed_varlock_when_not_on_path(
             "docker-compose.aux-stack.yaml up -d"
         )
     ]
+
+
+def test_launch_sidecars_dev_pins_repo_local_compose_state(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    docker_log = tmp_path / "docker.log"
+    env_log = tmp_path / "docker.env"
+    bin_dir = _build_tool_path(tmp_path, [])
+    _write_fake_docker(bin_dir, log_path=docker_log, env_log_path=env_log)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/ops/launch_sidecars_dev.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose -f docker-compose.aux-stack.yaml up -d"
+    ]
+    assert env_log.read_text(encoding="utf-8").splitlines() == [
+        f"STRONGCLAW_COMPOSE_STATE_DIR={repo_root / 'platform/compose/state'}"
+    ]
+
+
+def test_stop_sidecars_dev_pins_repo_local_compose_state(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    docker_log = tmp_path / "docker.log"
+    env_log = tmp_path / "docker.env"
+    bin_dir = _build_tool_path(tmp_path, [])
+    _write_fake_docker(bin_dir, log_path=docker_log, env_log_path=env_log)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/ops/stop_sidecars_dev.sh")],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose -f docker-compose.aux-stack.yaml down"
+    ]
+    assert env_log.read_text(encoding="utf-8").splitlines() == [
+        f"STRONGCLAW_COMPOSE_STATE_DIR={repo_root / 'platform/compose/state'}"
+    ]
+
+
+def test_reset_dev_compose_state_targets_only_selected_component(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    state_dir = tmp_path / "compose-state"
+    qdrant_dir = state_dir / "qdrant"
+    postgres_dir = state_dir / "postgres"
+    qdrant_dir.mkdir(parents=True)
+    postgres_dir.mkdir(parents=True)
+    (qdrant_dir / "segments.bin").write_text("old", encoding="utf-8")
+    (postgres_dir / "pgdata").write_text("keep", encoding="utf-8")
+    bin_dir = _build_tool_path(tmp_path, [])
+    _write_fake_docker(bin_dir)
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/ops/reset_dev_compose_state.sh"),
+            "--component",
+            "qdrant",
+            "--state-dir",
+            str(state_dir),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert not (qdrant_dir / "segments.bin").exists()
+    assert (postgres_dir / "pgdata").read_text(encoding="utf-8") == "keep"
+    assert f"Reset repo-local qdrant state at {qdrant_dir}" in result.stdout
+
+
+def test_reset_dev_compose_state_refuses_to_remove_running_component(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    state_dir = tmp_path / "compose-state"
+    qdrant_dir = state_dir / "qdrant"
+    qdrant_dir.mkdir(parents=True)
+    (qdrant_dir / "segments.bin").write_text("old", encoding="utf-8")
+    bin_dir = _build_tool_path(tmp_path, [])
+    _write_recording_script(
+        bin_dir / "docker",
+        (
+            'if [[ "$*" == "compose -f docker-compose.aux-stack.yaml ps -q qdrant" ]]; then\n'
+            "  printf 'container-123\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0\n"
+        ),
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/ops/reset_dev_compose_state.sh"),
+            "--component",
+            "qdrant",
+            "--state-dir",
+            str(state_dir),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert (qdrant_dir / "segments.bin").read_text(encoding="utf-8") == "old"
+    assert "ERROR: qdrant is still running." in result.stderr
+
+
+def test_prune_qdrant_test_collections_removes_only_legacy_memory_v2_prefix(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    delete_log = tmp_path / "delete.log"
+    bin_dir = _build_tool_path(tmp_path, ["python3"])
+    _write_fake_qdrant_curl(
+        bin_dir / "curl",
+        payload={
+            "result": {
+                "collections": [
+                    {"name": "memory-v2-int-36a6edf9c0b1"},
+                    {"name": "strongclaw-hypermemory"},
+                    {"name": "hypermemory-int-abcdef"},
+                    {"name": "memory-v2-int-44d1f348ccef"},
+                ]
+            }
+        },
+        delete_log=delete_log,
+    )
+    env = os.environ | {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/ops/prune_qdrant_test_collections.sh"),
+            "--qdrant-url",
+            "http://qdrant.test",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert delete_log.read_text(encoding="utf-8").splitlines() == [
+        "http://qdrant.test/collections/memory-v2-int-36a6edf9c0b1",
+        "http://qdrant.test/collections/memory-v2-int-44d1f348ccef",
+    ]
+    assert "Pruned memory-v2-int-36a6edf9c0b1" in result.stdout
+    assert "Pruned memory-v2-int-44d1f348ccef" in result.stdout
+    assert "strongclaw-hypermemory" not in delete_log.read_text(encoding="utf-8")
 
 
 def test_create_openclawsvc_requires_root_for_linux_branch(tmp_path: pathlib.Path) -> None:
