@@ -36,7 +36,7 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
     )
     assert '"$VERIFY_OPENCLAW_MODELS_SCRIPT" --check-only' in verify_script
     assert (
-        'VERIFY_MEMORY_V2_TIER1_SCRIPT="${VERIFY_MEMORY_V2_TIER1_SCRIPT:-$ROOT/scripts/bootstrap/verify_memory_v2_tier1.sh}"'
+        'VERIFY_HYPERMEMORY_SCRIPT="${VERIFY_HYPERMEMORY_SCRIPT:-$ROOT/scripts/bootstrap/verify_hypermemory.sh}"'
         in verify_script
     )
     assert '"$ROOT/scripts/bootstrap/verify_sidecars.sh" --skip-runtime' in verify_script
@@ -49,17 +49,17 @@ def test_verify_baseline_runs_platform_static_proof() -> None:
     )
 
 
-def test_current_state_tracks_memory_v2_and_plan2_completion() -> None:
+def test_current_state_tracks_hypermemory_and_plan2_completion() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    plugin = (repo_root / "platform/plugins/strongclaw-memory-v2/index.js").read_text(
+    plugin = (repo_root / "platform/plugins/strongclaw-hypermemory/index.js").read_text(
         encoding="utf-8"
     )
     openclaw_config = (repo_root / "src/clawops/openclaw_config.py").read_text(encoding="utf-8")
-    models = (repo_root / "src/clawops/memory_v2/models.py").read_text(encoding="utf-8")
+    models = (repo_root / "src/clawops/hypermemory/models.py").read_text(encoding="utf-8")
 
-    assert (repo_root / "src/clawops/memory_v2/providers.py").exists()
+    assert (repo_root / "src/clawops/hypermemory/providers.py").exists()
     assert "before_prompt_build" in plugin
-    assert "77-lossless-hypermemory-tier1.example.json5" in openclaw_config
+    assert "77-hypermemory.example.json5" in openclaw_config
     assert "qdrant_dense_hybrid" in models
     assert "qdrant_sparse_dense_hybrid" in models
 

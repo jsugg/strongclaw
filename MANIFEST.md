@@ -40,7 +40,7 @@ This manifest lists the major components shipped in the platform bundle.
 ## Plugins
 
 - `platform/plugins/memory-lancedb-pro`
-- `platform/plugins/strongclaw-memory-v2`
+- `platform/plugins/strongclaw-hypermemory`
 - `platform/configs/litellm/config.yaml`
 - `platform/configs/otel/collector.yaml`
 

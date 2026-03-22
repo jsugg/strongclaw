@@ -81,13 +81,28 @@ baseline verification gate. The lower-level shell entrypoint remains available
 at `./scripts/bootstrap/setup.sh` for manual or partial bring-up, and you can
 call the CLI directly with `uv run --project . clawops setup`.
 
-For the supported sparse+dense tier-one path, set one embedding model name and
-run the profile-aware setup directly:
+By default, StrongClaw now renders and provisions the
+`hypermemory` stack. Set one embedding model name before you run
+the no-arg setup path:
 
 ```bash
-export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
-uv run --project . clawops setup --profile lossless-hypermemory-tier1
+export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
+uv run --project . clawops setup
 clawops doctor
+```
+
+If you want the legacy OpenClaw built-ins instead, use the explicit
+`openclaw-default` profile:
+
+```bash
+uv run --project . clawops config memory --set-profile openclaw-default
+```
+
+If you want the built-ins plus the experimental QMD backend, use
+`openclaw-qmd`:
+
+```bash
+uv run --project . clawops config memory --set-profile openclaw-qmd
 ```
 
 StrongClaw-generated runtime artifacts no longer default into the git checkout.
@@ -111,7 +126,7 @@ instead of merging raw overlays:
 
 ```bash
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile lossless-hypermemory-tier1
+./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```

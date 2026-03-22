@@ -13,18 +13,18 @@ Use LiteLLM for:
 - OpenRouter
 - Z.AI
 - Moonshot
-- tier-one `memory-v2` embeddings through the stable `memory-v2-embedding` alias
+- hypermemory `hypermemory` embeddings through the stable `hypermemory-embedding` alias
 - centralized budgets / callbacks / fallbacks
 
 ## Memory-v2 embedding lane
 
-The supported `lossless-hypermemory-tier1` profile uses:
+The supported `hypermemory` profile uses:
 
-- `MEMORY_V2_EMBEDDING_MODEL` as the operator-facing upstream embedding model knob
-- `memory-v2-embedding` as the stable LiteLLM alias consumed by `memory-v2`
-- `MEMORY_V2_EMBEDDING_BASE_URL` to point `memory-v2` at the loopback LiteLLM route
+- `HYPERMEMORY_EMBEDDING_MODEL` as the operator-facing upstream embedding model knob
+- `hypermemory-embedding` as the stable LiteLLM alias consumed by `hypermemory`
+- `HYPERMEMORY_EMBEDDING_BASE_URL` to point `hypermemory` at the loopback LiteLLM route
 
-This keeps the tier-one memory config pinned to a stable route while letting
+This keeps the hypermemory memory config pinned to a stable route while letting
 operators swap the upstream embedding model behind that alias.
 
 ## Role defaults

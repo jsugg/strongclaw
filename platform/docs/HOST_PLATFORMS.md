@@ -34,7 +34,7 @@ CI enforces this support statement through:
 - a Python matrix on `3.12` and `3.13`
 - a setup/install smoke matrix on Node `22.16.0` and `24.13.1`
 - a vendored memory-plugin integration matrix on Node `22.16.0` and `24.13.1`
-- a `strongclaw-memory-v2` OpenClaw host-functional lane on Ubuntu
+- a `strongclaw-hypermemory` OpenClaw host-functional lane on Ubuntu
 
 ## Runtime data locations
 
@@ -68,8 +68,8 @@ Regardless of host OS, the baseline flow is:
 3. install the runtime package with `make install`
 4. either prepare `platform/configs/varlock/.env.local` manually or let `make setup` / `clawops setup` create and normalize it interactively
 5. prefer `make setup` for the baseline path after clone; it now guides Varlock env setup, managed secret backend selection, and OpenClaw model auth during setup
-6. for the supported sparse+dense memory path, set `MEMORY_V2_EMBEDDING_MODEL` and run `clawops setup --profile lossless-hypermemory-tier1`
-7. run `./scripts/bootstrap/verify_memory_v2_tier1.sh` after tier-one setup or rerenders
+6. for the supported sparse+dense memory path, set `HYPERMEMORY_EMBEDDING_MODEL` and run `clawops setup --profile hypermemory`
+7. run `./scripts/bootstrap/verify_hypermemory.sh` after hypermemory setup or rerenders
 8. if Linux bootstrap just granted Docker access, open a fresh login shell and rerun the same `make setup` / `clawops setup` command; completed bootstrap work is auto-detected and skipped
 9. contributors can additionally install `uv` and use `make dev && make test`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
 10. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `./scripts/bootstrap/configure_varlock_env.sh`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`

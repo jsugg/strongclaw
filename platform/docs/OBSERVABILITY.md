@@ -18,9 +18,9 @@
 
 Collector-side redaction is mandatory before broader trace export. Do not assume console redaction protects OTLP or file-log payloads.
 
-## Memory V2 Signals
+## Hypermemory Signals
 
-`strongclaw-memory-v2` now emits structured logs and OTLP spans for:
+`strongclaw-hypermemory` now emits structured logs and OTLP spans for:
 
 - reindex runs
 - embedding batches and embedding failures

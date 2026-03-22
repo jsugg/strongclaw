@@ -102,6 +102,7 @@ fi
 if [[ -n "$CONFIG_PROFILE" ]]; then
   export OPENCLAW_CONFIG_PROFILE="$CONFIG_PROFILE"
 fi
+export OPENCLAW_CONFIG_PROFILE="${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"
 if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
   export OPENCLAW_MODEL_SETUP_MODE="${OPENCLAW_MODEL_SETUP_MODE:-env-only}"
   CONFIGURE_VARLOCK_ENV_ARGS+=(--non-interactive)
@@ -149,19 +150,21 @@ describe_bootstrap_mode() {
 }
 
 reconcile_profile_assets() {
-  if profile_requires_qmd "${OPENCLAW_CONFIG_PROFILE:-default}"; then
+  if profile_requires_qmd "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"; then
     run_script_step \
       "QMD profile assets" \
       "Install the QMD runtime with: $BOOTSTRAP_QMD_SCRIPT" \
       "$BOOTSTRAP_QMD_SCRIPT"
   fi
 
-  run_script_step \
-    "Memory plugin assets" \
-    "Install the vendored memory plugin with: $BOOTSTRAP_MEMORY_PLUGIN_SCRIPT" \
-    "$BOOTSTRAP_MEMORY_PLUGIN_SCRIPT"
+  if profile_requires_memory_pro_plugin "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"; then
+    run_script_step \
+      "Vendored memory-pro plugin assets" \
+      "Install the vendored memory plugin with: $BOOTSTRAP_MEMORY_PLUGIN_SCRIPT" \
+      "$BOOTSTRAP_MEMORY_PLUGIN_SCRIPT"
+  fi
 
-  if profile_requires_lossless_claw "${OPENCLAW_CONFIG_PROFILE:-default}"; then
+  if profile_requires_lossless_claw "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"; then
     run_script_step \
       "Lossless context assets" \
       "Install the lossless-claw plugin with: $BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT" \
@@ -200,7 +203,7 @@ if [[ "$ACTIVATE_SERVICES" -eq 0 && "$VERIFY_BASELINE" -eq 1 ]]; then
 fi
 
 echo "== StrongClaw setup plan =="
-printf 'profile: %s\n' "${OPENCLAW_CONFIG_PROFILE:-default}"
+printf 'profile: %s\n' "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"
 printf 'bootstrap: %s\n' "$(describe_bootstrap_mode)"
 printf 'activate services: %s\n' "$([[ "$ACTIVATE_SERVICES" -eq 1 ]] && echo yes || echo no)"
 printf 'baseline verify: %s\n' "$([[ "$VERIFY_BASELINE" -eq 1 ]] && echo yes || echo no)"
@@ -230,8 +233,8 @@ fi
 if [[ -n "$CONFIG_PROFILE" || "$SKIP_BOOTSTRAP" -eq 1 ]]; then
   run_script_step \
     "Render OpenClaw config" \
-    "Rerender the selected profile with: $ROOT/scripts/bootstrap/render_openclaw_config.sh --profile ${OPENCLAW_CONFIG_PROFILE:-default}" \
-    "$RENDER_OPENCLAW_CONFIG_SCRIPT" --profile "${OPENCLAW_CONFIG_PROFILE:-default}"
+    "Rerender the selected profile with: $ROOT/scripts/bootstrap/render_openclaw_config.sh --profile ${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}" \
+    "$RENDER_OPENCLAW_CONFIG_SCRIPT" --profile "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"
   run_script_step \
     "OpenClaw config doctor" \
     "Review the rendered config and rerun: $ROOT/scripts/bootstrap/doctor_host.sh" \

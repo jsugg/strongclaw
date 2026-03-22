@@ -2,10 +2,12 @@
 
 set -euo pipefail
 
+STRONGCLAW_DEFAULT_PROFILE="${STRONGCLAW_DEFAULT_PROFILE:-hypermemory}"
+
 resolve_bootstrap_profile() {
-  local profile="${1:-${OPENCLAW_CONFIG_PROFILE:-default}}"
+  local profile="${1:-${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}}"
   if [[ -z "$profile" ]]; then
-    profile="default"
+    profile="$STRONGCLAW_DEFAULT_PROFILE"
   fi
   printf '%s\n' "$profile"
 }
@@ -14,7 +16,7 @@ profile_requires_qmd() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    default | memory-pro-local | memory-pro-local-smart | acp | browser-lab) return 0 ;;
+    openclaw-qmd | memory-pro-local | memory-pro-local-smart | acp | browser-lab) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -23,16 +25,25 @@ profile_requires_lossless_claw() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    lossless-hypermemory-tier1) return 0 ;;
+    hypermemory) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-profile_requires_memory_v2_tier1_backend() {
+profile_requires_hypermemory_backend() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    lossless-hypermemory-tier1) return 0 ;;
+    hypermemory) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_requires_memory_pro_plugin() {
+  local profile
+  profile="$(resolve_bootstrap_profile "${1:-}")"
+  case "$profile" in
+    memory-pro-local | memory-pro-local-smart) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -41,15 +52,17 @@ profile_bootstrap_capabilities() {
   local profile
   local -a capabilities=()
   profile="$(resolve_bootstrap_profile "${1:-}")"
-  capabilities+=("memory-plugin")
   if profile_requires_qmd "$profile"; then
     capabilities+=("qmd")
+  fi
+  if profile_requires_memory_pro_plugin "$profile"; then
+    capabilities+=("memory-pro-plugin")
   fi
   if profile_requires_lossless_claw "$profile"; then
     capabilities+=("lossless-claw")
   fi
-  if profile_requires_memory_v2_tier1_backend "$profile"; then
-    capabilities+=("memory-v2-tier1")
+  if profile_requires_hypermemory_backend "$profile"; then
+    capabilities+=("hypermemory")
   fi
   printf '%s\n' "${capabilities[*]}"
 }

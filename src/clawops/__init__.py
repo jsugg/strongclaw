@@ -6,7 +6,7 @@ __all__ = [
     "acp_runner",
     "common",
     "json_merge",
-    "memory_v2",
+    "hypermemory",
     "op_journal",
     "policy_engine",
     "context_service",

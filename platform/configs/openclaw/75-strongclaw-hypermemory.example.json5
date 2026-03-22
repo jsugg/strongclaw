@@ -1,0 +1,28 @@
+{
+  "plugins": {
+    "enabled": true,
+    "entries": {
+      "strongclaw-hypermemory": {
+        "enabled": true,
+        "config": {
+          "command": [
+            "clawops"
+          ],
+          "configPath": "__REPO_ROOT__/platform/configs/memory/hypermemory.sqlite.yaml",
+          "autoRecall": false,
+          "autoReflect": false,
+          "recallMaxResults": 3,
+          "timeoutMs": 20000
+        }
+      }
+    },
+    "load": {
+      "paths": [
+        "__REPO_ROOT__/platform/plugins/strongclaw-hypermemory"
+      ]
+    },
+    "slots": {
+      "memory": "strongclaw-hypermemory"
+    }
+  }
+}

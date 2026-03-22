@@ -19,20 +19,26 @@ The service is intentionally auditable and deterministic. QMD and context-engine
 ## Included integrations
 
 - base lexical indexer in `src/clawops/context_service.py`
-- default rendered QMD memory overlay from `platform/configs/openclaw/40-qmd-context.json5`
+- built-in OpenClaw QMD memory overlay from `platform/configs/openclaw/40-qmd-context.json5`
 - lossless-claw example in `platform/configs/openclaw/70-lossless-context-engine.example.json5`
 
 ## Default memory retrieval
 
-The baseline OpenClaw render path now enables QMD-backed memory retrieval by default.
+The default StrongClaw render path is `hypermemory`, which uses
+`lossless-claw` plus `strongclaw-hypermemory`.
 
-The rendered QMD corpus includes:
+The explicit `openclaw-default` fallback profile keeps the OpenClaw built-ins only.
+
+The explicit `openclaw-qmd` fallback profile enables QMD-backed memory
+retrieval.
+
+The rendered QMD corpus for `openclaw-qmd` includes:
 
 - `platform/docs`
 - `platform/skills`
-- top-level operator guides
-- `memory.md`
-- `platform/workspace/shared/MEMORY.md`
+- repo-root `*.md`
+- `platform/workspace/**/*.md`
+- optional `repo/upstream/**/*.md` when the upstream checkout exists
 
 This is retrieval-only by default. The project does not currently expose a writable memory tool contract.
 

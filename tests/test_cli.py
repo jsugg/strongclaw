@@ -14,6 +14,7 @@ def test_root_help_is_available(capsys: object) -> None:
     assert exit_code == 0
     assert "available commands:" in captured.out
     assert "approvals" in captured.out
+    assert "config" in captured.out
     assert "memory" in captured.out
     assert "merge-json" in captured.out
     assert "repo" in captured.out
@@ -22,7 +23,7 @@ def test_root_help_is_available(capsys: object) -> None:
     assert "skills" in captured.out
     assert "doctor" in captured.out
     assert "supply-chain" in captured.out
-    assert "memory-v2" in captured.out
+    assert "hypermemory" in captured.out
     assert "worktree" in captured.out
 
 

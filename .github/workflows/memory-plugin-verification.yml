@@ -29,8 +29,8 @@ jobs:
           cache: npm
           cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
       - run: ./scripts/ci/verify_vendored_memory_plugin.sh
-  verify-memory-v2-qdrant:
-    name: Run Memory V2 Qdrant Checks
+  verify-hypermemory-qdrant:
+    name: Run Hypermemory Qdrant Checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -57,11 +57,11 @@ jobs:
           done
           echo "Qdrant failed to become ready" >&2
           exit 1
-      - run: ./scripts/ci/verify_memory_v2_qdrant.sh
+      - run: ./scripts/ci/verify_hypermemory_qdrant.sh
         env:
           TEST_QDRANT_URL: http://127.0.0.1:6333
-  verify-strongclaw-memory-v2-host:
-    name: Run strongclaw-memory-v2 Host Checks
+  verify-strongclaw-hypermemory-host:
+    name: Run strongclaw-hypermemory Host Checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -77,4 +77,4 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/ci/verify_strongclaw_memory_v2_plugin.sh
+      - run: ./scripts/ci/verify_strongclaw_hypermemory_plugin.sh

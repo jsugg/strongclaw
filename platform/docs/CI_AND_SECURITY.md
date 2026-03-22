@@ -10,7 +10,7 @@ The repository includes:
 - Nightly Test Run
 - Repository Dependency Snapshot from a generated SPDX SBOM snapshot
 - Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
-- `strongclaw-memory-v2` host-functional checks through the local plugin SDK stub
+- `strongclaw-hypermemory` host-functional checks through the local plugin SDK stub
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
 - Upstream Integration Validation
 
@@ -29,14 +29,14 @@ GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 - The host-functional step clears ambient AWS credential env vars first so
   local Bedrock model discovery noise does not contaminate test assertions.
 
-## strongclaw-memory-v2 host verification
+## strongclaw-hypermemory host verification
 
-The repo-local `platform/plugins/strongclaw-memory-v2` bundle is also verified
+The repo-local `platform/plugins/strongclaw-hypermemory` bundle is also verified
 in `.github/workflows/memory-plugin-verification.yml`.
 
-- The shared entrypoint is `scripts/ci/verify_strongclaw_memory_v2_plugin.sh`.
+- The shared entrypoint is `scripts/ci/verify_strongclaw_hypermemory_plugin.sh`.
 - That flow runs `npm run test:openclaw-host` inside the plugin bundle.
-- The host-functional test creates a temporary sqlite-backed `memory-v2`
+- The host-functional test creates a temporary sqlite-backed `hypermemory`
   config, registers the plugin through the local SDK stub, verifies the
   exported `memory` CLI surface and subcommands, and exercises the
   strongclaw-owned `memory_search` and `memory_get` tool paths.

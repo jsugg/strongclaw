@@ -40,10 +40,25 @@ StrongClaw supports two setup paths:
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
 
-If you plan to use `lossless-hypermemory-tier1`, also set
-`MEMORY_V2_EMBEDDING_MODEL=<upstream embedding model>`. The tier-one setup path
-uses loopback defaults for `MEMORY_V2_EMBEDDING_BASE_URL` and
-`MEMORY_V2_QDRANT_URL` unless you override them.
+StrongClaw now defaults to `hypermemory`, so set
+`HYPERMEMORY_EMBEDDING_MODEL=<upstream embedding model>` before you run the
+no-arg setup path. The hypermemory setup path uses loopback defaults for
+`HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
+them.
+
+If you want the built-in OpenClaw path instead, use the explicit
+`openclaw-default` profile:
+
+```bash
+clawops config memory --set-profile openclaw-default
+```
+
+If you want the built-ins plus the experimental QMD backend, use
+`openclaw-qmd`:
+
+```bash
+clawops config memory --set-profile openclaw-qmd
+```
 
 ## 3. Bring up the host baseline
 
@@ -57,11 +72,23 @@ Equivalent shell entrypoint:
 ./scripts/bootstrap/setup.sh
 ```
 
-Supported sparse+dense tier-one path:
+Equivalent explicit hypermemory path:
 
 ```bash
-clawops setup --profile lossless-hypermemory-tier1
-./scripts/bootstrap/verify_memory_v2_tier1.sh
+clawops setup --profile hypermemory
+./scripts/bootstrap/verify_hypermemory.sh
+```
+
+Explicit built-in OpenClaw path:
+
+```bash
+clawops setup --profile openclaw-default
+```
+
+Explicit OpenClaw + QMD path:
+
+```bash
+clawops setup --profile openclaw-qmd
 ```
 
 That setup flow:
@@ -72,8 +99,8 @@ That setup flow:
 - uses an existing Docker-compatible runtime when one is already installed
 - installs Docker only when no Docker-compatible runtime is detected
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
-- provisions the selected profile's memory and plugin assets
-- installs the vendored `memory-lancedb-pro` dependencies with a host-compatible LanceDB version
+- provisions the selected profile's memory and context assets
+- installs the vendored `memory-lancedb-pro` dependencies only for the `memory-pro-local*` profiles
 - creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
 - prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
 - configures or validates OpenClaw model/provider auth before services are activated
@@ -111,35 +138,41 @@ auto-detected and skipped.
 ./scripts/bootstrap/render_openclaw_config.sh
 ```
 
-This renders the `default` profile, which merges:
+This now renders the default StrongClaw profile, `hypermemory`,
+and writes the result to `~/.openclaw/openclaw.json`.
+
+For the explicit built-in OpenClaw path, render `openclaw-default`, which merges:
 
 - `platform/configs/openclaw/00-baseline.json5`
 - `platform/configs/openclaw/10-trust-zones.json5`
-- a rendered form of `platform/configs/openclaw/40-qmd-context.json5`
 
-and writes the result to `~/.openclaw/openclaw.json`.
+For the explicit OpenClaw + QMD path, render `openclaw-qmd`, which adds:
+
+- a rendered form of `platform/configs/openclaw/40-qmd-context.json5`
 
 For placeholder-backed variants, rerender by profile instead of merging raw
 JSON5 overlays:
 
 ```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-default
+./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile lossless-hypermemory-tier1
+./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```
 
-The rendered config enables QMD-backed memory retrieval by default and indexes:
+The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
 
 - `platform/docs`
 - `platform/skills`
-- top-level operator guides
-- `memory.md`
-- `platform/workspace/shared/MEMORY.md`
+- repo-root `*.md`
+- `platform/workspace/**/*.md`
+- optional `repo/upstream/**/*.md` when the upstream checkout exists
 
-The `lossless-hypermemory-tier1` profile instead enables the combined
-`lossless-claw` + `strongclaw-memory-v2` runtime, points the plugin at
-`platform/configs/memory/memory-v2.tier1.yaml`, enables `autoRecall`, keeps
+The default `hypermemory` profile enables the combined
+`lossless-claw` + `strongclaw-hypermemory` runtime, points the plugin at
+`platform/configs/memory/hypermemory.yaml`, enables `autoRecall`, keeps
 `autoReflect` disabled, and does not inherit the QMD overlay.
 
 ## 5. Verify the baseline again on demand
@@ -175,18 +208,20 @@ Add these only in order:
 1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
 2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
 3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
-4. Supported sparse+dense tier-one path:
-   `clawops setup --profile lossless-hypermemory-tier1`
-5. Opt-in local LanceDB durable memory after the default QMD flow is stable by rerendering
+4. Built-in OpenClaw memory fallback:
+   `clawops setup --profile openclaw-default`
+5. Built-in OpenClaw plus experimental QMD:
+   `clawops setup --profile openclaw-qmd`
+6. Opt-in local LanceDB durable memory after the built-in QMD flow is stable by rerendering
    `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local`
-6. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
+7. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
    `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart`
-7. Migration-only standalone overlay reference:
-   `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5`
-8. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-9. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-10. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-11. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+8. Migration-only standalone overlay reference:
+   `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
+9. Telegram: `./scripts/bootstrap/enable_telegram.sh`
+10. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
+11. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
+12. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
 
 After each layer is enabled, run the matching verification entrypoint:
 

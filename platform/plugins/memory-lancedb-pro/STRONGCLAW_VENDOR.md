@@ -26,4 +26,4 @@ This avoids the upstream `command:new` / `command:reset` typed-hook incompatibil
 
 - The plugin is loaded from an absolute `plugins.load.paths` entry, which matches current OpenClaw plugin-loading guidance.
 - The strongclaw-local profiles target Ollama's OpenAI-compatible endpoint at `http://127.0.0.1:11434/v1`.
-- `memory-v2` remains the migration source and corpus reference path; QMD plus the context service remain the repo-document retrieval lane.
+- `hypermemory` remains the migration source and corpus reference path; QMD plus the context service remain the repo-document retrieval lane.

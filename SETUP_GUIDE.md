@@ -143,14 +143,14 @@ wrapper:
 
 ```bash
 make setup SETUP_ARGS="--profile acp"
-make setup SETUP_ARGS="--profile lossless-hypermemory-tier1"
+make setup SETUP_ARGS="--profile hypermemory"
 make setup SETUP_ARGS="--profile memory-pro-local"
 make setup SETUP_ARGS="--profile memory-pro-local-smart"
 ```
 
-For `lossless-hypermemory-tier1`, set `MEMORY_V2_EMBEDDING_MODEL` before you
+For `hypermemory`, set `HYPERMEMORY_EMBEDDING_MODEL` before you
 run setup. The guided env contract fills loopback defaults for
-`MEMORY_V2_EMBEDDING_BASE_URL` and `MEMORY_V2_QDRANT_URL` unless you override
+`HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
 them.
 
 Use `./scripts/bootstrap/doctor_host.sh` again after any host-side package or
@@ -183,26 +183,39 @@ starting services:
 ./scripts/bootstrap/configure_openclaw_model_auth.sh
 ```
 
-By default it now enables QMD-backed memory retrieval and renders repo-local memory corpus paths for:
+By default it now renders the `hypermemory` stack. If you want
+the built-in OpenClaw path instead, run
+`clawops config memory --set-profile openclaw-default` or rerender with
+`--profile openclaw-default`.
+
+For the experimental built-in QMD path, use
+`clawops config memory --set-profile openclaw-qmd` or rerender with
+`--profile openclaw-qmd`.
+
+The `openclaw-qmd` profile enables QMD-backed memory retrieval and renders
+repo-local memory corpus paths for:
 
 - `platform/docs`
 - `platform/skills`
-- top-level operator guides
-- `memory.md`
-- `platform/workspace/shared/MEMORY.md`
+- repo-root `*.md`
+- `platform/workspace/**/*.md`
+- optional `repo/upstream/**/*.md` when the upstream checkout exists
 
 Use profile rerenders for placeholder-backed variants:
 
 ```bash
+./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-default
+./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile lossless-hypermemory-tier1
+./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
 ./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
 ```
 
-The `lossless-hypermemory-tier1` profile renders a self-contained combined
-runtime: `lossless-claw` for context continuity plus `strongclaw-memory-v2`
-with `platform/configs/memory/memory-v2.tier1.yaml`, `autoRecall: true`, and
+The default `hypermemory` profile renders a self-contained
+combined runtime: `lossless-claw` for context continuity plus
+`strongclaw-hypermemory` with
+`platform/configs/memory/hypermemory.yaml`, `autoRecall: true`, and
 `autoReflect: false`.
 
 Install and activate services:
@@ -325,15 +338,15 @@ clawops render-openclaw-config \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```
 
-Keep `platform/configs/openclaw/75-strongclaw-memory-v2.example.json5` as the
+Keep `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5` as the
 Markdown-canonical migration source while you validate parity.
 
-For the supported sparse+dense tier-one path, run:
+For the supported sparse+dense hypermemory path, run:
 
 ```bash
-export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
-clawops setup --profile lossless-hypermemory-tier1
-./scripts/bootstrap/verify_memory_v2_tier1.sh
+export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
+clawops setup --profile hypermemory
+./scripts/bootstrap/verify_hypermemory.sh
 clawops doctor
 ```
 

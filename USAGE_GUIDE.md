@@ -78,7 +78,7 @@ Optional: render the companion exec approvals file with repo-local prefixes:
 ```bash
 clawops render-openclaw-config \
   --repo-root "$(pwd)" \
-  --profile default \
+  --profile hypermemory \
   --exec-approvals-output ~/.openclaw/exec-approvals.json
 ```
 
@@ -185,24 +185,38 @@ clawops context pack \
 
 ## Tier-one memory path
 
-Bring up the supported sparse+dense memory stack with:
+StrongClaw now defaults to the supported sparse+dense memory stack. Bring it up
+explicitly with:
 
 ```bash
-export MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small
-clawops setup --profile lossless-hypermemory-tier1
-./scripts/bootstrap/verify_memory_v2_tier1.sh
+export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
+clawops setup --profile hypermemory
+./scripts/bootstrap/verify_hypermemory.sh
 clawops doctor
 ```
 
-That profile enables the combined `lossless-claw` + `strongclaw-memory-v2`
+That profile enables the combined `lossless-claw` + `strongclaw-hypermemory`
 runtime, keeps `autoRecall` on, keeps `autoReflect` off, and verifies the
-Qdrant dense+sparse backend rather than the default QMD path.
+Qdrant dense+sparse backend rather than the legacy built-in QMD path.
+
+If you need the OpenClaw built-ins instead, switch to the explicit fallback:
+
+```bash
+clawops config memory --set-profile openclaw-default
+```
+
+If you need the built-ins plus the experimental QMD backend, switch to:
+
+```bash
+clawops config memory --set-profile openclaw-qmd
+```
 
 ## Memory migration
 
 Treat QMD plus the context service as the repo-document retrieval lane for the
-default profile. Use this section only when you need to migrate a standalone or
-tier-one `memory-v2` corpus into the vendored `memory-lancedb-pro` plugin.
+explicit `openclaw-qmd` fallback profile. Use this section only when you need
+to migrate a standalone or hypermemory `hypermemory` corpus into the vendored
+`memory-lancedb-pro` plugin.
 
 Export one scope at a time into the import JSON shape that `openclaw memory-pro
 import` expects. When you omit `--output` or `--report`, StrongClaw now writes
@@ -210,7 +224,7 @@ those artifacts under its OS-specific state directory instead of into the git
 checkout.
 
 ```bash
-clawops memory migrate-v2-to-pro \
+clawops memory migrate-hypermemory-to-pro \
   --scope project:strongclaw \
   --output /tmp/project-strongclaw-import.json
 ```

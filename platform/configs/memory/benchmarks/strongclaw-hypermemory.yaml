@@ -1,0 +1,13 @@
+cases:
+  - name: deployment-playbook
+    query: context service
+    lane: corpus
+    maxResults: 5
+    expectedPaths:
+      - platform/docs/CONTEXT_SERVICE.md
+  - name: gateway-runbook
+    query: Opt-in hypermemory after the default QMD flow is stable
+    lane: corpus
+    maxResults: 5
+    expectedPaths:
+      - QUICKSTART.md

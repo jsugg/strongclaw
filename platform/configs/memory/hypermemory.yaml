@@ -1,0 +1,104 @@
+storage:
+  db_path: .openclaw/hypermemory.sqlite
+
+workspace:
+  root: ../../../
+  include_default_memory: true
+  memory_file_names:
+    - MEMORY.md
+    - memory.md
+  daily_dir: memory
+  bank_dir: bank
+
+corpus:
+  paths:
+    - name: runbooks
+      path: ../../../platform/docs
+      pattern: "**/*.md"
+      required: true
+    - name: skills
+      path: ../../../platform/skills
+      pattern: "**/*.md"
+      required: true
+    - name: openclaw-workspaces
+      path: ../../../platform/workspace
+      pattern: "**/*.md"
+      required: true
+    - name: openclaw-upstream
+      path: ../../../repo/upstream
+      pattern: "**/*.md"
+    - name: repo-root-markdown
+      path: ../../../
+      pattern: "*.md"
+      required: true
+
+limits:
+  max_snippet_chars: 400
+  default_max_results: 8
+
+backend:
+  active: qdrant_sparse_dense_hybrid
+  fallback: sqlite_fts
+
+embedding:
+  enabled: true
+  provider: compatible-http
+  model: hypermemory-embedding
+  base_url: os.environ/HYPERMEMORY_EMBEDDING_BASE_URL
+  api_key_env: LITELLM_MASTER_KEY
+  batch_size: 32
+  timeout_ms: 15000
+
+rerank:
+  enabled: false
+  provider: none
+  model: ""
+  base_url: ""
+  timeout_ms: 15000
+  top_k: 0
+
+hybrid:
+  dense_candidate_pool: 24
+  sparse_candidate_pool: 24
+  vector_weight: 0.65
+  text_weight: 0.35
+  fusion: rrf
+  rrf_k: 60
+  rerank_top_k: 0
+
+qdrant:
+  enabled: true
+  url: os.environ/HYPERMEMORY_QDRANT_URL
+  collection: strongclaw-hypermemory
+  dense_vector_name: dense
+  sparse_vector_name: sparse
+  timeout_ms: 3000
+
+injection:
+  max_results: 3
+  max_chars_per_result: 280
+
+governance:
+  default_scope: project:strongclaw
+  readable_scopes:
+    - "project:"
+    - "agent:"
+    - "user:"
+    - "global"
+  writable_scopes:
+    - "project:"
+    - "agent:"
+  auto_apply_scopes:
+    - "project:"
+    - "agent:"
+
+ranking:
+  memory_lane_weight: 1.0
+  corpus_lane_weight: 1.0
+  lexical_weight: 0.75
+  coverage_weight: 0.35
+  confidence_weight: 0.15
+  recency_weight: 0.1
+  contradiction_penalty: 0.2
+  diversity_penalty: 0.35
+  recency_half_life_days: 45
