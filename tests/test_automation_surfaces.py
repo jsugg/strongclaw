@@ -64,6 +64,40 @@ def test_current_state_tracks_hypermemory_and_plan2_completion() -> None:
     assert "qdrant_sparse_dense_hybrid" in models
 
 
+def test_dev_sidecar_scripts_make_repo_local_state_explicit() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    app_paths = (repo_root / "scripts/lib/app_paths.sh").read_text(encoding="utf-8")
+    launch_dev = (repo_root / "scripts/ops/launch_sidecars_dev.sh").read_text(encoding="utf-8")
+    stop_dev = (repo_root / "scripts/ops/stop_sidecars_dev.sh").read_text(encoding="utf-8")
+    reset_dev = (repo_root / "scripts/ops/reset_dev_compose_state.sh").read_text(encoding="utf-8")
+    prune_qdrant = (repo_root / "scripts/ops/prune_qdrant_test_collections.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "strongclaw_repo_local_compose_state_dir" in app_paths
+    assert 'export_strongclaw_repo_local_compose_state_dir "$ROOT"' in launch_dev
+    assert 'export_strongclaw_repo_local_compose_state_dir "$ROOT"' in stop_dev
+    assert 'STATE_DIR="$(strongclaw_repo_local_compose_state_dir "$ROOT")"' in reset_dev
+    assert 'declare -a PREFIXES=("memory-v2-int-")' in prune_qdrant
+
+
+def test_litellm_sidecar_receives_dynamic_embedding_and_provider_env() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    compose = (repo_root / "platform/compose/docker-compose.aux-stack.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "HYPERMEMORY_EMBEDDING_MODEL" in compose
+    assert "HYPERMEMORY_EMBEDDING_API_BASE" in compose
+    assert "OPENAI_API_KEY" in compose
+    assert "ANTHROPIC_API_KEY" in compose
+    assert "OPENROUTER_API_KEY" in compose
+    assert "ZAI_API_KEY" in compose
+    assert "MOONSHOT_API_KEY" in compose
+    assert "OLLAMA_API_KEY" in compose
+    assert "host.docker.internal:host-gateway" in compose
+
+
 def test_security_harness_smoke_uses_uv_managed_python() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     suite = (repo_root / "platform/configs/harness/security_regressions.yaml").read_text(

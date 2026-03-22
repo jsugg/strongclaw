@@ -22,7 +22,10 @@
    - provider auth can be stored here with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`
    - optional model selection overrides: `OPENCLAW_DEFAULT_MODEL`, `OPENCLAW_MODEL_FALLBACKS`
    - local-model setups require `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+   - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
    - hypermemory requires `HYPERMEMORY_EMBEDDING_MODEL`
+   - for a fully local hypermemory baseline, use `HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text`
+   - local LiteLLM-to-Ollama routing also needs `HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434`
    - hypermemory defaults `HYPERMEMORY_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1`
    - hypermemory defaults `HYPERMEMORY_QDRANT_URL=http://127.0.0.1:6333`
 4. if you chose a managed backend, let guided setup generate `platform/configs/varlock/.env.plugins`, or maintain that file manually for hybrid setups

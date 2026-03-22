@@ -27,9 +27,16 @@ services:
     environment:
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      HYPERMEMORY_EMBEDDING_MODEL: ${HYPERMEMORY_EMBEDDING_MODEL}
+      HYPERMEMORY_EMBEDDING_API_BASE: ${HYPERMEMORY_EMBEDDING_API_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ZAI_API_KEY: ${ZAI_API_KEY}
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:4000:4000"
     volumes:

@@ -16,7 +16,7 @@ Use LiteLLM for:
 - hypermemory `hypermemory` embeddings through the stable `hypermemory-embedding` alias
 - centralized budgets / callbacks / fallbacks
 
-## Memory-v2 embedding lane
+## Hypermemory embedding lane
 
 The supported `hypermemory` profile uses:
 

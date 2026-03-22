@@ -93,6 +93,7 @@ StrongClaw supports both guided and env-driven setup:
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - local models require both `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+  - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
 
 ## 5. Preferred baseline bring-up
 

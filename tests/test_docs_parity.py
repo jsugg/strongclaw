@@ -81,6 +81,24 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
 
 
+def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
+    repo_root = _repo_root()
+    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
+    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    recovery = (repo_root / "platform/docs/BACKUP_AND_RECOVERY.md").read_text(encoding="utf-8")
+
+    assert "./scripts/ops/launch_sidecars_dev.sh" in quickstart
+    assert "./scripts/ops/launch_sidecars_dev.sh" in usage
+    assert "./scripts/ops/stop_sidecars_dev.sh" in quickstart
+    assert "./scripts/ops/stop_sidecars_dev.sh" in usage
+    assert "./scripts/ops/prune_qdrant_test_collections.sh" in quickstart
+    assert "./scripts/ops/prune_qdrant_test_collections.sh" in usage
+    assert "./scripts/ops/prune_qdrant_test_collections.sh" in recovery
+    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in quickstart
+    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in usage
+    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in recovery
+
+
 def test_operator_docs_surface_supported_hypermemory_path() -> None:
     repo_root = _repo_root()
     readme = (repo_root / "README.md").read_text(encoding="utf-8")

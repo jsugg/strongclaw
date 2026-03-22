@@ -39,12 +39,17 @@ StrongClaw supports two setup paths:
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
+  - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
 
 StrongClaw now defaults to `hypermemory`, so set
 `HYPERMEMORY_EMBEDDING_MODEL=<upstream embedding model>` before you run the
 no-arg setup path. The hypermemory setup path uses loopback defaults for
 `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
 them.
+
+For a fully local dev stack, `HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text`
+plus `HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434` is a
+working local baseline when that Ollama model is already pulled.
 
 If you want the built-in OpenClaw path instead, use the explicit
 `openclaw-default` profile:
@@ -113,6 +118,16 @@ StrongClaw-generated runtime data does not default into the repository checkout.
 Setup now places compose state, harness artifacts, ACP summaries, the managed
 `lossless-claw` checkout, and QMD package files under OS-appropriate app
 data/state directories instead.
+
+If you intentionally want repo-local compose state during development, keep it
+explicit instead of relying on stale container mounts:
+
+```bash
+./scripts/ops/launch_sidecars_dev.sh
+./scripts/ops/stop_sidecars_dev.sh
+./scripts/ops/prune_qdrant_test_collections.sh
+./scripts/ops/reset_dev_compose_state.sh --component qdrant
+```
 
 You can rerun the host doctor directly after any local change that might affect
 the rendered config or CLI toolchain:

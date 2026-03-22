@@ -12,6 +12,13 @@ Manual:
 ./scripts/ops/stop_sidecars.sh
 ```
 
+Repo-local sidecar state during development:
+
+```bash
+./scripts/ops/launch_sidecars_dev.sh
+./scripts/ops/stop_sidecars_dev.sh
+```
+
 Service mode:
 
 ```bash
@@ -42,6 +49,14 @@ openclaw security audit --deep
 openclaw secrets audit --check
 docker compose -f platform/compose/docker-compose.aux-stack.yaml ps
 ./scripts/ops/check_loopback_bindings.sh
+```
+
+For repo-local compose state hygiene during development, prefer targeted tools:
+
+```bash
+./scripts/ops/prune_qdrant_test_collections.sh
+./scripts/ops/reset_dev_compose_state.sh --component qdrant
+./scripts/ops/reset_dev_compose_state.sh --component postgres
 ```
 
 ## Remote operator access
@@ -183,7 +198,7 @@ clawops context pack \
   --output /tmp/context-pack.md
 ```
 
-## Tier-one memory path
+## Hypermemory path
 
 StrongClaw now defaults to the supported sparse+dense memory stack. Bring it up
 explicitly with:

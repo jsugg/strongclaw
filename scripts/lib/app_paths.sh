@@ -68,6 +68,11 @@ strongclaw_compose_state_dir() {
   printf '%s/compose\n' "$(strongclaw_state_dir)"
 }
 
+strongclaw_repo_local_compose_state_dir() {
+  local repo_root="${1:?repo root required}"
+  printf '%s/platform/compose/state\n' "$repo_root"
+}
+
 strongclaw_lossless_claw_dir() {
   if [[ -n "${LOSSLESS_CLAW_DIR:-}" ]]; then
     _strongclaw_expand_user_path "$LOSSLESS_CLAW_DIR"
@@ -91,6 +96,14 @@ strongclaw_qmd_install_dir() {
 export_strongclaw_compose_state_dir() {
   local compose_state_dir
   compose_state_dir="$(strongclaw_compose_state_dir)"
+  mkdir -p "$compose_state_dir"
+  export STRONGCLAW_COMPOSE_STATE_DIR="$compose_state_dir"
+}
+
+export_strongclaw_repo_local_compose_state_dir() {
+  local repo_root="${1:?repo root required}"
+  local compose_state_dir
+  compose_state_dir="$(strongclaw_repo_local_compose_state_dir "$repo_root")"
   mkdir -p "$compose_state_dir"
   export STRONGCLAW_COMPOSE_STATE_DIR="$compose_state_dir"
 }
