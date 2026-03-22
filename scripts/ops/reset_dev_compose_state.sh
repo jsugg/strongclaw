@@ -120,5 +120,18 @@ if [[ -n "$container_id" ]]; then
   docker compose -f "$compose_file" stop "$service_name" >/dev/null
 fi
 
-find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+python3 - "$TARGET_DIR" <<'PY'
+from __future__ import annotations
+
+import pathlib
+import shutil
+import sys
+
+target_dir = pathlib.Path(sys.argv[1])
+for child in target_dir.iterdir():
+    if child.is_dir() and not child.is_symlink():
+        shutil.rmtree(child)
+    else:
+        child.unlink()
+PY
 printf 'Reset repo-local %s state at %s\n' "$COMPONENT" "$TARGET_DIR"
