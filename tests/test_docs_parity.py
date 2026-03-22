@@ -81,33 +81,39 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
 
 
-def test_operator_docs_surface_supported_tier_one_memory_path() -> None:
+def test_operator_docs_surface_supported_hypermemory_path() -> None:
     repo_root = _repo_root()
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
     setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
     usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
-    memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
+    memory_doc = (repo_root / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
     secrets = (repo_root / "platform/docs/SECRETS_AND_ENV.md").read_text(encoding="utf-8")
     routing = (repo_root / "platform/docs/MODEL_ROUTING.md").read_text(encoding="utf-8")
 
-    assert "lossless-hypermemory-tier1" in readme
-    assert "lossless-hypermemory-tier1" in quickstart
-    assert "lossless-hypermemory-tier1" in setup
-    assert "lossless-hypermemory-tier1" in usage
-    assert "clawops setup --profile lossless-hypermemory-tier1" in memory_doc
-    assert "./scripts/bootstrap/verify_memory_v2_tier1.sh" in memory_doc
-    assert "MEMORY_V2_EMBEDDING_MODEL" in quickstart
-    assert "MEMORY_V2_EMBEDDING_MODEL" in secrets
-    assert "memory-v2-embedding" in routing
+    assert "hypermemory" in readme
+    assert "hypermemory" in quickstart
+    assert "hypermemory" in setup
+    assert "hypermemory" in usage
+    assert "openclaw-qmd" in readme
+    assert "openclaw-qmd" in quickstart
+    assert "openclaw-qmd" in setup
+    assert "openclaw-qmd" in usage
+    assert "clawops setup --profile hypermemory" in memory_doc
+    assert "clawops config memory --set-profile hypermemory" in memory_doc
+    assert "clawops config memory --set-profile openclaw-qmd" in memory_doc
+    assert "./scripts/bootstrap/verify_hypermemory.sh" in memory_doc
+    assert "HYPERMEMORY_EMBEDDING_MODEL" in quickstart
+    assert "HYPERMEMORY_EMBEDDING_MODEL" in secrets
+    assert "hypermemory-embedding" in routing
 
 
-def test_memory_v2_docs_surface_memory_pro_migration_bridge() -> None:
+def test_hypermemory_docs_surface_memory_pro_migration_bridge() -> None:
     repo_root = _repo_root()
-    memory_doc = (repo_root / "platform/docs/MEMORY_V2.md").read_text(encoding="utf-8")
+    memory_doc = (repo_root / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
     usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
 
-    assert "clawops memory migrate-v2-to-pro" in memory_doc
+    assert "clawops memory migrate-hypermemory-to-pro" in memory_doc
     assert "clawops memory import-pro-snapshot" in memory_doc
     assert "clawops memory verify-pro-parity" in memory_doc
     assert "openclaw memory-pro import" in memory_doc
@@ -134,7 +140,7 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     repo_doc = (repo_root / "repo/README.md").read_text(encoding="utf-8")
     ci_doc = (repo_root / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
 
-    assert "clawops memory migrate-v2-to-pro" in usage
+    assert "clawops memory migrate-hypermemory-to-pro" in usage
     assert "clawops memory verify-pro-parity" in usage
     assert "clawops repo --repo-root" in usage
     assert "clawops worktree --repo-root" in usage

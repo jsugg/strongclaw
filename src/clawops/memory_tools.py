@@ -13,7 +13,7 @@ from typing import Any, Final
 
 from clawops.app_paths import scoped_state_dir
 from clawops.common import ResultSummary, load_json, write_json
-from clawops.memory_v2 import MemoryV2Engine, default_config_path, load_config
+from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
 from clawops.process_runner import run_command
 
 MIGRATION_REPORT_VERSION: Final[int] = 1
@@ -52,17 +52,17 @@ def _scope_slug(scope: str) -> str:
     return normalized or "default-scope"
 
 
-def _artifact_dir(engine: MemoryV2Engine) -> pathlib.Path:
+def _artifact_dir(engine: HypermemoryEngine) -> pathlib.Path:
     """Return the default directory for migration artifacts."""
     return scoped_state_dir(engine.config.workspace_root, category="memory")
 
 
-def _default_import_output(engine: MemoryV2Engine, scope: str) -> pathlib.Path:
+def _default_import_output(engine: HypermemoryEngine, scope: str) -> pathlib.Path:
     """Return the default export artifact path."""
     return _artifact_dir(engine) / f"memory-pro-import-{_scope_slug(scope)}.json"
 
 
-def _default_report_output(engine: MemoryV2Engine, scope: str, name: str) -> pathlib.Path:
+def _default_report_output(engine: HypermemoryEngine, scope: str, name: str) -> pathlib.Path:
     """Return the default report path for a migration/parity action."""
     return _artifact_dir(engine) / f"{name}-{_scope_slug(scope)}.json"
 
@@ -85,10 +85,10 @@ def _source_path_counts(memories: list[dict[str, Any]]) -> dict[str, int]:
         metadata = memory.get("metadata")
         if not isinstance(metadata, dict):
             continue
-        memory_v2 = metadata.get("memoryV2")
-        if not isinstance(memory_v2, dict):
+        hypermemory = metadata.get("hypermemory")
+        if not isinstance(hypermemory, dict):
             continue
-        source_path = memory_v2.get("sourcePath")
+        source_path = hypermemory.get("sourcePath")
         if isinstance(source_path, str) and source_path:
             counts[source_path] += 1
     return dict(sorted(counts.items()))
@@ -115,7 +115,7 @@ def _build_migration_summary(
         "version": MIGRATION_REPORT_VERSION,
         "scope": scope,
         "includeDaily": bool(export_payload.get("includeDaily")),
-        "provider": str(export_payload.get("provider", "strongclaw-memory-v2")),
+        "provider": str(export_payload.get("provider", "strongclaw-hypermemory")),
         "memoryCount": len(memories),
         "categoryCounts": _category_counts(memories),
         "sourcePathCounts": _source_path_counts(memories),
@@ -129,7 +129,7 @@ def _build_migration_summary(
     return summary
 
 
-def migrate_v2_to_pro(
+def migrate_hypermemory_to_pro(
     *,
     config_path: pathlib.Path,
     scope: str | None,
@@ -138,8 +138,8 @@ def migrate_v2_to_pro(
     report: pathlib.Path | None,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Export a durable memory-v2 scope into `memory-lancedb-pro` import JSON."""
-    engine = MemoryV2Engine(load_config(config_path))
+    """Export a durable hypermemory scope into `memory-lancedb-pro` import JSON."""
+    engine = HypermemoryEngine(load_config(config_path))
     export_payload = engine.export_memory_pro_import(scope=scope, include_daily=include_daily)
     resolved_scope = str(export_payload["scope"])
     import_output = output or _default_import_output(engine, resolved_scope)
@@ -291,10 +291,10 @@ def _search_import_snapshot(
         if score <= 0:
             continue
         metadata = memory.get("metadata")
-        memory_v2 = metadata.get("memoryV2") if isinstance(metadata, dict) else None
+        hypermemory = metadata.get("hypermemory") if isinstance(metadata, dict) else None
         source_path = (
-            str(memory_v2.get("sourcePath"))
-            if isinstance(memory_v2, dict) and isinstance(memory_v2.get("sourcePath"), str)
+            str(hypermemory.get("sourcePath"))
+            if isinstance(hypermemory, dict) and isinstance(hypermemory.get("sourcePath"), str)
             else None
         )
         candidates.append(
@@ -328,10 +328,10 @@ def _extract_openclaw_items(payload: Any) -> list[dict[str, Any]]:
 def _candidate_from_openclaw_item(item: dict[str, Any], *, fallback_score: int) -> CandidateMemory:
     """Normalize one `openclaw memory-pro search` item."""
     metadata = item.get("metadata")
-    memory_v2 = metadata.get("memoryV2") if isinstance(metadata, dict) else None
+    hypermemory = metadata.get("hypermemory") if isinstance(metadata, dict) else None
     source_path = (
-        str(memory_v2.get("sourcePath"))
-        if isinstance(memory_v2, dict) and isinstance(memory_v2.get("sourcePath"), str)
+        str(hypermemory.get("sourcePath"))
+        if isinstance(hypermemory, dict) and isinstance(hypermemory.get("sourcePath"), str)
         else None
     )
     text_value = item.get("text")
@@ -386,7 +386,7 @@ def _search_memory_pro_cli(
 
 
 def _old_memory_results(
-    engine: MemoryV2Engine, *, query: str, scope: str, limit: int
+    engine: HypermemoryEngine, *, query: str, scope: str, limit: int
 ) -> list[CandidateMemory]:
     """Search the legacy durable-memory engine."""
     hits = engine.search(query, lane="memory", scope=scope, max_results=limit)
@@ -416,8 +416,8 @@ def verify_pro_parity(
     mode: str,
     openclaw_bin: str,
 ) -> dict[str, Any]:
-    """Compare memory-v2 durable results with migrated memory-pro candidates."""
-    engine = MemoryV2Engine(load_config(config_path))
+    """Compare hypermemory durable results with migrated memory-pro candidates."""
+    engine = HypermemoryEngine(load_config(config_path))
     export_payload = (
         load_json(import_snapshot)
         if import_snapshot is not None
@@ -507,7 +507,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     migrate = sub.add_parser(
-        "migrate-v2-to-pro", help="Export memory-v2 into memory-pro import JSON."
+        "migrate-hypermemory-to-pro",
+        help="Export hypermemory into memory-pro import JSON.",
     )
     migrate.add_argument("--config", type=pathlib.Path, default=default_config_path())
     migrate.add_argument("--scope")
@@ -517,7 +518,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     migrate.add_argument("--dry-run", action="store_true")
 
     verify = sub.add_parser(
-        "verify-pro-parity", help="Compare memory-v2 durable hits with migrated memory-pro results."
+        "verify-pro-parity",
+        help="Compare hypermemory durable hits with migrated memory-pro results.",
     )
     verify.add_argument("--config", type=pathlib.Path, default=default_config_path())
     verify.add_argument("--scope")
@@ -549,8 +551,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the memory migration CLI."""
     args = parse_args(argv)
-    if args.command == "migrate-v2-to-pro":
-        payload = migrate_v2_to_pro(
+    if args.command == "migrate-hypermemory-to-pro":
+        payload = migrate_hypermemory_to_pro(
             config_path=args.config,
             scope=args.scope,
             include_daily=bool(args.include_daily),

@@ -1,0 +1,23 @@
+{
+  "name": "@strongclaw/strongclaw-hypermemory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Opt-in OpenClaw memory plugin backed by clawops hypermemory.",
+  "type": "module",
+  "peerDependencies": {
+    "openclaw": ">=2026.3.11"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test:openclaw-host": "node test/openclaw-host-functional.mjs"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}

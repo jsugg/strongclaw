@@ -153,7 +153,7 @@ def _write_fake_clawops(bin_dir: pathlib.Path) -> None:
     target.chmod(0o755)
 
 
-def _write_fake_clawops_with_memory_v2_status(
+def _write_fake_clawops_with_hypermemory_status(
     bin_dir: pathlib.Path,
     *,
     status_payload: dict[str, object],
@@ -166,11 +166,11 @@ def _write_fake_clawops_with_memory_v2_status(
         lines.append(f'printf "%s\\n" "$*" >> "{log_path}"')
     lines.extend(
         [
-            'if [[ "${1:-}" == "memory-v2" && "${2:-}" == "status" ]]; then',
+            'if [[ "${1:-}" == "hypermemory" && "${2:-}" == "status" ]]; then',
             f"  printf '%s\\n' '{json.dumps(status_payload, sort_keys=True)}'",
             "  exit 0",
             "fi",
-            'if [[ "${1:-}" == "memory-v2" && "${2:-}" == "verify-tier1" ]]; then',
+            'if [[ "${1:-}" == "hypermemory" && "${2:-}" == "verify" ]]; then',
             f"  printf '%s\\n' '{json.dumps(verify_payload or {'ok': True}, sort_keys=True)}'",
             "  exit 0",
             "fi",
@@ -288,8 +288,8 @@ def _write_valid_varlock_env(path: pathlib.Path) -> None:
                 "OPENCLAW_STATE_DIR=~/.openclaw",
                 "LITELLM_MASTER_KEY=test-master-key-1234567890",
                 "LITELLM_DB_PASSWORD=test-db-password-1234",
-                "MEMORY_V2_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
-                "MEMORY_V2_QDRANT_URL=http://127.0.0.1:6333",
+                "HYPERMEMORY_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
+                "HYPERMEMORY_QDRANT_URL=http://127.0.0.1:6333",
                 "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
             ]
         )
@@ -408,7 +408,12 @@ def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.P
     outside_cwd.mkdir()
 
     result = subprocess.run(
-        ["/bin/bash", str(repo_root / "scripts/bootstrap/render_openclaw_config.sh")],
+        [
+            "/bin/bash",
+            str(repo_root / "scripts/bootstrap/render_openclaw_config.sh"),
+            "--profile",
+            "openclaw-qmd",
+        ],
         cwd=outside_cwd,
         env=env,
         capture_output=True,
@@ -422,12 +427,48 @@ def test_render_openclaw_config_enables_qmd_with_local_paths(tmp_path: pathlib.P
     assert '"backend": "qmd"' in rendered
     assert f'"command": "{pathlib.Path(env["HOME"]).resolve().as_posix()}/.bun/bin/qmd"' in rendered
     assert f'"path": "{(repo_root / "platform/docs").resolve().as_posix()}"' in rendered
-    assert '"pattern": "memory.md"' in rendered
+    assert '"name": "repo-root-markdown"' in rendered
+    assert '"pattern": "*.md"' in rendered
     assert (
         f'"workspace": "{(repo_root / "platform/workspace/admin").resolve().as_posix()}"'
         in rendered
     )
     assert '"userTimezone": "UTC"' in rendered
+
+
+def test_render_openclaw_config_defaults_to_hypermemory_profile(tmp_path: pathlib.Path) -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    env = os.environ | {
+        "HOME": str(tmp_path / "home"),
+        "PYTHONPATH": str(repo_root / "src"),
+        "OPENCLAW_USER_TIMEZONE": "UTC",
+    }
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "scripts/bootstrap/render_openclaw_config.sh")],
+        cwd=outside_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    rendered = json.loads(
+        ((tmp_path / "home") / ".openclaw" / "openclaw.json").read_text(encoding="utf-8")
+    )
+
+    assert rendered["plugins"]["slots"] == {
+        "contextEngine": "lossless-claw",
+        "memory": "strongclaw-hypermemory",
+    }
+    plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
+    assert (
+        plugin_config["configPath"]
+        == f"{repo_root.as_posix()}/platform/configs/memory/hypermemory.yaml"
+    )
 
 
 def test_render_openclaw_config_supports_profiles_and_exec_approvals_output(
@@ -568,7 +609,7 @@ def test_verify_baseline_uses_varlock_contract_when_available_off_path(
     ]
 
 
-def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
+def test_verify_baseline_uses_hypermemory_status_json_to_gate_hypermemory_verification(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -576,7 +617,7 @@ def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
     _write_fake_openclaw(bin_dir)
     _write_fake_uv(bin_dir)
     clawops_log = tmp_path / "clawops.log"
-    _write_fake_clawops_with_memory_v2_status(
+    _write_fake_clawops_with_hypermemory_status(
         bin_dir,
         status_payload={"backendActive": "qdrant_sparse_dense_hybrid"},
         log_path=clawops_log,
@@ -586,8 +627,8 @@ def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
     home_dir = tmp_path / "home"
     openclaw_dir = home_dir / ".openclaw"
     openclaw_dir.mkdir(parents=True, exist_ok=True)
-    memory_v2_config = tmp_path / "memory-v2.yaml"
-    memory_v2_config.write_text(
+    hypermemory_config = tmp_path / "hypermemory.sqlite.yaml"
+    hypermemory_config.write_text(
         "backend:\n  active: qdrant_sparse_dense_hybrid\n", encoding="utf-8"
     )
     openclaw_dir.joinpath("openclaw.json").write_text(
@@ -595,10 +636,10 @@ def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
             {
                 "gateway": {"bind": "loopback"},
                 "plugins": {
-                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "slots": {"memory": "strongclaw-hypermemory"},
                     "entries": {
-                        "strongclaw-memory-v2": {
-                            "config": {"configPath": memory_v2_config.as_posix()}
+                        "strongclaw-hypermemory": {
+                            "config": {"configPath": hypermemory_config.as_posix()}
                         }
                     },
                 },
@@ -625,12 +666,12 @@ def test_verify_baseline_uses_memory_v2_status_json_to_gate_tier1_verification(
     assert result.returncode == 0
     assert '"backendActive": "qdrant_sparse_dense_hybrid"' in result.stdout
     assert clawops_log.read_text(encoding="utf-8").splitlines()[:2] == [
-        f"memory-v2 status --config {memory_v2_config} --json",
-        f"memory-v2 verify-tier1 --config {memory_v2_config} --json",
+        f"hypermemory status --config {hypermemory_config} --json",
+        f"hypermemory verify --config {hypermemory_config} --json",
     ]
 
 
-def test_verify_baseline_skips_tier1_verification_for_dense_only_memory_v2_backend(
+def test_verify_baseline_skips_hypermemory_verification_for_dense_only_hypermemory_backend(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -638,7 +679,7 @@ def test_verify_baseline_skips_tier1_verification_for_dense_only_memory_v2_backe
     _write_fake_openclaw(bin_dir)
     _write_fake_uv(bin_dir)
     clawops_log = tmp_path / "clawops.log"
-    _write_fake_clawops_with_memory_v2_status(
+    _write_fake_clawops_with_hypermemory_status(
         bin_dir,
         status_payload={"backendActive": "qdrant_dense_hybrid"},
         log_path=clawops_log,
@@ -648,17 +689,17 @@ def test_verify_baseline_skips_tier1_verification_for_dense_only_memory_v2_backe
     home_dir = tmp_path / "home"
     openclaw_dir = home_dir / ".openclaw"
     openclaw_dir.mkdir(parents=True, exist_ok=True)
-    memory_v2_config = tmp_path / "memory-v2.yaml"
-    memory_v2_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
+    hypermemory_config = tmp_path / "hypermemory.sqlite.yaml"
+    hypermemory_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
     openclaw_dir.joinpath("openclaw.json").write_text(
         json.dumps(
             {
                 "gateway": {"bind": "loopback"},
                 "plugins": {
-                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "slots": {"memory": "strongclaw-hypermemory"},
                     "entries": {
-                        "strongclaw-memory-v2": {
-                            "config": {"configPath": memory_v2_config.as_posix()}
+                        "strongclaw-hypermemory": {
+                            "config": {"configPath": hypermemory_config.as_posix()}
                         }
                     },
                 },
@@ -684,9 +725,9 @@ def test_verify_baseline_skips_tier1_verification_for_dense_only_memory_v2_backe
 
     assert result.returncode == 0
     assert clawops_log.read_text(encoding="utf-8").splitlines()[0] == (
-        f"memory-v2 status --config {memory_v2_config} --json"
+        f"hypermemory status --config {hypermemory_config} --json"
     )
-    assert "memory-v2 verify-tier1" not in clawops_log.read_text(encoding="utf-8")
+    assert "hypermemory verify" not in clawops_log.read_text(encoding="utf-8")
 
 
 def test_configure_openclaw_model_auth_fails_check_only_without_usable_models(
@@ -959,6 +1000,7 @@ def test_validate_varlock_env_uses_directory_entrypoint_for_varlock_load(
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "VARLOCK_ENV_DIR": str(env_dir),
+        "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
     }
 
     result = subprocess.run(
@@ -993,6 +1035,7 @@ def test_validate_varlock_env_uses_installed_varlock_when_not_on_path(
         "HOME": str(home_dir),
         "XDG_CONFIG_HOME": str(xdg_config_home),
         "VARLOCK_ENV_DIR": str(env_dir),
+        "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
     }
 
     result = subprocess.run(
@@ -1040,6 +1083,7 @@ def test_configure_varlock_env_creates_local_contract_and_replaces_placeholders(
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "VARLOCK_ENV_DIR": str(env_dir),
         "VARLOCK_ENV_TEMPLATE": str(template_path),
+        "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
     }
 
     result = subprocess.run(
@@ -1123,8 +1167,8 @@ def test_configure_varlock_env_check_only_accepts_plugin_backed_provider_backend
                 "OPENCLAW_STATE_DIR=~/.openclaw",
                 "LITELLM_MASTER_KEY=test-master-key-1234567890",
                 "LITELLM_DB_PASSWORD=test-db-password-1234",
-                "MEMORY_V2_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
-                "MEMORY_V2_QDRANT_URL=http://127.0.0.1:6333",
+                "HYPERMEMORY_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1",
+                "HYPERMEMORY_QDRANT_URL=http://127.0.0.1:6333",
                 "OPENCLAW_DEFAULT_MODEL=openai/gpt-5.4",
                 "WHATSAPP_SESSION_DIR=~/.openclaw/channels/whatsapp",
             ]
@@ -1155,6 +1199,7 @@ def test_configure_varlock_env_check_only_accepts_plugin_backed_provider_backend
         "VARLOCK_ENV_DIR": str(env_dir),
         "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
         "VARLOCK_PLUGIN_ENV_FILE": str(env_dir / ".env.plugins"),
+        "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
     }
 
     result = subprocess.run(
@@ -1186,6 +1231,7 @@ def test_configure_varlock_env_check_only_rejects_stale_plugin_overlay_for_local
         "VARLOCK_ENV_DIR": str(env_dir),
         "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
         "VARLOCK_PLUGIN_ENV_FILE": str(env_dir / ".env.plugins"),
+        "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
     }
 
     result = subprocess.run(
@@ -1205,7 +1251,7 @@ def test_configure_varlock_env_check_only_rejects_stale_plugin_overlay_for_local
     assert "VARLOCK_SECRET_BACKEND=local" in result.stderr
 
 
-def test_configure_varlock_env_check_only_requires_tier1_embedding_model(
+def test_configure_varlock_env_check_only_requires_hypermemory_embedding_model(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -1213,7 +1259,7 @@ def test_configure_varlock_env_check_only_requires_tier1_embedding_model(
     env_dir.mkdir()
     _write_valid_varlock_env(env_dir / ".env.local")
     env = os.environ | {
-        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+        "OPENCLAW_CONFIG_PROFILE": "hypermemory",
         "VARLOCK_ENV_DIR": str(env_dir),
         "VARLOCK_LOCAL_ENV_FILE": str(env_dir / ".env.local"),
     }
@@ -1232,10 +1278,10 @@ def test_configure_varlock_env_check_only_requires_tier1_embedding_model(
     )
 
     assert result.returncode == 1
-    assert "MEMORY_V2_EMBEDDING_MODEL is required" in result.stderr
+    assert "HYPERMEMORY_EMBEDDING_MODEL is required" in result.stderr
 
 
-def test_configure_varlock_env_check_only_accepts_tier1_embedding_model(
+def test_configure_varlock_env_check_only_accepts_hypermemory_embedding_model(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -1245,7 +1291,7 @@ def test_configure_varlock_env_check_only_accepts_tier1_embedding_model(
     _write_valid_varlock_env(local_env)
     local_env.write_text(
         local_env.read_text(encoding="utf-8")
-        + "MEMORY_V2_EMBEDDING_MODEL=openai/text-embedding-3-small\n",
+        + "HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small\n",
         encoding="utf-8",
     )
     log_path = tmp_path / "varlock.log"
@@ -1254,7 +1300,7 @@ def test_configure_varlock_env_check_only_accepts_tier1_embedding_model(
     _write_fake_varlock(bin_dir, log_path)
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+        "OPENCLAW_CONFIG_PROFILE": "hypermemory",
         "VARLOCK_ENV_DIR": str(env_dir),
         "VARLOCK_LOCAL_ENV_FILE": str(local_env),
     }
@@ -1494,7 +1540,7 @@ def test_setup_script_composes_bootstrap_service_activation_and_verification(
     configure_models_script = tmp_path / "configure_openclaw_model_auth.sh"
     _write_recording_script(
         bootstrap_script,
-        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-hypermemory}}" >> "{log_path}"\n',
     )
     _write_recording_script(
         configure_varlock_env_script,
@@ -1531,7 +1577,7 @@ def test_setup_script_composes_bootstrap_service_activation_and_verification(
 
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
-        "bootstrap profile=default",
+        "bootstrap profile=hypermemory",
         "validate",
         "configure-model-auth --probe",
         "install --activate",
@@ -1554,7 +1600,7 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     bootstrap_memory_plugin_script = tmp_path / "bootstrap_memory_plugin.sh"
     _write_recording_script(
         bootstrap_script,
-        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+        f'printf "bootstrap profile=%s\\n" "${{OPENCLAW_CONFIG_PROFILE:-hypermemory}}" >> "{log_path}"\n',
     )
     _write_recording_script(
         bootstrap_qmd_script,
@@ -1570,7 +1616,7 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     )
     _write_recording_script(
         render_script,
-        f'printf "render %s profile=%s\\n" "$*" "${{OPENCLAW_CONFIG_PROFILE:-default}}" >> "{log_path}"\n',
+        f'printf "render %s profile=%s\\n" "$*" "${{OPENCLAW_CONFIG_PROFILE:-hypermemory}}" >> "{log_path}"\n',
     )
     _write_recording_script(
         doctor_script,
@@ -1615,7 +1661,6 @@ def test_setup_script_skip_bootstrap_supports_post_bootstrap_followups(
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "bootstrap-qmd",
-        "bootstrap-memory-plugin",
         "validate ",
         "render --profile acp profile=acp",
         "doctor",
@@ -1632,7 +1677,7 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "bootstrap.env").write_text(
-        "PROFILE=default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        "PROFILE=openclaw-default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
         encoding="utf-8",
     )
     bootstrap_script = tmp_path / "bootstrap.sh"
@@ -1708,7 +1753,6 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     assert "auto-skipped (host bootstrap already completed)" in result.stdout
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "bootstrap-qmd",
-        "bootstrap-memory-plugin",
         "validate",
         "render --profile acp",
         "doctor",
@@ -1717,7 +1761,7 @@ def test_setup_script_auto_skips_bootstrap_when_state_marker_exists(
     ]
 
 
-def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_tier1(
+def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_hypermemory(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -1725,7 +1769,7 @@ def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_tie
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "bootstrap.env").write_text(
-        "PROFILE=default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        "PROFILE=openclaw-default\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
         encoding="utf-8",
     )
     configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
@@ -1786,7 +1830,7 @@ def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_tie
             "/bin/bash",
             str(repo_root / "scripts/bootstrap/setup.sh"),
             "--profile",
-            "lossless-hypermemory-tier1",
+            "hypermemory",
             "--no-activate-services",
             "--no-verify",
         ],
@@ -1800,17 +1844,16 @@ def test_setup_script_auto_skip_reconciles_lossless_assets_when_switching_to_tie
     assert result.returncode == 0
     assert "auto-skipped (host bootstrap already completed)" in result.stdout
     assert log_path.read_text(encoding="utf-8").splitlines() == [
-        "bootstrap-memory-plugin",
         "bootstrap-lossless-context",
         "validate",
-        "render --profile lossless-hypermemory-tier1",
+        "render --profile hypermemory",
         "doctor",
         "configure-model-auth --probe",
         "install ",
     ]
 
 
-def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_back_to_default(
+def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_to_openclaw_qmd(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -1818,7 +1861,7 @@ def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_back_to_def
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     (state_dir / "bootstrap.env").write_text(
-        "PROFILE=lossless-hypermemory-tier1\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
+        "PROFILE=hypermemory\nHOST_OS=Linux\nRUNTIME_USER=tester\nCOMPLETED_AT=2026-03-19T00:00:00Z\n",
         encoding="utf-8",
     )
     configure_varlock_env_script = tmp_path / "configure_varlock_env.sh"
@@ -1879,7 +1922,7 @@ def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_back_to_def
             "/bin/bash",
             str(repo_root / "scripts/bootstrap/setup.sh"),
             "--profile",
-            "default",
+            "openclaw-qmd",
             "--no-activate-services",
             "--no-verify",
         ],
@@ -1894,9 +1937,8 @@ def test_setup_script_auto_skip_reconciles_qmd_assets_when_switching_back_to_def
     assert "auto-skipped (host bootstrap already completed)" in result.stdout
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "bootstrap-qmd",
-        "bootstrap-memory-plugin",
         "validate",
-        "render --profile default",
+        "render --profile openclaw-qmd",
         "doctor",
         "configure-model-auth --probe",
         "install ",
@@ -2148,6 +2190,10 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
         "printf 'render_openclaw_config\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
     )
     _write_recording_script(
+        harness_root / "scripts/bootstrap/bootstrap_lossless_context_engine.sh",
+        "printf 'bootstrap_lossless_context_engine\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
+    )
+    _write_recording_script(
         harness_root / "scripts/bootstrap/doctor_host.sh",
         "printf 'doctor_host\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
     )
@@ -2204,15 +2250,14 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "preflight",
         "npm install -g openclaw@2026.3.13 acpx@0.3.0",
-        "bootstrap_qmd",
-        "bootstrap_memory_plugin",
+        "bootstrap_lossless_context_engine",
         "render_openclaw_config",
         "doctor_host",
     ]
     assert not brew_log.exists()
 
 
-def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
+def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -2276,7 +2321,7 @@ def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "HOME": str(home_dir),
         "BOOTSTRAP_LOG_PATH": str(log_path),
-        "OPENCLAW_CONFIG_PROFILE": "lossless-hypermemory-tier1",
+        "OPENCLAW_CONFIG_PROFILE": "hypermemory",
     }
 
     result = subprocess.run(
@@ -2292,7 +2337,6 @@ def test_darwin_bootstrap_installs_lossless_claw_for_tier1_profile(
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "preflight",
         "npm install -g openclaw@2026.3.13 acpx@0.3.0",
-        "bootstrap_memory_plugin",
         "bootstrap_lossless_context_engine",
         "render_openclaw_config",
         "doctor_host",
@@ -2357,7 +2401,7 @@ def test_doctor_host_validates_installed_tools_and_rendered_config(tmp_path: pat
     assert "validated " in result.stdout
 
 
-def test_doctor_host_uses_memory_v2_status_json_to_gate_tier1_verification(
+def test_doctor_host_uses_hypermemory_status_json_to_gate_hypermemory_verification(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -2366,14 +2410,14 @@ def test_doctor_host_uses_memory_v2_status_json_to_gate_tier1_verification(
     _write_fake_acpx(bin_dir)
     _write_fake_varlock(bin_dir)
     clawops_log = tmp_path / "clawops.log"
-    _write_fake_clawops_with_memory_v2_status(
+    _write_fake_clawops_with_hypermemory_status(
         bin_dir,
         status_payload={"backendActive": "qdrant_sparse_dense_hybrid"},
         log_path=clawops_log,
     )
     home_dir = tmp_path / "home"
-    memory_v2_config = tmp_path / "memory-v2.yaml"
-    memory_v2_config.write_text(
+    hypermemory_config = tmp_path / "hypermemory.sqlite.yaml"
+    hypermemory_config.write_text(
         "backend:\n  active: qdrant_sparse_dense_hybrid\n", encoding="utf-8"
     )
     lossless_dir = tmp_path / "plugins" / "lossless-claw"
@@ -2389,11 +2433,11 @@ def test_doctor_host_uses_memory_v2_status_json_to_gate_tier1_verification(
                     "load": {"paths": [lossless_dir.as_posix()]},
                     "slots": {
                         "contextEngine": "lossless-claw",
-                        "memory": "strongclaw-memory-v2",
+                        "memory": "strongclaw-hypermemory",
                     },
                     "entries": {
-                        "strongclaw-memory-v2": {
-                            "config": {"configPath": memory_v2_config.as_posix()}
+                        "strongclaw-hypermemory": {
+                            "config": {"configPath": hypermemory_config.as_posix()}
                         }
                     },
                 },
@@ -2418,12 +2462,12 @@ def test_doctor_host_uses_memory_v2_status_json_to_gate_tier1_verification(
 
     assert result.returncode == 0
     assert clawops_log.read_text(encoding="utf-8").splitlines() == [
-        f"memory-v2 status --config {memory_v2_config} --json",
-        f"memory-v2 verify-tier1 --config {memory_v2_config} --json",
+        f"hypermemory status --config {hypermemory_config} --json",
+        f"hypermemory verify --config {hypermemory_config} --json",
     ]
 
 
-def test_doctor_host_skips_tier1_verification_for_dense_only_memory_v2_backend(
+def test_doctor_host_skips_hypermemory_verification_for_dense_only_hypermemory_backend(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -2432,14 +2476,14 @@ def test_doctor_host_skips_tier1_verification_for_dense_only_memory_v2_backend(
     _write_fake_acpx(bin_dir)
     _write_fake_varlock(bin_dir)
     clawops_log = tmp_path / "clawops.log"
-    _write_fake_clawops_with_memory_v2_status(
+    _write_fake_clawops_with_hypermemory_status(
         bin_dir,
         status_payload={"backendActive": "qdrant_dense_hybrid"},
         log_path=clawops_log,
     )
     home_dir = tmp_path / "home"
-    memory_v2_config = tmp_path / "memory-v2.yaml"
-    memory_v2_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
+    hypermemory_config = tmp_path / "hypermemory.sqlite.yaml"
+    hypermemory_config.write_text("backend:\n  active: qdrant_dense_hybrid\n", encoding="utf-8")
     config_path = home_dir / ".openclaw" / "openclaw.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -2447,10 +2491,10 @@ def test_doctor_host_skips_tier1_verification_for_dense_only_memory_v2_backend(
             {
                 "gateway": {"bind": "loopback"},
                 "plugins": {
-                    "slots": {"memory": "strongclaw-memory-v2"},
+                    "slots": {"memory": "strongclaw-hypermemory"},
                     "entries": {
-                        "strongclaw-memory-v2": {
-                            "config": {"configPath": memory_v2_config.as_posix()}
+                        "strongclaw-hypermemory": {
+                            "config": {"configPath": hypermemory_config.as_posix()}
                         }
                     },
                 },
@@ -2475,7 +2519,7 @@ def test_doctor_host_skips_tier1_verification_for_dense_only_memory_v2_backend(
 
     assert result.returncode == 0
     assert clawops_log.read_text(encoding="utf-8").splitlines() == [
-        f"memory-v2 status --config {memory_v2_config} --json"
+        f"hypermemory status --config {hypermemory_config} --json"
     ]
 
 

@@ -28,7 +28,7 @@ CODER_WORKSPACE_PLACEHOLDER = "__CODER_WORKSPACE__"
 REVIEWER_WORKSPACE_PLACEHOLDER = "__REVIEWER_WORKSPACE__"
 MESSAGING_WORKSPACE_PLACEHOLDER = "__MESSAGING_WORKSPACE__"
 OPENCLAW_CONFIG_DIR = pathlib.Path("platform/configs/openclaw")
-DEFAULT_PROFILE_NAME = "default"
+DEFAULT_PROFILE_NAME = "hypermemory"
 DEFAULT_OPENCLAW_CONFIG_OUTPUT = pathlib.Path.home() / ".openclaw" / "openclaw.json"
 DEFAULT_EXEC_APPROVALS_TEMPLATE = OPENCLAW_CONFIG_DIR / "exec-approvals.json"
 
@@ -43,14 +43,22 @@ class RenderProfile:
 
 
 PROFILES: dict[str, RenderProfile] = {
-    "default": RenderProfile(
-        name="default",
+    "openclaw-default": RenderProfile(
+        name="openclaw-default",
+        overlays=(
+            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
+            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
+        ),
+        description="OpenClaw built-ins only: memory-core and the legacy context engine.",
+    ),
+    "openclaw-qmd": RenderProfile(
+        name="openclaw-qmd",
         overlays=(
             OPENCLAW_CONFIG_DIR / "00-baseline.json5",
             OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
         ),
-        description="Baseline gateway, trust zones, and QMD-backed retrieval.",
+        description="OpenClaw built-ins plus the experimental QMD memory backend.",
     ),
     "memory-pro-local": RenderProfile(
         name="memory-pro-local",
@@ -60,7 +68,7 @@ PROFILES: dict[str, RenderProfile] = {
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
             OPENCLAW_CONFIG_DIR / "75-clawops-memory-pro.local.json5",
         ),
-        description="Default profile plus local LanceDB durable memory.",
+        description="Legacy OpenClaw built-ins plus local LanceDB durable memory.",
     ),
     "memory-pro-local-smart": RenderProfile(
         name="memory-pro-local-smart",
@@ -72,14 +80,14 @@ PROFILES: dict[str, RenderProfile] = {
         ),
         description="Local LanceDB durable memory with Ollama-backed smart extraction.",
     ),
-    "lossless-hypermemory-tier1": RenderProfile(
-        name="lossless-hypermemory-tier1",
+    "hypermemory": RenderProfile(
+        name="hypermemory",
         overlays=(
             OPENCLAW_CONFIG_DIR / "00-baseline.json5",
             OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
-            OPENCLAW_CONFIG_DIR / "77-lossless-hypermemory-tier1.example.json5",
+            OPENCLAW_CONFIG_DIR / "77-hypermemory.example.json5",
         ),
-        description="Lossless context compaction plus strongclaw-memory-v2 sparse+dense recall.",
+        description="Lossless context compaction plus strongclaw-hypermemory sparse+dense recall.",
     ),
     "acp": RenderProfile(
         name="acp",
@@ -89,7 +97,7 @@ PROFILES: dict[str, RenderProfile] = {
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
             OPENCLAW_CONFIG_DIR / "20-acp-workers.json5",
         ),
-        description="Default profile plus ACP worker agents.",
+        description="Legacy OpenClaw built-ins plus ACP worker agents.",
     ),
     "browser-lab": RenderProfile(
         name="browser-lab",
@@ -99,7 +107,7 @@ PROFILES: dict[str, RenderProfile] = {
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
             OPENCLAW_CONFIG_DIR / "60-browser-lab.json5",
         ),
-        description="Default profile plus browser-lab integration.",
+        description="Legacy OpenClaw built-ins plus browser-lab integration.",
     ),
 }
 

@@ -124,19 +124,32 @@ def test_repo_qmd_template_includes_expected_default_corpus() -> None:
     assert {
         "runbooks",
         "skills",
-        "readme",
-        "quickstart",
-        "setup-guide",
-        "usage-guide",
-        "project-memory",
-        "shared-memory",
+        "openclaw-workspaces",
+        "openclaw-upstream",
+        "repo-root-markdown",
     } <= path_names
 
 
-def test_render_default_profile_merges_baseline_trust_zones_and_qmd() -> None:
+def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_profile(
-        profile_name="default",
+        profile_name="openclaw-default",
+        repo_root=repo_root,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+    assert "backend" not in rendered["memory"]
+    assert rendered["gateway"]["bind"] == "loopback"
+    assert rendered["plugins"]["slots"]["memory"] == "memory-core"
+    admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
+    assert admin["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+
+
+def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> None:
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    rendered = render_openclaw_profile(
+        profile_name="openclaw-qmd",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
@@ -179,27 +192,28 @@ def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None
     assert coder["workspace"] == f"{repo_root.as_posix()}/repo/upstream"
 
 
-def test_memory_v2_overlay_template_renders_repo_local_paths() -> None:
+def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_overlay(
-        template_path=repo_root / "platform/configs/openclaw/75-strongclaw-memory-v2.example.json5",
+        template_path=repo_root
+        / "platform/configs/openclaw/75-strongclaw-hypermemory.example.json5",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
     )
 
-    plugin_config = rendered["plugins"]["entries"]["strongclaw-memory-v2"]["config"]
-    assert rendered["plugins"]["slots"]["memory"] == "strongclaw-memory-v2"
+    plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
+    assert rendered["plugins"]["slots"]["memory"] == "strongclaw-hypermemory"
     assert (
         plugin_config["configPath"]
-        == f"{repo_root.as_posix()}/platform/configs/memory/memory-v2.yaml"
+        == f"{repo_root.as_posix()}/platform/configs/memory/hypermemory.sqlite.yaml"
     )
     assert rendered["plugins"]["load"]["paths"] == [
-        f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2"
+        f"{repo_root.as_posix()}/platform/plugins/strongclaw-hypermemory"
     ]
 
 
-def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths(
+def test_hypermemory_overlay_renders_repo_local_paths(
     tmp_path: pathlib.Path,
 ) -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
@@ -207,25 +221,24 @@ def test_lossless_hypermemory_tier1_overlay_renders_repo_local_paths(
     lossless_dir = strongclaw_lossless_claw_dir(home_dir=home_dir)
     lossless_dir.mkdir(parents=True)
     rendered = render_openclaw_overlay(
-        template_path=repo_root
-        / "platform/configs/openclaw/77-lossless-hypermemory-tier1.example.json5",
+        template_path=repo_root / "platform/configs/openclaw/77-hypermemory.example.json5",
         repo_root=repo_root,
         home_dir=home_dir,
         user_timezone="UTC",
     )
 
     assert rendered["plugins"]["slots"]["contextEngine"] == "lossless-claw"
-    assert rendered["plugins"]["slots"]["memory"] == "strongclaw-memory-v2"
+    assert rendered["plugins"]["slots"]["memory"] == "strongclaw-hypermemory"
     assert rendered["plugins"]["load"]["paths"] == [
         lossless_dir.as_posix(),
-        f"{repo_root.as_posix()}/platform/plugins/strongclaw-memory-v2",
+        f"{repo_root.as_posix()}/platform/plugins/strongclaw-hypermemory",
     ]
 
 
-def test_render_lossless_hypermemory_tier1_profile_merges_baseline_and_plugin_slots() -> None:
+def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_profile(
-        profile_name="lossless-hypermemory-tier1",
+        profile_name="hypermemory",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
@@ -234,12 +247,12 @@ def test_render_lossless_hypermemory_tier1_profile_merges_baseline_and_plugin_sl
     assert rendered["gateway"]["bind"] == "loopback"
     assert rendered["plugins"]["slots"] == {
         "contextEngine": "lossless-claw",
-        "memory": "strongclaw-memory-v2",
+        "memory": "strongclaw-hypermemory",
     }
-    plugin_config = rendered["plugins"]["entries"]["strongclaw-memory-v2"]["config"]
+    plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     assert (
         plugin_config["configPath"]
-        == f"{repo_root.as_posix()}/platform/configs/memory/memory-v2.tier1.yaml"
+        == f"{repo_root.as_posix()}/platform/configs/memory/hypermemory.yaml"
     )
     assert plugin_config["autoRecall"] is True
     assert plugin_config["autoReflect"] is False

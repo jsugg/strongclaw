@@ -12,11 +12,11 @@ from clawops.memory_tools import main as memory_main
 from clawops.process_runner import CommandResult
 
 
-def _write_memory_v2_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
+def _write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
     config_path.write_text(
         textwrap.dedent("""
             storage:
-              db_path: .openclaw/test-memory-v2.sqlite
+              db_path: .openclaw/test-hypermemory.sqlite
             workspace:
               root: .
               include_default_memory: true
@@ -60,12 +60,12 @@ def _build_workspace(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path
         "# Gateway Runbook\n\nRotate the gateway token before enabling a new browser profile.\n",
         encoding="utf-8",
     )
-    config_path = workspace / "memory-v2.yaml"
-    _write_memory_v2_config(workspace, config_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
     return workspace, config_path
 
 
-def test_memory_migrate_v2_to_pro_writes_import_and_report(
+def test_memory_migrate_hypermemory_to_pro_writes_import_and_report(
     tmp_path: pathlib.Path,
     capsys: object,
 ) -> None:
@@ -75,7 +75,7 @@ def test_memory_migrate_v2_to_pro_writes_import_and_report(
 
     exit_code = memory_main(
         [
-            "migrate-v2-to-pro",
+            "migrate-hypermemory-to-pro",
             "--config",
             str(config_path),
             "--scope",
@@ -110,7 +110,7 @@ def test_memory_verify_pro_parity_uses_import_snapshot(
 
     migrate_exit = memory_main(
         [
-            "migrate-v2-to-pro",
+            "migrate-hypermemory-to-pro",
             "--config",
             str(config_path),
             "--scope",
@@ -160,7 +160,7 @@ def test_memory_import_pro_snapshot_invokes_openclaw_cli_and_writes_report(
 
     migrate_exit = memory_main(
         [
-            "migrate-v2-to-pro",
+            "migrate-hypermemory-to-pro",
             "--config",
             str(config_path),
             "--scope",

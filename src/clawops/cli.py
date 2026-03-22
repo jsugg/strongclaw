@@ -12,11 +12,12 @@ from clawops import (
     allowlist_sync,
     approvals,
     charts,
+    config_cli,
     context_service,
     harness,
+    hypermemory,
     json_merge,
     memory_tools,
-    memory_v2,
     op_journal,
     openclaw_config,
     platform_verify,
@@ -62,6 +63,7 @@ def _dispatch_wrapper(argv: list[str] | None) -> int:
 
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("merge-json", json_merge.main, "Merge JSON config overlays."),
+    CommandSpec("config", config_cli.main, "Manage StrongClaw-owned OpenClaw config profiles."),
     CommandSpec(
         "render-openclaw-config",
         openclaw_config.main,
@@ -74,7 +76,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "memory",
         memory_tools.main,
-        "Migrate and verify the memory-v2 to memory-pro transition.",
+        "Migrate and verify the hypermemory to memory-pro transition.",
     ),
     CommandSpec("repo", repo_tools.repo_main, "Validate the repo/upstream workspace contract."),
     CommandSpec("setup", setup_cli.setup_main, "Run the guided StrongClaw setup workflow."),
@@ -99,7 +101,9 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "verify-platform", platform_verify.main, "Verify sidecars, observability, and channels."
     ),
     CommandSpec(
-        "memory-v2", memory_v2.main, "Run the Markdown-canonical sparse+dense memory v2 engine."
+        "hypermemory",
+        hypermemory.main,
+        "Run the Markdown-canonical sparse+dense hypermemory engine.",
     ),
     CommandSpec(
         "supply-chain",

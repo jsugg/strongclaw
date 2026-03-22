@@ -23,11 +23,11 @@ rendered_openclaw_context_engine_slot() {
   rendered_openclaw_value "$config_path" '.plugins.slots.contextEngine'
 }
 
-rendered_openclaw_memory_v2_config_path() {
+rendered_openclaw_hypermemory_config_path() {
   local config_path="$1"
   rendered_openclaw_value \
     "$config_path" \
-    '.plugins.entries["strongclaw-memory-v2"].config.configPath'
+    '.plugins.entries["strongclaw-hypermemory"].config.configPath'
 }
 
 rendered_openclaw_lossless_plugin_path() {
@@ -45,7 +45,7 @@ rendered_openclaw_uses_lossless_claw() {
   [[ "$(rendered_openclaw_context_engine_slot "$config_path")" == "lossless-claw" ]]
 }
 
-rendered_openclaw_uses_memory_v2() {
+rendered_openclaw_uses_hypermemory() {
   local config_path="$1"
-  [[ "$(rendered_openclaw_memory_slot "$config_path")" == "strongclaw-memory-v2" ]]
+  [[ "$(rendered_openclaw_memory_slot "$config_path")" == "strongclaw-hypermemory" ]]
 }

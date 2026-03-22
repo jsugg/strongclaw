@@ -19,8 +19,8 @@ build/
 .tmp/
 .serena/
 .local/
-plan.md
-platform/compose/state/
+platform/compose/state/**/*
+!platform/compose/state/.gitkeep
 platform/workspace/*/.openclaw/workspace-state.json
 platform/configs/varlock/varlock.types.d.ts
 platform/configs/varlock/.env.plugins

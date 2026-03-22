@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 USER_TIMEZONE="${OPENCLAW_USER_TIMEZONE:-${TZ:-}}"
-DEFAULT_PROFILE="${OPENCLAW_CONFIG_PROFILE:-default}"
+DEFAULT_PROFILE="${OPENCLAW_CONFIG_PROFILE:-${STRONGCLAW_DEFAULT_PROFILE:-hypermemory}}"
 
 args=(
   render-openclaw-config

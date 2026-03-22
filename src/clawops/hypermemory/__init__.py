@@ -1,0 +1,55 @@
+"""StrongClaw hypermemory engine and CLI."""
+
+from clawops.hypermemory.cli import main, parse_args
+from clawops.hypermemory.config import default_config_path, load_config
+from clawops.hypermemory.engine import HypermemoryEngine
+from clawops.hypermemory.models import (
+    BackendConfig,
+    CorpusPathConfig,
+    DenseSearchCandidate,
+    EmbeddingConfig,
+    GovernanceConfig,
+    HybridConfig,
+    HypermemoryConfig,
+    IndexedDocument,
+    InjectionConfig,
+    ParsedItem,
+    ProposalRecord,
+    QdrantConfig,
+    RankingConfig,
+    ReflectionSummary,
+    ReindexSummary,
+    RerankConfig,
+    SearchBackend,
+    SearchExplanation,
+    SearchHit,
+    SparseSearchCandidate,
+)
+
+__all__ = [
+    "BackendConfig",
+    "CorpusPathConfig",
+    "DenseSearchCandidate",
+    "EmbeddingConfig",
+    "GovernanceConfig",
+    "HybridConfig",
+    "InjectionConfig",
+    "IndexedDocument",
+    "HypermemoryConfig",
+    "HypermemoryEngine",
+    "ParsedItem",
+    "ProposalRecord",
+    "QdrantConfig",
+    "RankingConfig",
+    "RerankConfig",
+    "ReflectionSummary",
+    "ReindexSummary",
+    "SearchExplanation",
+    "SearchBackend",
+    "SearchHit",
+    "default_config_path",
+    "load_config",
+    "main",
+    "parse_args",
+    "SparseSearchCandidate",
+]

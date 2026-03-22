@@ -21,34 +21,19 @@
           "pattern": "**/*.md"
         },
         {
-          "name": "readme",
-          "path": "__REPO_ROOT__",
-          "pattern": "README.md"
+          "name": "openclaw-workspaces",
+          "path": "__WORKSPACE_ROOT__",
+          "pattern": "**/*.md"
         },
         {
-          "name": "quickstart",
-          "path": "__REPO_ROOT__",
-          "pattern": "QUICKSTART.md"
+          "name": "openclaw-upstream",
+          "path": "__UPSTREAM_REPO_ROOT__",
+          "pattern": "**/*.md"
         },
         {
-          "name": "setup-guide",
+          "name": "repo-root-markdown",
           "path": "__REPO_ROOT__",
-          "pattern": "SETUP_GUIDE.md"
-        },
-        {
-          "name": "usage-guide",
-          "path": "__REPO_ROOT__",
-          "pattern": "USAGE_GUIDE.md"
-        },
-        {
-          "name": "project-memory",
-          "path": "__REPO_ROOT__",
-          "pattern": "memory.md"
-        },
-        {
-          "name": "shared-memory",
-          "path": "__REPO_ROOT__/platform/workspace/shared",
-          "pattern": "MEMORY.md"
+          "pattern": "*.md"
         }
       ],
       "scope": {

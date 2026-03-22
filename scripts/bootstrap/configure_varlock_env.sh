@@ -302,8 +302,8 @@ ensure_core_defaults() {
   ensure_non_empty_value "OPENCLAW_STATE_DIR" "$default_state_dir" "OpenClaw state directory"
   ensure_non_empty_value "LITELLM_MASTER_KEY" "$(generate_secret)" "LiteLLM master key"
   ensure_non_empty_value "LITELLM_DB_PASSWORD" "$(generate_secret)" "LiteLLM database password"
-  ensure_non_empty_value "MEMORY_V2_EMBEDDING_BASE_URL" "http://127.0.0.1:4000/v1" "memory-v2 embedding base URL"
-  ensure_non_empty_value "MEMORY_V2_QDRANT_URL" "http://127.0.0.1:6333" "memory-v2 Qdrant URL"
+  ensure_non_empty_value "HYPERMEMORY_EMBEDDING_BASE_URL" "http://127.0.0.1:4000/v1" "hypermemory embedding base URL"
+  ensure_non_empty_value "HYPERMEMORY_QDRANT_URL" "http://127.0.0.1:6333" "hypermemory Qdrant URL"
   ensure_non_empty_value "WHATSAPP_SESSION_DIR" "$default_whatsapp_dir" "WhatsApp session directory"
 }
 
@@ -975,31 +975,31 @@ EOF
   clear_backend_managed_local_values
 }
 
-ensure_tier1_embedding_model() {
-  if ! profile_requires_memory_v2_tier1_backend "${OPENCLAW_CONFIG_PROFILE:-default}"; then
+ensure_hypermemory_embedding_model() {
+  if ! profile_requires_hypermemory_backend "${OPENCLAW_CONFIG_PROFILE:-$STRONGCLAW_DEFAULT_PROFILE}"; then
     return 0
   fi
 
   local current_model
-  current_model="$(effective_env_value MEMORY_V2_EMBEDDING_MODEL)"
+  current_model="$(effective_env_value HYPERMEMORY_EMBEDDING_MODEL)"
   if [[ -n "$current_model" ]]; then
     return 0
   fi
 
   if [[ "$CHECK_ONLY" -eq 1 || "$NON_INTERACTIVE" -eq 1 ]] || ! interactive_mode; then
-    echo "ERROR: MEMORY_V2_EMBEDDING_MODEL is required when OPENCLAW_CONFIG_PROFILE=lossless-hypermemory-tier1." >&2
-    echo "Set MEMORY_V2_EMBEDDING_MODEL in $VARLOCK_LOCAL_ENV_FILE and rerun $ROOT/scripts/bootstrap/configure_varlock_env.sh." >&2
+    echo "ERROR: HYPERMEMORY_EMBEDDING_MODEL is required when OPENCLAW_CONFIG_PROFILE=hypermemory." >&2
+    echo "Set HYPERMEMORY_EMBEDDING_MODEL in $VARLOCK_LOCAL_ENV_FILE and rerun $ROOT/scripts/bootstrap/configure_varlock_env.sh." >&2
     exit 1
   fi
 
-  echo "== Tier-one memory embeddings =="
-  echo "The lossless-hypermemory-tier1 profile requires a LiteLLM embedding route target."
+  echo "== Hypermemory embeddings =="
+  echo "The hypermemory profile requires a LiteLLM embedding route target."
   set_or_prompt_value \
-    "MEMORY_V2_EMBEDDING_MODEL" \
-    "Embedding model ref for LiteLLM route memory-v2-embedding" \
+    "HYPERMEMORY_EMBEDDING_MODEL" \
+    "Embedding model ref for LiteLLM route hypermemory-embedding" \
     "${current_model:-}"
-  if ! value_is_effective "$(get_env_value MEMORY_V2_EMBEDDING_MODEL)"; then
-    echo "ERROR: MEMORY_V2_EMBEDDING_MODEL is required for tier-one." >&2
+  if ! value_is_effective "$(get_env_value HYPERMEMORY_EMBEDDING_MODEL)"; then
+    echo "ERROR: HYPERMEMORY_EMBEDDING_MODEL is required for hypermemory." >&2
     exit 1
   fi
 }
@@ -1085,7 +1085,7 @@ ensure_core_defaults
 prompt_core_settings_review
 prompt_secret_backend_setup
 prompt_model_provider_setup
-ensure_tier1_embedding_model
+ensure_hypermemory_embedding_model
 validate_secret_backend_configuration
 validate_with_varlock
 

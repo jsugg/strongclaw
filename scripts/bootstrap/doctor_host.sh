@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
 QMD_BIN="${OPENCLAW_QMD_BIN:-$HOME/.bun/bin/qmd}"
 VARLOCK_VERSION="${VARLOCK_VERSION:-0.5.0}"
-VERIFY_MEMORY_V2_TIER1_SCRIPT="${VERIFY_MEMORY_V2_TIER1_SCRIPT:-$ROOT/scripts/bootstrap/verify_memory_v2_tier1.sh}"
+VERIFY_HYPERMEMORY_SCRIPT="${VERIFY_HYPERMEMORY_SCRIPT:-$ROOT/scripts/bootstrap/verify_hypermemory.sh}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/openclaw.sh"
 # shellcheck disable=SC1091
@@ -75,16 +75,16 @@ if rendered_openclaw_uses_lossless_claw "$OPENCLAW_CONFIG"; then
   printf '%s\n' "$lossless_plugin_path"
 fi
 
-if rendered_openclaw_uses_memory_v2 "$OPENCLAW_CONFIG"; then
-  memory_v2_config_path="$(rendered_openclaw_memory_v2_config_path "$OPENCLAW_CONFIG")"
-  if [[ -z "$memory_v2_config_path" || ! -f "$memory_v2_config_path" ]]; then
-    echo "ERROR: strongclaw-memory-v2 is enabled, but its configPath is missing or unreadable." >&2
+if rendered_openclaw_uses_hypermemory "$OPENCLAW_CONFIG"; then
+  hypermemory_config_path="$(rendered_openclaw_hypermemory_config_path "$OPENCLAW_CONFIG")"
+  if [[ -z "$hypermemory_config_path" || ! -f "$hypermemory_config_path" ]]; then
+    echo "ERROR: strongclaw-hypermemory is enabled, but its configPath is missing or unreadable." >&2
     exit 1
   fi
-  echo "== strongclaw-memory-v2 config =="
-  printf '%s\n' "$memory_v2_config_path"
-  memory_v2_status_json="$(run_clawops "$ROOT" memory-v2 status --config "$memory_v2_config_path" --json)"
-  if printf '%s\n' "$memory_v2_status_json" | jq -e '.backendActive == "qdrant_sparse_dense_hybrid"' >/dev/null; then
-    run_shell_entrypoint "$VERIFY_MEMORY_V2_TIER1_SCRIPT" --config "$memory_v2_config_path" >/dev/null
+  echo "== strongclaw-hypermemory config =="
+  printf '%s\n' "$hypermemory_config_path"
+  hypermemory_status_json="$(run_clawops "$ROOT" hypermemory status --config "$hypermemory_config_path" --json)"
+  if printf '%s\n' "$hypermemory_status_json" | jq -e '.backendActive == "qdrant_sparse_dense_hybrid"' >/dev/null; then
+    run_shell_entrypoint "$VERIFY_HYPERMEMORY_SCRIPT" --config "$hypermemory_config_path" >/dev/null
   fi
 fi
