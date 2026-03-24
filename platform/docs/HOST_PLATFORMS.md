@@ -28,7 +28,7 @@ the pinned external tools that setup installs.
 | ACPX | `0.3.0` | Setup installs this exact CLI version. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
-| Hypermemory local rerank | macOS `arm64` on Python `3.12`/`3.13`; macOS `x86_64` on Python `3.12` with `torch<2.3`; Linux `x86_64` and `aarch64`/`arm64` on Python `3.12`/`3.13`, including Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu | Upstream `torch` wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. |
+| Hypermemory local rerank | macOS `arm64` on Python `3.12`/`3.13` with `torch==2.8.0`; macOS `x86_64` on Python `3.12` with `torch==2.2.2`; Linux `x86_64` and `aarch64`/`arm64` on Python `3.12`/`3.13` with `torch==2.8.0`, including Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu | Upstream `torch` wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. |
 
 CI enforces this support statement through:
 
@@ -42,6 +42,7 @@ For low-end or older hosts, this split matters:
 - x86_64 Linux laptops stay on the default local rerank path
 - Apple Silicon Macs stay on the default local rerank path for Python `3.12` and `3.13`
 - Intel Macs use a compatibility pin for local rerank on Python `3.12`
+- Apple Silicon Macs and supported Linux hosts use the pinned `torch==2.8.0` local rerank path on Python `3.12` and `3.13`
 - Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64 stay on the default local rerank path
 - 32-bit Raspberry Pi Linux hosts skip the local rerank dependency and should use `compatible-http` if reranking is required
 
