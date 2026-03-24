@@ -14,6 +14,9 @@ FusionMode = Literal["rrf", "weighted"]
 EmbeddingProviderKind = Literal["disabled", "compatible-http"]
 RerankProviderKind = Literal["none", "local-sentence-transformers", "compatible-http"]
 EvidenceKind = Literal["file", "lcm_summary", "lcm_message_range", "external_uri"]
+Tier = Literal["core", "working", "peripheral"]
+CaptureMode = Literal["llm", "regex", "both"]
+FactCategory = Literal["profile", "preference", "decision", "entity"]
 
 DEFAULT_MEMORY_FILE_NAMES = ("MEMORY.md", "memory.md")
 DEFAULT_DAILY_DIR = "memory"
@@ -80,6 +83,119 @@ class RankingConfig:
     diversity_penalty: float = 0.35
     recency_half_life_days: int = 45
     rerank_weight: float = 0.35
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DedupConfig:
+    """Semantic and deterministic deduplication settings."""
+
+    enabled: bool = False
+    similarity_threshold: float = 0.92
+    check_cross_scope: bool = False
+    typed_slots_enabled: bool = True
+    llm_assisted_enabled: bool = False
+    llm_near_threshold: float = 0.85
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CaptureLlmConfig:
+    """LLM-backed capture extraction settings."""
+
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str | None = None
+    api_key: str | None = None
+    timeout_ms: int = 15_000
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CaptureConfig:
+    """Conversation capture configuration."""
+
+    enabled: bool = False
+    mode: CaptureMode = "llm"
+    min_message_length: int = 20
+    max_candidates_per_session: int = 10
+    incremental: bool = True
+    batch_size: int = 6
+    batch_overlap: int = 2
+    llm: CaptureLlmConfig = dataclasses.field(default_factory=CaptureLlmConfig)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DecayConfig:
+    """Decay scoring and tier-transition configuration."""
+
+    enabled: bool = False
+    half_life_days: float = 45.0
+    recency_weight: float = 0.4
+    frequency_weight: float = 0.3
+    intrinsic_weight: float = 0.3
+    beta_core: float = 0.8
+    beta_working: float = 1.0
+    beta_peripheral: float = 1.3
+    promote_to_core_access: int = 10
+    promote_to_core_composite: float = 0.7
+    promote_to_core_importance: float = 0.8
+    promote_to_working_access: int = 3
+    promote_to_working_composite: float = 0.4
+    demote_to_peripheral_composite: float = 0.15
+    demote_to_peripheral_age_days: int = 60
+    demote_to_peripheral_access: int = 3
+    demote_from_core_composite: float = 0.15
+    demote_from_core_access: int = 3
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class NoiseConfig:
+    """Noise filtering thresholds for writes and capture."""
+
+    enabled: bool = True
+    min_text_length: int = 10
+    max_text_length: int = 2_000
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class AdmissionConfig:
+    """Optional capture-only admission control."""
+
+    enabled: bool = False
+    type_priors: Mapping[str, float] = dataclasses.field(
+        default_factory=lambda: {
+            "fact": 0.85,
+            "entity": 0.80,
+            "opinion": 0.70,
+            "reflection": 0.75,
+        }
+    )
+    min_confidence: float = 0.3
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FactRegistryConfig:
+    """Canonical fact registry behavior."""
+
+    enabled: bool = True
+    auto_infer_keys: bool = True
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FeedbackConfig:
+    """Feedback-signal scoring configuration."""
+
+    enabled: bool = False
+    reward_weight: float = 0.15
+    penalty_weight: float = 0.2
+    suppress_threshold: int = 3
+    suppress_penalty: float = 0.5
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RetrievalExtensionsConfig:
+    """Retrieval behavior extensions outside the hybrid core."""
+
+    adaptive_pool: bool = False
+    adaptive_pool_max_multiplier: int = 4
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -209,6 +325,16 @@ class HypermemoryConfig:
     hybrid: HybridConfig = dataclasses.field(default_factory=HybridConfig)
     qdrant: QdrantConfig = dataclasses.field(default_factory=QdrantConfig)
     injection: InjectionConfig = dataclasses.field(default_factory=InjectionConfig)
+    dedup: DedupConfig = dataclasses.field(default_factory=DedupConfig)
+    capture: CaptureConfig = dataclasses.field(default_factory=CaptureConfig)
+    decay: DecayConfig = dataclasses.field(default_factory=DecayConfig)
+    noise: NoiseConfig = dataclasses.field(default_factory=NoiseConfig)
+    admission: AdmissionConfig = dataclasses.field(default_factory=AdmissionConfig)
+    fact_registry: FactRegistryConfig = dataclasses.field(default_factory=FactRegistryConfig)
+    feedback: FeedbackConfig = dataclasses.field(default_factory=FeedbackConfig)
+    retrieval: RetrievalExtensionsConfig = dataclasses.field(
+        default_factory=RetrievalExtensionsConfig
+    )
 
     @property
     def proposals_path(self) -> pathlib.Path:
@@ -232,6 +358,16 @@ class ParsedItem:
     contradicts: tuple[str, ...] = ()
     proposal_id: str | None = None
     proposal_status: str | None = None
+    importance: float | None = None
+    tier: Tier = "working"
+    access_count: int = 0
+    last_access_date: str | None = None
+    injected_count: int = 0
+    confirmed_count: int = 0
+    bad_recall_count: int = 0
+    fact_key: str | None = None
+    invalidated_at: str | None = None
+    supersedes: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -263,6 +399,9 @@ class SearchExplanation:
     fusion_score: float = 0.0
     rerank_score: float = 0.0
     novelty_penalty: float = 0.0
+    decay_boost: float = 0.0
+    feedback_boost: float = 0.0
+    feedback_penalty: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
         """Convert the explanation to a serializable mapping."""
@@ -278,6 +417,9 @@ class SearchExplanation:
             "fusionScore": round(self.fusion_score, 6),
             "rerankScore": round(self.rerank_score, 6),
             "noveltyPenalty": round(self.novelty_penalty, 6),
+            "decayBoost": round(self.decay_boost, 6),
+            "feedbackBoost": round(self.feedback_boost, 6),
+            "feedbackPenalty": round(self.feedback_penalty, 6),
         }
 
 
@@ -467,6 +609,17 @@ class SearchHit:
     contradiction_count: int = 0
     explanation: SearchExplanation | None = None
     backend: SearchBackend = DEFAULT_SEARCH_BACKEND
+    item_id: int | None = None
+    importance: float | None = None
+    tier: Tier = "working"
+    access_count: int = 0
+    last_access_date: str | None = None
+    injected_count: int = 0
+    confirmed_count: int = 0
+    bad_recall_count: int = 0
+    fact_key: str | None = None
+    invalidated_at: str | None = None
+    supersedes: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the hit to a serializable dictionary."""
@@ -480,13 +633,30 @@ class SearchHit:
             "lane": self.lane,
             "itemType": self.item_type,
             "backend": self.backend,
+            "tier": self.tier,
+            "accessCount": self.access_count,
+            "injectedCount": self.injected_count,
+            "confirmedCount": self.confirmed_count,
+            "badRecallCount": self.bad_recall_count,
         }
+        if self.item_id is not None:
+            payload["itemId"] = self.item_id
         if self.confidence is not None:
             payload["confidence"] = self.confidence
         if self.entities:
             payload["entities"] = list(self.entities)
         if self.scope:
             payload["scope"] = self.scope
+        if self.importance is not None:
+            payload["importance"] = self.importance
+        if self.last_access_date is not None:
+            payload["lastAccess"] = self.last_access_date
+        if self.fact_key is not None:
+            payload["factKey"] = self.fact_key
+        if self.invalidated_at is not None:
+            payload["invalidatedAt"] = self.invalidated_at
+        if self.supersedes is not None:
+            payload["supersedes"] = self.supersedes
         if self.evidence_count:
             payload["evidenceCount"] = self.evidence_count
         if self.contradiction_count:
