@@ -44,7 +44,7 @@ def test_unknown_root_command_returns_error(capsys: object) -> None:
 def _write_shell_entrypoint(
     path: pathlib.Path, message: str, log_path: pathlib.Path | None = None
 ) -> None:
-    body = "#!/usr/bin/env bash\n" "set -euo pipefail\n" f'printf "{message} %s\\n" "$*"'
+    body = f'#!/usr/bin/env bash\nset -euo pipefail\nprintf "{message} %s\\n" "$*"'
     if log_path is not None:
         body += f' >> "{log_path}"'
     body += "\n"

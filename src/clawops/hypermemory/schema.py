@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "4.0"
+SCHEMA_VERSION = "5.0"
 
 DROP_STATEMENTS = (
     "DROP TABLE IF EXISTS backend_state",
     "DROP TABLE IF EXISTS vector_items",
     "DROP TABLE IF EXISTS sparse_terms",
+    "DROP TABLE IF EXISTS fact_registry",
     "DROP TABLE IF EXISTS conflicts",
     "DROP TABLE IF EXISTS evidence_links",
     "DROP TABLE IF EXISTS proposals",
@@ -62,7 +63,17 @@ SCHEMA_STATEMENTS = (
         contradiction_count INTEGER NOT NULL DEFAULT 0,
         evidence_count INTEGER NOT NULL DEFAULT 0,
         entities_json TEXT NOT NULL,
-        evidence_json TEXT NOT NULL
+        evidence_json TEXT NOT NULL,
+        importance REAL,
+        tier TEXT NOT NULL DEFAULT 'working',
+        access_count INTEGER NOT NULL DEFAULT 0,
+        last_access_date TEXT,
+        injected_count INTEGER NOT NULL DEFAULT 0,
+        confirmed_count INTEGER NOT NULL DEFAULT 0,
+        bad_recall_count INTEGER NOT NULL DEFAULT 0,
+        fact_key TEXT,
+        invalidated_at TEXT,
+        supersedes TEXT
     )
     """,
     """
@@ -97,6 +108,16 @@ SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS backend_state (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS fact_registry (
+        fact_key TEXT PRIMARY KEY,
+        current_item_id INTEGER NOT NULL REFERENCES search_items(id),
+        category TEXT NOT NULL,
+        last_updated TEXT NOT NULL,
+        version_count INTEGER NOT NULL DEFAULT 1,
+        history_json TEXT NOT NULL DEFAULT '[]'
     )
     """,
     """
@@ -174,6 +195,9 @@ SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL
     )
     """,
+    "CREATE INDEX IF NOT EXISTS idx_search_items_invalidated ON search_items(invalidated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_search_items_tier ON search_items(tier)",
+    "CREATE INDEX IF NOT EXISTS idx_search_items_fact_key ON search_items(fact_key)",
 )
 
 

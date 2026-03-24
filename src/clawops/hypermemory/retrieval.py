@@ -10,18 +10,23 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, cast
 
+from clawops.hypermemory.lifecycle import compute_decay_score
 from clawops.hypermemory.models import (
+    DecayConfig,
     DenseSearchCandidate,
     EntryType,
+    FeedbackConfig,
     HybridConfig,
     RankingConfig,
     RerankResponse,
+    RetrievalExtensionsConfig,
     SearchBackend,
     SearchDiagnostics,
     SearchExplanation,
     SearchHit,
     SearchMode,
     SparseSearchCandidate,
+    Tier,
     normalize_text_tokens,
 )
 
@@ -46,6 +51,9 @@ def search_index(
     scope: str | None,
     ranking: RankingConfig,
     hybrid: HybridConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
+    retrieval: RetrievalExtensionsConfig,
     dense_candidates: Sequence[DenseSearchCandidate] | None,
     sparse_candidates: Sequence[SparseSearchCandidate] | None,
     active_backend: SearchBackend,
@@ -57,6 +65,19 @@ def search_index(
     terms = normalize_text_tokens(query)
     if not terms:
         return [], SearchDiagnostics()
+
+    lexical_pool = max(hybrid.sparse_candidate_pool, 1)
+    if retrieval.adaptive_pool:
+        lexical_pool = _adaptive_pool_size(
+            base_pool=lexical_pool,
+            total_items=_count_items(conn),
+            active_items=_count_active_items(conn),
+            invalidated_ratio=_invalidated_ratio(conn),
+            query_specificity=_estimate_query_specificity(query),
+            has_scope_filter=scope is not None,
+            max_multiplier=max(retrieval.adaptive_pool_max_multiplier, 1),
+        )
+
     lexical_candidates: list[dict[str, Any]]
     lexical_ms = 0.0
     if active_backend == "qdrant_sparse_dense_hybrid":
@@ -66,6 +87,8 @@ def search_index(
             mode=mode,
             scope=scope,
             ranking=ranking,
+            decay=decay,
+            feedback=feedback,
             sparse_candidates=sparse_candidates or (),
         )
     else:
@@ -75,10 +98,13 @@ def search_index(
             terms=terms,
             mode=mode,
             scope=scope,
-            limit=max_results * max(hybrid.sparse_candidate_pool, 1),
+            limit=max_results * lexical_pool,
             ranking=ranking,
+            decay=decay,
+            feedback=feedback,
         )
         lexical_ms = (perf_counter() - lexical_started_at) * 1000.0
+
     sqlite_dense_started_at = perf_counter()
     dense_ranked_candidates = _dense_candidates(
         conn,
@@ -86,6 +112,8 @@ def search_index(
         mode=mode,
         scope=scope,
         ranking=ranking,
+        decay=decay,
+        feedback=feedback,
         dense_candidates=dense_candidates or (),
     )
     sqlite_dense_ms = (perf_counter() - sqlite_dense_started_at) * 1000.0
@@ -98,6 +126,7 @@ def search_index(
                 sparse_candidates=len(lexical_candidates),
             ),
         )
+
     fusion_started_at = perf_counter()
     merged = _merge_candidates(
         lexical_candidates=lexical_candidates,
@@ -108,6 +137,7 @@ def search_index(
     )
     ranked = sorted(merged.values(), key=lambda item: item["score"], reverse=True)
     fusion_ms = (perf_counter() - fusion_started_at) * 1000.0
+
     rerank_response = _apply_semantic_rerank(
         query=query,
         candidates=ranked,
@@ -137,6 +167,7 @@ def search_index(
         explanation = candidate["explanation"] if include_explain else None
         hits.append(
             SearchHit(
+                item_id=candidate["item_id"],
                 path=candidate["rel_path"],
                 start_line=candidate["start_line"],
                 end_line=candidate["end_line"],
@@ -151,6 +182,16 @@ def search_index(
                 contradiction_count=candidate["contradiction_count"],
                 explanation=explanation,
                 backend=candidate["backend"],
+                importance=candidate["importance"],
+                tier=candidate["tier"],
+                access_count=candidate["access_count"],
+                last_access_date=candidate["last_access_date"],
+                injected_count=candidate["injected_count"],
+                confirmed_count=candidate["confirmed_count"],
+                bad_recall_count=candidate["bad_recall_count"],
+                fact_key=candidate["fact_key"],
+                invalidated_at=candidate["invalidated_at"],
+                supersedes=candidate["supersedes"],
             )
         )
     selected_hits = hits[:max_results]
@@ -184,6 +225,8 @@ def _lexical_candidates(
     scope: str | None,
     limit: int,
     ranking: RankingConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
 ) -> list[dict[str, Any]]:
     """Collect lexical candidates from SQLite FTS and fallback substring search."""
     candidates: list[dict[str, Any]] = []
@@ -196,6 +239,8 @@ def _lexical_candidates(
                 scope=scope,
                 limit=limit,
                 ranking=ranking,
+                decay=decay,
+                feedback=feedback,
             )
         )
     candidates.sort(key=lambda item: item["text_score"], reverse=True)
@@ -212,6 +257,8 @@ def _lane_candidates(
     scope: str | None,
     limit: int,
     ranking: RankingConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
 ) -> list[dict[str, Any]]:
     """Collect lane-local candidates from FTS and substring retrieval."""
     params: list[Any] = [lane]
@@ -236,11 +283,22 @@ def _lane_candidates(
             si.contradiction_count,
             si.entities_json,
             si.modified_at,
+            si.importance,
+            si.tier,
+            si.access_count,
+            si.last_access_date,
+            si.injected_count,
+            si.confirmed_count,
+            si.bad_recall_count,
+            si.fact_key,
+            si.invalidated_at,
+            si.supersedes,
             bm25(search_items_fts) AS rank
         FROM search_items_fts
         JOIN search_items AS si ON si.id = search_items_fts.rowid
         WHERE search_items_fts MATCH ?
           AND si.lane = ?
+          AND si.invalidated_at IS NULL
           {scope_clause}
         ORDER BY rank ASC
         LIMIT ?
@@ -252,6 +310,8 @@ def _lane_candidates(
             row,
             terms=terms,
             ranking=ranking,
+            decay=decay,
+            feedback=feedback,
             text_score=_lexical_score(float(row["rank"]), is_fts=True),
         )
         for row in rows
@@ -274,11 +334,22 @@ def _lane_candidates(
             evidence_count,
             contradiction_count,
             entities_json,
-            modified_at
+            modified_at,
+            importance,
+            tier,
+            access_count,
+            last_access_date,
+            injected_count,
+            confirmed_count,
+            bad_recall_count,
+            fact_key,
+            invalidated_at,
+            supersedes
         FROM search_items
         WHERE lane = ?
+          AND invalidated_at IS NULL
           AND lower(title || ' ' || snippet) LIKE ?
-          {scope_clause.replace('si.', '')}
+          {scope_clause.replace("si.", "")}
         ORDER BY length(snippet) ASC, rel_path ASC, start_line ASC
         LIMIT ?
         """,
@@ -286,7 +357,12 @@ def _lane_candidates(
     ).fetchall()
     return [
         _score_candidate(
-            row, terms=terms, ranking=ranking, text_score=_lexical_score(0.0, is_fts=False)
+            row,
+            terms=terms,
+            ranking=ranking,
+            decay=decay,
+            feedback=feedback,
+            text_score=_lexical_score(0.0, is_fts=False),
         )
         for row in substring_rows
     ]
@@ -299,6 +375,8 @@ def _dense_candidates(
     mode: SearchMode,
     scope: str | None,
     ranking: RankingConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
     dense_candidates: Sequence[DenseSearchCandidate],
 ) -> list[dict[str, Any]]:
     """Load dense candidate rows from SQLite for ranked point hits."""
@@ -322,6 +400,8 @@ def _dense_candidates(
             row,
             terms=terms,
             ranking=ranking,
+            decay=decay,
+            feedback=feedback,
             text_score=0.0,
             dense_score=_normalize_dense_score(dense_hit.score),
         )
@@ -338,6 +418,8 @@ def _sparse_candidates(
     mode: SearchMode,
     scope: str | None,
     ranking: RankingConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
     sparse_candidates: Sequence[SparseSearchCandidate],
 ) -> list[dict[str, Any]]:
     """Load sparse candidate rows from SQLite for ranked Qdrant sparse hits."""
@@ -361,6 +443,8 @@ def _sparse_candidates(
             row,
             terms=terms,
             ranking=ranking,
+            decay=decay,
+            feedback=feedback,
             text_score=_normalize_sparse_score(sparse_hit.score),
         )
         candidate["lexical_rank"] = rank
@@ -389,9 +473,20 @@ def _load_rows_by_item_ids(conn: sqlite3.Connection, item_ids: Sequence[int]) ->
             evidence_count,
             contradiction_count,
             entities_json,
-            modified_at
+            modified_at,
+            importance,
+            tier,
+            access_count,
+            last_access_date,
+            injected_count,
+            confirmed_count,
+            bad_recall_count,
+            fact_key,
+            invalidated_at,
+            supersedes
         FROM search_items
         WHERE id IN ({placeholders})
+          AND invalidated_at IS NULL
         """,
         list(item_ids),
     ).fetchall()
@@ -418,7 +513,8 @@ def _merge_candidates(
             continue
         existing["text_score"] = max(float(existing["text_score"]), float(candidate["text_score"]))
         existing["dense_score"] = max(
-            float(existing["dense_score"]), float(candidate["dense_score"])
+            float(existing["dense_score"]),
+            float(candidate["dense_score"]),
         )
         existing["lexical_rank"] = existing.get("lexical_rank") or candidate.get("lexical_rank")
         existing["dense_rank"] = existing.get("dense_rank") or candidate.get("dense_rank")
@@ -457,6 +553,9 @@ def _merge_candidates(
             contradiction_penalty=float(candidate["contradiction_penalty"]),
             dense_score=float(candidate["dense_score"]),
             fusion_score=float(candidate["fusion_score"]),
+            decay_boost=float(candidate.get("decay_boost", 0.0)),
+            feedback_boost=float(candidate.get("feedback_boost", 0.0)),
+            feedback_penalty=float(candidate.get("feedback_penalty", 0.0)),
         )
         _apply_candidate_score(candidate, ranking=ranking)
     return merged
@@ -492,6 +591,8 @@ def _score_candidate(
     *,
     terms: Sequence[str],
     ranking: RankingConfig,
+    decay: DecayConfig,
+    feedback: FeedbackConfig,
     text_score: float,
     dense_score: float = 0.0,
 ) -> dict[str, Any]:
@@ -505,11 +606,37 @@ def _score_candidate(
     )
     type_weight = TYPE_ORDER.get(cast(EntryType, str(row["item_type"])), 0.9)
     confidence = None if row["confidence"] is None else float(row["confidence"])
+    importance = None if row["importance"] is None else float(row["importance"])
+    tier = cast(Tier, str(row["tier"] or "working"))
+    access_count = int(row["access_count"] or 0)
+    injected_count = int(row["injected_count"] or 0)
+    confirmed_count = int(row["confirmed_count"] or 0)
+    bad_recall_count = int(row["bad_recall_count"] or 0)
     confidence_boost = (confidence or 0.0) * ranking.confidence_weight
     recency_boost = _recency_boost(str(row["modified_at"]), ranking)
+    decay_boost = 0.0
+    if decay.enabled:
+        decay_score = compute_decay_score(
+            age_days=_age_days(str(row["modified_at"])),
+            access_count=access_count,
+            importance=importance if importance is not None else 0.5,
+            tier=tier,
+            config=decay,
+        )
+        tier_floor = {"core": 0.9, "working": 0.7, "peripheral": 0.5}.get(tier, 0.7)
+        decay_boost = max(tier_floor, decay_score)
     contradiction_penalty = int(row["contradiction_count"]) * ranking.contradiction_penalty
     exact_coverage_bonus = ranking.coverage_weight if coverage_ratio == 1.0 else 0.0
     coverage_boost = coverage_ratio * ranking.coverage_weight + exact_coverage_bonus
+    feedback_boost = 0.0
+    feedback_penalty = 0.0
+    if feedback.enabled and injected_count > 0:
+        injection_ratio = confirmed_count / max(injected_count, 1)
+        bad_ratio = bad_recall_count / max(injected_count, 1)
+        feedback_boost = injection_ratio * feedback.reward_weight
+        feedback_penalty = bad_ratio * feedback.penalty_weight
+        if bad_recall_count >= feedback.suppress_threshold:
+            feedback_penalty += feedback.suppress_penalty
     return {
         "item_id": int(row["id"]),
         "rel_path": str(row["rel_path"]),
@@ -523,6 +650,18 @@ def _score_candidate(
         "evidence_count": int(row["evidence_count"]),
         "contradiction_count": int(row["contradiction_count"]),
         "entities": tuple(json.loads(str(row["entities_json"]))),
+        "importance": importance,
+        "tier": tier,
+        "access_count": access_count,
+        "last_access_date": (
+            None if row["last_access_date"] is None else str(row["last_access_date"])
+        ),
+        "injected_count": injected_count,
+        "confirmed_count": confirmed_count,
+        "bad_recall_count": bad_recall_count,
+        "fact_key": None if row["fact_key"] is None else str(row["fact_key"]),
+        "invalidated_at": None if row["invalidated_at"] is None else str(row["invalidated_at"]),
+        "supersedes": None if row["supersedes"] is None else str(row["supersedes"]),
         "text_score": text_score,
         "dense_score": dense_score,
         "lane_weight": lane_weight,
@@ -530,7 +669,10 @@ def _score_candidate(
         "coverage_boost": coverage_boost,
         "confidence_boost": confidence_boost,
         "recency_boost": recency_boost,
+        "decay_boost": decay_boost,
         "contradiction_penalty": contradiction_penalty,
+        "feedback_boost": feedback_boost,
+        "feedback_penalty": feedback_penalty,
         "fusion_score": 0.0,
         "rerank_score": 0.0,
         "rerank_applied": False,
@@ -546,6 +688,9 @@ def _score_candidate(
             contradiction_penalty=contradiction_penalty,
             dense_score=dense_score,
             fusion_score=0.0,
+            decay_boost=decay_boost,
+            feedback_boost=feedback_boost,
+            feedback_penalty=feedback_penalty,
         ),
     }
 
@@ -569,7 +714,10 @@ def _apply_candidate_score(candidate: dict[str, Any], *, ranking: RankingConfig)
         + float(candidate["coverage_boost"])
         + float(candidate["confidence_boost"])
         + float(candidate["recency_boost"])
-        - float(candidate["contradiction_penalty"]),
+        + float(candidate.get("decay_boost", 0.0))
+        + float(candidate.get("feedback_boost", 0.0))
+        - float(candidate["contradiction_penalty"])
+        - float(candidate.get("feedback_penalty", 0.0)),
     )
     explanation = cast(SearchExplanation, candidate["explanation"])
     candidate["explanation"] = SearchExplanation(
@@ -583,6 +731,9 @@ def _apply_candidate_score(candidate: dict[str, Any], *, ranking: RankingConfig)
         dense_score=explanation.dense_score,
         fusion_score=float(candidate["fusion_score"]),
         rerank_score=float(candidate.get("rerank_score", 0.0)),
+        decay_boost=float(candidate.get("decay_boost", 0.0)),
+        feedback_boost=float(candidate.get("feedback_boost", 0.0)),
+        feedback_penalty=float(candidate.get("feedback_penalty", 0.0)),
     )
 
 
@@ -639,15 +790,77 @@ def _lexical_score(rank: float, *, is_fts: bool) -> float:
 
 def _recency_boost(modified_at: str, ranking: RankingConfig) -> float:
     """Compute recency boost using an exponential decay."""
-    try:
-        timestamp = datetime.fromisoformat(modified_at)
-    except ValueError:
-        return 0.0
-    age_days = max((datetime.now(tz=UTC) - timestamp).total_seconds() / 86400.0, 0.0)
+    age_days = _age_days(modified_at)
     if ranking.recency_half_life_days <= 0:
         return 0.0
     decay = math.exp(-math.log(2.0) * age_days / ranking.recency_half_life_days)
     return decay * ranking.recency_weight
+
+
+def _age_days(modified_at: str) -> float:
+    """Return the age of one timestamp in days."""
+    try:
+        timestamp = datetime.fromisoformat(modified_at)
+    except ValueError:
+        return 0.0
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return max((datetime.now(tz=UTC) - timestamp).total_seconds() / 86400.0, 0.0)
+
+
+def _adaptive_pool_size(
+    *,
+    base_pool: int,
+    total_items: int,
+    active_items: int,
+    invalidated_ratio: float,
+    query_specificity: float,
+    has_scope_filter: bool,
+    max_multiplier: int,
+) -> int:
+    """Compute an adaptive candidate pool size for larger stores."""
+    effective_total = max(total_items, active_items)
+    if effective_total <= 100:
+        return base_pool
+    size_factor = 1.0 + (0.3 * math.log2(max(effective_total / 100.0, 1.0)))
+    crowding_factor = 1.0 + invalidated_ratio
+    specificity_factor = 1.5 - (0.5 * query_specificity)
+    scope_factor = 0.7 if has_scope_filter else 1.0
+    adapted = int(base_pool * size_factor * crowding_factor * specificity_factor * scope_factor)
+    return min(max(adapted, base_pool), base_pool * max(max_multiplier, 1))
+
+
+def _estimate_query_specificity(query: str) -> float:
+    """Estimate how specific a query is in the closed interval [0.0, 1.0]."""
+    terms = normalize_text_tokens(query)
+    if not terms:
+        return 0.0
+    term_count_factor = min(len(terms) / 6.0, 1.0)
+    average_term_length = sum(len(term) for term in terms) / len(terms)
+    length_factor = min(average_term_length / 8.0, 1.0)
+    return (0.5 * term_count_factor) + (0.5 * length_factor)
+
+
+def _count_items(conn: sqlite3.Connection) -> int:
+    """Return the number of indexed items."""
+    row = conn.execute("SELECT COUNT(*) FROM search_items").fetchone()
+    return 0 if row is None else int(row[0])
+
+
+def _count_active_items(conn: sqlite3.Connection) -> int:
+    """Return the number of active, non-invalidated items."""
+    row = conn.execute("SELECT COUNT(*) FROM search_items WHERE invalidated_at IS NULL").fetchone()
+    return 0 if row is None else int(row[0])
+
+
+def _invalidated_ratio(conn: sqlite3.Connection) -> float:
+    """Return the invalidated share of the indexed store."""
+    total = _count_items(conn)
+    if total <= 0:
+        return 0.0
+    active = _count_active_items(conn)
+    invalidated = max(total - active, 0)
+    return invalidated / total
 
 
 def _apply_diversity(
@@ -669,7 +882,7 @@ def _apply_diversity(
                 best_score = adjusted
                 best_index = index
         chosen = remaining.pop(best_index)
-        explanation = chosen["explanation"]
+        explanation = cast(SearchExplanation, chosen["explanation"])
         penalty = max(chosen["score"] - best_score, 0.0)
         chosen["score"] = max(best_score, 0.0)
         chosen["explanation"] = SearchExplanation(
@@ -684,6 +897,9 @@ def _apply_diversity(
             fusion_score=explanation.fusion_score,
             rerank_score=explanation.rerank_score,
             novelty_penalty=penalty,
+            decay_boost=explanation.decay_boost,
+            feedback_boost=explanation.feedback_boost,
+            feedback_penalty=explanation.feedback_penalty,
         )
         selected.append(chosen)
     return selected

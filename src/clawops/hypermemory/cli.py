@@ -68,6 +68,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Include ranking explanation metadata in JSON results.",
     )
+    search_parser.add_argument(
+        "--include-invalidated",
+        action="store_true",
+        help="Include soft-invalidated rows for audit-oriented searches.",
+    )
     search_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
     get_parser = subparsers.add_parser("get", help="Read a canonical memory or corpus file.")
@@ -84,6 +89,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     store_parser.add_argument("--entity")
     store_parser.add_argument("--confidence", type=float)
     store_parser.add_argument("--scope", help="Target scope, e.g. project:strongclaw.")
+    store_parser.add_argument("--fact-key", help="Canonical fact slot key.")
+    store_parser.add_argument("--importance", type=float, help="Initial importance score.")
+    store_parser.add_argument("--tier", choices=("core", "working", "peripheral"))
     store_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
     update_parser = subparsers.add_parser(
@@ -105,6 +113,76 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="safe applies only configured scopes, propose never applies, apply always applies allowed scopes.",
     )
     reflect_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    capture_parser = subparsers.add_parser("capture", help="Extract durable memory from messages.")
+    capture_parser.add_argument(
+        "--messages", required=True, help="JSON array of [turn, role, text]."
+    )
+    capture_parser.add_argument("--mode", choices=("llm", "regex", "both"))
+    capture_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    forget_parser = subparsers.add_parser("forget", help="Invalidate or delete a durable entry.")
+    forget_parser.add_argument("--query")
+    forget_parser.add_argument("--path")
+    forget_parser.add_argument("--entry-text")
+    forget_parser.add_argument("--hard-delete", action="store_true")
+    forget_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    supersede_parser = subparsers.add_parser("supersede", help="Supersede a durable memory entry.")
+    supersede_parser.add_argument("--item-id", type=int)
+    supersede_parser.add_argument("--old-entry-text")
+    supersede_parser.add_argument("--new-text", required=True)
+    supersede_parser.add_argument(
+        "--type", choices=("fact", "reflection", "opinion", "entity"), required=True
+    )
+    supersede_parser.add_argument("--entity")
+    supersede_parser.add_argument("--confidence", type=float)
+    supersede_parser.add_argument("--scope")
+    supersede_parser.add_argument("--fact-key")
+    supersede_parser.add_argument("--importance", type=float)
+    supersede_parser.add_argument("--tier", choices=("core", "working", "peripheral"))
+    supersede_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    access_parser = subparsers.add_parser("access", help="Record access counts for item ids.")
+    access_parser.add_argument(
+        "--item-ids", required=True, help="JSON or comma-separated item ids."
+    )
+    access_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    injection_parser = subparsers.add_parser(
+        "record-injection",
+        help="Record prompt injection counts for item ids.",
+    )
+    injection_parser.add_argument("--item-ids", required=True)
+    injection_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    confirmation_parser = subparsers.add_parser(
+        "record-confirmation",
+        help="Record confirmation counts for item ids.",
+    )
+    confirmation_parser.add_argument("--item-ids", required=True)
+    confirmation_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    bad_recall_parser = subparsers.add_parser(
+        "record-bad-recall",
+        help="Record bad-recall counts for item ids.",
+    )
+    bad_recall_parser.add_argument("--item-ids", required=True)
+    bad_recall_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    lifecycle_parser = subparsers.add_parser("lifecycle", help="Run tier lifecycle evaluation.")
+    lifecycle_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    list_facts_parser = subparsers.add_parser("list-facts", help="List canonical fact slots.")
+    list_facts_parser.add_argument("--category")
+    list_facts_parser.add_argument("--scope")
+    list_facts_parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+    flush_parser = subparsers.add_parser(
+        "flush-metadata",
+        help="Flush lifecycle metadata back into canonical Markdown.",
+    )
+    flush_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
     benchmark_parser = subparsers.add_parser(
         "benchmark", help="Run benchmark fixtures against the current strongclaw memory provider."
@@ -158,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             dense_candidate_pool=args.dense_candidate_pool,
             sparse_candidate_pool=args.sparse_candidate_pool,
             fusion=args.fusion,
+            include_invalidated=bool(args.include_invalidated),
         )
         payload = {
             "results": [hit.to_dict() for hit in hits],
@@ -179,6 +258,9 @@ def main(argv: list[str] | None = None) -> int:
             entity=args.entity,
             confidence=args.confidence,
             scope=args.scope,
+            fact_key=args.fact_key,
+            importance=args.importance,
+            tier=args.tier,
         )
         _print_payload(payload, as_json=bool(args.json))
         return 0
@@ -193,6 +275,63 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "reflect":
         payload = engine.reflect(mode=args.mode)
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "capture":
+        messages = _parse_messages(args.messages)
+        payload = engine.capture(messages=messages, mode=args.mode)
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "forget":
+        payload = engine.forget(
+            query=args.query,
+            path=args.path,
+            entry_text=args.entry_text,
+            hard_delete=bool(args.hard_delete),
+        )
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "supersede":
+        payload = engine.supersede(
+            item_id=args.item_id,
+            old_entry_text=args.old_entry_text,
+            new_text=args.new_text,
+            kind=args.type,
+            entity=args.entity,
+            confidence=args.confidence,
+            scope=args.scope,
+            fact_key=args.fact_key,
+            importance=args.importance,
+            tier=args.tier,
+        )
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "access":
+        payload = engine.record_access(item_ids=_parse_item_ids(args.item_ids))
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "record-injection":
+        payload = engine.record_injection(item_ids=_parse_item_ids(args.item_ids))
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "record-confirmation":
+        payload = engine.record_confirmation(item_ids=_parse_item_ids(args.item_ids))
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "record-bad-recall":
+        payload = engine.record_bad_recall(item_ids=_parse_item_ids(args.item_ids))
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "lifecycle":
+        payload = engine.run_lifecycle()
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "list-facts":
+        payload = {"facts": engine.list_facts(category=args.category, scope=args.scope)}
+        _print_payload(payload, as_json=bool(args.json))
+        return 0
+    if args.command == "flush-metadata":
+        payload = engine.flush_metadata()
         _print_payload(payload, as_json=bool(args.json))
         return 0
     if args.command == "benchmark":
@@ -230,3 +369,29 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _parse_item_ids(raw_value: str) -> list[int]:
+    """Parse JSON or comma-separated item ids."""
+    stripped = raw_value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("["):
+        payload = json.loads(stripped)
+        if not isinstance(payload, list):
+            raise ValueError("item id payload must be a list")
+        return [int(item) for item in payload]
+    return [int(part.strip()) for part in stripped.split(",") if part.strip()]
+
+
+def _parse_messages(raw_value: str) -> list[tuple[int, str, str]]:
+    """Parse capture messages from JSON."""
+    payload = json.loads(raw_value)
+    if not isinstance(payload, list):
+        raise ValueError("messages must be a JSON list")
+    messages: list[tuple[int, str, str]] = []
+    for raw_item in payload:
+        if not isinstance(raw_item, list) or len(raw_item) != 3:
+            raise ValueError("each message must be a three-item array")
+        messages.append((int(raw_item[0]), str(raw_item[1]), str(raw_item[2])))
+    return messages

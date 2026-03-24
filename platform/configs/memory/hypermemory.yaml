@@ -87,6 +87,77 @@ injection:
   max_results: 3
   max_chars_per_result: 280
 
+dedup:
+  enabled: true
+  similarity_threshold: 0.92
+  check_cross_scope: false
+  typed_slots_enabled: true
+  llm_assisted_enabled: false
+  llm_near_threshold: 0.85
+
+capture:
+  enabled: false
+  mode: llm
+  incremental: true
+  min_message_length: 20
+  max_candidates_per_session: 10
+  batch_size: 6
+  batch_overlap: 2
+  llm:
+    endpoint: ""
+    model: ""
+    api_key_env: ""
+    timeout_ms: 15000
+
+decay:
+  enabled: false
+  half_life_days: 45
+  recency_weight: 0.4
+  frequency_weight: 0.3
+  intrinsic_weight: 0.3
+  beta_core: 0.8
+  beta_working: 1.0
+  beta_peripheral: 1.3
+  promote_to_core_access: 10
+  promote_to_core_composite: 0.7
+  promote_to_core_importance: 0.8
+  promote_to_working_access: 3
+  promote_to_working_composite: 0.4
+  demote_to_peripheral_composite: 0.15
+  demote_to_peripheral_age_days: 60
+  demote_to_peripheral_access: 3
+  demote_from_core_composite: 0.15
+  demote_from_core_access: 3
+
+noise:
+  enabled: true
+  min_text_length: 10
+  max_text_length: 2000
+
+admission:
+  enabled: false
+  min_confidence: 0.3
+  type_priors:
+    fact: 0.85
+    entity: 0.80
+    opinion: 0.70
+    reflection: 0.75
+
+fact_registry:
+  enabled: true
+  auto_infer_keys: true
+
+feedback:
+  enabled: false
+  reward_weight: 0.15
+  penalty_weight: 0.2
+  suppress_threshold: 3
+  suppress_penalty: 0.5
+
+retrieval:
+  adaptive_pool: false
+  adaptive_pool_max_multiplier: 4
+
 governance:
   default_scope: project:strongclaw
   readable_scopes:

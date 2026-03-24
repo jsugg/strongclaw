@@ -15,6 +15,8 @@ def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
     assert manifest["id"] == "strongclaw-hypermemory"
     assert manifest["kind"] == "memory"
     assert "configPath" in manifest["configSchema"]["properties"]
+    assert "autoCapture" in manifest["configSchema"]["properties"]
+    assert "captureMinMessages" in manifest["configSchema"]["properties"]
     assert package["openclaw"]["extensions"] == ["./index.js"]
     assert package["scripts"]["test:openclaw-host"] == "node test/openclaw-host-functional.mjs"
     assert (plugin_root / "test" / "openclaw-host-functional.mjs").exists()
@@ -35,3 +37,7 @@ def test_hypermemory_plugin_uses_compatible_tool_names() -> None:
     assert "--mode" in plugin_source
     assert "before_prompt_build" in plugin_source
     assert "--backend" in plugin_source
+    assert 'name: "memory_forget"' in plugin_source
+    assert 'name: "memory_list_facts"' in plugin_source
+    assert "autoCapture" in plugin_source
+    assert "record-injection" in plugin_source

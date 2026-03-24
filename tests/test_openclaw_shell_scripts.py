@@ -147,7 +147,7 @@ def _write_fake_acpx(bin_dir: pathlib.Path) -> None:
 def _write_fake_clawops(bin_dir: pathlib.Path) -> None:
     target = bin_dir / "clawops"
     target.write_text(
-        "#!/usr/bin/env bash\n" "set -euo pipefail\n" "printf 'fake-clawops %s\\n' \"$*\"\n",
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'fake-clawops %s\\n' \"$*\"\n",
         encoding="utf-8",
     )
     target.chmod(0o755)
@@ -211,7 +211,7 @@ def _write_fake_qmd(home_dir: pathlib.Path) -> pathlib.Path:
     target = home_dir / ".bun" / "bin" / "qmd"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        "#!/usr/bin/env bash\n" "set -euo pipefail\n" "exit 0\n",
+        "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
         encoding="utf-8",
     )
     target.chmod(0o755)
@@ -1753,7 +1753,7 @@ def test_docker_runtime_installs_docker_only_when_no_backend_is_detected(
         bin_dir / "apt-get",
         f'printf "%s\\n" "$*" >> "{log_path}"\n'
         'if [[ "${1:-}" == "install" ]]; then\n'
-        f'  /bin/cat > "{bin_dir / "docker"}" <<\'EOF\'\n'
+        f"  /bin/cat > \"{bin_dir / 'docker'}\" <<'EOF'\n"
         "#!/bin/bash\n"
         "set -euo pipefail\n"
         'if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then\n'
@@ -2493,7 +2493,7 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
 
     _write_recording_script(
         bin_dir / "uname",
-        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\n' "printf 'Darwin\\n'\n",
+        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\nprintf \'Darwin\\n\'\n',
     )
     _write_recording_script(bin_dir / "brew", f'printf "%s\\n" "$*" >> "{brew_log}"\n')
     _write_recording_script(
@@ -2505,7 +2505,7 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     )
     _write_recording_script(
         bin_dir / "node",
-        'if [[ "${1:-}" == "-e" ]]; then exit 0; fi\n' "printf 'v24.13.1\\n'\n",
+        'if [[ "${1:-}" == "-e" ]]; then exit 0; fi\nprintf \'v24.13.1\\n\'\n',
     )
     _write_recording_script(
         bin_dir / "npm",
@@ -2525,7 +2525,7 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     install_dir.mkdir(parents=True)
     _write_recording_script(
         install_dir / "varlock",
-        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\n' "exit 0\n",
+        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\nexit 0\n',
     )
     xdg_config_home = home_dir / ".config"
 
@@ -2600,7 +2600,7 @@ def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
 
     _write_recording_script(
         bin_dir / "uname",
-        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\n' "printf 'Darwin\\n'\n",
+        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\nprintf \'Darwin\\n\'\n',
     )
     _write_recording_script(bin_dir / "python3", 'if [[ "${1:-}" == "-c" ]]; then exit 0; fi\n')
     _write_recording_script(
@@ -2616,7 +2616,7 @@ def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
     )
     _write_recording_script(
         bin_dir / "varlock",
-        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\n' "exit 0\n",
+        'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\nexit 0\n',
     )
     _write_recording_script(bin_dir / "openclaw", "exit 0\n")
     _write_recording_script(bin_dir / "acpx", "exit 0\n")
