@@ -25,6 +25,7 @@
       <string>__HOME_DIR__/.config</string>
       <key>PATH</key>
       <string>__HOME_DIR__/.config/varlock/bin:__HOME_DIR__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+__LAUNCHD_EXTRA_ENV__
     </dict>
     <key>StandardOutPath</key>
     <string>__STATE_DIR__/logs/launchd-gateway.out.log</string>
