@@ -134,7 +134,7 @@ async function main() {
     assert.deepEqual(commands.map((command) => command.name), ["memory"]);
     assert.deepEqual(
       commands[0].subcommands.map((command) => command.name),
-      ["status", "index", "search", "get", "store", "update", "reflect"],
+      ["status", "index", "search", "get", "store", "update", "reflect", "forget", "list-facts"],
     );
 
     const memorySearch = stub.tools.get("memory_search");
