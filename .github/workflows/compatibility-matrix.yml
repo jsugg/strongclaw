@@ -80,7 +80,11 @@ jobs:
           )
           write_json(tmp_root / "openclaw.json", rendered)
           PY
-      - run: test -f "$STRONGCLAW_DATA_DIR/plugins/lossless-claw/openclaw.plugin.json"
+      - run: |
+          TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
+          STRONGCLAW_DATA_DIR="${STRONGCLAW_DATA_DIR:-$TMP_ROOT/data}"
+          test -f "$STRONGCLAW_DATA_DIR/plugins/lossless-claw/openclaw.plugin.json"
       - run: |
           TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
           TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
