@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
       POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "127.0.0.1:5432:5432"
     volumes:

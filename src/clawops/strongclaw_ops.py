@@ -15,8 +15,8 @@ from clawops.strongclaw_runtime import (
     DEFAULT_REPO_ROOT,
     CommandError,
     ensure_docker_backend_ready,
-    resolve_compose_state_dir,
     resolve_openclaw_config_path,
+    resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
     resolve_repo_root,
     run_command,
@@ -32,14 +32,19 @@ def _compose_state_dir(repo_root: pathlib.Path, *, repo_local_state: bool) -> pa
     """Return the effective compose-state directory."""
     if repo_local_state:
         return resolve_repo_local_compose_state_dir(repo_root)
-    return resolve_compose_state_dir()
+    explicit = os.environ.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip()
+    if explicit:
+        return pathlib.Path(explicit).expanduser().resolve()
+    return resolve_openclaw_state_dir(repo_root) / "compose"
 
 
 def _compose_env(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, str]:
     """Build the compose execution environment."""
+    openclaw_state_dir = resolve_openclaw_state_dir(repo_root)
     state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
     state_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
     env["OPENCLAW_CONFIG"] = str(resolve_openclaw_config_path(repo_root))
     return env

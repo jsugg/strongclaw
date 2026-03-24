@@ -48,10 +48,14 @@ jobs:
           .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
       - name: Upload Linux host artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: linux-fresh-host-artifacts
-          path: ${{ runner.temp }}/strongclaw-linux-host
+          path: |
+            ${{ runner.temp }}/strongclaw-linux-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-linux-host/home/.config/systemd/user
+          include-hidden-files: true
 
   macos-fresh-host:
     name: macOS Fresh Host
@@ -71,6 +75,24 @@ jobs:
           docker compose version
           echo "DOCKER_CONFIG=${HOME}/.docker" >> "${GITHUB_ENV}"
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+      - name: Normalize hosted macOS machine name
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo scutil --set ComputerName "openclaw-ci"
+          sudo scutil --set LocalHostName "openclaw-ci"
+          sudo scutil --set HostName "openclaw-ci"
+          scutil --get ComputerName
+          scutil --get LocalHostName
+      - name: Warm hosted macOS compose images
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
+          mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml pull postgres litellm qdrant otel-collector
+          docker compose -f platform/compose/docker-compose.browser-lab.yaml pull browserlab-proxy browserlab-playwright
       - name: Bootstrap setup services and runtime flows
         shell: bash
         run: |
@@ -80,11 +102,14 @@ jobs:
           export XDG_CONFIG_HOME="${HOME}/.config"
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS="2700"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${TMP_ROOT}/repo-local-compose"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           export DOCKER_CONFIG="${DOCKER_CONFIG}"
           export DOCKER_HOST="${DOCKER_HOST}"
-          mkdir -p "${HOME}"
+          mkdir -p "${HOME}" "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
 
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
           .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
@@ -99,9 +124,35 @@ jobs:
           launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
           .venv/bin/python -m clawops ops --repo-root . sidecars down || true
           .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+      - name: Dump macOS host logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export OPENCLAW_STATE_DIR="${TMP_ROOT}/home/.openclaw"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
+          for path in \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.out.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.err.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.out.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.err.log"; do
+            if [[ -f "${path}" ]]; then
+              echo "--- ${path}"
+              tail -n 200 "${path}"
+            fi
+          done
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml ps || true
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector || true
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" || true
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" || true
       - name: Upload macOS host artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: macos-fresh-host-artifacts
-          path: ${{ runner.temp }}/strongclaw-macos-host
+          path: |
+            ${{ runner.temp }}/strongclaw-macos-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-macos-host/home/Library/LaunchAgents
+          include-hidden-files: true
