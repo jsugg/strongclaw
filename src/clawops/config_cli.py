@@ -44,16 +44,9 @@ MEMORY_PROFILES: dict[str, MemoryProfileSpec] = {
         description="Built-in OpenClaw defaults plus the experimental QMD memory backend.",
         installs_qmd=True,
     ),
-    "memory-pro-local": MemoryProfileSpec(
-        profile_id="memory-pro-local",
-        render_profile="memory-pro-local",
-        description="Vendored memory-lancedb-pro with QMD-backed document recall.",
-        installs_qmd=True,
-        installs_memory_pro=True,
-    ),
-    "memory-pro-local-smart": MemoryProfileSpec(
-        profile_id="memory-pro-local-smart",
-        render_profile="memory-pro-local-smart",
+    "memory-lancedb-pro": MemoryProfileSpec(
+        profile_id="memory-lancedb-pro",
+        render_profile="memory-lancedb-pro",
         description="Vendored memory-lancedb-pro with Ollama-backed smart extraction.",
         installs_qmd=True,
         installs_memory_pro=True,

@@ -2,7 +2,7 @@
   "id": "memory-lancedb-pro",
   "name": "Memory (LanceDB Pro)",
   "description": "Enhanced LanceDB-backed long-term memory with hybrid retrieval, multi-scope isolation, long-context chunking, and management CLI",
-  "version": "1.1.0-beta.9",
+  "version": "1.1.0-beta.10",
   "kind": "memory",
   "configSchema": {
     "type": "object",
@@ -14,7 +14,10 @@
         "properties": {
           "provider": {
             "type": "string",
-            "const": "openai-compatible"
+            "enum": [
+              "openai-compatible",
+              "azure-openai"
+            ]
           },
           "apiKey": {
             "oneOf": [
@@ -59,6 +62,10 @@
             "type": "boolean",
             "default": true,
             "description": "Enable automatic chunking for documents exceeding embedding context limits"
+          },
+          "apiVersion": {
+            "type": "string",
+            "description": "API version for Azure OpenAI (e.g. 2024-02-01). Only used when provider is azure-openai."
           }
         },
         "required": [
@@ -102,8 +109,29 @@
         "type": "integer",
         "minimum": 0,
         "maximum": 100,
-        "default": 0,
-        "description": "Minimum number of turns before the same memory can be recalled again in the same session. Set to 0 to disable deduplication (default behavior: inject all memories)."
+        "default": 8,
+        "description": "Minimum number of turns before the same memory can be recalled again in the same session. Set to 0 to disable deduplication."
+      },
+      "autoRecallMaxItems": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 3,
+        "description": "Maximum number of memories auto-injected per turn."
+      },
+      "autoRecallMaxChars": {
+        "type": "integer",
+        "minimum": 64,
+        "maximum": 8000,
+        "default": 600,
+        "description": "Maximum total character budget for auto-injected memory summaries."
+      },
+      "autoRecallPerItemMaxChars": {
+        "type": "integer",
+        "minimum": 32,
+        "maximum": 1000,
+        "default": 180,
+        "description": "Maximum character budget per auto-injected memory summary."
       },
       "captureAssistant": {
         "type": "boolean"
@@ -117,7 +145,7 @@
         "type": "integer",
         "minimum": 1,
         "maximum": 100,
-        "default": 2,
+        "default": 4,
         "description": "Minimum conversation messages required before smart extraction runs."
       },
       "extractMaxChars": {
@@ -126,6 +154,100 @@
         "maximum": 100000,
         "default": 8000,
         "description": "Maximum conversation characters sent to the smart extraction LLM."
+      },
+      "admissionControl": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A-MAC-style admission governance on the smart-extraction write path. Rejects low-value candidates before persistence while preserving downstream dedup behavior for admitted candidates.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "balanced",
+              "conservative",
+              "high-recall"
+            ],
+            "default": "balanced",
+            "description": "Named admission tuning preset. Explicit admissionControl fields still override the selected preset."
+          },
+          "utilityMode": {
+            "type": "string",
+            "enum": [
+              "standalone",
+              "off"
+            ],
+            "default": "standalone"
+          },
+          "rejectThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.45
+          },
+          "admitThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.6
+          },
+          "noveltyCandidatePoolSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 8
+          },
+          "auditMetadata": {
+            "type": "boolean",
+            "default": true
+          },
+          "persistRejectedAudits": {
+            "type": "boolean",
+            "default": true
+          },
+          "rejectedAuditFilePath": {
+            "type": "string",
+            "description": "Optional JSONL file path for durable admission reject audit records. Defaults to a file beside the plugin memory data directory."
+          },
+          "recency": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "halfLifeDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365,
+                "default": 14
+              }
+            }
+          },
+          "weights": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "utility": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
+              "novelty": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
+              "recency": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
+              "typePrior": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.6 }
+            }
+          },
+          "typePriors": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "profile": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.95 },
+              "preferences": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
+              "entities": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.75 },
+              "events": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.45 },
+              "cases": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+              "patterns": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.85 }
+            }
+          }
+        }
       },
       "retrieval": {
         "type": "object",
@@ -259,32 +381,132 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "recencyHalfLifeDays": { "type": "number", "minimum": 1, "maximum": 365, "default": 30 },
-          "recencyWeight": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.4 },
-          "frequencyWeight": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.3 },
-          "intrinsicWeight": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.3 },
-          "staleThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.3 },
-          "searchBoostMin": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.3 },
-          "importanceModulation": { "type": "number", "minimum": 0, "maximum": 10, "default": 1.5 },
-          "betaCore": { "type": "number", "minimum": 0.1, "maximum": 5, "default": 0.8 },
-          "betaWorking": { "type": "number", "minimum": 0.1, "maximum": 5, "default": 1.0 },
-          "betaPeripheral": { "type": "number", "minimum": 0.1, "maximum": 5, "default": 1.3 },
-          "coreDecayFloor": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
-          "workingDecayFloor": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7 },
-          "peripheralDecayFloor": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 }
+          "recencyHalfLifeDays": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 30
+          },
+          "recencyWeight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.4
+          },
+          "frequencyWeight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3
+          },
+          "intrinsicWeight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3
+          },
+          "staleThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3
+          },
+          "searchBoostMin": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.3
+          },
+          "importanceModulation": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 1.5
+          },
+          "betaCore": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 5,
+            "default": 0.8
+          },
+          "betaWorking": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 5,
+            "default": 1
+          },
+          "betaPeripheral": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 5,
+            "default": 1.3
+          },
+          "coreDecayFloor": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.9
+          },
+          "workingDecayFloor": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7
+          },
+          "peripheralDecayFloor": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5
+          }
         }
       },
       "tier": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "coreAccessThreshold": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 10 },
-          "coreCompositeThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7 },
-          "coreImportanceThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
-          "peripheralCompositeThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.15 },
-          "peripheralAgeDays": { "type": "integer", "minimum": 1, "maximum": 3650, "default": 60 },
-          "workingAccessThreshold": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 3 },
-          "workingCompositeThreshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.4 }
+          "coreAccessThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 10
+          },
+          "coreCompositeThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7
+          },
+          "coreImportanceThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.8
+          },
+          "peripheralCompositeThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.15
+          },
+          "peripheralAgeDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650,
+            "default": 60
+          },
+          "workingAccessThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 3
+          },
+          "workingCompositeThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.4
+          }
         }
       },
       "sessionMemory": {
@@ -427,6 +649,15 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "auth": {
+            "type": "string",
+            "enum": [
+              "api-key",
+              "oauth"
+            ],
+            "default": "api-key",
+            "description": "LLM authentication mode. oauth uses the local Codex/ChatGPT login cache instead of llm.apiKey."
+          },
           "apiKey": {
             "type": "string"
           },
@@ -436,6 +667,19 @@
           },
           "baseURL": {
             "type": "string"
+          },
+          "oauthProvider": {
+            "type": "string",
+            "description": "OAuth provider id for llm.auth=oauth. Currently supported: openai-codex."
+          },
+          "oauthPath": {
+            "type": "string",
+            "description": "OAuth token file for llm.auth=oauth. Defaults to ~/.openclaw/.memory-lancedb-pro/oauth.json."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 30000
           }
         }
       },
@@ -451,6 +695,43 @@
           "dir": {
             "type": "string",
             "description": "Fallback directory for Markdown mirror files when agent workspace is unknown"
+          }
+        }
+      },
+      "workspaceBoundary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userMdExclusive": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Do not store USER.md-exclusive facts in LanceDB."
+              },
+              "routeProfile": {
+                "type": "boolean",
+                "default": true,
+                "description": "Treat extracted profile memories as USER.md-exclusive."
+              },
+              "routeCanonicalName": {
+                "type": "boolean",
+                "default": true,
+                "description": "Treat canonical name facts as USER.md-exclusive."
+              },
+              "routeCanonicalAddressing": {
+                "type": "boolean",
+                "default": true,
+                "description": "Treat canonical addressing facts as USER.md-exclusive."
+              },
+              "filterRecall": {
+                "type": "boolean",
+                "default": true,
+                "description": "Filter USER.md-exclusive facts out of plugin recall results."
+              }
+            }
           }
         }
       }
@@ -518,17 +799,18 @@
     "llm.apiKey": {
       "label": "LLM API Key",
       "sensitive": true,
-      "help": "API key for smart extraction LLM (defaults to embedding apiKey)",
-      "advanced": true
+      "placeholder": "sk-... or ${GROQ_API_KEY}",
+      "help": "API key for LLM used by smart memory extraction (defaults to embedding.apiKey if omitted)"
     },
     "llm.model": {
       "label": "LLM Model",
-      "help": "Model for memory extraction and dedup (default: gpt-4o-mini)",
-      "advanced": true
+      "placeholder": "openai/gpt-oss-120b",
+      "help": "OpenAI-compatible chat model for memory extraction/summary"
     },
     "llm.baseURL": {
       "label": "LLM Base URL",
-      "help": "Base URL for LLM API (defaults to embedding baseURL)",
+      "placeholder": "https://api.groq.com/openai/v1",
+      "help": "OpenAI-compatible base URL for LLM (defaults to embedding.baseURL if omitted)",
       "advanced": true
     },
     "extractMinMessages": {
@@ -539,6 +821,66 @@
     "extractMaxChars": {
       "label": "Max Chars for Extraction",
       "help": "Maximum conversation characters to process for extraction",
+      "advanced": true
+    },
+    "admissionControl.enabled": {
+      "label": "Admission Control",
+      "help": "Enable A-MAC-style admission scoring before downstream dedup.",
+      "advanced": true
+    },
+    "admissionControl.preset": {
+      "label": "Admission Preset",
+      "help": "balanced is the default; conservative favors precision; high-recall favors recall. Explicit admissionControl fields override the preset.",
+      "advanced": true
+    },
+    "admissionControl.utilityMode": {
+      "label": "Admission Utility Mode",
+      "help": "standalone adds a separate LLM utility scoring call; off disables that feature.",
+      "advanced": true
+    },
+    "admissionControl.rejectThreshold": {
+      "label": "Admission Reject Threshold",
+      "help": "Candidates below this weighted score are rejected before persistence.",
+      "advanced": true
+    },
+    "admissionControl.admitThreshold": {
+      "label": "Admission Admit Threshold",
+      "help": "Higher-scoring admitted candidates are labeled as likely add cases in audit metadata; all admitted candidates still go through downstream dedup.",
+      "advanced": true
+    },
+    "admissionControl.noveltyCandidatePoolSize": {
+      "label": "Admission Novelty Pool",
+      "help": "Number of nearby memories to compare for novelty scoring.",
+      "advanced": true
+    },
+    "admissionControl.auditMetadata": {
+      "label": "Admission Audit Metadata",
+      "help": "Persist per-memory admission scores and reasons in metadata for debugging.",
+      "advanced": true
+    },
+    "admissionControl.persistRejectedAudits": {
+      "label": "Persist Reject Audits",
+      "help": "Write rejected admission decisions to a JSONL audit log for later review.",
+      "advanced": true
+    },
+    "admissionControl.rejectedAuditFilePath": {
+      "label": "Reject Audit File",
+      "help": "Optional JSONL path for rejected admission audit records. Defaults beside the plugin memory data directory.",
+      "advanced": true
+    },
+    "admissionControl.recency.halfLifeDays": {
+      "label": "Admission Recency Half-Life",
+      "help": "Controls how quickly recency rises as similar memories get older.",
+      "advanced": true
+    },
+    "admissionControl.weights": {
+      "label": "Admission Weights",
+      "help": "Feature weights are normalized at runtime before scoring.",
+      "advanced": true
+    },
+    "admissionControl.typePriors": {
+      "label": "Admission Type Priors",
+      "help": "Category priors for long-term retention likelihood.",
       "advanced": true
     },
     "autoCapture": {
@@ -557,6 +899,21 @@
     "autoRecallMinRepeated": {
       "label": "Auto-Recall Min Repeated",
       "help": "Minimum number of conversation turns before a specific memory can be re-injected in the same session.",
+      "advanced": true
+    },
+    "autoRecallMaxItems": {
+      "label": "Auto-Recall Max Items",
+      "help": "Maximum memories that auto-recall can inject in one turn.",
+      "advanced": true
+    },
+    "autoRecallMaxChars": {
+      "label": "Auto-Recall Max Chars",
+      "help": "Maximum total characters injected by auto-recall in one turn.",
+      "advanced": true
+    },
+    "autoRecallPerItemMaxChars": {
+      "label": "Auto-Recall Per-Item Max Chars",
+      "help": "Maximum characters per injected memory summary.",
       "advanced": true
     },
     "captureAssistant": {
@@ -796,21 +1153,49 @@
       "help": "Fallback directory when agent workspace mapping is unavailable",
       "advanced": true
     },
-    "llm.apiKey": {
-      "label": "LLM API Key",
-      "sensitive": true,
-      "placeholder": "sk-... or ${GROQ_API_KEY}",
-      "help": "API key for LLM used by smart memory extraction (defaults to embedding.apiKey if omitted)"
+    "workspaceBoundary.userMdExclusive.enabled": {
+      "label": "USER.md Exclusive Facts",
+      "help": "Skip storing USER.md-owned facts in LanceDB and keep them out of plugin recall."
     },
-    "llm.model": {
-      "label": "LLM Model",
-      "placeholder": "openai/gpt-oss-120b",
-      "help": "OpenAI-compatible chat model for memory extraction/summary"
+    "workspaceBoundary.userMdExclusive.routeProfile": {
+      "label": "Exclude Profile Memories",
+      "help": "Treat extracted profile memories as USER.md-only facts.",
+      "advanced": true
     },
-    "llm.baseURL": {
-      "label": "LLM Base URL",
-      "placeholder": "https://api.groq.com/openai/v1",
-      "help": "OpenAI-compatible base URL for LLM (defaults to embedding.baseURL if omitted)",
+    "workspaceBoundary.userMdExclusive.routeCanonicalName": {
+      "label": "Exclude Canonical Name",
+      "help": "Treat canonical name facts as USER.md-only facts.",
+      "advanced": true
+    },
+    "workspaceBoundary.userMdExclusive.routeCanonicalAddressing": {
+      "label": "Exclude Canonical Addressing",
+      "help": "Treat canonical addressing facts as USER.md-only facts.",
+      "advanced": true
+    },
+    "workspaceBoundary.userMdExclusive.filterRecall": {
+      "label": "Filter USER.md Facts From Recall",
+      "help": "Hide USER.md-exclusive facts from plugin auto-recall and memory_recall output.",
+      "advanced": true
+    },
+    "llm.auth": {
+      "label": "LLM Auth",
+      "help": "api-key uses llm.apiKey or embedding.apiKey. oauth uses a plugin-scoped OAuth token file by default.",
+      "advanced": true
+    },
+    "llm.oauthProvider": {
+      "label": "LLM OAuth Provider",
+      "help": "OAuth provider id used when llm.auth=oauth. Currently supported: openai-codex.",
+      "advanced": true
+    },
+    "llm.oauthPath": {
+      "label": "LLM OAuth File",
+      "help": "OAuth token file used when llm.auth=oauth. Default: ~/.openclaw/.memory-lancedb-pro/oauth.json",
+      "advanced": true
+    },
+    "llm.timeoutMs": {
+      "label": "LLM Timeout (ms)",
+      "placeholder": "30000",
+      "help": "Request timeout for the smart-extraction / upgrade LLM in milliseconds",
       "advanced": true
     }
   }

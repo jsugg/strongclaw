@@ -30,6 +30,7 @@ from clawops.hypermemory.models import (
     DEFAULT_SNIPPET_CHARS,
     DEFAULT_WRITABLE_SCOPE_PATTERNS,
     BackendConfig,
+    CompatibleHttpRerankConfig,
     CorpusPathConfig,
     EmbeddingConfig,
     EmbeddingProviderKind,
@@ -38,6 +39,7 @@ from clawops.hypermemory.models import (
     HybridConfig,
     HypermemoryConfig,
     InjectionConfig,
+    LocalSentenceTransformersRerankConfig,
     QdrantConfig,
     RankingConfig,
     RerankConfig,
@@ -127,6 +129,18 @@ def _as_positive_float(name: str, value: object, *, default: float) -> float:
     converted = float(value)
     if converted <= 0:
         raise ValueError(f"{name} must be positive")
+    return converted
+
+
+def _as_probability(name: str, value: object, *, default: float) -> float:
+    """Validate a floating-point probability in the closed unit interval."""
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be numeric")
+    converted = float(value)
+    if converted < 0.0 or converted > 1.0:
+        raise ValueError(f"{name} must be between 0.0 and 1.0")
     return converted
 
 
@@ -270,6 +284,11 @@ def _load_ranking(root: Mapping[str, object]) -> RankingConfig:
             ranking.get("recency_half_life_days"),
             default=45,
         ),
+        rerank_weight=_as_probability(
+            "ranking.rerank_weight",
+            ranking.get("rerank_weight"),
+            default=0.35,
+        ),
     )
 
 
@@ -302,6 +321,19 @@ def _as_fusion_mode(name: str, value: object, *, default: FusionMode) -> FusionM
     if fusion not in {"rrf", "weighted"}:
         raise ValueError(f"{name} must be rrf or weighted")
     return cast(FusionMode, fusion)
+
+
+def _as_rerank_provider(
+    name: str,
+    value: object,
+    *,
+    default: RerankProviderKind,
+) -> RerankProviderKind:
+    """Validate a rerank provider identifier."""
+    provider = _as_string(name, value, default=default)
+    if provider not in {"none", "local-sentence-transformers", "compatible-http"}:
+        raise ValueError(f"{name} must be none, local-sentence-transformers, or compatible-http")
+    return cast(RerankProviderKind, provider)
 
 
 def _load_backend(root: Mapping[str, object]) -> BackendConfig:
@@ -349,29 +381,122 @@ def _load_embedding(root: Mapping[str, object]) -> EmbeddingConfig:
     )
 
 
+def _load_local_rerank(
+    rerank: Mapping[str, object],
+    provider: RerankProviderKind,
+    fallback_provider: RerankProviderKind,
+) -> LocalSentenceTransformersRerankConfig:
+    """Load the local sentence-transformers rerank subsection."""
+    local = _as_mapping("rerank.local", rerank.get("local") or {})
+    legacy_model = rerank.get("model") if provider == "local-sentence-transformers" else None
+    return LocalSentenceTransformersRerankConfig(
+        model=_as_blankable_string(
+            "rerank.local.model",
+            local.get("model", legacy_model),
+        ),
+        batch_size=_as_positive_int(
+            "rerank.local.batch_size",
+            local.get("batch_size", rerank.get("batch_size")),
+            default=8,
+        ),
+        max_length=_as_positive_int(
+            "rerank.local.max_length",
+            local.get("max_length", rerank.get("max_length")),
+            default=2_048,
+        ),
+    )
+
+
+def _load_compatible_http_rerank(
+    rerank: Mapping[str, object],
+    provider: RerankProviderKind,
+    fallback_provider: RerankProviderKind,
+) -> CompatibleHttpRerankConfig:
+    """Load the compatible HTTP rerank subsection."""
+    compatible_http = _as_mapping("rerank.compatible_http", rerank.get("compatible_http") or {})
+    legacy_model = rerank.get("model") if provider == "compatible-http" else None
+    legacy_base_url = rerank.get("base_url") if provider == "compatible-http" else None
+    uses_compatible_http = provider == "compatible-http" or fallback_provider == "compatible-http"
+    return CompatibleHttpRerankConfig(
+        model=_as_blankable_string(
+            "rerank.compatible_http.model",
+            compatible_http.get("model", legacy_model),
+        ),
+        base_url=_as_blankable_string(
+            "rerank.compatible_http.base_url",
+            compatible_http.get("base_url", legacy_base_url),
+        ),
+        api_key_env=_as_optional_string(
+            "rerank.compatible_http.api_key_env",
+            compatible_http.get(
+                "api_key_env", rerank.get("api_key_env") if uses_compatible_http else None
+            ),
+        ),
+        api_key=_as_optional_string(
+            "rerank.compatible_http.api_key",
+            compatible_http.get("api_key", rerank.get("api_key") if uses_compatible_http else None),
+        ),
+        timeout_ms=_as_positive_int(
+            "rerank.compatible_http.timeout_ms",
+            compatible_http.get(
+                "timeout_ms", rerank.get("timeout_ms") if uses_compatible_http else None
+            ),
+            default=15_000,
+        ),
+    )
+
+
 def _load_rerank(root: Mapping[str, object]) -> RerankConfig:
     """Load reranking configuration."""
     rerank = _as_mapping("rerank", root.get("rerank") or {})
-    provider = _as_string(
-        "rerank.provider", rerank.get("provider"), default=DEFAULT_RERANK_PROVIDER
+    provider = _as_rerank_provider(
+        "rerank.provider",
+        rerank.get("provider"),
+        default=DEFAULT_RERANK_PROVIDER,
     )
-    if provider != "none":
-        raise ValueError("rerank.provider currently supports only none")
+    fallback_provider = _as_rerank_provider(
+        "rerank.fallback_provider",
+        rerank.get("fallback_provider"),
+        default="none",
+    )
     return RerankConfig(
         enabled=_as_bool("rerank.enabled", rerank.get("enabled"), default=False),
-        provider=cast(RerankProviderKind, provider),
-        model=_as_blankable_string("rerank.model", rerank.get("model")),
-        base_url=_as_blankable_string("rerank.base_url", rerank.get("base_url")),
-        api_key_env=_as_optional_string("rerank.api_key_env", rerank.get("api_key_env")),
-        api_key=_as_optional_string("rerank.api_key", rerank.get("api_key")),
-        timeout_ms=_as_positive_int("rerank.timeout_ms", rerank.get("timeout_ms"), default=15_000),
-        top_k=_as_non_negative_int("rerank.top_k", rerank.get("top_k"), default=0),
+        provider=provider,
+        fallback_provider=fallback_provider,
+        fail_open=_as_bool("rerank.fail_open", rerank.get("fail_open"), default=True),
+        normalize_scores=_as_bool(
+            "rerank.normalize_scores",
+            rerank.get("normalize_scores"),
+            default=True,
+        ),
+        local=_load_local_rerank(rerank, provider, fallback_provider),
+        compatible_http=_load_compatible_http_rerank(rerank, provider, fallback_provider),
     )
 
 
 def _load_hybrid(root: Mapping[str, object]) -> HybridConfig:
     """Load hybrid retrieval configuration."""
     hybrid = _as_mapping("hybrid", root.get("hybrid") or {})
+    rerank = _as_mapping("rerank", root.get("rerank") or {})
+    rerank_candidate_pool_keys = {
+        "hybrid.rerank_candidate_pool": hybrid.get("rerank_candidate_pool"),
+        "hybrid.rerank_top_k": hybrid.get("rerank_top_k"),
+        "rerank.top_k": rerank.get("top_k"),
+    }
+    explicit_rerank_candidate_pool = {
+        name: _as_non_negative_int(name, value, default=0)
+        for name, value in rerank_candidate_pool_keys.items()
+        if value is not None
+    }
+    if len(set(explicit_rerank_candidate_pool.values())) > 1:
+        configured = ", ".join(
+            f"{name}={value}" for name, value in explicit_rerank_candidate_pool.items()
+        )
+        raise ValueError(
+            "rerank candidate pool settings must agree when multiple keys are present: "
+            f"{configured}"
+        )
+    rerank_candidate_pool = next(iter(explicit_rerank_candidate_pool.values()), 0)
     return HybridConfig(
         dense_candidate_pool=_as_positive_int(
             "hybrid.dense_candidate_pool",
@@ -391,9 +516,7 @@ def _load_hybrid(root: Mapping[str, object]) -> HybridConfig:
         ),
         fusion=_as_fusion_mode("hybrid.fusion", hybrid.get("fusion"), default="rrf"),
         rrf_k=_as_positive_int("hybrid.rrf_k", hybrid.get("rrf_k"), default=60),
-        rerank_top_k=_as_non_negative_int(
-            "hybrid.rerank_top_k", hybrid.get("rerank_top_k"), default=0
-        ),
+        rerank_candidate_pool=rerank_candidate_pool,
     )
 
 

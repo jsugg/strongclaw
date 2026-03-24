@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, cast
@@ -14,6 +14,8 @@ from clawops.hypermemory.models import (
     DenseSearchCandidate,
     EntryType,
     HybridConfig,
+    RankingConfig,
+    RerankResponse,
     SearchBackend,
     SearchDiagnostics,
     SearchExplanation,
@@ -42,11 +44,13 @@ def search_index(
     min_score: float | None,
     mode: SearchMode,
     scope: str | None,
-    ranking: Any,
+    ranking: RankingConfig,
     hybrid: HybridConfig,
     dense_candidates: Sequence[DenseSearchCandidate] | None,
     sparse_candidates: Sequence[SparseSearchCandidate] | None,
     active_backend: SearchBackend,
+    rerank_scorer: Callable[[str, Sequence[str]], RerankResponse] | None,
+    rerank_candidate_pool: int,
     include_explain: bool,
 ) -> tuple[list[SearchHit], SearchDiagnostics]:
     """Run the retrieval planner against the derived SQLite index."""
@@ -103,6 +107,23 @@ def search_index(
         active_backend=active_backend,
     )
     ranked = sorted(merged.values(), key=lambda item: item["score"], reverse=True)
+    rerank_response = _apply_semantic_rerank(
+        query=query,
+        candidates=ranked,
+        rerank_scorer=rerank_scorer,
+        rerank_candidate_pool=rerank_candidate_pool,
+        ranking=ranking,
+    )
+    rerank_attempted_candidates = (
+        min(rerank_candidate_pool, len(ranked))
+        if (
+            rerank_response.applied
+            or rerank_response.fail_open
+            or rerank_response.error is not None
+        )
+        else 0
+    )
+    ranked = sorted(ranked, key=lambda item: item["score"], reverse=True)
     selected = _apply_diversity(
         ranked,
         limit=max_results,
@@ -138,12 +159,18 @@ def search_index(
             lexical_ms=lexical_ms,
             sqlite_dense_ms=sqlite_dense_ms,
             fusion_ms=(perf_counter() - fusion_started_at) * 1000.0,
+            rerank_ms=rerank_response.latency_ms,
             lexical_candidates=len(lexical_candidates),
             sparse_candidates=(
                 len(lexical_candidates) if active_backend == "qdrant_sparse_dense_hybrid" else 0
             ),
             dense_candidates=len(dense_ranked_candidates),
+            rerank_candidates=rerank_attempted_candidates,
             selected_candidates=len(selected_hits),
+            rerank_applied=rerank_response.applied,
+            rerank_fallback_used=rerank_response.fallback_used,
+            rerank_fail_open=rerank_response.fail_open,
+            rerank_provider=rerank_response.provider,
         ),
     )
 
@@ -155,7 +182,7 @@ def _lexical_candidates(
     mode: SearchMode,
     scope: str | None,
     limit: int,
-    ranking: Any,
+    ranking: RankingConfig,
 ) -> list[dict[str, Any]]:
     """Collect lexical candidates from SQLite FTS and fallback substring search."""
     candidates: list[dict[str, Any]] = []
@@ -183,7 +210,7 @@ def _lane_candidates(
     terms: Sequence[str],
     scope: str | None,
     limit: int,
-    ranking: Any,
+    ranking: RankingConfig,
 ) -> list[dict[str, Any]]:
     """Collect lane-local candidates from FTS and substring retrieval."""
     params: list[Any] = [lane]
@@ -270,7 +297,7 @@ def _dense_candidates(
     terms: Sequence[str],
     mode: SearchMode,
     scope: str | None,
-    ranking: Any,
+    ranking: RankingConfig,
     dense_candidates: Sequence[DenseSearchCandidate],
 ) -> list[dict[str, Any]]:
     """Load dense candidate rows from SQLite for ranked point hits."""
@@ -309,7 +336,7 @@ def _sparse_candidates(
     terms: Sequence[str],
     mode: SearchMode,
     scope: str | None,
-    ranking: Any,
+    ranking: RankingConfig,
     sparse_candidates: Sequence[SparseSearchCandidate],
 ) -> list[dict[str, Any]]:
     """Load sparse candidate rows from SQLite for ranked Qdrant sparse hits."""
@@ -373,7 +400,7 @@ def _merge_candidates(
     *,
     lexical_candidates: Sequence[Mapping[str, Any]],
     dense_candidates: Sequence[Mapping[str, Any]],
-    ranking: Any,
+    ranking: RankingConfig,
     hybrid: HybridConfig,
     active_backend: SearchBackend,
 ) -> dict[int, dict[str, Any]]:
@@ -408,16 +435,9 @@ def _merge_candidates(
             rank=dense_rank,
             hybrid=hybrid,
         )
-        fusion_score = text_component + dense_component
-        final_score = max(
-            0.0,
-            (fusion_score * float(candidate["lane_weight"]) * float(candidate["type_weight"]))
-            + float(candidate["coverage_boost"])
-            + float(candidate["confidence_boost"])
-            + float(candidate["recency_boost"])
-            - float(candidate["contradiction_penalty"]),
-        )
-        candidate["score"] = final_score
+        candidate["fusion_score"] = text_component + dense_component
+        candidate["rerank_score"] = 0.0
+        candidate["rerank_applied"] = False
         candidate["backend"] = (
             active_backend
             if (
@@ -435,16 +455,42 @@ def _merge_candidates(
             recency_boost=float(candidate["recency_boost"]),
             contradiction_penalty=float(candidate["contradiction_penalty"]),
             dense_score=float(candidate["dense_score"]),
-            fusion_score=fusion_score,
+            fusion_score=float(candidate["fusion_score"]),
         )
+        _apply_candidate_score(candidate, ranking=ranking)
     return merged
+
+
+def _apply_semantic_rerank(
+    *,
+    query: str,
+    candidates: Sequence[dict[str, Any]],
+    rerank_scorer: Callable[[str, Sequence[str]], RerankResponse] | None,
+    rerank_candidate_pool: int,
+    ranking: RankingConfig,
+) -> RerankResponse:
+    """Apply planner-stage reranking before diversity selection."""
+    if rerank_scorer is None or rerank_candidate_pool <= 0 or not candidates:
+        return RerankResponse()
+    candidate_pool = list(candidates[:rerank_candidate_pool])
+    documents = [_candidate_rerank_text(candidate) for candidate in candidate_pool]
+    response = rerank_scorer(query, documents)
+    if not response.applied:
+        return response
+    if len(response.scores) != len(candidate_pool):
+        raise ValueError("rerank response count does not match the candidate pool size")
+    for candidate, rerank_score in zip(candidate_pool, response.scores, strict=True):
+        candidate["rerank_score"] = rerank_score
+        candidate["rerank_applied"] = True
+        _apply_candidate_score(candidate, ranking=ranking)
+    return response
 
 
 def _score_candidate(
     row: sqlite3.Row,
     *,
     terms: Sequence[str],
-    ranking: Any,
+    ranking: RankingConfig,
     text_score: float,
     dense_score: float = 0.0,
 ) -> dict[str, Any]:
@@ -484,6 +530,9 @@ def _score_candidate(
         "confidence_boost": confidence_boost,
         "recency_boost": recency_boost,
         "contradiction_penalty": contradiction_penalty,
+        "fusion_score": 0.0,
+        "rerank_score": 0.0,
+        "rerank_applied": False,
         "score": 0.0,
         "backend": "sqlite_fts",
         "explanation": SearchExplanation(
@@ -500,7 +549,54 @@ def _score_candidate(
     }
 
 
-def _text_component(*, score: float, rank: int | None, ranking: Any, hybrid: HybridConfig) -> float:
+def _candidate_fused_base(candidate: Mapping[str, Any], *, ranking: RankingConfig) -> float:
+    """Return the fused base score before governance boosts and penalties."""
+    fusion_score = float(candidate["fusion_score"])
+    if not bool(candidate.get("rerank_applied", False)):
+        return fusion_score
+    rerank_score = float(candidate.get("rerank_score", 0.0))
+    rerank_weight = ranking.rerank_weight
+    return (fusion_score * (1.0 - rerank_weight)) + (rerank_score * rerank_weight)
+
+
+def _apply_candidate_score(candidate: dict[str, Any], *, ranking: RankingConfig) -> None:
+    """Recompute the governed candidate score and explanation payload."""
+    fused_base = _candidate_fused_base(candidate, ranking=ranking)
+    candidate["score"] = max(
+        0.0,
+        (fused_base * float(candidate["lane_weight"]) * float(candidate["type_weight"]))
+        + float(candidate["coverage_boost"])
+        + float(candidate["confidence_boost"])
+        + float(candidate["recency_boost"])
+        - float(candidate["contradiction_penalty"]),
+    )
+    explanation = cast(SearchExplanation, candidate["explanation"])
+    candidate["explanation"] = SearchExplanation(
+        lexical_score=explanation.lexical_score,
+        lane_weight=explanation.lane_weight,
+        type_weight=explanation.type_weight,
+        coverage_boost=explanation.coverage_boost,
+        confidence_boost=explanation.confidence_boost,
+        recency_boost=explanation.recency_boost,
+        contradiction_penalty=explanation.contradiction_penalty,
+        dense_score=explanation.dense_score,
+        fusion_score=float(candidate["fusion_score"]),
+        rerank_score=float(candidate.get("rerank_score", 0.0)),
+    )
+
+
+def _candidate_rerank_text(candidate: Mapping[str, Any]) -> str:
+    """Return the rerank text used to rescore one candidate."""
+    return f"{candidate['rel_path']}\n{candidate['snippet']}"
+
+
+def _text_component(
+    *,
+    score: float,
+    rank: int | None,
+    ranking: RankingConfig,
+    hybrid: HybridConfig,
+) -> float:
     """Return the lexical contribution to the fused retrieval score."""
     if rank is not None and hybrid.fusion == "rrf":
         return (score + (1.0 / (hybrid.rrf_k + rank))) * ranking.lexical_weight * hybrid.text_weight
@@ -540,7 +636,7 @@ def _lexical_score(rank: float, *, is_fts: bool) -> float:
     return 1.0 / (1.0 + max(abs(rank), 0.01))
 
 
-def _recency_boost(modified_at: str, ranking: Any) -> float:
+def _recency_boost(modified_at: str, ranking: RankingConfig) -> float:
     """Compute recency boost using an exponential decay."""
     try:
         timestamp = datetime.fromisoformat(modified_at)
@@ -585,6 +681,7 @@ def _apply_diversity(
             contradiction_penalty=explanation.contradiction_penalty,
             dense_score=explanation.dense_score,
             fusion_score=explanation.fusion_score,
+            rerank_score=explanation.rerank_score,
             novelty_penalty=penalty,
         )
         selected.append(chosen)

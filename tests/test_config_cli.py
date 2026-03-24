@@ -25,8 +25,7 @@ def test_memory_config_list_profiles_json(capsys: object) -> None:
         "hypermemory",
         "openclaw-default",
         "openclaw-qmd",
-        "memory-pro-local",
-        "memory-pro-local-smart",
+        "memory-lancedb-pro",
     } == {entry["id"] for entry in payload["profiles"]}
 
 

@@ -5,6 +5,7 @@ from clawops.hypermemory.config import default_config_path, load_config
 from clawops.hypermemory.engine import HypermemoryEngine
 from clawops.hypermemory.models import (
     BackendConfig,
+    CompatibleHttpRerankConfig,
     CorpusPathConfig,
     DenseSearchCandidate,
     EmbeddingConfig,
@@ -13,6 +14,7 @@ from clawops.hypermemory.models import (
     HypermemoryConfig,
     IndexedDocument,
     InjectionConfig,
+    LocalSentenceTransformersRerankConfig,
     ParsedItem,
     ProposalRecord,
     QdrantConfig,
@@ -20,6 +22,7 @@ from clawops.hypermemory.models import (
     ReflectionSummary,
     ReindexSummary,
     RerankConfig,
+    RerankResponse,
     SearchBackend,
     SearchExplanation,
     SearchHit,
@@ -28,6 +31,7 @@ from clawops.hypermemory.models import (
 
 __all__ = [
     "BackendConfig",
+    "CompatibleHttpRerankConfig",
     "CorpusPathConfig",
     "DenseSearchCandidate",
     "EmbeddingConfig",
@@ -37,11 +41,13 @@ __all__ = [
     "IndexedDocument",
     "HypermemoryConfig",
     "HypermemoryEngine",
+    "LocalSentenceTransformersRerankConfig",
     "ParsedItem",
     "ProposalRecord",
     "QdrantConfig",
     "RankingConfig",
     "RerankConfig",
+    "RerankResponse",
     "ReflectionSummary",
     "ReindexSummary",
     "SearchExplanation",

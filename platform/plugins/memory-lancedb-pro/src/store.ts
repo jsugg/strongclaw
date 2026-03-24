@@ -12,7 +12,7 @@ import {
   realpathSync,
   lstatSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 
 // ============================================================================
@@ -51,11 +51,25 @@ export interface MetadataPatch {
 let lancedbImportPromise: Promise<typeof import("@lancedb/lancedb")> | null =
   null;
 
+// =========================================================================
+// Cross-Process File Lock (proper-lockfile)
+// =========================================================================
+
+let lockfileModule: any = null;
+
+async function loadLockfile(): Promise<any> {
+  if (!lockfileModule) {
+    lockfileModule = await import("proper-lockfile");
+  }
+  return lockfileModule;
+}
+
 export const loadLanceDB = async (): Promise<
   typeof import("@lancedb/lancedb")
 > => {
   if (!lancedbImportPromise) {
-    lancedbImportPromise = import("@lancedb/lancedb");
+    // Use require() for CommonJS modules on Windows to avoid ESM URL scheme issues
+    lancedbImportPromise = Promise.resolve(require("@lancedb/lancedb"));
   }
   try {
     return await lancedbImportPromise;
@@ -82,6 +96,10 @@ function escapeSqlLiteral(value: string): string {
 
 function normalizeSearchText(value: string): string {
   return value.toLowerCase().trim();
+}
+
+function isExplicitDenyAllScopeFilter(scopeFilter?: string[]): boolean {
+  return Array.isArray(scopeFilter) && scopeFilter.length === 0;
 }
 
 function scoreLexicalHit(query: string, candidates: Array<{ text: string; weight: number }>): number {
@@ -183,6 +201,20 @@ export class MemoryStore {
   private updateQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly config: StoreConfig) { }
+
+  private async runWithFileLock<T>(fn: () => Promise<T>): Promise<T> {
+    const lockfile = await loadLockfile();
+    const lockPath = join(this.config.dbPath, ".memory-write.lock");
+    if (!existsSync(lockPath)) {
+      try { mkdirSync(dirname(lockPath), { recursive: true }); } catch {}
+      try { const { writeFileSync } = await import("node:fs"); writeFileSync(lockPath, "", { flag: "wx" }); } catch {}
+    }
+    const release = await lockfile.lock(lockPath, {
+      retries: { retries: 5, factor: 2, minTimeout: 100, maxTimeout: 2000 },
+      stale: 10000,
+    });
+    try { return await fn(); } finally { await release(); }
+  }
 
   get dbPath(): string {
     return this.config.dbPath;
@@ -329,16 +361,18 @@ export class MemoryStore {
       metadata: entry.metadata || "{}",
     };
 
-    try {
-      await this.table!.add([fullEntry]);
-    } catch (err: any) {
-      const code = err.code || "";
-      const message = err.message || String(err);
-      throw new Error(
-        `Failed to store memory in "${this.config.dbPath}": ${code} ${message}`,
-      );
-    }
-    return fullEntry;
+    return this.runWithFileLock(async () => {
+      try {
+        await this.table!.add([fullEntry]);
+      } catch (err: any) {
+        const code = err.code || "";
+        const message = err.message || String(err);
+        throw new Error(
+          `Failed to store memory in "${this.config.dbPath}": ${code} ${message}`,
+        );
+      }
+      return fullEntry;
+    });
   }
 
   /**
@@ -370,8 +404,10 @@ export class MemoryStore {
       metadata: entry.metadata || "{}",
     };
 
-    await this.table!.add([full]);
-    return full;
+    return this.runWithFileLock(async () => {
+      await this.table!.add([full]);
+      return full;
+    });
   }
 
   async hasId(id: string): Promise<boolean> {
@@ -387,6 +423,8 @@ export class MemoryStore {
 
   async getById(id: string, scopeFilter?: string[]): Promise<MemoryEntry | null> {
     await this.ensureInitialized();
+
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return null;
 
     const safeId = escapeSqlLiteral(id);
     const rows = await this.table!
@@ -417,6 +455,8 @@ export class MemoryStore {
 
   async vectorSearch(vector: number[], limit = 5, minScore = 0.3, scopeFilter?: string[], options?: { excludeInactive?: boolean }): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
+
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
 
     const safeLimit = clampInt(limit, 1, 20);
     // Over-fetch more aggressively when filtering inactive records,
@@ -486,6 +526,8 @@ export class MemoryStore {
     options?: { excludeInactive?: boolean },
   ): Promise<MemorySearchResult[]> {
     await this.ensureInitialized();
+
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
 
     const safeLimit = clampInt(limit, 1, 20);
     const inactiveFilter = options?.excludeInactive ?? false;
@@ -563,6 +605,8 @@ export class MemoryStore {
   }
 
   private async lexicalFallbackSearch(query: string, limit: number, scopeFilter?: string[], options?: { excludeInactive?: boolean }): Promise<MemorySearchResult[]> {
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
+
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return [];
 
@@ -630,6 +674,10 @@ export class MemoryStore {
   async delete(id: string, scopeFilter?: string[]): Promise<boolean> {
     await this.ensureInitialized();
 
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) {
+      throw new Error(`Memory ${id} is outside accessible scopes`);
+    }
+
     // Support both full UUID and short prefix (8+ hex chars)
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -676,8 +724,10 @@ export class MemoryStore {
       throw new Error(`Memory ${resolvedId} is outside accessible scopes`);
     }
 
-    await this.table!.delete(`id = '${resolvedId}'`);
-    return true;
+    return this.runWithFileLock(async () => {
+      await this.table!.delete(`id = '${resolvedId}'`);
+      return true;
+    });
   }
 
   async list(
@@ -687,6 +737,8 @@ export class MemoryStore {
     offset = 0,
   ): Promise<MemoryEntry[]> {
     await this.ensureInitialized();
+
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) return [];
 
     let query = this.table!.query();
 
@@ -745,6 +797,14 @@ export class MemoryStore {
   }> {
     await this.ensureInitialized();
 
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) {
+      return {
+        totalCount: 0,
+        scopeCounts: {},
+        categoryCounts: {},
+      };
+    }
+
     let query = this.table!.query();
 
     if (scopeFilter && scopeFilter.length > 0) {
@@ -787,7 +847,11 @@ export class MemoryStore {
   ): Promise<MemoryEntry | null> {
     await this.ensureInitialized();
 
-    return this.runSerializedUpdate(async () => {
+    if (isExplicitDenyAllScopeFilter(scopeFilter)) {
+      throw new Error(`Memory ${id} is outside accessible scopes`);
+    }
+
+    return this.runWithFileLock(() => this.runSerializedUpdate(async () => {
       // Support both full UUID and short prefix (8+ hex chars), same as delete()
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -902,7 +966,7 @@ export class MemoryStore {
       }
 
       return updated;
-    });
+    }));
   }
 
   private async runSerializedUpdate<T>(action: () => Promise<T>): Promise<T> {
@@ -961,16 +1025,18 @@ export class MemoryStore {
 
     const whereClause = conditions.join(" AND ");
 
-    // Count first
-    const countResults = await this.table!.query().where(whereClause).toArray();
-    const deleteCount = countResults.length;
+    return this.runWithFileLock(async () => {
+      // Count first
+      const countResults = await this.table!.query().where(whereClause).toArray();
+      const deleteCount = countResults.length;
 
-    // Then delete
-    if (deleteCount > 0) {
-      await this.table!.delete(whereClause);
-    }
+      // Then delete
+      if (deleteCount > 0) {
+        await this.table!.delete(whereClause);
+      }
 
-    return deleteCount;
+      return deleteCount;
+    });
   }
 
   get hasFtsSupport(): boolean {

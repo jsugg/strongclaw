@@ -50,12 +50,20 @@ embedding:
   timeout_ms: 15000
 
 rerank:
-  enabled: false
-  provider: none
-  model: ""
-  base_url: ""
-  timeout_ms: 15000
-  top_k: 0
+  enabled: true
+  provider: local-sentence-transformers
+  fallback_provider: compatible-http
+  fail_open: true
+  normalize_scores: true
+  local:
+    model: BAAI/bge-reranker-v2-m3
+    batch_size: 8
+    max_length: 2048
+  compatible_http:
+    model: os.environ/HYPERMEMORY_RERANK_MODEL
+    base_url: os.environ/HYPERMEMORY_RERANK_BASE_URL
+    api_key_env: HYPERMEMORY_RERANK_API_KEY
+    timeout_ms: 15000
 
 hybrid:
   dense_candidate_pool: 24
@@ -64,7 +72,7 @@ hybrid:
   text_weight: 0.35
   fusion: rrf
   rrf_k: 60
-  rerank_top_k: 0
+  rerank_candidate_pool: 32
 
 qdrant:
   enabled: true
@@ -102,3 +110,4 @@ ranking:
   contradiction_penalty: 0.2
   diversity_penalty: 0.35
   recency_half_life_days: 45
+  rerank_weight: 0.35

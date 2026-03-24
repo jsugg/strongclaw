@@ -91,6 +91,20 @@ uv run --project . clawops setup
 clawops doctor
 ```
 
+The shipped hypermemory configs now also enable planner-stage reranking with a
+local `sentence-transformers` provider first and a `compatible-http` fallback.
+Plain `uv sync` installs the local rerank dependency on the host/Python
+combinations where upstream wheels are known to work: macOS arm64, macOS
+x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or
+3.13. For Raspberry Pi, that explicitly includes Raspberry Pi 4/5 running
+64-bit Raspberry Pi OS or Ubuntu arm64. On unsupported combinations such as
+macOS x86_64 with Python 3.13 or 32-bit Raspberry Pi Linux, StrongClaw skips
+the local dependency and relies on `compatible-http` or fail-open behavior
+instead of breaking installation.
+
+If you want the HTTP fallback available, set `HYPERMEMORY_RERANK_BASE_URL` and,
+optionally, `HYPERMEMORY_RERANK_MODEL` / `HYPERMEMORY_RERANK_API_KEY`.
+
 If you want the legacy OpenClaw built-ins instead, use the explicit
 `openclaw-default` profile:
 
@@ -127,9 +141,12 @@ instead of merging raw overlays:
 ```bash
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
 ./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
 ```
+
+The StrongClaw-managed `memory-lancedb-pro` profile keeps smart extraction on,
+but still ships with `autoRecall = false`, `sessionStrategy = "none"`,
+`selfImprovement.enabled = false`, and `enableManagementTools = false`.
 
 The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
 on the operator path: sidecars can be probed directly, while the baseline gate

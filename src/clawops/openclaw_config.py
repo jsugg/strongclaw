@@ -60,25 +60,15 @@ PROFILES: dict[str, RenderProfile] = {
         ),
         description="OpenClaw built-ins plus the experimental QMD memory backend.",
     ),
-    "memory-pro-local": RenderProfile(
-        name="memory-pro-local",
+    "memory-lancedb-pro": RenderProfile(
+        name="memory-lancedb-pro",
         overlays=(
             OPENCLAW_CONFIG_DIR / "00-baseline.json5",
             OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
-            OPENCLAW_CONFIG_DIR / "75-clawops-memory-pro.local.json5",
+            OPENCLAW_CONFIG_DIR / "75-memory-lancedb-pro.local.json5",
         ),
-        description="Legacy OpenClaw built-ins plus local LanceDB durable memory.",
-    ),
-    "memory-pro-local-smart": RenderProfile(
-        name="memory-pro-local-smart",
-        overlays=(
-            OPENCLAW_CONFIG_DIR / "00-baseline.json5",
-            OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
-            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
-            OPENCLAW_CONFIG_DIR / "76-clawops-memory-pro.local-smart.json5",
-        ),
-        description="Local LanceDB durable memory with Ollama-backed smart extraction.",
+        description="Vendored memory-lancedb-pro with Ollama-backed smart extraction.",
     ),
     "hypermemory": RenderProfile(
         name="hypermemory",

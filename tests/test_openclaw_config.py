@@ -179,7 +179,7 @@ def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
 def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_profile(
-        profile_name="memory-pro-local",
+        profile_name="memory-lancedb-pro",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
@@ -288,10 +288,10 @@ def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
     ]
 
 
-def test_memory_lancedb_pro_local_overlay_renders_vendor_local_paths() -> None:
+def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     rendered = render_openclaw_overlay(
-        template_path=repo_root / "platform/configs/openclaw/75-clawops-memory-pro.local.json5",
+        template_path=repo_root / "platform/configs/openclaw/75-memory-lancedb-pro.local.json5",
         repo_root=repo_root,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
@@ -305,20 +305,6 @@ def test_memory_lancedb_pro_local_overlay_renders_vendor_local_paths() -> None:
     assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
     assert plugin["sessionStrategy"] == "none"
     assert plugin["selfImprovement"]["enabled"] is False
-    assert plugin["smartExtraction"] is False
-
-
-def test_memory_lancedb_pro_local_smart_overlay_enables_local_llm_only() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    rendered = render_openclaw_overlay(
-        template_path=repo_root
-        / "platform/configs/openclaw/76-clawops-memory-pro.local-smart.json5",
-        repo_root=repo_root,
-        home_dir=pathlib.Path.home(),
-        user_timezone="UTC",
-    )
-
-    plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
     assert plugin["smartExtraction"] is True
     assert plugin["llm"]["baseURL"] == "http://127.0.0.1:11434/v1"
     assert plugin["selfImprovement"]["enabled"] is False
@@ -333,6 +319,6 @@ def test_vendored_memory_lancedb_pro_bundle_is_pinned() -> None:
         repo_root / "platform/plugins/memory-lancedb-pro/STRONGCLAW_VENDOR.md"
     ).read_text(encoding="utf-8")
 
-    assert package["version"] == "1.1.0-beta.9"
-    assert "2ebba8e6b7b65bf38336199384d5ec8690701f6e" in vendor_note
+    assert package["version"] == "1.1.0-beta.10"
+    assert "63495671fde55f2c8e3d6eb95267381d1889cca9" in vendor_note
     assert "selfImprovement.enabled = false" in vendor_note
