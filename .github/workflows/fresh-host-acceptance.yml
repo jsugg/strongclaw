@@ -75,6 +75,15 @@ jobs:
           docker compose version
           echo "DOCKER_CONFIG=${HOME}/.docker" >> "${GITHUB_ENV}"
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+      - name: Normalize hosted macOS machine name
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo scutil --set ComputerName "openclaw-ci"
+          sudo scutil --set LocalHostName "openclaw-ci"
+          sudo scutil --set HostName "openclaw-ci"
+          scutil --get ComputerName
+          scutil --get LocalHostName
       - name: Bootstrap setup services and runtime flows
         shell: bash
         run: |
@@ -84,6 +93,7 @@ jobs:
           export XDG_CONFIG_HOME="${HOME}/.config"
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           export DOCKER_CONFIG="${DOCKER_CONFIG}"
