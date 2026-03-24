@@ -32,7 +32,7 @@ jobs:
           export XDG_RUNTIME_DIR="${TMP_ROOT}/xdg-runtime"
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
-          export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PATH="${HOME}/.local/bin:${PATH}"
           export PYTHONPATH="src"
           mkdir -p "${HOME}" "${XDG_RUNTIME_DIR}"
           chmod 700 "${XDG_RUNTIME_DIR}"
