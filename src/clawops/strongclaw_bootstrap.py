@@ -97,13 +97,22 @@ def _ensure_python_runtime_darwin() -> None:
         raise CommandError("python3 >= 3.12 is required")
 
 
+def _resolve_node_command() -> str | None:
+    """Return the available Node.js executable name."""
+    for candidate in ("node", "nodejs"):
+        if command_exists(candidate):
+            return candidate
+    return None
+
+
 def _node_satisfies_minimum() -> bool:
     """Return whether Node.js >= 22.16 is available."""
-    if not command_exists("node"):
+    node_command = _resolve_node_command()
+    if node_command is None:
         return False
     result = run_command(
         [
-            "node",
+            node_command,
             "-e",
             "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 16) ? 0 : 1);",
         ],
@@ -255,7 +264,8 @@ def install_qmd_asset(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
         and run_command([str(expected_wrapper), "status"], timeout_seconds=30).ok
     ):
         return expected_wrapper
-    if not command_exists("npm") or not command_exists("node"):
+    node_command = _resolve_node_command()
+    if not command_exists("npm") or node_command is None:
         raise CommandError("npm and node are required before QMD can be installed")
     qmd_install_prefix.mkdir(parents=True, exist_ok=True)
     _stream_checked(
@@ -274,7 +284,7 @@ def install_qmd_asset(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
         raise CommandError(f"QMD install finished but {qmd_dist_entry} is missing")
     expected_wrapper.parent.mkdir(parents=True, exist_ok=True)
     expected_wrapper.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\n" f'exec node "{qmd_dist_entry}" "$@"\n',
+        "#!/usr/bin/env bash\nset -euo pipefail\n" f'exec {node_command} "{qmd_dist_entry}" "$@"\n',
         encoding="utf-8",
     )
     expected_wrapper.chmod(0o755)
