@@ -49,6 +49,7 @@ def test_service_templates_call_repo_venv_python() -> None:
         in sidecars
     )
     assert "<key>PATH</key>" in launchd_gateway
+    assert "<key>KeepAlive</key>\n    <false/>" in launchd_sidecars
     assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_gateway
     assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_sidecars
     assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_browserlab
