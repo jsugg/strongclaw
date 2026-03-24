@@ -256,6 +256,11 @@ def ensure_model_auth(
     config_path = resolve_openclaw_config_path(repo_root)
     if not config_path.exists():
         raise CommandError(f"Rendered OpenClaw config not found at {config_path}.")
+    setup_mode = os.environ.get("OPENCLAW_MODEL_SETUP_MODE", "auto").strip() or "auto"
+    # Fresh-host setup uses skip mode to exercise bootstrap/service flows without
+    # depending on provider auth or platform-specific OpenClaw agent discovery.
+    if not check_only and setup_mode == "skip":
+        return {"ok": True, "checkedOnly": False, "configured": False, "skipped": True}
     ready, missing_agents = _all_agents_have_models(
         repo_root,
         probe=probe,
@@ -271,9 +276,6 @@ def ensure_model_auth(
             "missingAgents": missing_agents,
             "guidance": _guidance_text(repo_root),
         }
-    setup_mode = os.environ.get("OPENCLAW_MODEL_SETUP_MODE", "auto").strip() or "auto"
-    if setup_mode == "skip":
-        return {"ok": True, "checkedOnly": False, "configured": False, "skipped": True}
     model_chain = _build_model_chain(_effective_env_assignments(repo_root))
     if model_chain:
         _apply_model_chain(repo_root, model_chain)
