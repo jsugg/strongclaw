@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import time
 from typing import Final
 
 from clawops.common import load_text, write_text
@@ -21,6 +22,8 @@ LAUNCHD_ACTIVATE_LABELS: Final[tuple[str, ...]] = (
     "ai.openclaw.gateway",
     "ai.openclaw.sidecars",
 )
+LAUNCHD_GATEWAY_LABEL: Final[str] = "ai.openclaw.gateway"
+LAUNCHD_SIDECARS_LABEL: Final[str] = "ai.openclaw.sidecars"
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
     "openclaw-sidecars.service",
     "openclaw-gateway.service",
@@ -35,6 +38,11 @@ def launchd_dir() -> pathlib.Path:
 def systemd_dir() -> pathlib.Path:
     """Return the default user-level systemd directory."""
     return pathlib.Path.home() / ".config" / "systemd" / "user"
+
+
+def _launchd_domain() -> str:
+    """Return the current launchd GUI domain."""
+    return f"gui/{run_command(['id', '-u']).stdout.strip()}"
 
 
 def _render_template(
@@ -102,9 +110,46 @@ def render_service_files(
     }
 
 
-def _activate_launchd_service(label: str, plist_path: pathlib.Path) -> None:
+def _launchd_field(launchctl_output: str, field_name: str) -> str:
+    """Return one top-level field from `launchctl print` output."""
+    prefix = f"{field_name} = "
+    for raw_line in launchctl_output.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix) :].strip()
+    return ""
+
+
+def _wait_for_launchd_service(label: str, *, persistent: bool, timeout_seconds: int) -> None:
+    """Wait for one launchd service to reach its steady state."""
+    domain = _launchd_domain()
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        current = run_command(["launchctl", "print", f"{domain}/{label}"], timeout_seconds=15)
+        if not current.ok:
+            detail = (
+                current.stderr.strip()
+                or current.stdout.strip()
+                or f"launchctl print failed for {label}"
+            )
+            raise RuntimeError(detail)
+        state = _launchd_field(current.stdout, "state")
+        last_exit_code = _launchd_field(current.stdout, "last exit code")
+        if persistent and state == "running":
+            return
+        if not persistent and last_exit_code == "0":
+            return
+        if last_exit_code and last_exit_code not in {"0", "(never exited)"}:
+            raise RuntimeError(f"{label} exited with code {last_exit_code}")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"Timed out waiting for {label} to reach its expected launchd state."
+            )
+        time.sleep(1)
+
+
+def _activate_launchd_service(domain: str, label: str, plist_path: pathlib.Path) -> None:
     """Bootstrap one launchd agent, replacing an existing instance when present."""
-    domain = f"gui/{run_command(['id', '-u']).stdout.strip()}"
     current = run_command(["launchctl", "print", f"{domain}/{label}"], timeout_seconds=15)
     if current.ok:
         bootout = run_command(["launchctl", "bootout", domain, str(plist_path)], timeout_seconds=30)
@@ -135,8 +180,11 @@ def activate_services(
     manager = str(render_payload["serviceManager"])
     if manager == "launchd":
         output_dir = pathlib.Path(str(render_payload["outputDir"]))
+        domain = _launchd_domain()
         for label in LAUNCHD_ACTIVATE_LABELS:
-            _activate_launchd_service(label, output_dir / f"{label}.plist")
+            _activate_launchd_service(domain, label, output_dir / f"{label}.plist")
+        _wait_for_launchd_service(LAUNCHD_GATEWAY_LABEL, persistent=True, timeout_seconds=30)
+        _wait_for_launchd_service(LAUNCHD_SIDECARS_LABEL, persistent=False, timeout_seconds=300)
         return {
             **render_payload,
             "activated": list(LAUNCHD_ACTIVATE_LABELS),
