@@ -184,3 +184,54 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
         ("activate", "gui/501:ai.openclaw.sidecars"),
         ("wait", "ai.openclaw.sidecars:False"),
     ]
+
+
+def test_activate_services_uses_launchd_timeout_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Launchd activation should honor explicit timeout overrides."""
+    output_dir = tmp_path / "LaunchAgents"
+    output_dir.mkdir(parents=True)
+    payload = {
+        "ok": True,
+        "serviceManager": "launchd",
+        "outputDir": str(output_dir),
+        "stateDir": str(tmp_path / "state"),
+        "renderedFiles": [],
+    }
+    waits: list[tuple[str, bool, int]] = []
+
+    monkeypatch.setattr(
+        strongclaw_services, "render_service_files", lambda *args, **kwargs: payload
+    )
+    monkeypatch.setattr(strongclaw_services, "ensure_docker_backend_ready", lambda: None)
+    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(
+        strongclaw_services,
+        "_activate_launchd_service",
+        lambda _domain, _label, _plist: None,
+    )
+
+    def fake_wait(label: str, *, persistent: bool, timeout_seconds: int) -> None:
+        waits.append((label, persistent, timeout_seconds))
+
+    monkeypatch.setattr(strongclaw_services, "_wait_for_launchd_service", fake_wait)
+    monkeypatch.setenv(strongclaw_services.LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR, "45")
+    monkeypatch.setenv(strongclaw_services.LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR, "2700")
+
+    activated = strongclaw_services.activate_services(tmp_path, service_manager="launchd")
+
+    assert activated["activated"] == list(strongclaw_services.LAUNCHD_ACTIVATE_LABELS)
+    assert waits == [
+        (strongclaw_services.LAUNCHD_GATEWAY_LABEL, True, 45),
+        (strongclaw_services.LAUNCHD_SIDECARS_LABEL, False, 2700),
+    ]
+
+
+def test_launchd_timeout_override_rejects_invalid_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Launchd timeout overrides must be positive integers."""
+    monkeypatch.setenv("TEST_TIMEOUT", "invalid")
+    with pytest.raises(RuntimeError, match="must be a positive integer"):
+        strongclaw_services._launchd_timeout_seconds("TEST_TIMEOUT", 30)

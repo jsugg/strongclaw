@@ -26,13 +26,15 @@ LAUNCHD_ACTIVATE_LABELS: Final[tuple[str, ...]] = (
 )
 LAUNCHD_GATEWAY_LABEL: Final[str] = "ai.openclaw.gateway"
 LAUNCHD_SIDECARS_LABEL: Final[str] = "ai.openclaw.sidecars"
+LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_GATEWAY_TIMEOUT_SECONDS"
+LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS"
 LAUNCHD_PASSTHROUGH_ENV_VARS: Final[tuple[str, ...]] = (
     "DOCKER_CONFIG",
     "DOCKER_CONTEXT",
     "DOCKER_HOST",
 )
 LAUNCHD_GATEWAY_TIMEOUT_SECONDS: Final[int] = 30
-LAUNCHD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 900
+LAUNCHD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 1800
 LAUNCHD_ONESHOT_MAX_ATTEMPTS: Final[int] = 2
 LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
@@ -143,6 +145,20 @@ def _launchd_field(launchctl_output: str, field_name: str) -> str:
     return ""
 
 
+def _launchd_timeout_seconds(env_var: str, default: int) -> int:
+    """Resolve one positive launchd timeout from the environment."""
+    raw_value = os.environ.get(env_var, "").strip()
+    if not raw_value:
+        return default
+    try:
+        resolved = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{env_var} must be a positive integer.") from exc
+    if resolved < 1:
+        raise RuntimeError(f"{env_var} must be a positive integer.")
+    return resolved
+
+
 def _wait_for_launchd_service(label: str, *, persistent: bool, timeout_seconds: int) -> None:
     """Wait for one launchd service to reach its steady state."""
     domain = _launchd_domain()
@@ -231,19 +247,27 @@ def activate_services(
     if manager == "launchd":
         output_dir = pathlib.Path(str(render_payload["outputDir"]))
         domain = _launchd_domain()
+        gateway_timeout_seconds = _launchd_timeout_seconds(
+            LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR,
+            LAUNCHD_GATEWAY_TIMEOUT_SECONDS,
+        )
+        sidecars_timeout_seconds = _launchd_timeout_seconds(
+            LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR,
+            LAUNCHD_SIDECARS_TIMEOUT_SECONDS,
+        )
         gateway_plist = output_dir / f"{LAUNCHD_GATEWAY_LABEL}.plist"
         sidecars_plist = output_dir / f"{LAUNCHD_SIDECARS_LABEL}.plist"
         _activate_launchd_service(domain, LAUNCHD_GATEWAY_LABEL, gateway_plist)
         _wait_for_launchd_service(
             LAUNCHD_GATEWAY_LABEL,
             persistent=True,
-            timeout_seconds=LAUNCHD_GATEWAY_TIMEOUT_SECONDS,
+            timeout_seconds=gateway_timeout_seconds,
         )
         _activate_launchd_oneshot_service(
             domain,
             LAUNCHD_SIDECARS_LABEL,
             sidecars_plist,
-            timeout_seconds=LAUNCHD_SIDECARS_TIMEOUT_SECONDS,
+            timeout_seconds=sidecars_timeout_seconds,
         )
         return {
             **render_payload,

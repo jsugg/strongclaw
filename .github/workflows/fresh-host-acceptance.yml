@@ -84,6 +84,15 @@ jobs:
           sudo scutil --set HostName "openclaw-ci"
           scutil --get ComputerName
           scutil --get LocalHostName
+      - name: Warm hosted macOS compose images
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
+          mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml pull postgres litellm qdrant otel-collector
+          docker compose -f platform/compose/docker-compose.browser-lab.yaml pull browserlab-proxy browserlab-playwright
       - name: Bootstrap setup services and runtime flows
         shell: bash
         run: |
@@ -94,6 +103,7 @@ jobs:
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS="2700"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           export DOCKER_CONFIG="${DOCKER_CONFIG}"
