@@ -84,7 +84,7 @@ overlay, append it explicitly so each fragment is rendered before merge:
 ```bash
 clawops render-openclaw-config \
   --repo-root "$(pwd)" \
-  --profile memory-pro-local \
+  --profile memory-lancedb-pro \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```
 

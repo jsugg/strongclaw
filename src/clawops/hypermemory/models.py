@@ -12,7 +12,7 @@ SearchMode = Literal["all", "memory", "corpus"]
 SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"]
 FusionMode = Literal["rrf", "weighted"]
 EmbeddingProviderKind = Literal["disabled", "compatible-http"]
-RerankProviderKind = Literal["none"]
+RerankProviderKind = Literal["none", "local-sentence-transformers", "compatible-http"]
 EvidenceKind = Literal["file", "lcm_summary", "lcm_message_range", "external_uri"]
 
 DEFAULT_MEMORY_FILE_NAMES = ("MEMORY.md", "memory.md")
@@ -79,6 +79,7 @@ class RankingConfig:
     contradiction_penalty: float = 0.2
     diversity_penalty: float = 0.35
     recency_half_life_days: int = 45
+    rerank_weight: float = 0.35
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -105,17 +106,49 @@ class EmbeddingConfig:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class RerankConfig:
-    """Optional reranking configuration."""
+class LocalSentenceTransformersRerankConfig:
+    """Local sentence-transformers rerank provider configuration."""
 
-    enabled: bool = False
-    provider: RerankProviderKind = DEFAULT_RERANK_PROVIDER
+    model: str = ""
+    batch_size: int = 8
+    max_length: int = 2_048
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CompatibleHttpRerankConfig:
+    """Compatible HTTP rerank provider configuration."""
+
     model: str = ""
     base_url: str = ""
     api_key_env: str | None = None
     api_key: str | None = None
     timeout_ms: int = 15_000
-    top_k: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RerankConfig:
+    """Optional reranking configuration with primary and fallback providers."""
+
+    enabled: bool = False
+    provider: RerankProviderKind = DEFAULT_RERANK_PROVIDER
+    fallback_provider: RerankProviderKind = "none"
+    fail_open: bool = True
+    normalize_scores: bool = True
+    local: LocalSentenceTransformersRerankConfig = dataclasses.field(
+        default_factory=LocalSentenceTransformersRerankConfig
+    )
+    compatible_http: CompatibleHttpRerankConfig = dataclasses.field(
+        default_factory=CompatibleHttpRerankConfig
+    )
+
+    def model_for(self, provider: RerankProviderKind | None = None) -> str:
+        """Return the configured model name for *provider*."""
+        resolved_provider = self.provider if provider is None else provider
+        if resolved_provider == "local-sentence-transformers":
+            return self.local.model
+        if resolved_provider == "compatible-http":
+            return self.compatible_http.model
+        return ""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -128,7 +161,7 @@ class HybridConfig:
     text_weight: float = 0.35
     fusion: FusionMode = "rrf"
     rrf_k: int = 60
-    rerank_top_k: int = 0
+    rerank_candidate_pool: int = 0
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -227,6 +260,7 @@ class SearchExplanation:
     contradiction_penalty: float
     dense_score: float = 0.0
     fusion_score: float = 0.0
+    rerank_score: float = 0.0
     novelty_penalty: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
@@ -241,6 +275,7 @@ class SearchExplanation:
             "contradictionPenalty": round(self.contradiction_penalty, 6),
             "denseScore": round(self.dense_score, 6),
             "fusionScore": round(self.fusion_score, 6),
+            "rerankScore": round(self.rerank_score, 6),
             "noveltyPenalty": round(self.novelty_penalty, 6),
         }
 
@@ -367,12 +402,18 @@ class SearchDiagnostics:
     qdrant_dense_ms: float = 0.0
     qdrant_sparse_ms: float = 0.0
     fusion_ms: float = 0.0
+    rerank_ms: float = 0.0
     lexical_candidates: int = 0
     sparse_candidates: int = 0
     dense_candidates: int = 0
+    rerank_candidates: int = 0
     selected_candidates: int = 0
+    rerank_applied: bool = False
+    rerank_fallback_used: bool = False
+    rerank_fail_open: bool = False
+    rerank_provider: str = "none"
 
-    def to_dict(self) -> dict[str, float | int]:
+    def to_dict(self) -> dict[str, float | int | bool | str]:
         """Convert diagnostics to telemetry-friendly scalars."""
         return {
             "lexicalMs": round(self.lexical_ms, 3),
@@ -380,11 +421,30 @@ class SearchDiagnostics:
             "qdrantDenseMs": round(self.qdrant_dense_ms, 3),
             "qdrantSparseMs": round(self.qdrant_sparse_ms, 3),
             "fusionMs": round(self.fusion_ms, 3),
+            "rerankMs": round(self.rerank_ms, 3),
             "lexicalCandidates": self.lexical_candidates,
             "sparseCandidates": self.sparse_candidates,
             "denseCandidates": self.dense_candidates,
+            "rerankCandidates": self.rerank_candidates,
             "selectedCandidates": self.selected_candidates,
+            "rerankApplied": self.rerank_applied,
+            "rerankFallbackUsed": self.rerank_fallback_used,
+            "rerankFailOpen": self.rerank_fail_open,
+            "rerankProvider": self.rerank_provider,
         }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RerankResponse:
+    """Normalized planner-time rerank response."""
+
+    scores: tuple[float, ...] = ()
+    provider: RerankProviderKind = "none"
+    applied: bool = False
+    fallback_used: bool = False
+    latency_ms: float = 0.0
+    fail_open: bool = False
+    error: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

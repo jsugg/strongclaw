@@ -105,7 +105,7 @@ That setup flow:
 - installs Docker only when no Docker-compatible runtime is detected
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the selected profile's memory and context assets
-- installs the vendored `memory-lancedb-pro` dependencies only for the `memory-pro-local*` profiles
+- installs the vendored `memory-lancedb-pro` dependencies only for the `memory-lancedb-pro` profile
 - creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
 - prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
 - configures or validates OpenClaw model/provider auth before services are activated
@@ -173,8 +173,7 @@ JSON5 overlays:
 ./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
 ./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
 ```
 
 The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
@@ -227,16 +226,14 @@ Add these only in order:
    `clawops setup --profile openclaw-default`
 5. Built-in OpenClaw plus experimental QMD:
    `clawops setup --profile openclaw-qmd`
-6. Opt-in local LanceDB durable memory after the built-in QMD flow is stable by rerendering
-   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local`
-7. Optional local smart extraction profile with Ollama-backed LLM extraction by rerendering
-   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart`
-8. Migration-only standalone overlay reference:
+6. Opt-in local LanceDB durable memory with Ollama-backed smart extraction by rerendering
+   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro`
+7. Migration-only standalone overlay reference:
    `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
-9. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-10. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-11. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-12. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+8. Telegram: `./scripts/bootstrap/enable_telegram.sh`
+9. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
+10. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
+11. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
 
 After each layer is enabled, run the matching verification entrypoint:
 

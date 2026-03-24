@@ -7,7 +7,7 @@ import json
 import pathlib
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from time import perf_counter
@@ -25,6 +25,7 @@ from clawops.hypermemory.models import (
     ReflectionMode,
     ReflectionSummary,
     ReindexSummary,
+    RerankResponse,
     SearchBackend,
     SearchHit,
     SearchMode,
@@ -126,7 +127,12 @@ class HypermemoryEngine:
             "embeddingModel": self.config.embedding.model,
             "rerankEnabled": self.config.rerank.enabled,
             "rerankProvider": self.config.rerank.provider,
-            "rerankModel": self.config.rerank.model,
+            "rerankFallbackProvider": self.config.rerank.fallback_provider,
+            "rerankFailOpen": self.config.rerank.fail_open,
+            "rerankModel": self.config.rerank.model_for(),
+            "rerankFallbackModel": self.config.rerank.model_for(
+                self.config.rerank.fallback_provider
+            ),
             "qdrantEnabled": bool(qdrant_health.get("enabled", False)),
             "qdrantHealthy": bool(qdrant_health.get("healthy", False)),
             "qdrant": qdrant_health,
@@ -426,6 +432,7 @@ class HypermemoryEngine:
                                 query=query,
                                 lane=lane,
                                 scope=scope,
+                                candidate_limit=hybrid_config.dense_candidate_pool,
                             )
                             if resolved_backend == "qdrant_sparse_dense_hybrid":
                                 sparse_candidates, qdrant_sparse_search_ms = self._sparse_search(
@@ -433,6 +440,7 @@ class HypermemoryEngine:
                                     query=query,
                                     lane=lane,
                                     scope=scope,
+                                    candidate_limit=hybrid_config.sparse_candidate_pool,
                                 )
                         except Exception as err:
                             if self.config.backend.fallback != "sqlite_fts":
@@ -461,34 +469,10 @@ class HypermemoryEngine:
                         dense_candidates=dense_candidates,
                         sparse_candidates=sparse_candidates,
                         active_backend=resolved_backend,
+                        rerank_scorer=self._observed_rerank_scorer(),
+                        rerank_candidate_pool=hybrid_config.rerank_candidate_pool,
                         include_explain=include_explain,
                     )
-                rerank_ms = 0.0
-                if hybrid_config.rerank_top_k > 0 and hits:
-                    rerank_started_at = perf_counter()
-                    reranked = self._rerank_provider.rerank(
-                        query,
-                        [hit.to_dict() for hit in hits[: hybrid_config.rerank_top_k]],
-                    )
-                    rerank_ms = (perf_counter() - rerank_started_at) * 1000.0
-                    if reranked:
-                        order: dict[tuple[str, int, int], int] = {}
-                        for index, candidate in enumerate(reranked):
-                            path = candidate.get("path")
-                            start_line = candidate.get("startLine", 0)
-                            end_line = candidate.get("endLine", 0)
-                            if not isinstance(path, str):
-                                continue
-                            if isinstance(start_line, bool) or not isinstance(start_line, int):
-                                continue
-                            if isinstance(end_line, bool) or not isinstance(end_line, int):
-                                continue
-                            order[(path, start_line, end_line)] = index
-                        hits.sort(
-                            key=lambda hit: order.get(
-                                (hit.path, hit.start_line, hit.end_line), len(order)
-                            )
-                        )
                 telemetry_payload: dict[str, Any] = {
                     "requestedBackend": requested_backend,
                     "resolvedBackend": resolved_backend,
@@ -496,7 +480,6 @@ class HypermemoryEngine:
                     "results": len(hits),
                     "qdrantDenseSearchMs": round(qdrant_dense_search_ms, 3),
                     "qdrantSparseSearchMs": round(qdrant_sparse_search_ms, 3),
-                    "rerankMs": round(rerank_ms, 3),
                 }
                 telemetry_payload.update(diagnostics.to_dict())
                 span.set_attributes(telemetry_payload)
@@ -515,6 +498,63 @@ class HypermemoryEngine:
                     },
                 )
                 raise
+
+    def _observed_rerank_scorer(self) -> Callable[[str, Sequence[str]], RerankResponse]:
+        """Return a rerank scorer that emits telemetry and honors fail-open semantics."""
+
+        def score(query: str, documents: Sequence[str]) -> RerankResponse:
+            if not documents:
+                return RerankResponse()
+            with observed_span(
+                "clawops.hypermemory.rerank",
+                attributes={
+                    "configuredProvider": self.config.rerank.provider,
+                    "fallbackProvider": self.config.rerank.fallback_provider,
+                    "candidateCount": len(documents),
+                },
+            ) as span:
+                started_at = perf_counter()
+                try:
+                    response = self._rerank_provider.score(query, documents)
+                except Exception as err:
+                    latency_ms = (perf_counter() - started_at) * 1000.0
+                    error_payload = {
+                        "configuredProvider": self.config.rerank.provider,
+                        "fallbackProvider": self.config.rerank.fallback_provider,
+                        "candidateCount": len(documents),
+                        "rerankMs": round(latency_ms, 3),
+                        "error": str(err),
+                    }
+                    span.record_exception(err)
+                    span.set_error(str(err))
+                    span.set_attributes(error_payload)
+                    emit_structured_log("clawops.hypermemory.rerank.error", error_payload)
+                    if not self.config.rerank.fail_open:
+                        raise
+                    return RerankResponse(
+                        latency_ms=latency_ms,
+                        fail_open=True,
+                        error=str(err),
+                    )
+                latency_ms = (perf_counter() - started_at) * 1000.0
+                observed_response = replace(response, latency_ms=latency_ms)
+                payload: dict[str, Any] = {
+                    "configuredProvider": self.config.rerank.provider,
+                    "provider": observed_response.provider,
+                    "fallbackProvider": self.config.rerank.fallback_provider,
+                    "fallbackUsed": observed_response.fallback_used,
+                    "applied": observed_response.applied,
+                    "failOpen": observed_response.fail_open,
+                    "candidateCount": len(documents),
+                    "rerankMs": round(latency_ms, 3),
+                }
+                if observed_response.error:
+                    payload["error"] = observed_response.error
+                span.set_attributes(payload)
+                emit_structured_log("clawops.hypermemory.rerank", payload)
+                return observed_response
+
+        return score
 
     def verify(self) -> dict[str, Any]:
         """Verify the supported sparse+dense backend contract for hypermemory."""
@@ -565,6 +605,7 @@ class HypermemoryEngine:
                         query=probe_query,
                         lane="all",
                         scope=None,
+                        candidate_limit=self.config.hybrid.dense_candidate_pool,
                     )
                     lane_checks["dense"] = {"hits": len(dense_hits), "ms": round(dense_ms, 3)}
                     if not dense_hits:
@@ -577,6 +618,7 @@ class HypermemoryEngine:
                         query=probe_query,
                         lane="all",
                         scope=None,
+                        candidate_limit=self.config.hybrid.sparse_candidate_pool,
                     )
                     lane_checks["sparse"] = {"hits": len(sparse_hits), "ms": round(sparse_ms, 3)}
                     if not sparse_hits:
@@ -1356,6 +1398,7 @@ class HypermemoryEngine:
         query: str,
         lane: SearchMode,
         scope: str | None,
+        candidate_limit: int,
     ) -> tuple[list[DenseSearchCandidate], float]:
         """Run a dense search query through the configured vector backend."""
         if not self.config.qdrant.enabled or not self.config.embedding.enabled:
@@ -1365,7 +1408,7 @@ class HypermemoryEngine:
             attributes={
                 "lane": lane,
                 "scope": scope,
-                "candidate_limit": self.config.hybrid.dense_candidate_pool,
+                "candidate_limit": candidate_limit,
             },
         ) as span:
             started_at = perf_counter()
@@ -1375,7 +1418,7 @@ class HypermemoryEngine:
             try:
                 hits = self._qdrant_backend.search_dense(
                     vector=embedding[0],
-                    limit=self.config.hybrid.dense_candidate_pool,
+                    limit=candidate_limit,
                     mode=lane,
                     scope=scope,
                 )
@@ -1405,6 +1448,7 @@ class HypermemoryEngine:
         query: str,
         lane: SearchMode,
         scope: str | None,
+        candidate_limit: int,
     ) -> tuple[list[SparseSearchCandidate], float]:
         """Run a sparse search query through the configured vector backend."""
         if not self._backend_uses_sparse_vectors():
@@ -1420,14 +1464,14 @@ class HypermemoryEngine:
             attributes={
                 "lane": lane,
                 "scope": scope,
-                "candidate_limit": self.config.hybrid.sparse_candidate_pool,
+                "candidate_limit": candidate_limit,
             },
         ) as span:
             started_at = perf_counter()
             try:
                 hits = self._qdrant_backend.search_sparse(
                     vector=sparse_vector.to_qdrant(),
-                    limit=self.config.hybrid.sparse_candidate_pool,
+                    limit=candidate_limit,
                     mode=lane,
                     scope=scope,
                 )

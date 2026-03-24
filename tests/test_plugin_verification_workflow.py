@@ -48,11 +48,8 @@ def test_plugin_verification_docs_reference_current_workflow_and_script() -> Non
     assert "verify_vendored_memory_plugin.sh" in vendor_note
 
 
-def test_vendored_plugin_test_helper_supports_macos_and_linux_global_module_paths() -> None:
+def test_vendored_plugin_host_checks_support_macos_and_linux_global_module_paths() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    helper = (
-        repo_root / "platform/plugins/memory-lancedb-pro/test/helpers/node-path.mjs"
-    ).read_text(encoding="utf-8")
     runtime = (repo_root / "platform/plugins/memory-lancedb-pro/index.ts").read_text(
         encoding="utf-8"
     )
@@ -60,10 +57,9 @@ def test_vendored_plugin_test_helper_supports_macos_and_linux_global_module_path
         encoding="utf-8"
     )
 
-    assert "/opt/homebrew/lib/node_modules" in helper
-    assert "/usr/local/lib/node_modules" in helper
-    assert "/usr/lib/node_modules" in helper
     assert "/opt/homebrew/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
     assert "/usr/local/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
     assert "/usr/lib/node_modules/openclaw/dist/extensionAPI.js" in runtime
-    assert 'import { initGlobalNodePath } from "./helpers/node-path.mjs";' in cli_smoke
+    assert "/opt/homebrew/lib/node_modules" in cli_smoke
+    assert "/usr/local/lib/node_modules" in cli_smoke
+    assert "/usr/lib/node_modules" in cli_smoke

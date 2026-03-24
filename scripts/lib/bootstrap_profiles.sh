@@ -16,7 +16,7 @@ profile_requires_qmd() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    openclaw-qmd | memory-pro-local | memory-pro-local-smart | acp | browser-lab) return 0 ;;
+    openclaw-qmd | memory-lancedb-pro | acp | browser-lab) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -43,7 +43,7 @@ profile_requires_memory_pro_plugin() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    memory-pro-local | memory-pro-local-smart) return 0 ;;
+    memory-lancedb-pro) return 0 ;;
     *) return 1 ;;
   esac
 }

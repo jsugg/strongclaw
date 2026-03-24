@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
+import Module from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import jitiFactory from "jiti";
-import { initGlobalNodePath } from "./helpers/node-path.mjs";
 
-initGlobalNodePath();
+process.env.NODE_PATH = [
+  process.env.NODE_PATH,
+  "/opt/homebrew/lib/node_modules/openclaw/node_modules",
+  "/opt/homebrew/lib/node_modules",
+].filter(Boolean).join(":");
+Module._initPaths();
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const plugin = jiti("../index.ts");
@@ -136,6 +141,14 @@ function createMockApi(dbPath, embeddingBaseURL, llmBaseURL, logs) {
   };
 }
 
+async function runAgentEndHook(api, event, ctx) {
+  await api.hooks.agent_end(event, ctx);
+  const backgroundRun = api.hooks.agent_end?.__lastRun;
+  if (backgroundRun && typeof backgroundRun.then === "function") {
+    await backgroundRun;
+  }
+}
+
 async function seedPreference(dbPath) {
   const store = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
   const embedder = createEmbedder({
@@ -256,7 +269,8 @@ async function runScenario(mode) {
     plugin.register(api);
     await seedPreference(dbPath);
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         sessionKey: "agent:life:test",
@@ -444,7 +458,8 @@ async function runMultiRoundScenario() {
     ];
 
     for (const round of rounds) {
-      await api.hooks.agent_end(
+      await runAgentEndHook(
+        api,
         {
           success: true,
           sessionKey: "agent:life:test",
@@ -534,7 +549,8 @@ async function runInjectedRecallScenario() {
     );
     plugin.register(api);
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         sessionKey: "agent:life:test",
@@ -627,7 +643,8 @@ async function runPrependedRecallWithUserTextScenario() {
     );
     plugin.register(api);
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         sessionKey: "agent:life:test",
@@ -718,7 +735,8 @@ async function runInboundMetadataWrappedScenario() {
     );
     plugin.register(api);
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         sessionKey: "agent:life:test",
@@ -773,7 +791,8 @@ async function runSessionDeltaScenario() {
     );
     plugin.register(api);
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         messages: [
@@ -786,7 +805,8 @@ async function runSessionDeltaScenario() {
       { agentId: "life", sessionKey: "agent:life:test" },
     );
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         messages: [
@@ -840,7 +860,8 @@ async function runPendingIngressScenario() {
       { channelId: "discord", conversationId: "channel:1", accountId: "default" },
     );
 
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         messages: [
@@ -894,7 +915,8 @@ async function runRememberCommandContextScenario() {
       { from: "discord:channel:1", content: "@jige_claw_bot 我的饮品偏好是乌龙茶" },
       { channelId: "discord", conversationId: "channel:1", accountId: "default" },
     );
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         messages: [{ role: "user", content: "@jige_claw_bot 我的饮品偏好是乌龙茶" }],
@@ -906,7 +928,8 @@ async function runRememberCommandContextScenario() {
       { from: "discord:channel:1", content: "@jige_claw_bot 请记住" },
       { channelId: "discord", conversationId: "channel:1", accountId: "default" },
     );
-    await api.hooks.agent_end(
+    await runAgentEndHook(
+      api,
       {
         success: true,
         messages: [
@@ -944,6 +967,202 @@ assert.ok(
 assert.ok(
   rememberCommandContextLogs.some((entry) =>
     entry[1].includes("auto-capture collected 2 text(s)")
+  ),
+);
+
+async function runUserMdExclusiveProfileScenario() {
+  const workDir = mkdtempSync(path.join(tmpdir(), "memory-smart-user-md-"));
+  const dbPath = path.join(workDir, "db");
+  const logs = [];
+  const embeddingServer = createEmbeddingServer();
+  const llmServer = http.createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== "/chat/completions") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const prompt = payload.messages?.[1]?.content || "";
+
+    let content = JSON.stringify({ memories: [] });
+    if (prompt.includes("Analyze the following session context")) {
+      content = JSON.stringify({
+        memories: [
+          {
+            category: "profile",
+            abstract: "User profile: timezone Asia/Shanghai",
+            overview: "## Background\n- Timezone: Asia/Shanghai",
+            content: "User timezone is Asia/Shanghai.",
+          },
+        ],
+      });
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: "mock-memory-model",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content },
+          finish_reason: "stop",
+        },
+      ],
+    }));
+  });
+
+  await new Promise((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => llmServer.listen(0, "127.0.0.1", resolve));
+  const embeddingPort = embeddingServer.address().port;
+  const llmPort = llmServer.address().port;
+
+  try {
+    const api = createMockApi(
+      dbPath,
+      `http://127.0.0.1:${embeddingPort}/v1`,
+      `http://127.0.0.1:${llmPort}`,
+      logs,
+    );
+    api.pluginConfig.workspaceBoundary = {
+      userMdExclusive: {
+        enabled: true,
+      },
+    };
+    plugin.register(api);
+
+    await runAgentEndHook(
+      api,
+      {
+        success: true,
+        sessionKey: "agent:life:user-md-exclusive",
+        messages: [
+          { role: "user", content: "我的时区是 Asia/Shanghai。" },
+          { role: "user", content: "这是长期资料。" },
+        ],
+      },
+      { agentId: "life", sessionKey: "agent:life:user-md-exclusive" },
+    );
+
+    const store = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
+    const entries = await store.list(["agent:life"], undefined, 10, 0);
+    return { entries, logs };
+  } finally {
+    await new Promise((resolve) => embeddingServer.close(resolve));
+    await new Promise((resolve) => llmServer.close(resolve));
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+const userMdExclusiveProfileResult = await runUserMdExclusiveProfileScenario();
+assert.equal(userMdExclusiveProfileResult.entries.length, 0);
+assert.ok(
+  userMdExclusiveProfileResult.logs.some((entry) =>
+    entry[1].includes("skipped USER.md-exclusive [profile]")
+  ),
+);
+
+async function runBoundarySkipKeepsRegexFallbackScenario() {
+  const workDir = mkdtempSync(path.join(tmpdir(), "memory-smart-boundary-fallback-"));
+  const dbPath = path.join(workDir, "db");
+  const logs = [];
+  const embeddingServer = createEmbeddingServer();
+
+  const llmServer = http.createServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== "/chat/completions") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const prompt = payload.messages?.[1]?.content || "";
+
+    let content = JSON.stringify({ memories: [] });
+    if (prompt.includes("Analyze the following session context")) {
+      content = JSON.stringify({
+        memories: [
+          {
+            category: "profile",
+            abstract: "User profile: timezone Asia/Shanghai",
+            overview: "## Background\n- Timezone: Asia/Shanghai",
+            content: "User timezone is Asia/Shanghai.",
+          },
+        ],
+      });
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: "mock-memory-model",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content },
+          finish_reason: "stop",
+        },
+      ],
+    }));
+  });
+
+  await new Promise((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => llmServer.listen(0, "127.0.0.1", resolve));
+  const embeddingPort = embeddingServer.address().port;
+  const llmPort = llmServer.address().port;
+
+  try {
+    const api = createMockApi(
+      dbPath,
+      `http://127.0.0.1:${embeddingPort}/v1`,
+      `http://127.0.0.1:${llmPort}`,
+      logs,
+    );
+    api.pluginConfig.workspaceBoundary = {
+      userMdExclusive: {
+        enabled: true,
+      },
+    };
+    plugin.register(api);
+
+    await runAgentEndHook(
+      api,
+      {
+        success: true,
+        sessionKey: "agent:life:user-md-fallback",
+        messages: [
+          { role: "user", content: "我的时区是 Asia/Shanghai。" },
+          { role: "user", content: "我们决定以后用 AWS ECS with Fargate 部署应用。" },
+        ],
+      },
+      { agentId: "life", sessionKey: "agent:life:user-md-fallback" },
+    );
+
+    const store = new MemoryStore({ dbPath, vectorDim: EMBEDDING_DIMENSIONS });
+    const entries = await store.list(["agent:life"], undefined, 10, 0);
+    return { entries, logs };
+  } finally {
+    await new Promise((resolve) => embeddingServer.close(resolve));
+    await new Promise((resolve) => llmServer.close(resolve));
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+const boundarySkipFallbackResult = await runBoundarySkipKeepsRegexFallbackScenario();
+assert.equal(boundarySkipFallbackResult.entries.length, 1);
+assert.equal(boundarySkipFallbackResult.entries[0].text, "我们决定以后用 AWS ECS with Fargate 部署应用。");
+assert.ok(
+  boundarySkipFallbackResult.logs.some((entry) =>
+    entry[1].includes("continuing to regex fallback for non-boundary texts")
   ),
 );
 

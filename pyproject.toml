@@ -16,6 +16,8 @@ dependencies = [
   "opentelemetry-api>=1.29.0",
   "opentelemetry-sdk>=1.29.0",
   "opentelemetry-exporter-otlp>=1.29.0",
+  "sentence-transformers>=3.4.1; ((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version < '3.13') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64'))",
+  "torch<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version < '3.13'",
 ]
 authors = [
   {name = "Juan P. Sugg", email = "juanpedrosugg@gmail.com"}

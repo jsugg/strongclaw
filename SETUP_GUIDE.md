@@ -145,8 +145,7 @@ wrapper:
 ```bash
 make setup SETUP_ARGS="--profile acp"
 make setup SETUP_ARGS="--profile hypermemory"
-make setup SETUP_ARGS="--profile memory-pro-local"
-make setup SETUP_ARGS="--profile memory-pro-local-smart"
+make setup SETUP_ARGS="--profile memory-lancedb-pro"
 ```
 
 For `hypermemory`, set `HYPERMEMORY_EMBEDDING_MODEL` before you
@@ -209,8 +208,7 @@ Use profile rerenders for placeholder-backed variants:
 ./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
 ./scripts/bootstrap/render_openclaw_config.sh --profile acp
 ./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
 ```
 
 The default `hypermemory` profile renders a self-contained
@@ -316,18 +314,16 @@ clawops context query \
 ```
 
 If you need the opt-in local durable memory path instead of the default
-QMD-backed retrieval rollout, rerender with:
+QMD-backed retrieval rollout, rerender with the Ollama-backed smart extraction
+profile:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local
+./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
 ```
 
-Use the Ollama-backed smart extraction profile only after Ollama is serving
-both embeddings and a local extraction model:
-
-```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-pro-local-smart
-```
+This StrongClaw-managed profile uses Ollama-backed smart extraction, but it
+still keeps `autoRecall` off and leaves session-memory/self-improvement and
+management tools disabled by default.
 
 If you need a combined placeholder-backed variant, use the root CLI and append
 the extra overlay explicitly so every selected fragment is rendered first:
@@ -335,7 +331,7 @@ the extra overlay explicitly so every selected fragment is rendered first:
 ```bash
 clawops render-openclaw-config \
   --repo-root "$(pwd)" \
-  --profile memory-pro-local \
+  --profile memory-lancedb-pro \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```
 

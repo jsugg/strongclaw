@@ -1,15 +1,13 @@
 # StrongClaw Hypermemory
 
-`hypermemory` is StrongClaw's Markdown-canonical durable memory engine. It is
-the default StrongClaw memory stack through the `hypermemory` profile, which
+`hypermemory` is StrongClaw's Markdown-canonical durable memory engine. It is the default StrongClaw memory stack through the `hypermemory` profile, which
 binds:
 
 - `plugins.slots.contextEngine = "lossless-claw"`
 - `plugins.slots.memory = "strongclaw-hypermemory"`
 - `platform/configs/memory/hypermemory.yaml`
 
-The built-in OpenClaw fallback remains available as `openclaw-default`, and the
-explicit built-ins-plus-QMD fallback remains available as `openclaw-qmd`.
+The built-in OpenClaw fallback remains available as `openclaw-default`, and the explicit built-ins-plus-QMD fallback remains available as `openclaw-qmd`.
 
 ## Design goals
 
@@ -37,18 +35,13 @@ Daily logs can expose retained entries under `## Retain`. Supported bullets:
 - `- Opinion[c=0.80]: ...`
 - `- Entity[Alice]: ...`
 
-`clawops hypermemory reflect` promotes retained entries into the durable
-`bank/` pages and rebuilds the derived index.
+`clawops hypermemory reflect` promotes retained entries into the durable `bank/` pages and rebuilds the derived index.
 
-Typed durable entries can also carry evidence metadata. File-backed proof stays
-in canonical Markdown coordinates and external conversation proof stays as URIs,
-for example:
+Typed durable entries can also carry evidence metadata. File-backed proof stays in canonical Markdown coordinates and external conversation proof stays as URIs, for example:
 
 - `Fact[evidence=docs/runbook.md#L1-L3|lcm://conversation/abc123/summary/sum_deadbeef]: ...`
 
-The derived index stores those references as structured provenance so export and
-audit flows can preserve canonical file lines and `lcm://...` links without
-coupling hypermemory to the context-engine database.
+The derived index stores those references as structured provenance so export and audit flows can preserve canonical file lines and `lcm://...` links without coupling hypermemory to the context-engine database.
 
 ## Derived index
 
@@ -69,9 +62,7 @@ The supported sparse+dense stack extends that design:
 
 ## Missing Markdown behavior
 
-Hypermemory intentionally soft-fails when configured Markdown paths are missing
-at runtime or during reindex. That matches OpenClaw's own Markdown-memory
-behavior more closely and avoids breaking the agent because a file was deleted.
+Hypermemory intentionally soft-fails when configured Markdown paths are missing at runtime or during reindex. That matches OpenClaw's own Markdown-memory behavior more closely and avoids breaking the agent because a file was deleted.
 
 - missing corpus roots are surfaced through `status().missingCorpusPaths`
 - `reindex` skips unavailable paths instead of raising
@@ -81,9 +72,7 @@ That split keeps the runtime robust while preserving an explicit operator check.
 
 ## OpenClaw compatibility
 
-The opt-in plugin at
-[platform/plugins/strongclaw-hypermemory](../plugins/strongclaw-hypermemory)
-preserves the stable OpenClaw memory tool names:
+The opt-in plugin at [platform/plugins/strongclaw-hypermemory](../plugins/strongclaw-hypermemory) preserves the stable OpenClaw memory tool names:
 
 - `memory_search`
 - `memory_get`
@@ -94,8 +83,7 @@ It also adds gated durable-memory tools:
 - `memory_update`
 - `memory_reflect`
 
-The plugin proxies `openclaw memory ...` to `clawops hypermemory ...` when the
-`strongclaw-hypermemory` slot is active.
+The plugin proxies `openclaw memory ...` to `clawops hypermemory ...` when the `strongclaw-hypermemory` slot is active.
 
 ## Supported setup
 
@@ -107,13 +95,30 @@ clawops setup --profile hypermemory
 ./scripts/bootstrap/verify_hypermemory.sh
 ```
 
-That flow renders the default StrongClaw stack with `lossless-claw`,
-`strongclaw-hypermemory`, `autoRecall: true`, `autoReflect: false`, and
-[platform/configs/memory/hypermemory.yaml](../configs/memory/hypermemory.yaml).
+That flow renders the default StrongClaw stack with `lossless-claw`, `strongclaw-hypermemory`, `autoRecall: true`, `autoReflect: false`, and [platform/configs/memory/hypermemory.yaml](../configs/memory/hypermemory.yaml).
 
-The hypermemory env contract requires `HYPERMEMORY_EMBEDDING_MODEL`. Guided
-setup backfills loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and
-`HYPERMEMORY_QDRANT_URL` unless you override them.
+The hypermemory env contract requires `HYPERMEMORY_EMBEDDING_MODEL`. Guided setup backfills loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override them.
+
+The shipped hypermemory configs also enable planner-stage reranking. The
+primary provider is `local-sentence-transformers` with
+`BAAI/bge-reranker-v2-m3`; the fallback is `compatible-http`, which activates
+when `HYPERMEMORY_RERANK_BASE_URL` is configured and reachable. If neither
+provider is available, search fails open and keeps the provisional hybrid
+planner order.
+
+Plain `uv sync` keeps the primary local rerank path on host/Python combinations
+with known upstream wheel support: macOS arm64, macOS x86_64 on Python 3.12,
+and Linux x86_64 or aarch64/arm64 on Python 3.12 or 3.13. For Raspberry Pi,
+that means Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu arm64 stay
+on the primary local rerank path. Unsupported combinations such as 32-bit Pi
+Linux skip the local dependency and use `compatible-http` or fail-open behavior
+instead of blocking setup.
+
+Optional fallback env vars:
+
+- `HYPERMEMORY_RERANK_BASE_URL`
+- `HYPERMEMORY_RERANK_MODEL`
+- `HYPERMEMORY_RERANK_API_KEY`
 
 To switch profiles later without rerunning guided setup:
 
@@ -143,9 +148,7 @@ openclaw plugins list
 openclaw memory status --json
 ```
 
-The standalone overlay points the plugin at
-[platform/configs/memory/hypermemory.sqlite.yaml](../configs/memory/hypermemory.sqlite.yaml)
-and uses the installed `clawops` command.
+The standalone overlay points the plugin at [platform/configs/memory/hypermemory.sqlite.yaml](../configs/memory/hypermemory.sqlite.yaml) and uses the installed `clawops` command.
 
 For the combined context-engine + memory stack, use the integrated overlay:
 
@@ -171,9 +174,7 @@ PYTHONPATH=src python3 -m clawops hypermemory reflect --json
 
 ## Migrating to `memory-lancedb-pro`
 
-StrongClaw vendors and verifies `memory-lancedb-pro`, but its import CLI
-accepts one scope per run. The hypermemory bridge therefore exports a single
-scope at a time in the JSON shape that `openclaw memory-pro import` expects.
+StrongClaw vendors and verifies `memory-lancedb-pro`, but its import CLI accepts one scope per run. The hypermemory bridge therefore exports a single scope at a time in the JSON shape that `openclaw memory-pro import` expects.
 
 1. Promote retained notes you want to keep as durable bank entries:
 
@@ -228,7 +229,9 @@ openclaw memory-pro import /tmp/strongclaw-memory-pro-project.json --scope proje
 - missing corpus paths
 
 When `CLAWOPS_STRUCTURED_LOGS=1` is set, hypermemory emits compact JSON lines
-for embedding calls, Qdrant search, lexical planning, fusion, rerank, fallback
-activation, and vector sync. When OTLP tracing is enabled through
-`CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*` variables, the
-same operations emit spans through the shared ClawOps observability pipeline.
+for embedding calls, Qdrant search, lexical planning, fusion, rerank, rerank
+errors, fallback activation, and vector sync. When OTLP tracing is enabled
+through `CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*`
+variables, the same operations emit spans through the shared ClawOps
+observability pipeline, including a dedicated `clawops.hypermemory.rerank`
+span.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from clawops.platform_compat import (
+    DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT,
     DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION,
     DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
     HostPlatform,
@@ -10,8 +11,10 @@ from clawops.platform_compat import (
     detect_host_platform,
     normalize_architecture,
     normalize_os_name,
+    resolve_hypermemory_local_rerank_torch_constraint,
     resolve_memory_plugin_lancedb_version,
     resolve_service_manager,
+    supports_hypermemory_local_rerank,
 )
 
 
@@ -50,9 +53,58 @@ def test_memory_plugin_lancedb_version_uses_intel_mac_fallback_only() -> None:
 
 
 def test_build_compatibility_record_reports_when_override_is_required() -> None:
-    record = build_compatibility_record(HostPlatform("darwin", "x86_64"))
+    record = build_compatibility_record(HostPlatform("darwin", "x86_64"), python_version="3.12")
 
     assert record["service_manager"] == "launchd"
+    assert record["python_version"] == "3.12"
     assert record["memory_plugin_lancedb_version"] == DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_default_lancedb_version"] == DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_override_required"] is True
+    assert record["hypermemory_local_rerank_supported"] is True
+    assert (
+        record["hypermemory_local_rerank_torch_constraint"]
+        == DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
+    )
+    assert record["hypermemory_local_rerank_requires_http_fallback"] is False
+
+
+def test_local_rerank_support_matrix_tracks_known_host_python_combinations() -> None:
+    assert supports_hypermemory_local_rerank(HostPlatform("darwin", "arm64"), python_version="3.13")
+    assert supports_hypermemory_local_rerank(HostPlatform("linux", "x86_64"), python_version="3.13")
+    assert supports_hypermemory_local_rerank(HostPlatform("linux", "arm64"), python_version="3.12")
+    assert supports_hypermemory_local_rerank(
+        HostPlatform("darwin", "x86_64"),
+        python_version="3.12",
+    )
+    assert not supports_hypermemory_local_rerank(
+        HostPlatform("darwin", "x86_64"),
+        python_version="3.13",
+    )
+    assert not supports_hypermemory_local_rerank(
+        HostPlatform("linux", "armv7l"),
+        python_version="3.12",
+    )
+
+
+def test_local_rerank_constraint_applies_only_to_intel_macos_python_312() -> None:
+    assert (
+        resolve_hypermemory_local_rerank_torch_constraint(
+            HostPlatform("darwin", "x86_64"),
+            python_version="3.12",
+        )
+        == DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
+    )
+    assert (
+        resolve_hypermemory_local_rerank_torch_constraint(
+            HostPlatform("darwin", "arm64"),
+            python_version="3.13",
+        )
+        is None
+    )
+    assert (
+        resolve_hypermemory_local_rerank_torch_constraint(
+            HostPlatform("darwin", "x86_64"),
+            python_version="3.13",
+        )
+        is None
+    )

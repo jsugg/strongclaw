@@ -17,8 +17,9 @@ const jiti = jitiFactory(import.meta.url, {
 
 const pluginModule = jiti("../index.ts");
 const memoryLanceDBProPlugin = pluginModule.default || pluginModule;
-const { registerMemoryRecallTool } = jiti("../src/tools.ts");
+const { registerMemoryRecallTool, registerMemoryStoreTool } = jiti("../src/tools.ts");
 const { MemoryRetriever } = jiti("../src/retriever.ts");
+const { buildSmartMetadata, stringifySmartMetadata } = jiti("../src/smart-metadata.ts");
 
 function makeApiCapture() {
   let capturedCreator = null;
@@ -54,7 +55,11 @@ function createPluginApiHarness({ pluginConfig, resolveRoot }) {
       list.push({ handler, meta });
       eventHandlers.set(eventName, list);
     },
-    registerHook() {},
+    registerHook(eventName, handler, opts) {
+      const list = eventHandlers.get(eventName) || [];
+      list.push({ handler, meta: opts });
+      eventHandlers.set(eventName, list);
+    },
   };
 
   return { api, eventHandlers };
@@ -116,11 +121,164 @@ function makeExpandedResults() {
   ];
 }
 
+function makeUserMdExclusiveResults() {
+  return [
+    ...makeResults(),
+    {
+      entry: {
+        id: "m3",
+        text: "称呼偏好：宙斯",
+        category: "preference",
+        scope: "global",
+        importance: 0.9,
+        timestamp: Date.now(),
+        metadata: stringifySmartMetadata(
+          buildSmartMetadata(
+            { text: "称呼偏好：宙斯", category: "preference", importance: 0.9 },
+            {
+              l0_abstract: "称呼偏好：宙斯",
+              l1_overview: "## Addressing\n- Preferred form of address: 宙斯",
+              l2_content: "用户希望以后被称呼为“宙斯”。",
+              memory_category: "preferences",
+              fact_key: "preferences:称呼偏好",
+            },
+          ),
+        ),
+      },
+      score: 0.96,
+      sources: {
+        vector: { score: 0.96, rank: 1 },
+      },
+    },
+  ];
+}
+
+function makeLegacyAddressingResults() {
+  return [
+    ...makeResults(),
+    {
+      entry: {
+        id: "m4",
+        text: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+        category: "preference",
+        scope: "agent:main",
+        importance: 0.95,
+        timestamp: Date.now(),
+        metadata: stringifySmartMetadata(
+          buildSmartMetadata(
+            {
+              text: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              category: "preference",
+              importance: 0.95,
+            },
+            {
+              l0_abstract: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              l1_overview: "- 用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              l2_content: "用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”。",
+              memory_category: "preferences",
+              fact_key: "preferences:用户从 2026-03-15 起希望在主会话中被称呼为“宙斯”",
+            },
+          ),
+        ),
+      },
+      score: 0.91,
+      sources: {
+        vector: { score: 0.91, rank: 1 },
+      },
+    },
+  ];
+}
+
+function makeManyResults(count = 7) {
+  return Array.from({ length: count }, (_, i) => {
+    const id = `m${i + 1}`;
+    return {
+      entry: {
+        id,
+        text: `memory-${i + 1} ${"x".repeat(240)}`,
+        category: "fact",
+        scope: "global",
+        importance: 0.5,
+        timestamp: Date.now(),
+      },
+      score: 0.9 - i * 0.05,
+      sources: {
+        vector: { score: 0.9 - i * 0.05, rank: i + 1 },
+      },
+    };
+  });
+}
+
+function makeGovernanceFilteredResults() {
+  const now = Date.now();
+  return [
+    {
+      entry: {
+        id: "c1",
+        text: "confirmed durable memory",
+        category: "fact",
+        scope: "global",
+        importance: 0.7,
+        timestamp: now,
+        metadata: JSON.stringify({
+          l0_abstract: "confirmed durable memory",
+          memory_category: "cases",
+          state: "confirmed",
+          memory_layer: "durable",
+          source: "manual",
+        }),
+      },
+      score: 0.93,
+      sources: { vector: { score: 0.93, rank: 1 } },
+    },
+    {
+      entry: {
+        id: "p1",
+        text: "pending memory should not auto-recall",
+        category: "fact",
+        scope: "global",
+        importance: 0.7,
+        timestamp: now,
+        metadata: JSON.stringify({
+          l0_abstract: "pending memory should not auto-recall",
+          memory_category: "cases",
+          state: "pending",
+          memory_layer: "working",
+          source: "auto-capture",
+        }),
+      },
+      score: 0.9,
+      sources: { vector: { score: 0.9, rank: 2 } },
+    },
+    {
+      entry: {
+        id: "a1",
+        text: "archived memory should not auto-recall",
+        category: "fact",
+        scope: "global",
+        importance: 0.7,
+        timestamp: now,
+        metadata: JSON.stringify({
+          l0_abstract: "archived memory should not auto-recall",
+          memory_category: "cases",
+          state: "archived",
+          memory_layer: "archive",
+          source: "manual",
+        }),
+      },
+      score: 0.88,
+      sources: { vector: { score: 0.88, rank: 3 } },
+    },
+  ];
+}
+
 function makeRecallContext(results = makeResults()) {
   return {
     retriever: {
-      async retrieve() {
-        return results;
+      async retrieve(params = {}) {
+        const rawLimit = typeof params.limit === "number" ? params.limit : results.length;
+        const safeLimit = Math.max(1, Math.floor(rawLimit));
+        return results.slice(0, safeLimit);
       },
       getConfig() {
         return { mode: "hybrid" };
@@ -220,8 +378,8 @@ describe("recall text cleanup", () => {
 
     memoryLanceDBProPlugin.register(harness.api);
 
-    const hooks = harness.eventHandlers.get("before_agent_start") || [];
-    assert.equal(hooks.length, 1, "expected exactly one before_agent_start hook for this config");
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    assert.equal(hooks.length, 1, "expected at least one before_prompt_build hook for this config");
     const [{ handler: autoRecallHook }] = hooks;
     assert.equal(typeof autoRecallHook, "function");
 
@@ -236,5 +394,268 @@ describe("recall text cleanup", () => {
     assert.doesNotMatch(output.prependContext, /vector\+BM25/);
     assert.doesNotMatch(output.prependContext, /reranked/);
     assert.doesNotMatch(output.prependContext, /\d+%/);
+  });
+
+  it("defaults memory_recall to concise output (limit=3, preview text)", async () => {
+    const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(7)));
+    const res = await tool.execute(null, { query: "many memories" });
+    const lines = extractRenderedMemoryRecallLines(res.content[0].text);
+
+    assert.equal(lines.length, 3, "default recall should return 3 items");
+    assert.match(lines[0], /…$/, "default recall should return truncated preview text");
+  });
+
+  it("caps summary-mode memory_recall results to 6 even if a larger limit is requested", async () => {
+    const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(9)));
+    const res = await tool.execute(null, { query: "many memories", limit: 10 });
+    const lines = extractRenderedMemoryRecallLines(res.content[0].text);
+
+    assert.equal(lines.length, 6, "summary mode should clamp limit to 6");
+  });
+
+  it("allows larger limits when includeFullText=true", async () => {
+    const tool = createTool(registerMemoryRecallTool, makeRecallContext(makeManyResults(9)));
+    const res = await tool.execute(null, {
+      query: "many memories",
+      limit: 7,
+      includeFullText: true,
+    });
+    const lines = extractRenderedMemoryRecallLines(res.content[0].text);
+
+    assert.equal(lines.length, 7, "full text mode should honor larger limits");
+    assert.doesNotMatch(lines[0], /…$/, "full text mode should not force preview truncation");
+  });
+
+  it("applies auto-recall item/char budgets before injecting context", async () => {
+    MemoryRetriever.prototype.retrieve = async () => makeManyResults(5);
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key" },
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMaxItems: 2,
+        autoRecallMaxChars: 160,
+        autoRecallPerItemMaxChars: 100,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    memoryLanceDBProPlugin.register(harness.api);
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    const [{ handler: autoRecallHook }] = hooks;
+    const output = await autoRecallHook(
+      { prompt: "Please recall what I mentioned before about this task." },
+      { sessionId: "auto-budget", sessionKey: "agent:main:session:auto-budget", agentId: "main" }
+    );
+
+    assert.ok(output);
+    const injectedLines = output.prependContext
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("- "));
+    assert.ok(injectedLines.length <= 2, "injected lines should respect autoRecallMaxItems");
+  });
+
+  it("auto-recall only injects confirmed non-archived memories", async () => {
+    MemoryRetriever.prototype.retrieve = async () => makeGovernanceFilteredResults();
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key" },
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        autoRecallMaxItems: 5,
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+    memoryLanceDBProPlugin.register(harness.api);
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    const [{ handler: autoRecallHook }] = hooks;
+    const output = await autoRecallHook(
+      { prompt: "Please recall what I mentioned before about this task." },
+      { sessionId: "auto-governance", sessionKey: "agent:main:session:auto-governance", agentId: "main" }
+    );
+
+    assert.ok(output);
+    assert.match(output.prependContext, /confirmed durable memory/);
+    assert.doesNotMatch(output.prependContext, /pending memory should not auto-recall/);
+    assert.doesNotMatch(output.prependContext, /archived memory should not auto-recall/);
+  });
+
+  it("filters USER.md-exclusive facts from memory_recall output", async () => {
+    const tool = createTool(registerMemoryRecallTool, {
+      ...makeRecallContext(makeUserMdExclusiveResults()),
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+        },
+      },
+    });
+    const res = await tool.execute(null, { query: "addressing" });
+
+    assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
+      "1. [m1] [fact:global] remember this",
+      "2. [m2] [preference:global] prefer concise diffs",
+    ]);
+    assert.equal(res.details.memories.length, 2);
+    assert.doesNotMatch(res.content[0].text, /称呼偏好：宙斯/);
+  });
+
+  it("skips USER.md-exclusive facts in memory_store", async () => {
+    const tool = createTool(registerMemoryStoreTool, {
+      ...makeRecallContext(),
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+        },
+      },
+      embedder: {
+        embedPassage: async () => {
+          throw new Error("embedder should not run for USER.md-exclusive facts");
+        },
+      },
+    });
+    const res = await tool.execute(null, { text: "以后请叫我宙斯" });
+
+    assert.match(res.content[0].text, /belongs in USER\.md/);
+    assert.equal(res.details.action, "skipped_by_workspace_boundary");
+  });
+
+  it("skips startup profile facts in memory_store", async () => {
+    const tool = createTool(registerMemoryStoreTool, {
+      ...makeRecallContext(),
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+        },
+      },
+      embedder: {
+        embedPassage: async () => {
+          throw new Error("embedder should not run for USER.md-exclusive profile facts");
+        },
+      },
+    });
+    const res = await tool.execute(null, { text: "我的时区是 Asia/Shanghai。" });
+
+    assert.match(res.content[0].text, /belongs in USER\.md/);
+    assert.equal(res.details.action, "skipped_by_workspace_boundary");
+  });
+
+  it("filters USER.md-exclusive facts from auto-recall injected text", async () => {
+    MemoryRetriever.prototype.retrieve = async () => makeUserMdExclusiveResults();
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key" },
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        workspaceBoundary: {
+          userMdExclusive: {
+            enabled: true,
+          },
+        },
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    memoryLanceDBProPlugin.register(harness.api);
+
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    assert.equal(hooks.length, 1);
+    const [{ handler: autoRecallHook }] = hooks;
+
+    const output = await autoRecallHook(
+      { prompt: "Please recall what I mentioned before about this task." },
+      { sessionId: "auto-filter", sessionKey: "agent:main:session:auto-filter", agentId: "main" }
+    );
+
+    assert.ok(output);
+    assert.match(output.prependContext, /remember this/);
+    assert.doesNotMatch(output.prependContext, /称呼偏好：宙斯/);
+  });
+
+  it("filters legacy addressing memories with non-canonical fact keys", async () => {
+    const tool = createTool(registerMemoryRecallTool, {
+      ...makeRecallContext(makeLegacyAddressingResults()),
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+        },
+      },
+    });
+    const res = await tool.execute(null, { query: "legacy addressing" });
+
+    assert.deepEqual(extractRenderedMemoryRecallLines(res.content[0].text), [
+      "1. [m1] [fact:global] remember this",
+      "2. [m2] [preference:global] prefer concise diffs",
+    ]);
+    assert.equal(res.details.memories.length, 2);
+    assert.doesNotMatch(res.content[0].text, /希望在主会话中被称呼为“宙斯”/);
+  });
+
+  it("filters legacy addressing memories from auto-recall injected text", async () => {
+    MemoryRetriever.prototype.retrieve = async () => makeLegacyAddressingResults();
+
+    const harness = createPluginApiHarness({
+      resolveRoot: workspaceDir,
+      pluginConfig: {
+        dbPath: path.join(workspaceDir, "db"),
+        embedding: { apiKey: "test-api-key" },
+        smartExtraction: false,
+        autoCapture: false,
+        autoRecall: true,
+        autoRecallMinLength: 1,
+        workspaceBoundary: {
+          userMdExclusive: {
+            enabled: true,
+          },
+        },
+        selfImprovement: { enabled: false, beforeResetNote: false, ensureLearningFiles: false },
+      },
+    });
+
+    memoryLanceDBProPlugin.register(harness.api);
+
+    const hooks = harness.eventHandlers.get("before_prompt_build") || [];
+    assert.equal(hooks.length, 1);
+    const [{ handler: autoRecallHook }] = hooks;
+
+    const output = await autoRecallHook(
+      { prompt: "Please recall what I mentioned before about this task." },
+      { sessionId: "auto-filter-legacy", sessionKey: "agent:main:session:auto-filter-legacy", agentId: "main" }
+    );
+
+    assert.ok(output);
+    assert.match(output.prependContext, /remember this/);
+    assert.doesNotMatch(output.prependContext, /希望在主会话中被称呼为“宙斯”/);
+  });
+
+  it("respects filterRecall=false for memory_recall output", async () => {
+    const tool = createTool(registerMemoryRecallTool, {
+      ...makeRecallContext(makeUserMdExclusiveResults()),
+      workspaceBoundary: {
+        userMdExclusive: {
+          enabled: true,
+          filterRecall: false,
+        },
+      },
+    });
+    const res = await tool.execute(null, { query: "addressing without recall filter" });
+
+    assert.equal(res.details.memories.length, 3);
+    assert.match(res.content[0].text, /称呼偏好：宙斯/);
   });
 });

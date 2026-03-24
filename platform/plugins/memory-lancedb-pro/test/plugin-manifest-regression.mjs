@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
+import Module from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import jitiFactory from "jiti";
-import { initGlobalNodePath } from "./helpers/node-path.mjs";
 
-initGlobalNodePath();
+process.env.NODE_PATH = [
+  process.env.NODE_PATH,
+  "/opt/homebrew/lib/node_modules/openclaw/node_modules",
+  "/opt/homebrew/lib/node_modules",
+].filter(Boolean).join(":");
+Module._initPaths();
 
 const jiti = jitiFactory(import.meta.url, { interopDefault: true });
 const plugin = jiti("../index.ts");
@@ -51,13 +56,44 @@ function createMockApi(pluginConfig, options = {}) {
   };
 }
 
-for (const key of ["smartExtraction", "extractMinMessages", "extractMaxChars"]) {
+for (const key of [
+  "smartExtraction",
+  "extractMinMessages",
+  "extractMaxChars",
+  "llm",
+  "autoRecallMaxItems",
+  "autoRecallMaxChars",
+  "autoRecallPerItemMaxChars",
+]) {
   assert.ok(
     Object.prototype.hasOwnProperty.call(manifest.configSchema.properties, key),
     `configSchema should declare ${key}`,
   );
 }
 
+assert.ok(
+  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "auth"),
+  "configSchema should declare llm.auth",
+);
+assert.ok(
+  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "oauthPath"),
+  "configSchema should declare llm.oauthPath",
+);
+assert.ok(
+  Object.prototype.hasOwnProperty.call(manifest.configSchema.properties.llm.properties, "oauthProvider"),
+  "configSchema should declare llm.oauthProvider",
+);
+
+assert.equal(
+  manifest.configSchema.properties.autoRecallMinRepeated.default,
+  8,
+  "autoRecallMinRepeated schema default should be conservative",
+);
+assert.equal(
+  manifest.configSchema.properties.extractMinMessages.default,
+  4,
+  "extractMinMessages schema default should reduce aggressive auto-capture",
+);
 assert.equal(
   manifest.configSchema.properties.autoCapture.default,
   true,

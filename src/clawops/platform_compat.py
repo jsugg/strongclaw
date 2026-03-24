@@ -6,11 +6,13 @@ import argparse
 import dataclasses
 import json
 import platform
+import sys
 
 DEFAULT_OPENCLAW_VERSION = "2026.3.13"
 DEFAULT_ACPX_VERSION = "0.3.0"
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
+DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT = "torch<2.3"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -19,6 +21,22 @@ class HostPlatform:
 
     os_name: str
     architecture: str
+
+
+def _normalize_python_version(value: str) -> tuple[int, int]:
+    """Normalize a Python version string to a major/minor tuple."""
+    parts = value.strip().split(".")
+    if len(parts) < 2:
+        raise ValueError(f"python version must include major.minor: {value!r}")
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError as err:
+        raise ValueError(f"python version must be numeric: {value!r}") from err
+
+
+def _python_version_text(version: tuple[int, int]) -> str:
+    """Return a normalized major.minor version string."""
+    return f"{version[0]}.{version[1]}"
 
 
 def normalize_os_name(value: str) -> str:
@@ -68,12 +86,54 @@ def resolve_memory_plugin_lancedb_version(host: HostPlatform) -> str:
     return DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
 
 
-def build_compatibility_record(host: HostPlatform) -> dict[str, object]:
+def supports_hypermemory_local_rerank(
+    host: HostPlatform, *, python_version: str | None = None
+) -> bool:
+    """Return whether the local rerank dependency should be installed."""
+    resolved_python = _normalize_python_version(
+        python_version
+        if python_version is not None
+        else _python_version_text((sys.version_info.major, sys.version_info.minor))
+    )
+    if resolved_python < (3, 12):
+        return False
+    if host.os_name == "darwin" and host.architecture == "x86_64":
+        return resolved_python < (3, 13)
+    if host.os_name == "darwin" and host.architecture == "arm64":
+        return True
+    if host.os_name == "linux" and host.architecture in {"x86_64", "arm64"}:
+        return True
+    return False
+
+
+def resolve_hypermemory_local_rerank_torch_constraint(
+    host: HostPlatform, *, python_version: str | None = None
+) -> str | None:
+    """Return any host-specific torch constraint for local reranking."""
+    if not supports_hypermemory_local_rerank(host, python_version=python_version):
+        return None
+    if host.os_name == "darwin" and host.architecture == "x86_64":
+        return DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
+    return None
+
+
+def build_compatibility_record(
+    host: HostPlatform, *, python_version: str | None = None
+) -> dict[str, object]:
     """Return a JSON-safe compatibility description for the host."""
     resolved_lancedb = resolve_memory_plugin_lancedb_version(host)
+    resolved_python = _python_version_text(
+        _normalize_python_version(
+            python_version
+            if python_version is not None
+            else _python_version_text((sys.version_info.major, sys.version_info.minor))
+        )
+    )
+    local_rerank_supported = supports_hypermemory_local_rerank(host, python_version=resolved_python)
     return {
         "host_os": host.os_name,
         "host_arch": host.architecture,
+        "python_version": resolved_python,
         "service_manager": resolve_service_manager(host),
         "openclaw_version": DEFAULT_OPENCLAW_VERSION,
         "acpx_version": DEFAULT_ACPX_VERSION,
@@ -81,6 +141,11 @@ def build_compatibility_record(host: HostPlatform) -> dict[str, object]:
         "memory_plugin_lancedb_version": resolved_lancedb,
         "memory_plugin_override_required": resolved_lancedb
         != DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
+        "hypermemory_local_rerank_supported": local_rerank_supported,
+        "hypermemory_local_rerank_torch_constraint": (
+            resolve_hypermemory_local_rerank_torch_constraint(host, python_version=resolved_python)
+        ),
+        "hypermemory_local_rerank_requires_http_fallback": not local_rerank_supported,
     }
 
 
@@ -89,17 +154,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--os")
     parser.add_argument("--arch")
+    parser.add_argument("--python-version")
     parser.add_argument(
         "--field",
         choices=(
             "host_os",
             "host_arch",
+            "python_version",
             "service_manager",
             "openclaw_version",
             "acpx_version",
             "memory_plugin_default_lancedb_version",
             "memory_plugin_lancedb_version",
             "memory_plugin_override_required",
+            "hypermemory_local_rerank_supported",
+            "hypermemory_local_rerank_torch_constraint",
+            "hypermemory_local_rerank_requires_http_fallback",
         ),
     )
     parser.add_argument("--json", action="store_true")
@@ -110,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     """Print host compatibility information."""
     args = parse_args(argv)
     host = detect_host_platform(os_name=args.os, architecture=args.arch)
-    payload = build_compatibility_record(host)
+    payload = build_compatibility_record(host, python_version=args.python_version)
     if args.field is not None:
         value = payload[args.field]
         if isinstance(value, bool):

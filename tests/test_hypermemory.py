@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 import textwrap
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -13,6 +14,7 @@ import pytest
 from clawops.hypermemory import (
     DenseSearchCandidate,
     HypermemoryEngine,
+    RerankResponse,
     SparseSearchCandidate,
     default_config_path,
     load_config,
@@ -77,6 +79,27 @@ def _build_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
     return workspace
 
 
+def _build_rerank_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
+    workspace = _build_workspace(tmp_path)
+    (workspace / "MEMORY.md").write_text(
+        """
+        # Project Memory
+
+        - Fact: Gateway token deploy checklist lives beside the release notes.
+        """.strip() + "\n",
+        encoding="utf-8",
+    )
+    (workspace / "docs" / "runbook.md").write_text(
+        """
+        # Gateway Runbook
+
+        The browser profile rollout follows the gateway token deploy checklist.
+        """.strip() + "\n",
+        encoding="utf-8",
+    )
+    return workspace
+
+
 def test_load_shipped_hypermemory_config() -> None:
     config = load_config(default_config_path())
     assert config.include_default_memory is True
@@ -85,6 +108,10 @@ def test_load_shipped_hypermemory_config() -> None:
     assert any(entry.name == "openclaw-workspaces" for entry in config.corpus_paths)
     assert config.backend.active == "sqlite_fts"
     assert config.hybrid.fusion == "rrf"
+    assert config.hybrid.rerank_candidate_pool == 32
+    assert config.rerank.enabled is True
+    assert config.rerank.provider == "local-sentence-transformers"
+    assert config.rerank.fallback_provider == "compatible-http"
     assert config.qdrant.enabled is False
 
 
@@ -317,7 +344,17 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
     config = replace(
         config,
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-status"),
-        rerank=replace(config.rerank, model="rerank-test"),
+        rerank=replace(
+            config.rerank,
+            enabled=True,
+            provider="local-sentence-transformers",
+            fallback_provider="compatible-http",
+            local=replace(config.rerank.local, model="rerank-test"),
+            compatible_http=replace(
+                config.rerank.compatible_http,
+                model="http-rerank-test",
+            ),
+        ),
     )
     engine = HypermemoryEngine(config)
     engine._qdrant_backend = _FakeQdrantBackend()
@@ -328,13 +365,106 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
     assert payload["backendActive"] == "sqlite_fts"
     assert payload["backendFallback"] == "sqlite_fts"
     assert payload["embeddingProvider"] == "disabled"
-    assert payload["rerankProvider"] == "none"
+    assert payload["rerankProvider"] == "local-sentence-transformers"
+    assert payload["rerankFallbackProvider"] == "compatible-http"
+    assert payload["rerankFailOpen"] is True
     assert payload["rerankModel"] == "rerank-test"
+    assert payload["rerankFallbackModel"] == "http-rerank-test"
     assert payload["qdrantEnabled"] is True
     assert payload["qdrantHealthy"] is True
     assert payload["vectorItems"] == 0
     assert payload["lastVectorSyncAt"]
     assert payload["missingCorpusPaths"] == []
+
+
+def test_hypermemory_rerank_changes_planner_order_before_diversity(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_rerank_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    baseline_config = load_config(config_path)
+    baseline_engine = HypermemoryEngine(baseline_config)
+    baseline_engine.reindex()
+    baseline_hits = baseline_engine.search(
+        "gateway token deploy checklist",
+        lane="all",
+        include_explain=True,
+    )
+    assert baseline_hits
+    assert baseline_hits[0].path == "MEMORY.md"
+
+    rerank_config = replace(
+        baseline_config,
+        ranking=replace(baseline_config.ranking, rerank_weight=0.95),
+        hybrid=replace(baseline_config.hybrid, rerank_candidate_pool=3),
+        rerank=replace(
+            baseline_config.rerank,
+            enabled=True,
+            provider="local-sentence-transformers",
+            local=replace(
+                baseline_config.rerank.local,
+                model="BAAI/bge-reranker-v2-m3",
+            ),
+        ),
+    )
+    rerank_engine = HypermemoryEngine(rerank_config)
+    rerank_engine.reindex()
+    rerank_provider = _StaticRerankProvider([0.0, 0.4, 1.0])
+    rerank_engine._rerank_provider = rerank_provider
+
+    hits = rerank_engine.search(
+        "gateway token deploy checklist",
+        lane="all",
+        include_explain=True,
+    )
+
+    assert hits
+    assert hits[0].path == "docs/runbook.md"
+    assert hits[0].to_dict()["explain"]["rerankScore"] == pytest.approx(1.0)
+    assert rerank_provider.calls
+
+
+def test_hypermemory_rerank_fail_open_preserves_provisional_order(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_rerank_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    baseline_config = load_config(config_path)
+    baseline_engine = HypermemoryEngine(baseline_config)
+    baseline_engine.reindex()
+    baseline_hits = baseline_engine.search("gateway token deploy checklist", lane="all")
+    assert baseline_hits
+
+    fail_open_config = replace(
+        baseline_config,
+        hybrid=replace(baseline_config.hybrid, rerank_candidate_pool=2),
+        rerank=replace(
+            baseline_config.rerank,
+            enabled=True,
+            provider="local-sentence-transformers",
+            fail_open=True,
+            local=replace(
+                baseline_config.rerank.local,
+                model="BAAI/bge-reranker-v2-m3",
+            ),
+        ),
+    )
+    fail_open_engine = HypermemoryEngine(fail_open_config)
+    fail_open_engine.reindex()
+    fail_open_engine._rerank_provider = _FailingRerankProvider()
+
+    hits = fail_open_engine.search(
+        "gateway token deploy checklist",
+        lane="all",
+        include_explain=True,
+    )
+
+    assert [hit.path for hit in hits] == [hit.path for hit in baseline_hits]
+    assert hits[0].to_dict()["explain"]["rerankScore"] == pytest.approx(0.0)
 
 
 def test_hypermemory_status_reports_missing_optional_corpus_paths(tmp_path: pathlib.Path) -> None:
@@ -456,6 +586,8 @@ class _FakeQdrantBackend:
         self.ensure_calls: list[int] = []
         self.upsert_calls: list[list[dict[str, Any]]] = []
         self.delete_calls: list[list[str]] = []
+        self.dense_limits: list[int] = []
+        self.sparse_limits: list[int] = []
         self.search_results: list[DenseSearchCandidate] = []
         self.sparse_search_results: list[Any] = []
         self.raise_on_search = False
@@ -489,7 +621,8 @@ class _FakeQdrantBackend:
     def search_dense(
         self, *, vector: list[float], limit: int, mode: str, scope: str | None
     ) -> list[DenseSearchCandidate]:
-        del vector, limit, mode, scope
+        del vector, mode, scope
+        self.dense_limits.append(limit)
         if self.raise_on_search:
             raise RuntimeError("dense backend unavailable")
         return list(self.search_results)
@@ -502,13 +635,43 @@ class _FakeQdrantBackend:
         mode: str,
         scope: str | None,
     ) -> list[Any]:
-        del vector, limit, mode, scope
+        del vector, mode, scope
+        self.sparse_limits.append(limit)
         return list(self.sparse_search_results)
 
     def search(
         self, *, vector: list[float], limit: int, mode: str, scope: str | None
     ) -> list[DenseSearchCandidate]:
         return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
+
+
+class _StaticRerankProvider:
+    def __init__(
+        self,
+        scores: Sequence[float],
+        *,
+        provider: str = "local-sentence-transformers",
+        fallback_used: bool = False,
+    ) -> None:
+        self._scores = tuple(scores)
+        self._provider = provider
+        self._fallback_used = fallback_used
+        self.calls: list[dict[str, Any]] = []
+
+    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
+        self.calls.append({"query": query, "documents": list(documents)})
+        return RerankResponse(
+            scores=self._scores,
+            provider=self._provider,
+            applied=True,
+            fallback_used=self._fallback_used,
+        )
+
+
+class _FailingRerankProvider:
+    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
+        del query, documents
+        raise RuntimeError("rerank backend unavailable")
 
 
 def test_hypermemory_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) -> None:
@@ -553,6 +716,57 @@ def test_hypermemory_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) ->
     assert hits[0].backend == "qdrant_dense_hybrid"
     assert fake_qdrant.ensure_calls
     assert fake_qdrant.upsert_calls
+
+
+def test_hypermemory_search_uses_runtime_candidate_pool_overrides(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-test"),
+    )
+    engine = HypermemoryEngine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.7)
+    ]
+
+    hits = engine.search(
+        "gateway token",
+        lane="all",
+        dense_candidate_pool=7,
+        sparse_candidate_pool=5,
+    )
+
+    assert hits
+    assert fake_qdrant.dense_limits[-1] == 7
+    assert fake_qdrant.sparse_limits[-1] == 5
 
 
 def test_hypermemory_dense_backend_falls_back_to_sqlite(tmp_path: pathlib.Path) -> None:
