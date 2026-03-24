@@ -6,6 +6,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: fresh-host-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -85,6 +89,7 @@ jobs:
           scutil --get ComputerName
           scutil --get LocalHostName
       - name: Warm hosted macOS aux-stack images
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euxo pipefail
@@ -120,23 +125,26 @@ jobs:
           mkdir -p "${HOME}"
 
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
-          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
-          launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
-          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist"
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist"
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist"
+          else
+            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
+            launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
+            launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
             mkdir -p "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
             .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
             .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
             .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
             .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
-          else
-            echo "Skipping repo-local macOS compose/browser-lab cycle on pull_request; Linux pull_request coverage exercises that path."
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
+            .venv/bin/python -m clawops ops --repo-root . sidecars down || true
+            .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
           fi
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
-          .venv/bin/python -m clawops ops --repo-root . sidecars down || true
-          .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
       - name: Dump macOS host logs on failure
         if: failure()
         shell: bash
