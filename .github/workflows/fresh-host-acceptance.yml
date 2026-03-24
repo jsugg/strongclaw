@@ -52,6 +52,7 @@ jobs:
         with:
           name: linux-fresh-host-artifacts
           path: ${{ runner.temp }}/strongclaw-linux-host
+          include-hidden-files: true
 
   macos-fresh-host:
     name: macOS Fresh Host
@@ -105,3 +106,4 @@ jobs:
         with:
           name: macos-fresh-host-artifacts
           path: ${{ runner.temp }}/strongclaw-macos-host
+          include-hidden-files: true

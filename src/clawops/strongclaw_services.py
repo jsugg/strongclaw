@@ -31,6 +31,8 @@ LAUNCHD_PASSTHROUGH_ENV_VARS: Final[tuple[str, ...]] = (
     "DOCKER_CONTEXT",
     "DOCKER_HOST",
 )
+LAUNCHD_GATEWAY_TIMEOUT_SECONDS: Final[int] = 30
+LAUNCHD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 900
 LAUNCHD_ONESHOT_MAX_ATTEMPTS: Final[int] = 2
 LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
@@ -232,12 +234,16 @@ def activate_services(
         gateway_plist = output_dir / f"{LAUNCHD_GATEWAY_LABEL}.plist"
         sidecars_plist = output_dir / f"{LAUNCHD_SIDECARS_LABEL}.plist"
         _activate_launchd_service(domain, LAUNCHD_GATEWAY_LABEL, gateway_plist)
-        _wait_for_launchd_service(LAUNCHD_GATEWAY_LABEL, persistent=True, timeout_seconds=30)
+        _wait_for_launchd_service(
+            LAUNCHD_GATEWAY_LABEL,
+            persistent=True,
+            timeout_seconds=LAUNCHD_GATEWAY_TIMEOUT_SECONDS,
+        )
         _activate_launchd_oneshot_service(
             domain,
             LAUNCHD_SIDECARS_LABEL,
             sidecars_plist,
-            timeout_seconds=300,
+            timeout_seconds=LAUNCHD_SIDECARS_TIMEOUT_SECONDS,
         )
         return {
             **render_payload,
