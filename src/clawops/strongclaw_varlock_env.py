@@ -88,6 +88,8 @@ def _current_env_values(repo_root: pathlib.Path) -> dict[str, str]:
 def _save_plugin_overlay(path: pathlib.Path, content: str) -> None:
     """Write the managed backend overlay with strict permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # codeql[py/clear-text-storage-sensitive-data]: backend overlay secrets are intentionally written to a user-owned local file, and the file is immediately restricted to 0600.
     path.write_text(content.strip() + "\n", encoding="utf-8")
     path.chmod(0o600)
 
