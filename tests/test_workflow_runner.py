@@ -77,11 +77,7 @@ def test_workflow_main_allows_trusted_repo_workflows_in_dry_run() -> None:
 def test_workflow_main_rejects_untrusted_paths_by_default(tmp_path: pathlib.Path) -> None:
     workflow_path = tmp_path / "custom.yaml"
     workflow_path.write_text(
-        "name: custom\n"
-        "steps:\n"
-        "  - name: noop\n"
-        "    kind: journal_init\n"
-        "    db: ignored.sqlite\n",
+        "name: custom\nsteps:\n  - name: noop\n    kind: journal_init\n    db: ignored.sqlite\n",
         encoding="utf-8",
     )
 
@@ -94,11 +90,7 @@ def test_workflow_main_allows_untrusted_paths_with_explicit_override(
 ) -> None:
     workflow_path = tmp_path / "custom.yaml"
     workflow_path.write_text(
-        "name: custom\n"
-        "steps:\n"
-        "  - name: noop\n"
-        "    kind: journal_init\n"
-        "    db: ignored.sqlite\n",
+        "name: custom\nsteps:\n  - name: noop\n    kind: journal_init\n    db: ignored.sqlite\n",
         encoding="utf-8",
     )
 

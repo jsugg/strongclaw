@@ -43,6 +43,13 @@ Typed durable entries can also carry evidence metadata. File-backed proof stays 
 
 The derived index stores those references as structured provenance so export and audit flows can preserve canonical file lines and `lcm://...` links without coupling hypermemory to the context-engine database.
 
+Typed durable entries may also carry lifecycle metadata directly in the canonical line prefix, for example:
+
+- `Fact[scope=project:strongclaw,importance=0.80,tier=core,fact_key=user:timezone]: My timezone is UTC-3`
+- `Fact[scope=project:strongclaw,accessed=5,last_access=2026-03-24]: Deploy approvals require two reviewers.`
+
+Those fields remain Markdown-canonical: reindex reconstructs them from source Markdown, and the fact registry rebuilds current keyed facts from those same canonical entries.
+
 ## Derived index
 
 The derived store lives in SQLite and is rebuilt from Markdown:
@@ -168,7 +175,11 @@ PYTHONPATH=src python3 -m clawops hypermemory status --json
 PYTHONPATH=src python3 -m clawops hypermemory verify --json --config platform/configs/memory/hypermemory.yaml
 PYTHONPATH=src python3 -m clawops hypermemory index --json
 PYTHONPATH=src python3 -m clawops hypermemory search --query "deployment playbook" --json
-PYTHONPATH=src python3 -m clawops hypermemory store --type fact --text "Deploy approvals require two reviewers." --json
+PYTHONPATH=src python3 -m clawops hypermemory store --type fact --text "Deploy approvals require two reviewers." --importance 0.8 --json
+PYTHONPATH=src python3 -m clawops hypermemory capture --messages '[[0,"user","My timezone is UTC-3"]]' --mode regex --json
+PYTHONPATH=src python3 -m clawops hypermemory list-facts --json
+PYTHONPATH=src python3 -m clawops hypermemory forget --entry-text "Deploy approvals require two reviewers." --json
+PYTHONPATH=src python3 -m clawops hypermemory lifecycle --json
 PYTHONPATH=src python3 -m clawops hypermemory reflect --json
 ```
 

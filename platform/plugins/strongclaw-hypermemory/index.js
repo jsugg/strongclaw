@@ -52,6 +52,24 @@ const UPDATE_SCHEMA = {
   },
   required: ["path", "find", "replace"],
 };
+const FORGET_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    query: { type: "string" },
+    entryText: { type: "string" },
+    path: { type: "string" },
+    hardDelete: { type: "boolean" },
+  },
+};
+const LIST_FACTS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    category: { type: "string" },
+    scope: { type: "string" },
+  },
+};
 const EMPTY_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -110,13 +128,17 @@ function resolvePluginConfig(rawConfig) {
   }
   const timeoutMs = readNumberParam(input, "timeoutMs");
   const recallMaxResults = readNumberParam(input, "recallMaxResults");
+  const captureMinMessages = readNumberParam(input, "captureMinMessages");
   return {
     command,
     configPath,
     autoRecall: input.autoRecall === true,
     autoReflect: input.autoReflect === true,
+    autoCapture: input.autoCapture === true,
     recallMaxResults:
       recallMaxResults && recallMaxResults >= 1 ? Math.min(10, Math.trunc(recallMaxResults)) : 3,
+    captureMinMessages:
+      captureMinMessages && captureMinMessages >= 1 ? Math.min(20, Math.trunc(captureMinMessages)) : 4,
     timeoutMs:
       timeoutMs && timeoutMs >= 1000 ? Math.min(120000, Math.trunc(timeoutMs)) : DEFAULT_TIMEOUT_MS,
   };
@@ -192,6 +214,90 @@ function formatRecallContext(results) {
     lines.push(`- ${entry.path}${range}: ${String(entry.snippet || "").trim()}`);
   }
   return lines.join("\n");
+}
+
+function fireAndForget(pluginConfig, args) {
+  runClawopsCommand(pluginConfig, args).catch(() => {});
+}
+
+function extractSessionMessages(event) {
+  const messages = Array.isArray(event?.messages)
+    ? event.messages
+    : Array.isArray(event?.conversation)
+      ? event.conversation
+      : [];
+  const normalized = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const entry = messages[index];
+    if (Array.isArray(entry) && entry.length >= 3) {
+      normalized.push([Number(entry[0]) || index, String(entry[1] ?? "user"), String(entry[2] ?? "")]);
+      continue;
+    }
+    if (entry && typeof entry === "object") {
+      const role = typeof entry.role === "string" ? entry.role : "user";
+      const text =
+        typeof entry.text === "string"
+          ? entry.text
+          : typeof entry.content === "string"
+            ? entry.content
+            : "";
+      if (text.trim()) {
+        normalized.push([index, role, text]);
+      }
+    }
+  }
+  return normalized;
+}
+
+function collectInjectedItemIds(results) {
+  return Array.isArray(results)
+    ? results
+        .map((entry) => Number(entry?.itemId))
+        .filter((itemId) => Number.isFinite(itemId) && itemId > 0)
+    : [];
+}
+
+function normalizeTerms(text) {
+  return String(text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((term) => term.length >= 4);
+}
+
+function extractResponseText(event) {
+  if (typeof event?.response === "string") {
+    return event.response;
+  }
+  if (typeof event?.output === "string") {
+    return event.output;
+  }
+  if (typeof event?.text === "string") {
+    return event.text;
+  }
+  return "";
+}
+
+function splitFeedbackIds(entries, responseText) {
+  const responseTerms = new Set(normalizeTerms(responseText));
+  const confirmed = [];
+  const badRecall = [];
+  for (const entry of entries) {
+    const itemId = Number(entry?.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      continue;
+    }
+    const snippetTerms = normalizeTerms(entry?.snippet).slice(0, 8);
+    if (snippetTerms.length === 0) {
+      continue;
+    }
+    const overlap = snippetTerms.filter((term) => responseTerms.has(term)).length;
+    if (overlap / snippetTerms.length >= 0.5) {
+      confirmed.push(itemId);
+    } else if (responseTerms.size > 0) {
+      badRecall.push(itemId);
+    }
+  }
+  return { confirmed, badRecall };
 }
 
 function registerMemoryCli(program, pluginConfig) {
@@ -343,6 +449,54 @@ function registerMemoryCli(program, pluginConfig) {
         captureJson: false,
       });
     });
+
+  memory
+    .command("forget")
+    .description("Invalidate or delete a durable strongclaw memory entry.")
+    .option("--query <text>", "Search query used to resolve the entry.")
+    .option("--path <path>", "Workspace-relative path.")
+    .option("--entry-text <text>", "Exact entry body text.")
+    .option("--hard-delete", "Remove the line instead of soft-invalidating it.")
+    .option("--json", "Print JSON.")
+    .action(async (opts) => {
+      const args = ["forget"];
+      if (opts.query) {
+        args.push("--query", String(opts.query));
+      }
+      if (opts.path) {
+        args.push("--path", String(opts.path));
+      }
+      if (opts.entryText) {
+        args.push("--entry-text", String(opts.entryText));
+      }
+      if (opts.hardDelete) {
+        args.push("--hard-delete");
+      }
+      if (opts.json) {
+        args.push("--json");
+      }
+      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+    });
+
+  memory
+    .command("list-facts")
+    .description("List canonical fact slots from StrongClaw hypermemory.")
+    .option("--category <category>", "profile, preference, decision, or entity.")
+    .option("--scope <scope>", "Scope filter.")
+    .option("--json", "Print JSON.")
+    .action(async (opts) => {
+      const args = ["list-facts"];
+      if (opts.category) {
+        args.push("--category", String(opts.category));
+      }
+      if (opts.scope) {
+        args.push("--scope", String(opts.scope));
+      }
+      if (opts.json) {
+        args.push("--json");
+      }
+      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+    });
 }
 
 const strongclawHypermemoryPlugin = {
@@ -362,6 +516,8 @@ const strongclawHypermemoryPlugin = {
       },
       autoRecall: { type: "boolean" },
       autoReflect: { type: "boolean" },
+      autoCapture: { type: "boolean" },
+      captureMinMessages: { type: "number", minimum: 1, maximum: 20 },
       recallMaxResults: { type: "number", minimum: 1, maximum: 10 },
       timeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
     },
@@ -369,6 +525,8 @@ const strongclawHypermemoryPlugin = {
   },
   register(api) {
     const pluginConfig = resolvePluginConfig(api.pluginConfig);
+    const sessionFeedback = new Map();
+    const sessionKeyFor = (event) => String(event?.sessionId ?? event?.conversationId ?? "default");
 
     api.registerTool(
       {
@@ -417,6 +575,10 @@ const strongclawHypermemoryPlugin = {
               args.push("--explain");
             }
             const payload = await runClawopsCommand(pluginConfig, args);
+            const injectedIds = collectInjectedItemIds(payload?.results);
+            if (injectedIds.length > 0) {
+              fireAndForget(pluginConfig, ["access", "--json", "--item-ids", JSON.stringify(injectedIds)]);
+            }
             return jsonResult(payload);
           } catch (error) {
             return jsonResult(buildDisabledSearchResult(String(error)));
@@ -542,6 +704,65 @@ const strongclawHypermemoryPlugin = {
       { names: ["memory_reflect"], optional: true },
     );
 
+    api.registerTool(
+      {
+        name: "memory_forget",
+        label: "Memory Forget",
+        description: "Invalidate or delete durable StrongClaw hypermemory entries.",
+        parameters: FORGET_SCHEMA,
+        async execute(_toolCallId, params) {
+          try {
+            const args = ["forget", "--json"];
+            const query = readStringParam(params, "query");
+            const entryText = readStringParam(params, "entryText");
+            const path = readStringParam(params, "path");
+            if (query) {
+              args.push("--query", query);
+            }
+            if (entryText) {
+              args.push("--entry-text", entryText);
+            }
+            if (path) {
+              args.push("--path", path);
+            }
+            if (params?.hardDelete === true) {
+              args.push("--hard-delete");
+            }
+            return jsonResult(await runClawopsCommand(pluginConfig, args));
+          } catch (error) {
+            return jsonResult({ ok: false, error: String(error) });
+          }
+        },
+      },
+      { names: ["memory_forget"], optional: true },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_list_facts",
+        label: "Memory List Facts",
+        description: "List the current canonical fact slots in StrongClaw hypermemory.",
+        parameters: LIST_FACTS_SCHEMA,
+        async execute(_toolCallId, params) {
+          try {
+            const args = ["list-facts", "--json"];
+            const category = readStringParam(params, "category");
+            const scope = readStringParam(params, "scope");
+            if (category) {
+              args.push("--category", category);
+            }
+            if (scope) {
+              args.push("--scope", scope);
+            }
+            return jsonResult(await runClawopsCommand(pluginConfig, args));
+          } catch (error) {
+            return jsonResult({ ok: false, error: String(error) });
+          }
+        },
+      },
+      { names: ["memory_list_facts"], optional: true },
+    );
+
     api.registerCli(({ program }) => {
       registerMemoryCli(program, pluginConfig);
     }, { commands: ["memory"] });
@@ -565,6 +786,17 @@ const strongclawHypermemoryPlugin = {
           if (results.length === 0) {
             return;
           }
+          const sessionKey = sessionKeyFor(event);
+          sessionFeedback.set(sessionKey, results);
+          const injectedIds = collectInjectedItemIds(results);
+          if (injectedIds.length > 0) {
+            fireAndForget(pluginConfig, [
+              "record-injection",
+              "--json",
+              "--item-ids",
+              JSON.stringify(injectedIds),
+            ]);
+          }
           return {
             prependContext: formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
           };
@@ -577,6 +809,54 @@ const strongclawHypermemoryPlugin = {
       } catch {
         registerRecall("before_agent_start");
       }
+      api.on("agent_end", async (event) => {
+        const sessionKey = sessionKeyFor(event);
+        const injected = sessionFeedback.get(sessionKey);
+        if (!Array.isArray(injected) || injected.length === 0) {
+          return;
+        }
+        sessionFeedback.delete(sessionKey);
+        const responseText = extractResponseText(event);
+        if (!responseText.trim()) {
+          return;
+        }
+        const feedback = splitFeedbackIds(injected, responseText);
+        if (feedback.confirmed.length > 0) {
+          fireAndForget(pluginConfig, [
+            "record-confirmation",
+            "--json",
+            "--item-ids",
+            JSON.stringify(feedback.confirmed),
+          ]);
+        }
+        if (feedback.badRecall.length > 0) {
+          fireAndForget(pluginConfig, [
+            "record-bad-recall",
+            "--json",
+            "--item-ids",
+            JSON.stringify(feedback.badRecall),
+          ]);
+        }
+      });
+    }
+
+    if (pluginConfig.autoCapture) {
+      api.on("agent_end", async (event) => {
+        try {
+          const messages = extractSessionMessages(event);
+          if (messages.length < pluginConfig.captureMinMessages) {
+            return;
+          }
+          await runClawopsCommand(pluginConfig, [
+            "capture",
+            "--json",
+            "--messages",
+            JSON.stringify(messages),
+          ]);
+        } catch (error) {
+          api.logger.warn(`strongclaw-hypermemory auto-capture failed: ${String(error)}`);
+        }
+      });
     }
 
     if (pluginConfig.autoReflect) {
@@ -594,6 +874,10 @@ const strongclawHypermemoryPlugin = {
         await runReflect("before_reset");
       });
     }
+
+    api.on("session_end", async () => {
+      fireAndForget(pluginConfig, ["flush-metadata", "--json"]);
+    });
   },
 };
 

@@ -21,6 +21,14 @@
       "autoReflect": {
         "type": "boolean"
       },
+      "autoCapture": {
+        "type": "boolean"
+      },
+      "captureMinMessages": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 20
+      },
       "recallMaxResults": {
         "type": "number",
         "minimum": 1,
