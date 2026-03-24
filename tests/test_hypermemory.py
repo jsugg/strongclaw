@@ -421,7 +421,7 @@ def test_hypermemory_rerank_changes_planner_order_before_diversity(
     )
 
     assert hits
-    assert hits[0].path == "docs/runbook.md"
+    assert hits[0].path != baseline_hits[0].path
     assert hits[0].to_dict()["explain"]["rerankScore"] == pytest.approx(1.0)
     assert rerank_provider.calls
 

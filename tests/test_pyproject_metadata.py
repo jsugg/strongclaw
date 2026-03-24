@@ -19,17 +19,19 @@ def test_rerank_dependency_markers_cover_supported_host_matrix() -> None:
     sentence_transformers_dep = next(
         dependency
         for dependency in dependencies
-        if dependency.startswith("sentence-transformers>=")
+        if dependency.startswith("sentence-transformers==")
     )
-    torch_dep = next(dependency for dependency in dependencies if dependency.startswith("torch<"))
+    torch_deps = sorted(
+        dependency for dependency in dependencies if dependency.startswith("torch==")
+    )
 
     assert "sys_platform == 'darwin'" in sentence_transformers_dep
     assert "platform_machine == 'x86_64' and python_version < '3.13'" in sentence_transformers_dep
     assert "platform_machine == 'arm64'" in sentence_transformers_dep
     assert "platform_machine == 'aarch64'" in sentence_transformers_dep
     assert "sys_platform == 'linux'" in sentence_transformers_dep
-    assert "platform_machine == 'x86_64'" in sentence_transformers_dep
-    assert torch_dep == (
-        "torch<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64' "
-        "and python_version < '3.13'"
-    )
+    assert "python_version >= '3.12' and python_version < '3.14'" in sentence_transformers_dep
+    assert torch_deps == [
+        "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version >= '3.12' and python_version < '3.13'",
+        "torch==2.8.0; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
+    ]

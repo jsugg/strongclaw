@@ -6,6 +6,7 @@ from clawops.platform_compat import (
     DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT,
     DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION,
     DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
+    SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT,
     HostPlatform,
     build_compatibility_record,
     detect_host_platform,
@@ -86,7 +87,7 @@ def test_local_rerank_support_matrix_tracks_known_host_python_combinations() -> 
     )
 
 
-def test_local_rerank_constraint_applies_only_to_intel_macos_python_312() -> None:
+def test_local_rerank_constraint_tracks_supported_host_specific_pins() -> None:
     assert (
         resolve_hypermemory_local_rerank_torch_constraint(
             HostPlatform("darwin", "x86_64"),
@@ -99,12 +100,26 @@ def test_local_rerank_constraint_applies_only_to_intel_macos_python_312() -> Non
             HostPlatform("darwin", "arm64"),
             python_version="3.13",
         )
-        is None
+        == SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT
+    )
+    assert (
+        resolve_hypermemory_local_rerank_torch_constraint(
+            HostPlatform("linux", "x86_64"),
+            python_version="3.13",
+        )
+        == SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT
     )
     assert (
         resolve_hypermemory_local_rerank_torch_constraint(
             HostPlatform("darwin", "x86_64"),
             python_version="3.13",
+        )
+        is None
+    )
+    assert (
+        resolve_hypermemory_local_rerank_torch_constraint(
+            HostPlatform("linux", "x86_64"),
+            python_version="3.14",
         )
         is None
     )
