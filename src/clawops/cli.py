@@ -70,6 +70,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "context", "clawops.context_service", "main", "Index, query, or pack repository context."
     ),
     CommandSpec(
+        "credential-status",
+        "clawops.credential_broker",
+        "main",
+        "Report machine-readable backend credential readiness.",
+    ),
+    CommandSpec(
         "memory",
         "clawops.memory_tools",
         "main",

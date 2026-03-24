@@ -11,10 +11,10 @@ import re
 import sqlite3
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Literal, cast
 
-from clawops.common import expand, load_yaml, sha256_hex, utc_now_ms, write_text
+from clawops.common import canonical_json, expand, load_yaml, sha256_hex, utc_now_ms, write_text
 from clawops.observability import emit_structured_log, observed_span
 
 DEFAULT_TEXT_EXTENSIONS = {
@@ -206,6 +206,17 @@ class SearchHit:
     symbols: list[str]
     start_line: int
     end_line: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class IndexedFile:
+    """Indexed file metadata used by context envelopes."""
+
+    path: str
+    sha256: str
+    size_bytes: int
+    symbols: tuple[str, ...]
+    content: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -475,6 +486,69 @@ class ContextService:
                 )
             )
         return hits
+
+    def load_file_records(self, paths: Sequence[str]) -> list[IndexedFile]:
+        """Load indexed file metadata for one or more repo-relative paths."""
+        if not paths:
+            return []
+        placeholders = ", ".join("?" for _ in paths)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT path, sha256, size_bytes, symbols, content
+                FROM files
+                WHERE path IN ({placeholders})
+                ORDER BY path ASC
+                """,
+                tuple(paths),
+            ).fetchall()
+        records: list[IndexedFile] = []
+        for row in rows:
+            symbols = tuple(item for item in str(row["symbols"]).splitlines() if item.strip())
+            records.append(
+                IndexedFile(
+                    path=str(row["path"]),
+                    sha256=str(row["sha256"]),
+                    size_bytes=int(row["size_bytes"]),
+                    symbols=symbols,
+                    content=str(row["content"]),
+                )
+            )
+        return records
+
+    def snapshot_records(self) -> list[IndexedFile]:
+        """Return the full indexed file snapshot in stable order."""
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT path, sha256, size_bytes, symbols, content
+                FROM files
+                ORDER BY path ASC
+                """).fetchall()
+        records: list[IndexedFile] = []
+        for row in rows:
+            symbols = tuple(item for item in str(row["symbols"]).splitlines() if item.strip())
+            records.append(
+                IndexedFile(
+                    path=str(row["path"]),
+                    sha256=str(row["sha256"]),
+                    size_bytes=int(row["size_bytes"]),
+                    symbols=symbols,
+                    content=str(row["content"]),
+                )
+            )
+        return records
+
+    def index_snapshot_id(self) -> str:
+        """Return a stable hash of the indexed repository snapshot."""
+        snapshot = [
+            {
+                "path": record.path,
+                "sha256": record.sha256,
+                "size_bytes": record.size_bytes,
+            }
+            for record in self.snapshot_records()
+        ]
+        return sha256_hex(canonical_json(snapshot))
 
     def git_diff(self) -> str:
         """Return the current git diff, if any."""
