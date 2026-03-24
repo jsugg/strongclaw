@@ -129,6 +129,11 @@ def strongclaw_compose_state_dir(
     return strongclaw_state_dir(home_dir=resolved_home, environ=env, os_name=os_name) / "compose"
 
 
+def strongclaw_repo_local_compose_state_dir(repo_root: pathlib.Path) -> pathlib.Path:
+    """Return the repo-local compose-state directory used by development sidecars."""
+    return repo_root.expanduser().resolve() / "platform" / "compose" / "state"
+
+
 def strongclaw_lossless_claw_dir(
     *,
     home_dir: pathlib.Path | None = None,

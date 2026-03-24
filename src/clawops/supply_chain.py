@@ -325,13 +325,29 @@ def _switch_branch(repo_root: pathlib.Path, branch: str) -> None:
 
 def _run_quality_gate(repo_root: pathlib.Path) -> None:
     """Run the repository quality gate."""
-    result = run_command(
-        ["/bin/bash", str(repo_root / "scripts/ci/run_repository_quality_gate.sh")],
-        cwd=repo_root,
-        timeout_seconds=1800,
+    commands = (
+        ["uv", "run", "pre-commit", "run", "actionlint", "--all-files"],
+        ["uv", "run", "pre-commit", "run", "shellcheck", "--all-files"],
+        [
+            "uv",
+            "run",
+            "pytest",
+            "-q",
+            "--cov=src/clawops",
+            "--cov-report=xml",
+            "--cov-report=term-missing",
+        ],
+        ["uv", "run", "python", "-m", "compileall", "-q", "src", "tests"],
     )
-    if not result.ok:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "quality gate failed")
+    env = dict(os.environ)
+    env["CLAWOPS_HTTP_RETRY_MODE"] = env.get("CLAWOPS_HTTP_RETRY_MODE", "safe")
+    env["PYTHONPATH"] = "src"
+    for command in commands:
+        result = run_command(command, cwd=repo_root, env=env, timeout_seconds=1800)
+        if not result.ok:
+            raise RuntimeError(
+                result.stderr.strip() or result.stdout.strip() or "quality gate failed"
+            )
 
 
 def _run_sbom_generation(repo_root: pathlib.Path) -> str:
@@ -339,9 +355,7 @@ def _run_sbom_generation(repo_root: pathlib.Path) -> str:
     output_path = repo_root / ".tmp" / "supply-chain-refresh" / "sbom.spdx.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     result = run_command(
-        ["/bin/bash", str(repo_root / "scripts/ci/generate_sbom.sh"), str(output_path)],
-        cwd=repo_root,
-        timeout_seconds=600,
+        ["syft", "dir:.", "-o", f"spdx-json={output_path}"], cwd=repo_root, timeout_seconds=600
     )
     if not result.ok:
         raise RuntimeError(

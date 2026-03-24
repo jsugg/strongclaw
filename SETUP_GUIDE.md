@@ -21,7 +21,7 @@ Host-specific notes:
 ## 1. Provision the runtime user
 
 ```bash
-sudo ./scripts/bootstrap/create_openclawsvc.sh
+Create the dedicated runtime user with your platform-native user-management tooling
 ```
 
 Then switch into the runtime account with the host-native path.
@@ -88,7 +88,7 @@ varlock load --path platform/configs/varlock
 Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports both guided and env-driven setup:
 
-- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
+- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
 - env-driven: set provider keys in `platform/configs/varlock/.env.local`
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
@@ -104,7 +104,7 @@ make setup
 Equivalent shell entrypoint:
 
 ```bash
-./scripts/bootstrap/setup.sh
+clawops setup
 ```
 
 That path bootstraps the host, creates or repairs the repo-local Varlock env
@@ -153,7 +153,7 @@ run setup. The guided env contract fills loopback defaults for
 `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
 them.
 
-Use `./scripts/bootstrap/doctor_host.sh` again after any host-side package or
+Use `clawops doctor-host` again after any host-side package or
 config change that might affect the local OpenClaw runtime contract.
 
 ## 6. Manual config and service flow
@@ -164,14 +164,14 @@ separately, use the lower-level entrypoints directly.
 Bootstrap the host:
 
 ```bash
-./scripts/bootstrap/bootstrap.sh
+clawops bootstrap
 ```
 
 Then validate the env contract and render the OpenClaw config:
 
 ```bash
-./scripts/bootstrap/configure_varlock_env.sh
-./scripts/bootstrap/render_openclaw_config.sh
+clawops varlock-env configure
+clawops render-openclaw-config --repo-root .
 ```
 
 This writes the merged config to `~/.openclaw/openclaw.json`.
@@ -180,7 +180,7 @@ If you bypass `make setup` / `clawops setup`, complete model/provider setup manu
 starting services:
 
 ```bash
-./scripts/bootstrap/configure_openclaw_model_auth.sh
+clawops model-auth ensure
 ```
 
 By default it now renders the `hypermemory` stack. If you want
@@ -204,11 +204,11 @@ repo-local memory corpus paths for:
 Use profile rerenders for placeholder-backed variants:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-default
-./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
-./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
+clawops render-openclaw-config --repo-root . --profile openclaw-default
+clawops render-openclaw-config --repo-root . --profile openclaw-qmd
+clawops render-openclaw-config --repo-root . --profile acp
+clawops render-openclaw-config --repo-root . --profile hypermemory
+clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
 ```
 
 The default `hypermemory` profile renders a self-contained
@@ -220,7 +220,7 @@ combined runtime: `lossless-claw` for context continuity plus
 Install and activate services:
 
 ```bash
-./scripts/bootstrap/install_host_services.sh --activate
+clawops services install --activate
 ```
 
 Equivalent manual activation commands:
@@ -243,9 +243,9 @@ systemctl --user enable --now openclaw-gateway.service
 Or run the gateway and sidecars manually first:
 
 ```bash
-./scripts/ops/launch_gateway_with_varlock.sh
-./scripts/ops/launch_sidecars_with_varlock.sh
-./scripts/bootstrap/verify_sidecars.sh
+clawops ops gateway start
+clawops ops sidecars up
+clawops verify-platform sidecars
 ```
 
 ## 7. Verify the secure baseline
@@ -254,7 +254,7 @@ If you used `make setup` or `clawops setup`, this verification already
 ran. Re-run it directly whenever you want to recheck the host baseline:
 
 ```bash
-./scripts/bootstrap/verify_baseline.sh
+clawops baseline verify
 ```
 
 Do not continue until all baseline checks are clean.
@@ -269,7 +269,7 @@ clawops doctor
 ## 8. Enable ACP workers
 
 ```bash
-./scripts/bootstrap/bootstrap_acpx.sh
+clawops render-openclaw-config --repo-root . --profile acp
 ```
 
 This installs the acpx config templates and writes the ACP worker overlay.
@@ -277,21 +277,21 @@ This installs the acpx config templates and writes the ACP worker overlay.
 Then rerender the OpenClaw config with the ACP worker profile:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile acp
+clawops render-openclaw-config --repo-root . --profile acp
 ```
 
 Smoke test:
 
 ```bash
-./scripts/workers/run_codex_session.sh "Summarize the repo"
-./scripts/workers/run_claude_review.sh "Review auth boundaries"
+clawops acp-runner --prompt "Summarize the repo"
+clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-run
 ```
 
 ## 9. Enable repo lexical context indexing and verify QMD
 
 ```bash
-./scripts/bootstrap/bootstrap_context.sh
-./scripts/workers/prewarm_qmd.sh
+clawops context index --config platform/configs/context/context-service.yaml --repo .
+qmd status
 ```
 
 `bootstrap_qmd.sh` is now part of the standard host bootstrap path. Re-run it only if the QMD backend is missing or needs repair.
@@ -318,7 +318,7 @@ QMD-backed retrieval rollout, rerender with the Ollama-backed smart extraction
 profile:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
+clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
 ```
 
 This StrongClaw-managed profile uses Ollama-backed smart extraction, but it
@@ -343,7 +343,7 @@ For the supported sparse+dense hypermemory path, run:
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
 clawops setup --profile hypermemory
-./scripts/bootstrap/verify_hypermemory.sh
+clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
 clawops doctor
 ```
 
@@ -361,13 +361,13 @@ SQLite fallback path.
 4. Approve the first DM via pairing.
 
 ```bash
-./scripts/bootstrap/enable_telegram.sh
+platform/docs/channels/telegram.md
 ```
 
 Verify the channel overlay, docs, and allowlist contract:
 
 ```bash
-./scripts/bootstrap/verify_channels.sh
+clawops verify-platform channels
 ```
 
 ### WhatsApp
@@ -375,13 +375,13 @@ Verify the channel overlay, docs, and allowlist contract:
 Use a dedicated number.
 
 ```bash
-./scripts/bootstrap/enable_whatsapp.sh
+platform/docs/channels/whatsapp.md
 ```
 
 Re-run channel verification after WhatsApp is enabled:
 
 ```bash
-./scripts/bootstrap/verify_channels.sh
+clawops verify-platform channels
 ```
 
 ## 12. Enable observability
@@ -389,8 +389,8 @@ Re-run channel verification after WhatsApp is enabled:
 First start OTEL only:
 
 ```bash
-./scripts/bootstrap/enable_observability.sh
-./scripts/bootstrap/verify_observability.sh
+clawops verify-platform observability
+clawops verify-platform observability
 ```
 
 Optional: start Langfuse on a separate VM or separate sidecar host using:
@@ -406,14 +406,14 @@ Do **not** enable browser automation on the main control-plane host.
 On a dedicated box or separate hardened OS user session:
 
 ```bash
-./scripts/bootstrap/bootstrap_browser_lab.sh
+clawops ops browser-lab up --repo-local-state
 docker compose -f platform/compose/docker-compose.browser-lab.yaml up -d
 ```
 
 Run exfil tests:
 
 ```bash
-./scripts/workers/run_browser_lab_exfil_tests.sh
+the browser-lab exfiltration test suite
 ```
 
 Reach the gateway over SSH tunnel only:
@@ -426,7 +426,7 @@ Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator
 workstation. Verify the local-only posture after startup:
 
 ```bash
-./scripts/ops/check_loopback_bindings.sh 18789 3128 9222
+clawops verify-platform sidecars
 ```
 
 ## 14. Backups and retention
@@ -434,14 +434,14 @@ workstation. Verify the local-only posture after startup:
 Create and verify a backup:
 
 ```bash
-./scripts/recovery/backup_create.sh
-./scripts/recovery/backup_verify.sh latest
+clawops recovery backup-create
+clawops recovery backup-verify latest
 ```
 
 Prune old artifacts:
 
 ```bash
-./scripts/recovery/prune_retention.sh
+clawops recovery prune-retention
 ```
 
 ## 15. CI/CD
@@ -461,7 +461,7 @@ Push the repo and enable branch protection. The included workflows provide:
 When you run on Linux:
 
 1. prefer rootless Docker or a locked-down `docker` group for the runtime user
-2. render user units with `./scripts/bootstrap/install_host_services.sh`
+2. render user units with `clawops services install`
 3. keep browser lab on a separate runner
 4. keep channel ingress private or tailnet-only
 

@@ -165,13 +165,14 @@ def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
             return CommandResult(returncode=0, stdout="", stderr="", duration_ms=1)
         if command[:4] == ["git", "-C", str(repo_root), "commit"]:
             return CommandResult(returncode=0, stdout="[branch] refresh", stderr="", duration_ms=1)
-        if command[:2] == [
-            "/bin/bash",
-            str(repo_root / "scripts/ci/run_repository_quality_gate.sh"),
-        ]:
+        if command[:3] == ["uv", "run", "pre-commit"]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
-        if command[:2] == ["/bin/bash", str(repo_root / "scripts/ci/generate_sbom.sh")]:
-            pathlib.Path(command[2]).write_text("{}", encoding="utf-8")
+        if command[:2] == ["uv", "run"] and "pytest" in command:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:2] == ["uv", "run"] and "compileall" in command:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:2] == ["syft", "dir:."]:
+            pathlib.Path(str(command[-1]).split("=", 1)[1]).write_text("{}", encoding="utf-8")
             return CommandResult(returncode=0, stdout="sbom ok", stderr="", duration_ms=1)
         if command[:3] == ["gh", "pr", "create"]:
             return CommandResult(

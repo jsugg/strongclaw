@@ -92,7 +92,7 @@ Supported default StrongClaw path:
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
 clawops setup --profile hypermemory
-./scripts/bootstrap/verify_hypermemory.sh
+clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
 ```
 
 That flow renders the default StrongClaw stack with `lossless-claw`, `strongclaw-hypermemory`, `autoRecall: true`, `autoReflect: false`, and [platform/configs/memory/hypermemory.yaml](../configs/memory/hypermemory.yaml).

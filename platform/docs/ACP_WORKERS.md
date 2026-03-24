@@ -13,8 +13,8 @@ ACP/acpx is the preferred structured worker plane for coding agents.
 
 - worker config templates
 - coding/review system prompts
-- worktree management scripts
-- reviewer/fixer loop script
+- worktree management commands
+- reviewer/fixer workflow templates
 - OpenClaw overlay for ACP agents
 
 ## Flow

@@ -23,8 +23,10 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/bootstrap/run_harness_smoke.sh "$RUNNER_TEMP/strongclaw/harness"
+      - run: uv sync --locked --extra dev
+      - run: mkdir -p "$RUNNER_TEMP/strongclaw/harness"
+      - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/harness/security.jsonl"
+      - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/harness/policy.jsonl"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always()
         with:

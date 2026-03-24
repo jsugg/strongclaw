@@ -12,7 +12,7 @@ REPO_DIR ?= .
 RUNS_DIR ?=
 SETUP_ARGS ?=
 DOCTOR_ARGS ?=
-PREFERRED_PYTHON := $(shell ./scripts/lib/preferred_python.sh 2>/dev/null)
+PREFERRED_PYTHON := $(shell PYTHONPATH=src $(PYTHON) -m clawops.platform_compat --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
 .PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
@@ -74,22 +74,22 @@ compile: ## Compile source and tests in the managed dev environment.
 	PYTHONPATH=src $(RUN) python -m compileall -q src tests
 
 render-config: ## Render the OpenClaw config bundle.
-	./scripts/bootstrap/render_openclaw_config.sh
+	PYTHONPATH=src $(RUN) python -m clawops render-openclaw-config --repo-root .
 
 start-sidecars: ## Launch the sidecar services.
-	./scripts/ops/launch_sidecars_with_varlock.sh
+	PYTHONPATH=src $(RUN) python -m clawops ops sidecars up
 
 stop-sidecars: ## Stop the sidecar services.
-	./scripts/ops/stop_sidecars.sh
+	PYTHONPATH=src $(RUN) python -m clawops ops sidecars down
 
 verify: ## Run the baseline verification flow.
-	./scripts/bootstrap/verify_baseline.sh
+	PYTHONPATH=src $(RUN) python -m clawops baseline verify
 
 context-index: ## Build the repo lexical context index.
 	$(RUN) clawops context index --config $(CONTEXT_CONFIG) --repo $(REPO_DIR)
 
 run-harness: ## Execute the harness smoke suite.
-	./scripts/bootstrap/run_harness_smoke.sh $(RUNS_DIR)
+	PYTHONPATH=src $(RUN) python -m clawops baseline harness-smoke --runs-dir $(if $(RUNS_DIR),$(RUNS_DIR),.tmp/harness)
 
 backup: ## Create a recovery backup bundle.
-	./scripts/recovery/backup_create.sh
+	PYTHONPATH=src $(RUN) python -m clawops recovery backup-create

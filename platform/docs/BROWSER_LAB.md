@@ -26,7 +26,7 @@ ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 Verify the expected local-only bindings after startup:
 
 ```bash
-./scripts/ops/check_loopback_bindings.sh 18789 3128 9222
+clawops verify-platform sidecars
 ```
 
 ## Included artifacts

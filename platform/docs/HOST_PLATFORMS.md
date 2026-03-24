@@ -51,7 +51,7 @@ For low-end or older hosts, this split matters:
 
 StrongClaw-generated runtime artifacts should not live inside the repository
 checkout. The setup, doctor, harness, ACP runner, workflow context-pack, and
-compose helper scripts now default to OS-appropriate app directories instead.
+compose helper commands now default to OS-appropriate app directories instead.
 
 | Kind | Linux default | macOS default |
 | --- | --- | --- |
@@ -67,23 +67,23 @@ compose helper scripts now default to OS-appropriate app directories instead.
 
 Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`,
 `STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs
-to override those defaults. The provided shell wrappers export
+to override those defaults. The Python-owned compose commands export
 `STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
 
 ## Shared host contract
 
 Regardless of host OS, the baseline flow is:
 
-1. provision a dedicated non-admin runtime user with `./scripts/bootstrap/create_openclawsvc.sh`
+1. provision a dedicated non-admin runtime user with `your platform-native runtime-user provisioning flow`
 2. clone the repo as that user
 3. install the runtime package with `make install`
 4. either prepare `platform/configs/varlock/.env.local` manually or let `make setup` / `clawops setup` create and normalize it interactively
 5. prefer `make setup` for the baseline path after clone; it now guides Varlock env setup, managed secret backend selection, and OpenClaw model auth during setup
 6. for the supported sparse+dense memory path, set `HYPERMEMORY_EMBEDDING_MODEL` and run `clawops setup --profile hypermemory`
-7. run `./scripts/bootstrap/verify_hypermemory.sh` after hypermemory setup or rerenders
+7. run `clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify` after hypermemory setup or rerenders
 8. if Linux bootstrap just granted Docker access, open a fresh login shell and rerun the same `make setup` / `clawops setup` command; completed bootstrap work is auto-detected and skipped
 9. contributors can additionally install `uv` and use `make dev && make test`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
-10. or run the lower-level steps explicitly with `./scripts/bootstrap/bootstrap.sh`, `./scripts/bootstrap/configure_varlock_env.sh`, `./scripts/bootstrap/render_openclaw_config.sh`, `./scripts/bootstrap/install_host_services.sh --activate`, and `./scripts/bootstrap/verify_baseline.sh`
+10. or run the lower-level steps explicitly with `clawops bootstrap`, `clawops varlock-env configure`, `clawops render-openclaw-config --repo-root .`, `clawops services install --activate`, and `clawops baseline verify`
 
 ## macOS host notes
 
@@ -105,7 +105,7 @@ Regardless of host OS, the baseline flow is:
   `docker` plus `docker compose` for the runtime user.
 - If no compatible runtime is detected, bootstrap installs Docker Engine as the
   fallback backend.
-- Provision the runtime user with `./scripts/bootstrap/create_openclawsvc.sh`.
+- Provision the runtime user with `your platform-native runtime-user provisioning flow`.
 - Service definitions render into `~/.config/systemd/user`.
 - Activate them with `systemctl --user daemon-reload` and
   `systemctl --user enable --now ...`.

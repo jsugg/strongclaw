@@ -13,7 +13,7 @@ Preferred pattern:
 Host-aware entrypoint:
 
 ```bash
-sudo ./scripts/bootstrap/create_openclawsvc.sh
+Create the dedicated runtime user with your platform-native user-management tooling
 ```
 
 Then switch into the runtime shell with:

@@ -39,12 +39,7 @@ Read these in order:
 │   ├── systemd/                # Linux service templates
 │   ├── workers/                # acpx, QMD, and browser-lab artifacts
 │   └── workspace/              # per-role AGENTS/MEMORY bootstrap
-├── scripts/
-│   ├── bootstrap/              # bring-up scripts
-│   ├── ci/                     # CI helpers
-│   ├── ops/                    # runtime helpers
-│   ├── recovery/               # backup/restore/rotation helpers
-│   └── workers/                # acpx and browser-lab helpers
+├── repo/                       # upstream/worktree operator contract
 ├── security/                   # CodeQL, Semgrep, Gitleaks, Trivy config
 ├── src/clawops/                # companion Python tooling
 └── tests/                      # unit tests for companion tooling
@@ -83,8 +78,8 @@ environment. It bootstraps host prerequisites, creates or repairs
 `platform/configs/varlock/.env.local`, offers local or managed Varlock secret
 backends for provider auth, prompts for missing setup input when needed,
 configures OpenClaw model/provider auth, activates services, and runs the
-baseline verification gate. The lower-level shell entrypoint remains available
-at `./scripts/bootstrap/setup.sh` for manual or partial bring-up, and you can
+baseline verification gate. The lower-level CLI entrypoint remains available
+at `clawops setup` for manual or partial bring-up, and you can
 call the CLI directly with `uv run --project . clawops setup`.
 
 By default, StrongClaw now renders and provisions the
@@ -151,9 +146,9 @@ For placeholder-backed variants, rerender through the profile-aware entrypoint
 instead of merging raw overlays:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
+clawops render-openclaw-config --repo-root . --profile acp
+clawops render-openclaw-config --repo-root . --profile hypermemory
+clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
 ```
 
 The StrongClaw-managed `memory-lancedb-pro` profile keeps smart extraction on,

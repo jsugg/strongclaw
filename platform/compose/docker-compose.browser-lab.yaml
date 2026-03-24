@@ -22,7 +22,7 @@ services:
     ports:
       - "127.0.0.1:9222:9222"
     volumes:
-      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use scripts/bootstrap/bootstrap_browser_lab.sh}/browser-lab:/workspace/state
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops browser-lab up}/browser-lab:/workspace/state
       - ../workers/browser-lab:/workspace/browser-lab:ro
     restart: unless-stopped
     security_opt:

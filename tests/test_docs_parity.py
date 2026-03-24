@@ -66,19 +66,19 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     ).read_text(encoding="utf-8")
 
     assert "clawops setup" in readme
-    assert "./scripts/bootstrap/verify_sidecars.sh" in quickstart
-    assert "./scripts/bootstrap/verify_channels.sh" in quickstart
-    assert "./scripts/bootstrap/verify_channels.sh" in setup
-    assert "./scripts/bootstrap/verify_observability.sh" in quickstart
-    assert "./scripts/bootstrap/verify_observability.sh" in setup
+    assert "clawops verify-platform sidecars --skip-runtime" in quickstart
+    assert "clawops verify-platform channels" in quickstart
+    assert "clawops verify-platform channels" in setup
+    assert "clawops verify-platform observability" in quickstart
+    assert "clawops verify-platform observability" in setup
     assert "clawops setup" in setup
     assert "clawops setup" in host_platforms
     assert "make doctor" in quickstart
     assert "make doctor" in setup
     assert "make install" in quickstart
     assert "macOS-first rollout before Linux" not in host_platforms
-    assert "./scripts/bootstrap/create_openclawsvc.sh" in macos_runbook
-    assert "./scripts/bootstrap/create_openclawsvc.sh" in linux_runbook
+    assert "platform-native user-management tooling" in macos_runbook
+    assert "platform-native user-management tooling" in linux_runbook
 
 
 def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
@@ -87,16 +87,16 @@ def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
     usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
     recovery = (repo_root / "platform/docs/BACKUP_AND_RECOVERY.md").read_text(encoding="utf-8")
 
-    assert "./scripts/ops/launch_sidecars_dev.sh" in quickstart
-    assert "./scripts/ops/launch_sidecars_dev.sh" in usage
-    assert "./scripts/ops/stop_sidecars_dev.sh" in quickstart
-    assert "./scripts/ops/stop_sidecars_dev.sh" in usage
-    assert "./scripts/ops/prune_qdrant_test_collections.sh" in quickstart
-    assert "./scripts/ops/prune_qdrant_test_collections.sh" in usage
-    assert "./scripts/ops/prune_qdrant_test_collections.sh" in recovery
-    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in quickstart
-    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in usage
-    assert "./scripts/ops/reset_dev_compose_state.sh --component qdrant" in recovery
+    assert "clawops ops sidecars up --repo-local-state" in quickstart
+    assert "clawops ops sidecars up --repo-local-state" in usage
+    assert "clawops ops sidecars down --repo-local-state" in quickstart
+    assert "clawops ops sidecars down --repo-local-state" in usage
+    assert "clawops ops prune-qdrant-test-collections" in quickstart
+    assert "clawops ops prune-qdrant-test-collections" in usage
+    assert "clawops ops prune-qdrant-test-collections" in recovery
+    assert "clawops ops reset-compose-state --component qdrant" in quickstart
+    assert "clawops ops reset-compose-state --component qdrant" in usage
+    assert "clawops ops reset-compose-state --component qdrant" in recovery
 
 
 def test_operator_docs_surface_supported_hypermemory_path() -> None:
@@ -120,7 +120,9 @@ def test_operator_docs_surface_supported_hypermemory_path() -> None:
     assert "clawops setup --profile hypermemory" in memory_doc
     assert "clawops config memory --set-profile hypermemory" in memory_doc
     assert "clawops config memory --set-profile openclaw-qmd" in memory_doc
-    assert "./scripts/bootstrap/verify_hypermemory.sh" in memory_doc
+    assert (
+        "clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify" in memory_doc
+    )
     assert "HYPERMEMORY_EMBEDDING_MODEL" in quickstart
     assert "HYPERMEMORY_EMBEDDING_MODEL" in secrets
     assert "hypermemory-embedding" in routing
@@ -168,3 +170,10 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     assert "clawops worktree --repo-root" in repo_doc
     assert "dependency-submission.yml" in ci_doc
     assert "memory-plugin-verification.yml" in ci_doc
+
+
+def test_operator_docs_no_longer_surface_root_shell_entrypoints() -> None:
+    repo_root = _repo_root()
+    for markdown_file in _official_markdown_files(repo_root):
+        text = markdown_file.read_text(encoding="utf-8")
+        assert "./scripts/" not in text

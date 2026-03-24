@@ -19,8 +19,8 @@ The repository includes:
 The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on
 GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 
-- The shared entrypoint is `scripts/ci/verify_vendored_memory_plugin.sh`.
-- That flow reuses `scripts/bootstrap/bootstrap_memory_plugin.sh`, which
+- The shared entrypoint is `the vendored-memory plugin verification workflow`.
+- That flow reuses `clawops config memory --set-profile memory-lancedb-pro`, which
   auto-detects the host and installs the default LanceDB dependency on
   supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
 - The script then installs the pinned
@@ -34,7 +34,7 @@ GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 The repo-local `platform/plugins/strongclaw-hypermemory` bundle is also verified
 in `.github/workflows/memory-plugin-verification.yml`.
 
-- The shared entrypoint is `scripts/ci/verify_strongclaw_hypermemory_plugin.sh`.
+- The shared entrypoint is `the strongclaw-hypermemory verification workflow`.
 - That flow runs `npm run test:openclaw-host` inside the plugin bundle.
 - The host-functional test creates a temporary sqlite-backed `hypermemory`
   config, registers the plugin through the local SDK stub, verifies the

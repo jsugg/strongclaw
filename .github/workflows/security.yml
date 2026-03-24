@@ -29,25 +29,48 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/ci/run_repository_quality_gate.sh
+      - run: uv sync --locked --extra dev
+      - run: uv run pre-commit run actionlint --all-files
+      - run: uv run pre-commit run shellcheck --all-files
+      - run: PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml --cov-report=term-missing
+      - run: PYTHONPATH=src uv run python -m compileall -q src tests
       - name: Coverage summary
-        run: python3 ./scripts/ci/write_coverage_summary.py coverage.xml
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+          coverage = float(ET.parse("coverage.xml").getroot().attrib["line-rate"]) * 100
+          Path(summary_path).open("a", encoding="utf-8").write(f"Coverage: {coverage:.2f}%\n")
+          PY
       - uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
         with:
           config: security/semgrep/semgrep.yml
       - name: Install gitleaks CLI
         env:
           GITLEAKS_VERSION: "8.28.0"
-        run: ./scripts/ci/install_gitleaks.sh
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          mkdir -p "${HOME}/.local/bin"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" gitleaks
+          install "${RUNNER_TEMP}/gitleaks" "${HOME}/.local/bin/gitleaks"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
       - name: Run gitleaks
-        run: ./scripts/ci/run_gitleaks_scan.sh
+        run: gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact
       - name: Install syft CLI
         env:
           SYFT_VERSION: "v1.42.2"
-        run: ./scripts/ci/install_syft.sh
+        run: |
+          archive="syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
+          curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" syft
+          install "${RUNNER_TEMP}/syft" "${HOME}/.local/bin/syft"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
       - name: Generate SBOM
-        run: ./scripts/ci/generate_sbom.sh sbom.spdx.json
+        run: syft dir:. -o spdx-json=sbom.spdx.json
       - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           cache: true
