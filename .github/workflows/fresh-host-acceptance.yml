@@ -109,6 +109,8 @@ jobs:
         run: |
           set +e
           export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export OPENCLAW_STATE_DIR="${TMP_ROOT}/home/.openclaw"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
           for path in \
             "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.out.log" \
             "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.err.log" \
@@ -119,6 +121,8 @@ jobs:
               tail -n 200 "${path}"
             fi
           done
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml ps || true
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector || true
           launchctl print "gui/$(id -u)/ai.openclaw.gateway" || true
           launchctl print "gui/$(id -u)/ai.openclaw.sidecars" || true
       - name: Upload macOS host artifacts
