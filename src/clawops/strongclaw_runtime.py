@@ -462,6 +462,8 @@ def load_env_assignments(path: pathlib.Path) -> dict[str, str]:
 def write_env_assignments(path: pathlib.Path, values: Mapping[str, str]) -> None:
     """Write a dotenv-style assignment file."""
     _write_key_value_file(path, values)
+    if path.exists():
+        path.chmod(0o600)
 
 
 def set_env_assignment(path: pathlib.Path, key: str, value: str) -> None:

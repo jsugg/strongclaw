@@ -160,16 +160,21 @@ def _ensure_required_defaults(
         "APP_ENV": "local",
         "OPENCLAW_VERSION": os.environ.get("OPENCLAW_VERSION", "2026.3.13"),
         "VARLOCK_SECRET_BACKEND": "local",
-        "OPENCLAW_GATEWAY_TOKEN": generate_secret_value(),
         "OPENCLAW_CONTROL_USER": values.get("OPENCLAW_CONTROL_USER", "openclawsvc")
         or "openclawsvc",
         "OPENCLAW_STATE_DIR": values.get("OPENCLAW_STATE_DIR", "~/.openclaw") or "~/.openclaw",
-        "LITELLM_MASTER_KEY": generate_secret_value(),
-        "LITELLM_DB_PASSWORD": generate_secret_value(),
         "HYPERMEMORY_EMBEDDING_BASE_URL": "http://127.0.0.1:4000/v1",
         "HYPERMEMORY_QDRANT_URL": "http://127.0.0.1:6333",
         "WHATSAPP_SESSION_DIR": "~/.openclaw/channels/whatsapp",
     }
+
+    # codeql[py/clear-text-storage-sensitive-data]: locally generated bootstrap secrets are intentionally written to the user-owned env contract, and write_env_assignments enforces 0600 permissions.
+    generated_secret_defaults = {
+        "OPENCLAW_GATEWAY_TOKEN": generate_secret_value(),
+        "LITELLM_MASTER_KEY": generate_secret_value(),
+        "LITELLM_DB_PASSWORD": generate_secret_value(),
+    }
+    required_defaults.update(generated_secret_defaults)
     for key, default_value in required_defaults.items():
         current = values.get(key)
         if value_is_effective(current):
