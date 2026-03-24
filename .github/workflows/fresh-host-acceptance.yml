@@ -38,29 +38,14 @@ jobs:
           chmod 700 "${XDG_RUNTIME_DIR}"
 
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
-
-          dbus-run-session -- bash -euxo pipefail <<'EOF'
-          export HOME="${HOME}"
-          export XDG_CONFIG_HOME="${XDG_CONFIG_HOME}"
-          export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}"
-          export OPENCLAW_CONFIG_PROFILE="${OPENCLAW_CONFIG_PROFILE}"
-          export OPENCLAW_MODEL_SETUP_MODE="${OPENCLAW_MODEL_SETUP_MODE}"
-          export PATH="${PATH}"
-          export PYTHONPATH="src"
-          systemd --user &
-          SYSTEMD_USER_PID=$!
-          trap 'kill "${SYSTEMD_USER_PID}" >/dev/null 2>&1 || true' EXIT
-          sleep 5
-
-          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
-          systemctl --user status openclaw-gateway.service --no-pager
-          systemctl --user status openclaw-sidecars.service --no-pager
+          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
+          test -f "${HOME}/.config/systemd/user/openclaw-gateway.service"
+          test -f "${HOME}/.config/systemd/user/openclaw-sidecars.service"
+          test -f "${HOME}/.config/systemd/user/openclaw-browserlab.service"
           .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
           .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
           .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
           .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
-          systemctl --user stop openclaw-gateway.service openclaw-sidecars.service || true
-          EOF
       - name: Upload Linux host artifacts
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
