@@ -63,6 +63,32 @@ CREATE TABLE IF NOT EXISTS op (
 CREATE INDEX IF NOT EXISTS op_status_idx ON op(status);
 CREATE INDEX IF NOT EXISTS op_scope_idx  ON op(scope);
 CREATE INDEX IF NOT EXISTS op_kind_idx   ON op(kind);
+
+CREATE TABLE IF NOT EXISTS session_lease (
+  lease_id TEXT PRIMARY KEY,
+  lock_identity TEXT NOT NULL,
+  session_identity TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  role TEXT NOT NULL,
+  operation_kind TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  metadata_json TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  expires_at_ms INTEGER NOT NULL,
+  released_at_ms INTEGER,
+  released_by TEXT,
+  status TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS session_lease_lock_idx ON session_lease(lock_identity);
+CREATE INDEX IF NOT EXISTS session_lease_status_idx ON session_lease(status);
+CREATE UNIQUE INDEX IF NOT EXISTS session_lease_active_lock_idx
+ON session_lease(lock_identity)
+WHERE released_at_ms IS NULL;
 """
 
 MIGRATION_COLUMNS: dict[str, str] = {
@@ -190,6 +216,38 @@ class Operation:
         return cls(**dict(row))
 
 
+@dataclasses.dataclass(slots=True)
+class SessionLease:
+    """Journal-backed session lease row."""
+
+    lease_id: str
+    lock_identity: str
+    session_identity: str
+    backend: str
+    project_id: str
+    workspace_id: str
+    lane: str
+    role: str
+    operation_kind: str
+    holder: str
+    metadata_json: str | None
+    created_at_ms: int
+    updated_at_ms: int
+    expires_at_ms: int
+    released_at_ms: int | None
+    released_by: str | None
+    status: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "SessionLease":
+        """Create a SessionLease from a sqlite row."""
+        return cls(**dict(row))
+
+
+class LeaseConflictError(RuntimeError):
+    """Raised when an active session lease already owns a lock identity."""
+
+
 class OperationJournal:
     """High-level journal API."""
 
@@ -234,6 +292,122 @@ class OperationJournal:
             if row is None:
                 raise KeyError(f"unknown operation: {op_id}")
             return Operation.from_row(row)
+
+    def acquire_lease(
+        self,
+        *,
+        lock_identity: str,
+        session_identity: str,
+        backend: str,
+        project_id: str,
+        workspace_id: str,
+        lane: str,
+        role: str,
+        operation_kind: str,
+        holder: str,
+        ttl_seconds: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> SessionLease:
+        """Acquire one journal-backed session lease."""
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        now = utc_now_ms()
+        expires_at_ms = now + (ttl_seconds * 1000)
+        lease_id = sha256_hex(f"{lock_identity}:{session_identity}:{now}")[:24]
+        metadata_json = None if metadata is None else canonical_json(metadata)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE session_lease
+                SET updated_at_ms = ?, released_at_ms = ?, released_by = ?, status = 'expired'
+                WHERE lock_identity = ?
+                  AND released_at_ms IS NULL
+                  AND expires_at_ms <= ?
+                """,
+                (now, now, session_identity, lock_identity, now),
+            )
+            active = conn.execute(
+                """
+                SELECT * FROM session_lease
+                WHERE lock_identity = ?
+                  AND released_at_ms IS NULL
+                """,
+                (lock_identity,),
+            ).fetchone()
+            if active is not None:
+                raise LeaseConflictError(
+                    f"active lease already exists for {lock_identity}: {active['lease_id']}"
+                )
+            conn.execute(
+                """
+                INSERT INTO session_lease (
+                  lease_id, lock_identity, session_identity, backend, project_id,
+                  workspace_id, lane, role, operation_kind, holder, metadata_json,
+                  created_at_ms, updated_at_ms, expires_at_ms, released_at_ms,
+                  released_by, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    lease_id,
+                    lock_identity,
+                    session_identity,
+                    backend,
+                    project_id,
+                    workspace_id,
+                    lane,
+                    role,
+                    operation_kind,
+                    holder,
+                    metadata_json,
+                    now,
+                    now,
+                    expires_at_ms,
+                    None,
+                    None,
+                    "active",
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM session_lease WHERE lease_id = ?", (lease_id,)
+            ).fetchone()
+            assert row is not None
+            return SessionLease.from_row(row)
+
+    def release_lease(self, lease_id: str, *, released_by: str) -> SessionLease:
+        """Release one session lease."""
+        now = utc_now_ms()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM session_lease WHERE lease_id = ?", (lease_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown lease: {lease_id}")
+            conn.execute(
+                """
+                UPDATE session_lease
+                SET updated_at_ms = ?, released_at_ms = ?, released_by = ?, status = 'released'
+                WHERE lease_id = ?
+                """,
+                (now, now, released_by, lease_id),
+            )
+            conn.commit()
+            updated = conn.execute(
+                "SELECT * FROM session_lease WHERE lease_id = ?", (lease_id,)
+            ).fetchone()
+            assert updated is not None
+            return SessionLease.from_row(updated)
+
+    def list_leases(self, *, active_only: bool = False) -> list[SessionLease]:
+        """Return session leases ordered by update time."""
+        query = "SELECT * FROM session_lease"
+        params: tuple[object, ...] = ()
+        if active_only:
+            query += " WHERE released_at_ms IS NULL"
+        query += " ORDER BY updated_at_ms ASC, created_at_ms ASC"
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [SessionLease.from_row(row) for row in rows]
 
     def begin(
         self,
