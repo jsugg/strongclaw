@@ -6,6 +6,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: fresh-host-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -84,7 +88,8 @@ jobs:
           sudo scutil --set HostName "openclaw-ci"
           scutil --get ComputerName
           scutil --get LocalHostName
-      - name: Warm hosted macOS compose images
+      - name: Warm hosted macOS aux-stack images
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euxo pipefail
@@ -92,6 +97,14 @@ jobs:
           export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
           mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
           docker compose -f platform/compose/docker-compose.aux-stack.yaml pull postgres litellm qdrant otel-collector
+      - name: Warm hosted macOS browser-lab images
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
+          mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
           docker compose -f platform/compose/docker-compose.browser-lab.yaml pull browserlab-proxy browserlab-playwright
       - name: Bootstrap setup services and runtime flows
         shell: bash
@@ -104,26 +117,34 @@ jobs:
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS="2700"
-          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${TMP_ROOT}/repo-local-compose"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           export DOCKER_CONFIG="${DOCKER_CONFIG}"
           export DOCKER_HOST="${DOCKER_HOST}"
-          mkdir -p "${HOME}" "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
+          mkdir -p "${HOME}"
 
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
-          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
-          launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
-          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
-          .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
-          .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
-          .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
-          .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
-          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
-          .venv/bin/python -m clawops ops --repo-root . sidecars down || true
-          .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist"
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist"
+            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist"
+          else
+            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
+            launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
+            launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
+            mkdir -p "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
+            .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
+            .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
+            .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
+            .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
+            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
+            .venv/bin/python -m clawops ops --repo-root . sidecars down || true
+            .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+          fi
       - name: Dump macOS host logs on failure
         if: failure()
         shell: bash
