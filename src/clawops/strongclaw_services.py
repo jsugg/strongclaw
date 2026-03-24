@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import time
 from typing import Final
+from xml.sax.saxutils import escape
 
 from clawops.common import load_text, write_text
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
@@ -24,6 +26,13 @@ LAUNCHD_ACTIVATE_LABELS: Final[tuple[str, ...]] = (
 )
 LAUNCHD_GATEWAY_LABEL: Final[str] = "ai.openclaw.gateway"
 LAUNCHD_SIDECARS_LABEL: Final[str] = "ai.openclaw.sidecars"
+LAUNCHD_PASSTHROUGH_ENV_VARS: Final[tuple[str, ...]] = (
+    "DOCKER_CONFIG",
+    "DOCKER_CONTEXT",
+    "DOCKER_HOST",
+)
+LAUNCHD_ONESHOT_MAX_ATTEMPTS: Final[int] = 2
+LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
     "openclaw-sidecars.service",
     "openclaw-gateway.service",
@@ -45,6 +54,17 @@ def _launchd_domain() -> str:
     return f"gui/{run_command(['id', '-u']).stdout.strip()}"
 
 
+def _launchd_extra_env_xml() -> str:
+    """Render passthrough launchd env entries for the active shell."""
+    lines: list[str] = []
+    for key in LAUNCHD_PASSTHROUGH_ENV_VARS:
+        value = os.environ.get(key, "").strip()
+        if not value:
+            continue
+        lines.extend((f"      <key>{key}</key>", f"      <string>{escape(value)}</string>"))
+    return "\n".join(lines)
+
+
 def _render_template(
     template_path: pathlib.Path, *, repo_root: pathlib.Path, state_dir: pathlib.Path
 ) -> str:
@@ -54,6 +74,7 @@ def _render_template(
         .replace("__REPO_ROOT__", repo_root.as_posix())
         .replace("__STATE_DIR__", state_dir.as_posix())
         .replace("__HOME_DIR__", pathlib.Path.home().as_posix())
+        .replace("__LAUNCHD_EXTRA_ENV__", _launchd_extra_env_xml())
     )
 
 
@@ -164,6 +185,33 @@ def _activate_launchd_service(domain: str, label: str, plist_path: pathlib.Path)
         raise RuntimeError(detail)
 
 
+def _activate_launchd_oneshot_service(
+    domain: str,
+    label: str,
+    plist_path: pathlib.Path,
+    *,
+    timeout_seconds: int,
+) -> None:
+    """Bootstrap and verify a one-shot launchd agent with one bounded retry."""
+    last_error: RuntimeError | None = None
+    for attempt in range(1, LAUNCHD_ONESHOT_MAX_ATTEMPTS + 1):
+        _activate_launchd_service(domain, label, plist_path)
+        try:
+            _wait_for_launchd_service(
+                label,
+                persistent=False,
+                timeout_seconds=timeout_seconds,
+            )
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            if "exited with code" not in str(exc) or attempt >= LAUNCHD_ONESHOT_MAX_ATTEMPTS:
+                raise
+            time.sleep(LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS)
+    assert last_error is not None
+    raise last_error
+
+
 def activate_services(
     repo_root: pathlib.Path,
     *,
@@ -181,10 +229,16 @@ def activate_services(
     if manager == "launchd":
         output_dir = pathlib.Path(str(render_payload["outputDir"]))
         domain = _launchd_domain()
-        for label in LAUNCHD_ACTIVATE_LABELS:
-            _activate_launchd_service(domain, label, output_dir / f"{label}.plist")
+        gateway_plist = output_dir / f"{LAUNCHD_GATEWAY_LABEL}.plist"
+        sidecars_plist = output_dir / f"{LAUNCHD_SIDECARS_LABEL}.plist"
+        _activate_launchd_service(domain, LAUNCHD_GATEWAY_LABEL, gateway_plist)
         _wait_for_launchd_service(LAUNCHD_GATEWAY_LABEL, persistent=True, timeout_seconds=30)
-        _wait_for_launchd_service(LAUNCHD_SIDECARS_LABEL, persistent=False, timeout_seconds=300)
+        _activate_launchd_oneshot_service(
+            domain,
+            LAUNCHD_SIDECARS_LABEL,
+            sidecars_plist,
+            timeout_seconds=300,
+        )
         return {
             **render_payload,
             "activated": list(LAUNCHD_ACTIVATE_LABELS),
