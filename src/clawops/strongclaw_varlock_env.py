@@ -89,7 +89,8 @@ def _save_plugin_overlay(path: pathlib.Path, content: str) -> None:
     """Write the managed backend overlay with strict permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # codeql[py/clear-text-storage-sensitive-data]: backend overlay secrets are intentionally written to a user-owned local file, and the file is immediately restricted to 0600.
+    # lgtm[py/clear-text-storage-sensitive-data]
+    # Backend overlay secrets are intentionally written to a user-owned local file and immediately restricted to 0600.
     path.write_text(content.strip() + "\n", encoding="utf-8")
     path.chmod(0o600)
 
@@ -170,7 +171,8 @@ def _ensure_required_defaults(
         "WHATSAPP_SESSION_DIR": "~/.openclaw/channels/whatsapp",
     }
 
-    # codeql[py/clear-text-storage-sensitive-data]: locally generated bootstrap secrets are intentionally written to the user-owned env contract, and write_env_assignments enforces 0600 permissions.
+    # lgtm[py/clear-text-storage-sensitive-data]
+    # Locally generated bootstrap secrets are intentionally written to the user-owned env contract, and write_env_assignments enforces 0600 permissions.
     generated_secret_defaults = {
         "OPENCLAW_GATEWAY_TOKEN": generate_secret_value(),
         "LITELLM_MASTER_KEY": generate_secret_value(),
