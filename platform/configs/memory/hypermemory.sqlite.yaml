@@ -58,6 +58,7 @@ rerank:
     model: BAAI/bge-reranker-v2-m3
     batch_size: 8
     max_length: 2048
+    device: auto
   compatible_http:
     model: os.environ/HYPERMEMORY_RERANK_MODEL
     base_url: os.environ/HYPERMEMORY_RERANK_BASE_URL

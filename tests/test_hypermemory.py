@@ -112,6 +112,7 @@ def test_load_shipped_hypermemory_config() -> None:
     assert config.rerank.enabled is True
     assert config.rerank.provider == "local-sentence-transformers"
     assert config.rerank.fallback_provider == "compatible-http"
+    assert config.rerank.local.device == "auto"
     assert config.qdrant.enabled is False
 
 
@@ -343,6 +344,7 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
     config = load_config(config_path)
     config = replace(
         config,
+        hybrid=replace(config.hybrid, rerank_candidate_pool=32),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-status"),
         rerank=replace(
             config.rerank,
@@ -369,7 +371,11 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
     assert payload["rerankFallbackProvider"] == "compatible-http"
     assert payload["rerankFailOpen"] is True
     assert payload["rerankModel"] == "rerank-test"
+    assert payload["rerankDevice"] == "auto"
+    assert payload["rerankResolvedDevice"] in {"cpu", "cuda", "mps"}
     assert payload["rerankFallbackModel"] == "http-rerank-test"
+    assert payload["rerankCandidatePool"] == 32
+    assert payload["rerankOperationalRequired"] is True
     assert payload["qdrantEnabled"] is True
     assert payload["qdrantHealthy"] is True
     assert payload["vectorItems"] == 0
@@ -851,6 +857,113 @@ def test_hypermemory_status_and_verify_report_sparse_backend_state(
     assert verification["laneChecks"]["dense"]["hits"] >= 1
     assert verification["laneChecks"]["sparse"]["hits"] >= 1
     assert fake_qdrant.include_sparse_calls == [True]
+
+
+def test_hypermemory_verify_requires_an_operational_rerank_provider(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        hybrid=replace(config.hybrid, rerank_candidate_pool=2),
+        rerank=replace(
+            config.rerank,
+            enabled=True,
+            provider="local-sentence-transformers",
+            local=replace(config.rerank.local, model="BAAI/bge-reranker-v2-m3"),
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
+    )
+    engine = HypermemoryEngine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    engine._rerank_provider = _StaticRerankProvider([0.8, 0.2])
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.7)
+    ]
+
+    verification = engine.verify()
+
+    assert verification["ok"] is True
+    assert verification["laneChecks"]["rerank"]["provider"] == "local-sentence-transformers"
+    assert verification["laneChecks"]["rerank"]["candidateCount"] == 2
+
+
+def test_hypermemory_verify_fails_when_rerank_provider_is_not_operational(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        hybrid=replace(config.hybrid, rerank_candidate_pool=2),
+        rerank=replace(
+            config.rerank,
+            enabled=True,
+            provider="local-sentence-transformers",
+            local=replace(config.rerank.local, model="BAAI/bge-reranker-v2-m3"),
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
+    )
+    engine = HypermemoryEngine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    engine._rerank_provider = _FailingRerankProvider()
+    fake_qdrant = _FakeQdrantBackend()
+    engine._qdrant_backend = fake_qdrant
+    engine.reindex()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM search_items WHERE rel_path = ? AND lane = 'corpus' LIMIT 1",
+            ("docs/runbook.md",),
+        ).fetchone()
+    assert row is not None
+    fake_qdrant.search_results = [
+        DenseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=0.92)
+    ]
+    fake_qdrant.sparse_search_results = [
+        SparseSearchCandidate(item_id=int(row["id"]), point_id="runbook-1", score=1.7)
+    ]
+
+    verification = engine.verify()
+
+    assert verification["ok"] is False
+    assert "rerank provider failed: rerank backend unavailable" in verification["errors"]
 
 
 def test_hypermemory_verify_fails_when_sparse_state_is_stale(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import math
 import os
+import platform
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, cast
 
@@ -18,6 +19,7 @@ from clawops.hypermemory.models import (
     RerankProviderKind,
     RerankResponse,
 )
+from clawops.observability import emit_structured_log
 
 
 class EmbeddingProvider(Protocol):
@@ -121,6 +123,7 @@ class LocalSentenceTransformersRerankProvider:
     def __init__(self, config: LocalSentenceTransformersRerankConfig) -> None:
         self._config = config
         self._model: object | None = None
+        self._resolved_device: str | None = None
 
     def score_documents(self, query: str, documents: Sequence[str]) -> list[float]:
         """Score *documents* with the configured local cross-encoder."""
@@ -130,28 +133,87 @@ class LocalSentenceTransformersRerankProvider:
             )
         if not documents:
             return []
-        model = self._load_model()
-        predict = getattr(model, "predict", None)
-        if not callable(predict):
-            raise RuntimeError("sentence-transformers CrossEncoder is missing predict()")
-        pairs = [(query, document) for document in documents]
         try:
-            raw_scores = predict(
-                pairs,
-                batch_size=self._config.batch_size,
-                show_progress_bar=False,
+            model = self._load_model()
+            raw_scores = self._predict(model, query=query, documents=documents)
+        except Exception as err:
+            current_device = self.resolved_device()
+            if not self._should_fallback_to_cpu(current_device):
+                raise
+            emit_structured_log(
+                "clawops.hypermemory.rerank.local.device_fallback",
+                {
+                    "configuredDevice": self._config.device,
+                    "resolvedDevice": current_device,
+                    "fallbackDevice": "cpu",
+                    "error": str(err),
+                },
             )
-        except TypeError:
-            raw_scores = predict(pairs, batch_size=self._config.batch_size)
+            model = self._load_model(device="cpu", force_reload=True)
+            raw_scores = self._predict(model, query=query, documents=documents)
         return _coerce_score_sequence(
             raw_scores,
             expected_count=len(documents),
             source="local sentence-transformers rerank response",
         )
 
-    def _load_model(self) -> object:
+    def resolved_device(self) -> str:
+        """Return the selected runtime device for the local reranker."""
+        if self._resolved_device is not None:
+            return self._resolved_device
+        if self._config.device and self._config.device != "auto":
+            return self._config.device
+        try:
+            module = importlib.import_module("torch")
+        except ImportError:
+            return "cpu"
+        cuda = getattr(module, "cuda", None)
+        if (
+            cuda is not None
+            and callable(getattr(cuda, "is_available", None))
+            and cuda.is_available()
+        ):
+            return "cuda"
+        if platform.system().casefold() == "darwin" and platform.machine().casefold() in {
+            "arm64",
+            "aarch64",
+        }:
+            backends = getattr(module, "backends", None)
+            mps = getattr(backends, "mps", None)
+            is_available = getattr(mps, "is_available", None)
+            is_built = getattr(mps, "is_built", None)
+            if callable(is_available) and is_available():
+                if not callable(is_built) or is_built():
+                    return "mps"
+        return "cpu"
+
+    def _predict(self, model: object, *, query: str, documents: Sequence[str]) -> object:
+        """Run one prediction batch through the loaded cross-encoder."""
+        predict = getattr(model, "predict", None)
+        if not callable(predict):
+            raise RuntimeError("sentence-transformers CrossEncoder is missing predict()")
+        pairs = [(query, document) for document in documents]
+        try:
+            return predict(
+                pairs,
+                batch_size=self._config.batch_size,
+                show_progress_bar=False,
+            )
+        except TypeError:
+            return predict(pairs, batch_size=self._config.batch_size)
+
+    def _should_fallback_to_cpu(self, device: str) -> bool:
+        """Return whether automatic device selection should retry on CPU."""
+        return device != "cpu" and (not self._config.device or self._config.device == "auto")
+
+    def _load_model(self, *, device: str | None = None, force_reload: bool = False) -> object:
         """Load and cache the configured CrossEncoder instance."""
-        if self._model is not None:
+        resolved_device = self.resolved_device() if device is None else device
+        if (
+            not force_reload
+            and self._model is not None
+            and self._resolved_device == resolved_device
+        ):
             return self._model
         try:
             module = importlib.import_module("sentence_transformers")
@@ -164,10 +226,23 @@ class LocalSentenceTransformersRerankProvider:
         cross_encoder_cls = getattr(module, "CrossEncoder", None)
         if cross_encoder_cls is None:
             raise RuntimeError("sentence-transformers is missing CrossEncoder")
+        init_kwargs: dict[str, object] = {"max_length": self._config.max_length}
+        if resolved_device:
+            init_kwargs["device"] = resolved_device
         try:
-            self._model = cross_encoder_cls(self._config.model, max_length=self._config.max_length)
+            self._model = cross_encoder_cls(self._config.model, **init_kwargs)
         except TypeError:
-            self._model = cross_encoder_cls(self._config.model)
+            fallback_kwargs = {
+                name: value for name, value in init_kwargs.items() if name != "max_length"
+            }
+            if fallback_kwargs:
+                try:
+                    self._model = cross_encoder_cls(self._config.model, **fallback_kwargs)
+                except TypeError:
+                    self._model = cross_encoder_cls(self._config.model)
+            else:
+                self._model = cross_encoder_cls(self._config.model)
+        self._resolved_device = resolved_device
         return self._model
 
 
@@ -223,6 +298,10 @@ class NoopRerankProvider:
         del query, documents
         return RerankResponse()
 
+    def resolved_device(self) -> str:
+        """Return no runtime device because reranking is disabled."""
+        return ""
+
 
 class ConfiguredRerankProvider:
     """Primary/fallback rerank provider chain."""
@@ -270,6 +349,17 @@ class ConfiguredRerankProvider:
             raise RuntimeError(f"unsupported rerank provider: {provider_kind}")
         self._backends[provider_kind] = backend
         return backend
+
+    def resolved_device(self) -> str:
+        """Return the selected runtime device for the primary rerank backend."""
+        provider_chain = _rerank_provider_chain(self._config)
+        if not provider_chain or provider_chain[0] != "local-sentence-transformers":
+            return ""
+        backend = self._backend(provider_chain[0])
+        resolver = getattr(backend, "resolved_device", None)
+        if callable(resolver):
+            return cast(str, resolver())
+        return ""
 
 
 def create_embedding_provider(config: EmbeddingConfig) -> EmbeddingProvider:

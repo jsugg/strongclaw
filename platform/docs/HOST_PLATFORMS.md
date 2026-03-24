@@ -21,6 +21,7 @@ the pinned external tools that setup installs.
 | Component | Supported / pinned version | Why |
 | --- | --- | --- |
 | Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
+| Managed install baseline | Python `3.12` | `make install` and bootstrap prefer Python `3.12` on supported Darwin/Linux hosts so the default hypermemory local-rerank path stays on the broadest compatible interpreter. |
 | Node.js | `22.16.x`, `24.x` | OpenClaw `2026.3.13` requires `>=22.16.0`; ACPX `0.3.0`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
 | `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
 | Varlock | `0.5.0` | Setup installs and verifies this exact version. |
@@ -28,7 +29,7 @@ the pinned external tools that setup installs.
 | ACPX | `0.3.0` | Setup installs this exact CLI version. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
-| Hypermemory local rerank | macOS `arm64` on Python `3.12`/`3.13` with `torch==2.8.0`; macOS `x86_64` on Python `3.12` with `torch==2.2.2`; Linux `x86_64` and `aarch64`/`arm64` on Python `3.12`/`3.13` with `torch==2.8.0`, including Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu | Upstream `torch` wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. |
+| Hypermemory local rerank | macOS `arm64` on Python `3.12`/`3.13` with `sentence-transformers==5.3.0` and `torch==2.8.0`; macOS `x86_64` on Python `3.12` with `sentence-transformers==3.4.1`, `torch==2.2.2`, and `numpy<2`; Linux `x86_64` and `aarch64`/`arm64` on Python `3.12`/`3.13` with `sentence-transformers==5.3.0` and `torch==2.8.0`, including Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
 
 CI enforces this support statement through:
 
@@ -41,7 +42,7 @@ For low-end or older hosts, this split matters:
 
 - x86_64 Linux laptops stay on the default local rerank path
 - Apple Silicon Macs stay on the default local rerank path for Python `3.12` and `3.13`
-- Intel Macs use a compatibility pin for local rerank on Python `3.12`
+- Intel Macs use compatibility pins for local rerank on Python `3.12`
 - Apple Silicon Macs and supported Linux hosts use the pinned `torch==2.8.0` local rerank path on Python `3.12` and `3.13`
 - Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64 stay on the default local rerank path
 - 32-bit Raspberry Pi Linux hosts skip the local rerank dependency and should use `compatible-http` if reranking is required

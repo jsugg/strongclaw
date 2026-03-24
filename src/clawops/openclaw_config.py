@@ -94,7 +94,6 @@ PROFILES: dict[str, RenderProfile] = {
         overlays=(
             OPENCLAW_CONFIG_DIR / "00-baseline.json5",
             OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
-            OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
             OPENCLAW_CONFIG_DIR / "60-browser-lab.json5",
         ),
         description="Legacy OpenClaw built-ins plus browser-lab integration.",

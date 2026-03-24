@@ -362,7 +362,10 @@ def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
     )
     assert search_log["resolvedBackend"] == "qdrant_sparse_dense_hybrid"
     assert search_log["sparseCandidates"] >= 1
+    assert search_log["qdrantDenseSearchMs"] >= 0.0
     assert search_log["qdrantSparseSearchMs"] >= 0.0
+    assert "qdrantDenseMs" not in search_log
+    assert "qdrantSparseMs" not in search_log
 
 
 def test_hypermemory_emits_rerank_logs(

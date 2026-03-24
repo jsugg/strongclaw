@@ -12,6 +12,7 @@ UV_BIN_DIR="${HOME}/.local/bin"
 BOOTSTRAP_QMD_SCRIPT="${BOOTSTRAP_QMD_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_qmd.sh}"
 BOOTSTRAP_MEMORY_PLUGIN_SCRIPT="${BOOTSTRAP_MEMORY_PLUGIN_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_memory_plugin.sh}"
 BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT="${BOOTSTRAP_LOSSLESS_CONTEXT_ENGINE_SCRIPT:-$ROOT/scripts/bootstrap/bootstrap_lossless_context_engine.sh}"
+PREFERRED_PYTHON_SCRIPT="${PREFERRED_PYTHON_SCRIPT:-$ROOT/scripts/lib/preferred_python.sh}"
 # shellcheck disable=SC1091
 source "$ROOT/scripts/lib/docker_runtime.sh"
 # shellcheck disable=SC1091
@@ -134,6 +135,18 @@ install_profile_assets() {
   fi
 }
 
+uv_sync_managed_environment() {
+  local preferred_python=""
+  if [[ -x "$PREFERRED_PYTHON_SCRIPT" ]]; then
+    preferred_python="$("$PREFERRED_PYTHON_SCRIPT")"
+  fi
+  if [[ -n "$preferred_python" ]]; then
+    uv sync --project "$ROOT" --python "$preferred_python" --locked --extra dev
+    return
+  fi
+  uv sync --project "$ROOT" --locked --extra dev
+}
+
 "$ROOT/scripts/bootstrap/preflight.sh"
 
 case "$HOST_OS" in
@@ -149,7 +162,7 @@ case "$HOST_OS" in
     ensure_varlock_installed "$VARLOCK_VERSION"
     ensure_docker_compatible_runtime darwin
     ensure_uv
-    uv sync --project "$ROOT" --locked --extra dev
+    uv_sync_managed_environment
     prepend_path "$ROOT/.venv/bin"
     npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
     ;;
@@ -160,7 +173,7 @@ case "$HOST_OS" in
     ensure_varlock_installed "$VARLOCK_VERSION"
     ensure_docker_compatible_runtime linux
     ensure_uv
-    uv sync --project "$ROOT" --python 3.12 --locked --extra dev
+    uv_sync_managed_environment
     prepend_path "$ROOT/.venv/bin"
     sudo npm install -g "openclaw@${OPENCLAW_VERSION}" "acpx@${ACPX_VERSION}"
     ;;

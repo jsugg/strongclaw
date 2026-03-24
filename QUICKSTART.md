@@ -12,6 +12,11 @@ this guide.
 make install
 ```
 
+`make install` prefers Python `3.12` for the managed environment on supported
+Darwin/Linux hosts so the default hypermemory rerank stack stays on the most
+compatible interpreter path. Python `3.13` remains supported when you choose it
+explicitly.
+
 If you plan to develop on this repo, install `uv` and use `make dev` plus
 `make test` separately. The companion-tool test entrypoints run through
 `uv run`, and the bootstrap flow installs `uv` when the host does not

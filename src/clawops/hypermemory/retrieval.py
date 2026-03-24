@@ -107,6 +107,7 @@ def search_index(
         active_backend=active_backend,
     )
     ranked = sorted(merged.values(), key=lambda item: item["score"], reverse=True)
+    fusion_ms = (perf_counter() - fusion_started_at) * 1000.0
     rerank_response = _apply_semantic_rerank(
         query=query,
         candidates=ranked,
@@ -158,7 +159,7 @@ def search_index(
         SearchDiagnostics(
             lexical_ms=lexical_ms,
             sqlite_dense_ms=sqlite_dense_ms,
-            fusion_ms=(perf_counter() - fusion_started_at) * 1000.0,
+            fusion_ms=fusion_ms,
             rerank_ms=rerank_response.latency_ms,
             lexical_candidates=len(lexical_candidates),
             sparse_candidates=(

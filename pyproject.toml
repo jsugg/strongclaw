@@ -16,7 +16,9 @@ dependencies = [
   "opentelemetry-api>=1.29.0",
   "opentelemetry-sdk>=1.29.0",
   "opentelemetry-exporter-otlp>=1.29.0",
-  "sentence-transformers==5.3.0; ((((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version < '3.13') or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14'))",
+  "sentence-transformers==3.4.1; sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version >= '3.12' and python_version < '3.13'",
+  "sentence-transformers==5.3.0; ((((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14'))",
+  "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version >= '3.12' and python_version < '3.13'",
   "torch==2.8.0; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
   "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64' and python_version >= '3.12' and python_version < '3.13'",
 ]

@@ -12,6 +12,8 @@ REPO_DIR ?= .
 RUNS_DIR ?=
 SETUP_ARGS ?=
 DOCTOR_ARGS ?=
+PREFERRED_PYTHON := $(shell ./scripts/lib/preferred_python.sh 2>/dev/null)
+UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
 .PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
@@ -19,7 +21,7 @@ help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 install: ## Sync the managed project environment.
-	$(UV) sync $(DEV_SYNC_FLAGS)
+	$(UV_SYNC) $(DEV_SYNC_FLAGS)
 
 setup: ## Run the guided StrongClaw setup workflow.
 	PYTHONPATH=src $(RUN) clawops setup $(SETUP_ARGS)
@@ -28,7 +30,7 @@ doctor: ## Run the deep StrongClaw readiness scan.
 	PYTHONPATH=src $(RUN) clawops doctor $(DOCTOR_ARGS)
 
 dev: ## Sync the locked dev environment and install pre-commit hooks.
-	$(UV) sync $(DEV_SYNC_FLAGS) --extra dev
+	$(UV_SYNC) $(DEV_SYNC_FLAGS) --extra dev
 	$(PRE_COMMIT) install --install-hooks
 
 fmt: ## Apply import sorting, lint autofixes, and formatting.

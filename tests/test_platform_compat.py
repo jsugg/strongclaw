@@ -5,6 +5,7 @@ from __future__ import annotations
 from clawops.platform_compat import (
     DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT,
     DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION,
+    DEFAULT_MANAGED_PROJECT_PYTHON_VERSION,
     DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
     SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT,
     HostPlatform,
@@ -14,6 +15,7 @@ from clawops.platform_compat import (
     normalize_os_name,
     resolve_hypermemory_local_rerank_torch_constraint,
     resolve_memory_plugin_lancedb_version,
+    resolve_preferred_project_python_version,
     resolve_service_manager,
     supports_hypermemory_local_rerank,
 )
@@ -58,6 +60,7 @@ def test_build_compatibility_record_reports_when_override_is_required() -> None:
 
     assert record["service_manager"] == "launchd"
     assert record["python_version"] == "3.12"
+    assert record["preferred_project_python_version"] == DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
     assert record["memory_plugin_lancedb_version"] == DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_default_lancedb_version"] == DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_override_required"] is True
@@ -85,6 +88,26 @@ def test_local_rerank_support_matrix_tracks_known_host_python_combinations() -> 
         HostPlatform("linux", "armv7l"),
         python_version="3.12",
     )
+
+
+def test_managed_install_prefers_python_312_on_supported_hosts() -> None:
+    assert (
+        resolve_preferred_project_python_version(HostPlatform("darwin", "x86_64"))
+        == DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
+    )
+    assert (
+        resolve_preferred_project_python_version(HostPlatform("darwin", "arm64"))
+        == DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
+    )
+    assert (
+        resolve_preferred_project_python_version(HostPlatform("linux", "x86_64"))
+        == DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
+    )
+    assert (
+        resolve_preferred_project_python_version(HostPlatform("linux", "arm64"))
+        == DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
+    )
+    assert resolve_preferred_project_python_version(HostPlatform("windows", "x86_64")) is None
 
 
 def test_local_rerank_constraint_tracks_supported_host_specific_pins() -> None:
