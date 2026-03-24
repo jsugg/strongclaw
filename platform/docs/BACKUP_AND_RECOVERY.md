@@ -7,27 +7,27 @@
 - harness results you want to keep
 - compose state for Postgres / LiteLLM / Qdrant if you need continuity
 
-## Included scripts
+## Included commands
 
-- `scripts/recovery/backup_create.sh`
-- `scripts/recovery/backup_verify.sh`
-- `scripts/recovery/restore_openclaw.sh`
-- `scripts/recovery/prune_retention.sh`
-- `scripts/recovery/rotate_secrets.sh`
+- `clawops recovery backup-create`
+- `clawops recovery backup-verify`
+- `clawops recovery restore`
+- `clawops recovery prune-retention`
+- `clawops recovery rotate-secrets`
 
 ## Development-mode repo-local compose state
 
 If you keep compose state under `platform/compose/state` during development, use
 the explicit dev wrappers instead of relying on implicit leftover mounts:
 
-- `./scripts/ops/launch_sidecars_dev.sh`
-- `./scripts/ops/stop_sidecars_dev.sh`
+- `clawops ops sidecars up --repo-local-state`
+- `clawops ops sidecars down --repo-local-state`
 
 Prefer targeted cleanup over deleting the whole tree:
 
-- `./scripts/ops/prune_qdrant_test_collections.sh`
-- `./scripts/ops/reset_dev_compose_state.sh --component qdrant`
-- `./scripts/ops/reset_dev_compose_state.sh --component postgres`
+- `clawops ops prune-qdrant-test-collections`
+- `clawops ops reset-compose-state --component qdrant`
+- `clawops ops reset-compose-state --component postgres`
 
 ## Recovery order
 

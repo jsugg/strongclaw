@@ -7,16 +7,16 @@ This guide is for day-2 operations after the platform is up.
 Manual:
 
 ```bash
-./scripts/ops/launch_gateway_with_varlock.sh
-./scripts/ops/launch_sidecars_with_varlock.sh
-./scripts/ops/stop_sidecars.sh
+clawops ops gateway start
+clawops ops sidecars up
+clawops ops sidecars down
 ```
 
 Repo-local sidecar state during development:
 
 ```bash
-./scripts/ops/launch_sidecars_dev.sh
-./scripts/ops/stop_sidecars_dev.sh
+clawops ops sidecars up --repo-local-state
+clawops ops sidecars down --repo-local-state
 ```
 
 Service mode:
@@ -34,10 +34,12 @@ systemctl --user restart openclaw-gateway.service
 
 ## Health checks
 
-Repository helper scripts that depend on `openclaw` now detect whether the CLI is installed. Tasks that require it fail fast with a clear message, while fallback-capable tasks warn and continue with their fallback path.
+Repository helper commands that depend on `openclaw` now detect whether the CLI
+is installed. Tasks that require it fail fast with a clear message, while
+fallback-capable tasks warn and continue with their fallback path.
 
 ```bash
-./scripts/bootstrap/doctor_host.sh
+clawops doctor-host
 make doctor
 uv run --project . clawops doctor --skip-runtime
 openclaw gateway status --json
@@ -48,15 +50,15 @@ openclaw memory search --query "ClawOps" --max-results 1
 openclaw security audit --deep
 openclaw secrets audit --check
 docker compose -f platform/compose/docker-compose.aux-stack.yaml ps
-./scripts/ops/check_loopback_bindings.sh
+clawops verify-platform sidecars
 ```
 
 For repo-local compose state hygiene during development, prefer targeted tools:
 
 ```bash
-./scripts/ops/prune_qdrant_test_collections.sh
-./scripts/ops/reset_dev_compose_state.sh --component qdrant
-./scripts/ops/reset_dev_compose_state.sh --component postgres
+clawops ops prune-qdrant-test-collections
+clawops ops reset-compose-state --component qdrant
+clawops ops reset-compose-state --component postgres
 ```
 
 ## Remote operator access
@@ -206,7 +208,7 @@ explicitly with:
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
 clawops setup --profile hypermemory
-./scripts/bootstrap/verify_hypermemory.sh
+clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
 clawops doctor
 ```
 
@@ -344,7 +346,7 @@ any current working directory. The helper script also pins the repo root
 explicitly:
 
 ```bash
-./scripts/ops/run_workflow.sh platform/configs/workflows/code_review.yaml --dry-run
+clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-run
 ```
 
 ## Approval-gated wrappers
@@ -398,22 +400,22 @@ clawops workflow \
 
 ## ACP workers
 
-Use the helper scripts:
+Use the helper commands:
 
 ```bash
-./scripts/workers/run_codex_session.sh "Refactor auth middleware"
-./scripts/workers/run_claude_review.sh "Review the proposed patch"
-./scripts/workers/worktree_new.sh feature/auth-hardening
-./scripts/workers/reviewer_fixer_loop.sh feature/auth-hardening
+clawops acp-runner --prompt "Refactor auth middleware"
+clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-run
+clawops worktree new --branch feature/auth-hardening
+clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-run
 ```
 
 ## Recovery
 
 ```bash
-./scripts/recovery/backup_create.sh
-./scripts/recovery/backup_verify.sh latest
-./scripts/recovery/restore_openclaw.sh /path/to/archive.tar.gz
-./scripts/recovery/rotate_secrets.sh
+clawops recovery backup-create
+clawops recovery backup-verify latest
+clawops recovery restore /path/to/archive.tar.gz
+clawops recovery rotate-secrets
 ```
 
 ## Production checklists

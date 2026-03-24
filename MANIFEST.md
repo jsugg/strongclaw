@@ -59,11 +59,11 @@ This manifest lists the major components shipped in the platform bundle.
 
 ## Scripts
 
-- `scripts/bootstrap/*`
-- `scripts/ops/*`
-- `scripts/workers/*`
-- `scripts/recovery/*`
-- `scripts/ci/*`
+- `clawops bootstrap + doctor-host + model-auth + varlock-env + services + baseline surfaces`
+- `clawops ops surfaces`
+- `clawops acp-runner + worktree + workflow surfaces`
+- `clawops recovery surfaces`
+- `GitHub workflow inline uv/clawops tasks`
 
 ## Tests
 

@@ -7,7 +7,8 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=__REPO_ROOT__
 Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
-ExecStart=/bin/bash -lc '__REPO_ROOT__/scripts/ops/launch_gateway_with_varlock.sh'
+Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=__REPO_ROOT__/.venv/bin/python -m clawops ops --repo-root __REPO_ROOT__ gateway start
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

@@ -28,7 +28,28 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
-      - run: ./scripts/ci/verify_vendored_memory_plugin.sh
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: PYTHONPATH=src uv run python -m clawops config --repo-root . memory --set-profile memory-lancedb-pro --output "$RUNNER_TEMP/openclaw.json"
+      - run: |
+          tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-openclaw-cli.XXXXXX")"
+          npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@2026.3.13"
+          export PATH="$tool_dir/node_modules/.bin:$PATH"
+          cd platform/plugins/memory-lancedb-pro
+          env \
+            -u AWS_PROFILE \
+            -u AWS_ACCESS_KEY_ID \
+            -u AWS_SECRET_ACCESS_KEY \
+            -u AWS_SESSION_TOKEN \
+            -u AWS_DEFAULT_REGION \
+            -u AWS_REGION \
+            npm run test:openclaw-host
   verify-hypermemory-qdrant:
     name: Run Hypermemory Qdrant Checks
     runs-on: ubuntu-latest
@@ -47,7 +68,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
+      - run: uv sync --locked --extra dev
       - run: |
           for _ in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:6333/healthz >/dev/null; then
@@ -57,7 +78,7 @@ jobs:
           done
           echo "Qdrant failed to become ready" >&2
           exit 1
-      - run: ./scripts/ci/verify_hypermemory_qdrant.sh
+      - run: PYTHONPATH=src uv run pytest -q tests/test_hypermemory.py tests/test_hypermemory_qdrant_backend.py tests/test_hypermemory_qdrant_integration.py
         env:
           TEST_QDRANT_URL: http://127.0.0.1:6333
   verify-strongclaw-hypermemory-host:
@@ -76,5 +97,5 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/ci/verify_strongclaw_hypermemory_plugin.sh
+      - run: uv sync --locked --extra dev
+      - run: cd platform/plugins/strongclaw-hypermemory && npm run test:openclaw-host

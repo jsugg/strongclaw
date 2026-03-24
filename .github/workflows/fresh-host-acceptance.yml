@@ -1,0 +1,107 @@
+name: Fresh Host Acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  linux-fresh-host:
+    name: Linux Fresh Host
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+      - name: Bootstrap setup services and runtime flows
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-linux-host"
+          export HOME="${TMP_ROOT}/home"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export XDG_RUNTIME_DIR="${TMP_ROOT}/xdg-runtime"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          export PYTHONPATH="src"
+          mkdir -p "${HOME}" "${XDG_RUNTIME_DIR}"
+          chmod 700 "${XDG_RUNTIME_DIR}"
+
+          python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
+          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
+          test -f "${HOME}/.config/systemd/user/openclaw-gateway.service"
+          test -f "${HOME}/.config/systemd/user/openclaw-sidecars.service"
+          test -f "${HOME}/.config/systemd/user/openclaw-browserlab.service"
+          .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
+      - name: Upload Linux host artifacts
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-fresh-host-artifacts
+          path: ${{ runner.temp }}/strongclaw-linux-host
+
+  macos-fresh-host:
+    name: macOS Fresh Host
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Install Docker tooling for hosted macOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install colima docker docker-compose
+          mkdir -p "${HOME}/.docker/cli-plugins"
+          ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${HOME}/.docker/cli-plugins/docker-compose"
+          colima start --cpu 2 --memory 4 --disk 20
+          docker version
+          docker compose version
+          echo "DOCKER_CONFIG=${HOME}/.docker" >> "${GITHUB_ENV}"
+          echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+      - name: Bootstrap setup services and runtime flows
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          export HOME="${TMP_ROOT}/home"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PYTHONPATH="src"
+          export DOCKER_CONFIG="${DOCKER_CONFIG}"
+          export DOCKER_HOST="${DOCKER_HOST}"
+          mkdir -p "${HOME}"
+
+          python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
+          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
+          .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
+          .venv/bin/python -m clawops ops --repo-root . sidecars down || true
+          .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+      - name: Upload macOS host artifacts
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: macos-fresh-host-artifacts
+          path: ${{ runner.temp }}/strongclaw-macos-host

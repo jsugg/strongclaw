@@ -29,8 +29,8 @@
    - hypermemory defaults `HYPERMEMORY_EMBEDDING_BASE_URL=http://127.0.0.1:4000/v1`
    - hypermemory defaults `HYPERMEMORY_QDRANT_URL=http://127.0.0.1:6333`
 4. if you chose a managed backend, let guided setup generate `platform/configs/varlock/.env.plugins`, or maintain that file manually for hybrid setups
-5. run `./scripts/bootstrap/configure_varlock_env.sh` or `varlock load --path platform/configs/varlock`
-6. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `./scripts/bootstrap/setup.sh` do it for you
+5. run `clawops varlock-env configure` or `varlock load --path platform/configs/varlock`
+6. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `clawops setup` do it for you
 7. launch gateway / sidecars with `varlock run -- ...`
 
 ## Backend notes
@@ -44,5 +44,5 @@
 
 ## Rotation
 
-Use `scripts/recovery/rotate_secrets.sh` and the runbook:
+Use `clawops recovery rotate-secrets` and the runbook:
 `platform/docs/runbooks/credential-rotation.md`

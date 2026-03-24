@@ -305,13 +305,13 @@ def test_verify_observability_accepts_empty_metrics_body_when_endpoint_is_reacha
             assert report.ok is True
 
 
-def test_verify_channels_matches_repo_docs_and_scripts() -> None:
+def test_verify_channels_matches_repo_docs_and_guidance() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     report = verify_channels(
         overlay_path=repo_root / "platform/configs/openclaw/30-channels.json5",
         channels_doc_path=repo_root / "platform/docs/CHANNELS.md",
-        telegram_script_path=repo_root / "scripts/bootstrap/enable_telegram.sh",
-        whatsapp_script_path=repo_root / "scripts/bootstrap/enable_whatsapp.sh",
+        telegram_guidance_path=repo_root / "platform/docs/channels/telegram.md",
+        whatsapp_guidance_path=repo_root / "platform/docs/channels/whatsapp.md",
         allowlist_source_path=repo_root / "platform/configs/source-allowlists.example.yaml",
     )
 

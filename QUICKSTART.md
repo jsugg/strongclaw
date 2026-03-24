@@ -39,7 +39,7 @@ $EDITOR platform/configs/varlock/.env.local
 Before you continue, decide how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports two setup paths:
 
-- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `./scripts/bootstrap/setup.sh` can launch `openclaw configure --section model`
+- guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` can launch `openclaw configure --section model`
 - env-driven: set provider keys plus optional model overrides in `platform/configs/varlock/.env.local`
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
@@ -79,14 +79,14 @@ make setup
 Equivalent shell entrypoint:
 
 ```bash
-./scripts/bootstrap/setup.sh
+clawops setup
 ```
 
 Equivalent explicit hypermemory path:
 
 ```bash
 clawops setup --profile hypermemory
-./scripts/bootstrap/verify_hypermemory.sh
+clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
 ```
 
 Explicit built-in OpenClaw path:
@@ -128,17 +128,17 @@ If you intentionally want repo-local compose state during development, keep it
 explicit instead of relying on stale container mounts:
 
 ```bash
-./scripts/ops/launch_sidecars_dev.sh
-./scripts/ops/stop_sidecars_dev.sh
-./scripts/ops/prune_qdrant_test_collections.sh
-./scripts/ops/reset_dev_compose_state.sh --component qdrant
+clawops ops sidecars up --repo-local-state
+clawops ops sidecars down --repo-local-state
+clawops ops prune-qdrant-test-collections
+clawops ops reset-compose-state --component qdrant
 ```
 
 You can rerun the host doctor directly after any local change that might affect
 the rendered config or CLI toolchain:
 
 ```bash
-./scripts/bootstrap/doctor_host.sh
+clawops doctor-host
 ```
 
 For the full post-bootstrap readiness sweep, run:
@@ -155,7 +155,7 @@ auto-detected and skipped.
 ## 4. Rerender the OpenClaw config when you change profiles
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh
+clawops render-openclaw-config --repo-root .
 ```
 
 This now renders the default StrongClaw profile, `hypermemory`,
@@ -174,11 +174,11 @@ For placeholder-backed variants, rerender by profile instead of merging raw
 JSON5 overlays:
 
 ```bash
-./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-default
-./scripts/bootstrap/render_openclaw_config.sh --profile openclaw-qmd
-./scripts/bootstrap/render_openclaw_config.sh --profile acp
-./scripts/bootstrap/render_openclaw_config.sh --profile hypermemory
-./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro
+clawops render-openclaw-config --repo-root . --profile openclaw-default
+clawops render-openclaw-config --repo-root . --profile openclaw-qmd
+clawops render-openclaw-config --repo-root . --profile acp
+clawops render-openclaw-config --repo-root . --profile hypermemory
+clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
 ```
 
 The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
@@ -197,7 +197,7 @@ The default `hypermemory` profile enables the combined
 ## 5. Verify the baseline again on demand
 
 ```bash
-./scripts/bootstrap/verify_baseline.sh
+clawops baseline verify
 ```
 
 It runs:
@@ -207,10 +207,10 @@ It runs:
 - `openclaw secrets audit --check`
 - `openclaw memory status --deep`
 - `openclaw memory search --query "ClawOps" --max-results 1`
-- `./scripts/bootstrap/configure_openclaw_model_auth.sh --check-only`
-- `./scripts/bootstrap/verify_sidecars.sh --skip-runtime`
-- `./scripts/bootstrap/verify_observability.sh --skip-runtime`
-- `./scripts/bootstrap/verify_channels.sh`
+- `clawops model-auth check`
+- `clawops verify-platform sidecars --skip-runtime`
+- `clawops verify-platform observability --skip-runtime`
+- `clawops verify-platform channels`
 - companion-tool smoke tests
 
 For the deeper StrongClaw readiness scan, including model/provider validation
@@ -224,27 +224,27 @@ make doctor
 
 Add these only in order:
 
-1. ACP workers: `./scripts/bootstrap/bootstrap_acpx.sh`
-2. Repo context service: `./scripts/bootstrap/bootstrap_context.sh`
-3. QMD prewarm: `./scripts/workers/prewarm_qmd.sh`
+1. ACP workers: `clawops render-openclaw-config --repo-root . --profile acp`
+2. Repo context service: `clawops context index --config platform/configs/context/context-service.yaml --repo .`
+3. QMD prewarm: `qmd status`
 4. Built-in OpenClaw memory fallback:
    `clawops setup --profile openclaw-default`
 5. Built-in OpenClaw plus experimental QMD:
    `clawops setup --profile openclaw-qmd`
 6. Opt-in local LanceDB durable memory with Ollama-backed smart extraction by rerendering
-   `./scripts/bootstrap/render_openclaw_config.sh --profile memory-lancedb-pro`
+   `clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro`
 7. Migration-only standalone overlay reference:
    `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
-8. Telegram: `./scripts/bootstrap/enable_telegram.sh`
-9. WhatsApp: `./scripts/bootstrap/enable_whatsapp.sh`
-10. OTel/Langfuse: `./scripts/bootstrap/enable_observability.sh`
-11. Browser lab on a separate host: `./scripts/bootstrap/bootstrap_browser_lab.sh`
+8. Telegram: `platform/docs/channels/telegram.md`
+9. WhatsApp: `platform/docs/channels/whatsapp.md`
+10. OTel/Langfuse: `clawops verify-platform observability`
+11. Browser lab on a separate host: `clawops ops browser-lab up --repo-local-state`
 
 After each layer is enabled, run the matching verification entrypoint:
 
-- ACP workers: `./scripts/workers/run_codex_session.sh "Summarize the repo"`
-- Telegram / WhatsApp: `./scripts/bootstrap/verify_channels.sh`
-- OTel/Langfuse: `./scripts/bootstrap/verify_observability.sh`
+- ACP workers: `clawops acp-runner --prompt "Summarize the repo"`
+- Telegram / WhatsApp: `clawops verify-platform channels`
+- OTel/Langfuse: `clawops verify-platform observability`
 
 For remote operator access, tunnel the gateway only:
 

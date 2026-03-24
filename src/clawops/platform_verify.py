@@ -7,6 +7,7 @@ import dataclasses
 import http.client
 import json
 import pathlib
+import re
 import socket
 import time
 import urllib.error
@@ -224,11 +225,50 @@ def _check_loopback_probe(script_path: pathlib.Path, ports: Sequence[int]) -> Ch
     return _fail("loopback-probe", detail)
 
 
+def _listener_addresses(port: int) -> list[str]:
+    """Collect listener addresses for one TCP port."""
+    commands = (
+        ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-F", "n"],
+        ["ss", "-H", "-ltn", f"( sport = :{port} )"],
+        ["netstat", "-an"],
+    )
+    for command in commands:
+        result = run_command(command, timeout_seconds=10)
+        if not result.ok:
+            continue
+        if command[0] == "lsof":
+            return [line[1:] for line in result.stdout.splitlines() if line.startswith("n")]
+        if command[0] == "ss":
+            return [line.split()[-1] for line in result.stdout.splitlines() if line.split()]
+        return [
+            line.split()[-1]
+            for line in result.stdout.splitlines()
+            if "LISTEN" in line and re.search(rf"[.:]{port}\b", line)
+        ]
+    return []
+
+
+def _check_loopback_ports(ports: Sequence[int]) -> Check:
+    """Verify that discovered listeners stay loopback-only."""
+    failures: list[str] = []
+    for port in ports:
+        listeners = sorted(set(_listener_addresses(port)))
+        if not listeners:
+            continue
+        non_loopback = [
+            listener for listener in listeners if not _is_loopback_host(listener.split(":")[0])
+        ]
+        if non_loopback:
+            failures.append(f"port {port}: {', '.join(non_loopback)}")
+    if failures:
+        return _fail("loopback-probe", "; ".join(failures))
+    return _ok("loopback-probe", "runtime listeners remain loopback-only")
+
+
 def verify_sidecars(
     *,
     compose_path: pathlib.Path,
     skip_runtime: bool = False,
-    loopback_script: pathlib.Path | None = None,
 ) -> VerificationReport:
     """Verify sidecar compose contracts and runtime reachability."""
     compose = _load_mapping_yaml(compose_path)
@@ -301,13 +341,12 @@ def verify_sidecars(
                 f"http://{qdrant_port.host}:{qdrant_port.host_port}/healthz",
             )
         )
-    if loopback_script is not None:
-        discovered_ports = [
-            published.host_port
-            for published in (postgres_port, litellm_port, otlp_port, metrics_port, qdrant_port)
-            if published is not None
-        ]
-        checks.append(_check_loopback_probe(loopback_script, discovered_ports))
+    discovered_ports = [
+        published.host_port
+        for published in (postgres_port, litellm_port, otlp_port, metrics_port, qdrant_port)
+        if published is not None
+    ]
+    checks.append(_check_loopback_ports(discovered_ports))
     return VerificationReport(name="sidecars", checks=checks)
 
 
@@ -454,8 +493,8 @@ def verify_channels(
     *,
     overlay_path: pathlib.Path,
     channels_doc_path: pathlib.Path,
-    telegram_script_path: pathlib.Path,
-    whatsapp_script_path: pathlib.Path,
+    telegram_guidance_path: pathlib.Path,
+    whatsapp_guidance_path: pathlib.Path,
     allowlist_source_path: pathlib.Path,
 ) -> VerificationReport:
     """Verify channel overlays, docs, and allowlist rendering parity."""
@@ -522,8 +561,8 @@ def verify_channels(
     )
 
     docs_text = load_text(channels_doc_path)
-    telegram_script_text = load_text(telegram_script_path)
-    whatsapp_script_text = load_text(whatsapp_script_path)
+    telegram_guidance_text = load_text(telegram_guidance_path)
+    whatsapp_guidance_text = load_text(whatsapp_guidance_path)
     checks.extend(
         [
             (
@@ -545,19 +584,24 @@ def verify_channels(
             ),
             (
                 _ok(
-                    "telegram-script-pairing", "Telegram helper preserves pairing approval guidance"
+                    "telegram-guidance-pairing",
+                    "Telegram guidance preserves pairing approval guidance",
                 )
-                if "openclaw pairing approve telegram <CODE>" in telegram_script_text
+                if "openclaw pairing approve telegram <CODE>" in telegram_guidance_text
                 else _fail(
-                    "telegram-script-pairing",
-                    "Telegram helper must surface pairing approval guidance",
+                    "telegram-guidance-pairing",
+                    "Telegram guidance must surface pairing approval guidance",
                 )
             ),
             (
-                _ok("whatsapp-script-pairing", "WhatsApp helper preserves pairing-first guidance")
-                if "pairing" in whatsapp_script_text and "allowlist" in whatsapp_script_text
+                _ok(
+                    "whatsapp-guidance-pairing",
+                    "WhatsApp guidance preserves pairing-first guidance",
+                )
+                if "pairing" in whatsapp_guidance_text and "allowlist" in whatsapp_guidance_text
                 else _fail(
-                    "whatsapp-script-pairing", "WhatsApp helper drifted from pairing-first guidance"
+                    "whatsapp-guidance-pairing",
+                    "WhatsApp guidance drifted from pairing-first guidance",
                 )
             ),
         ]
@@ -605,7 +649,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repo-root", dest="subcommand_repo_root", type=pathlib.Path, default=None
     )
     sidecars.add_argument("--compose-file", type=pathlib.Path, default=None)
-    sidecars.add_argument("--loopback-script", type=pathlib.Path, default=None)
     sidecars.add_argument("--skip-runtime", action="store_true")
 
     observability = subparsers.add_parser("observability")
@@ -625,8 +668,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     channels.add_argument("--overlay", type=pathlib.Path, default=None)
     channels.add_argument("--doc", type=pathlib.Path, default=None)
-    channels.add_argument("--telegram-script", type=pathlib.Path, default=None)
-    channels.add_argument("--whatsapp-script", type=pathlib.Path, default=None)
+    channels.add_argument("--telegram-guidance", type=pathlib.Path, default=None)
+    channels.add_argument("--whatsapp-guidance", type=pathlib.Path, default=None)
     channels.add_argument("--allowlist-source", type=pathlib.Path, default=None)
 
     return parser.parse_args(argv)
@@ -654,11 +697,6 @@ def main(argv: list[str] | None = None) -> int:
                 else repo_root / "platform/compose/docker-compose.aux-stack.yaml"
             ),
             skip_runtime=bool(args.skip_runtime),
-            loopback_script=(
-                args.loopback_script.resolve()
-                if args.loopback_script is not None
-                else repo_root / "scripts/ops/check_loopback_bindings.sh"
-            ),
         )
     elif args.target == "observability":
         report = verify_observability(
@@ -686,15 +724,15 @@ def main(argv: list[str] | None = None) -> int:
                 if args.doc is not None
                 else repo_root / "platform/docs/CHANNELS.md"
             ),
-            telegram_script_path=(
-                args.telegram_script.resolve()
-                if args.telegram_script is not None
-                else repo_root / "scripts/bootstrap/enable_telegram.sh"
+            telegram_guidance_path=(
+                args.telegram_guidance.resolve()
+                if args.telegram_guidance is not None
+                else repo_root / "platform/docs/channels/telegram.md"
             ),
-            whatsapp_script_path=(
-                args.whatsapp_script.resolve()
-                if args.whatsapp_script is not None
-                else repo_root / "scripts/bootstrap/enable_whatsapp.sh"
+            whatsapp_guidance_path=(
+                args.whatsapp_guidance.resolve()
+                if args.whatsapp_guidance is not None
+                else repo_root / "platform/docs/channels/whatsapp.md"
             ),
             allowlist_source_path=(
                 args.allowlist_source.resolve()

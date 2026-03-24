@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
-import os
 import pathlib
-import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
-from clawops.openclaw_config import DEFAULT_OPENCLAW_CONFIG_OUTPUT
-from clawops.setup_cli import DEFAULT_REPO_ROOT
+from clawops.common import write_json
+from clawops.openclaw_config import DEFAULT_OPENCLAW_CONFIG_OUTPUT, render_openclaw_profile
+from clawops.strongclaw_bootstrap import install_profile_assets
+from clawops.strongclaw_runtime import DEFAULT_REPO_ROOT, resolve_home_dir, resolve_repo_root
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -54,31 +54,6 @@ MEMORY_PROFILES: dict[str, MemoryProfileSpec] = {
 }
 
 
-def _resolve_script(env_name: str, relative_path: str) -> pathlib.Path:
-    """Resolve an overrideable shell entrypoint."""
-    override = os.environ.get(env_name)
-    if override:
-        return pathlib.Path(override).expanduser().resolve()
-    return (DEFAULT_REPO_ROOT / relative_path).resolve()
-
-
-def _script_command(script_path: pathlib.Path, argv: Sequence[str] | None) -> list[str]:
-    """Build a resilient command line for a local shell entrypoint."""
-    args = list(argv or ())
-    if script_path.suffix == ".sh":
-        return ["/bin/bash", str(script_path), *args]
-    return [str(script_path), *args]
-
-
-def _run_script(script_path: pathlib.Path, argv: Sequence[str] | None) -> None:
-    """Execute a local script and raise on failure."""
-    if not script_path.exists():
-        raise FileNotFoundError(f"missing script: {script_path}")
-    result = subprocess.run(_script_command(script_path, argv), check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"{script_path} exited with code {result.returncode}")
-
-
 def _memory_profile(profile_id: str) -> MemoryProfileSpec:
     """Resolve one supported StrongClaw memory profile."""
     try:
@@ -90,9 +65,7 @@ def _memory_profile(profile_id: str) -> MemoryProfileSpec:
 
 def _print_payload(payload: Mapping[str, object], *, as_json: bool) -> None:
     """Render a command payload."""
-    if as_json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return
+    del as_json
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
@@ -101,56 +74,30 @@ def _set_memory_profile(
     profile_id: str,
     output_path: pathlib.Path,
     skip_assets: bool,
+    repo_root: pathlib.Path,
+    home_dir: pathlib.Path,
 ) -> dict[str, object]:
     """Install required assets and render the selected OpenClaw profile."""
     profile = _memory_profile(profile_id)
     installed_assets: list[str] = []
     if not skip_assets:
-        if profile.installs_qmd:
-            _run_script(
-                _resolve_script(
-                    "CLAWOPS_CONFIG_MEMORY_BOOTSTRAP_QMD_SCRIPT",
-                    "scripts/bootstrap/bootstrap_qmd.sh",
-                ),
-                (),
-            )
-            installed_assets.append("qmd")
-        if profile.installs_lossless_claw:
-            _run_script(
-                _resolve_script(
-                    "CLAWOPS_CONFIG_MEMORY_BOOTSTRAP_LOSSLESS_CLAW_SCRIPT",
-                    "scripts/bootstrap/bootstrap_lossless_context_engine.sh",
-                ),
-                (),
-            )
-            installed_assets.append("lossless-claw")
-        if profile.installs_memory_pro:
-            _run_script(
-                _resolve_script(
-                    "CLAWOPS_CONFIG_MEMORY_BOOTSTRAP_MEMORY_PRO_SCRIPT",
-                    "scripts/bootstrap/bootstrap_memory_plugin.sh",
-                ),
-                (),
-            )
-            installed_assets.append("memory-lancedb-pro")
-    render_script = _resolve_script(
-        "CLAWOPS_CONFIG_MEMORY_RENDER_SCRIPT",
-        "scripts/bootstrap/render_openclaw_config.sh",
+        installed_assets = install_profile_assets(
+            repo_root,
+            profile=profile.render_profile,
+            home_dir=home_dir,
+        )
+    rendered = render_openclaw_profile(
+        profile_name=profile.render_profile,
+        repo_root=repo_root,
+        home_dir=home_dir,
     )
-    _run_script(
-        render_script,
-        (
-            "--profile",
-            profile.render_profile,
-            "--output",
-            output_path.expanduser().resolve().as_posix(),
-        ),
-    )
+    resolved_output = output_path.expanduser().resolve()
+    write_json(resolved_output, rendered)
     return {
         "ok": True,
         "profileId": profile.profile_id,
         "renderProfile": profile.render_profile,
-        "output": output_path.expanduser().resolve().as_posix(),
+        "output": resolved_output.as_posix(),
         "installedAssets": installed_assets,
         "description": profile.description,
     }
@@ -159,6 +106,8 @@ def _set_memory_profile(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for StrongClaw config management."""
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     memory_parser = subparsers.add_parser("memory", help="Manage StrongClaw memory profiles.")
@@ -190,6 +139,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the StrongClaw config manager."""
     args = parse_args(argv)
+    repo_root = resolve_repo_root(args.repo_root)
+    home_dir = resolve_home_dir(args.home_dir)
     if args.command != "memory":
         raise SystemExit(f"unsupported config command: {args.command}")
     if bool(args.list_profiles):
@@ -211,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         profile_id=str(args.set_profile),
         output_path=args.output,
         skip_assets=bool(args.skip_assets),
+        repo_root=repo_root,
+        home_dir=home_dir,
     )
     _print_payload(payload, as_json=bool(args.json))
     return 0

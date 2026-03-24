@@ -6,12 +6,26 @@
     <string>ai.openclaw.browserlab</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/bin/bash</string>
-      <string>-lc</string>
-      <string>cd __REPO_ROOT__ && ./scripts/bootstrap/bootstrap_browser_lab.sh</string>
+      <string>__REPO_ROOT__/.venv/bin/python</string>
+      <string>-m</string>
+      <string>clawops</string>
+      <string>ops</string>
+      <string>--repo-root</string>
+      <string>__REPO_ROOT__</string>
+      <string>browser-lab</string>
+      <string>up</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO_ROOT__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>HOME</key>
+      <string>__HOME_DIR__</string>
+      <key>XDG_CONFIG_HOME</key>
+      <string>__HOME_DIR__/.config</string>
+      <key>PATH</key>
+      <string>__HOME_DIR__/.config/varlock/bin:__HOME_DIR__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>__STATE_DIR__/logs/launchd-browserlab.out.log</string>
     <key>StandardErrorPath</key>

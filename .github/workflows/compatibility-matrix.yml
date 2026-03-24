@@ -29,7 +29,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
+      - run: uv sync --locked --extra dev
       - run: PYTHONPATH=src uv run --project . --locked --extra dev pytest -q tests
       - run: PYTHONPATH=src uv run --project . --locked --extra dev python -m compileall -q src tests
 
@@ -52,5 +52,50 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: ./scripts/ci/sync_dev_environment.sh
-      - run: ./scripts/ci/run_setup_compatibility_smoke.sh
+      - run: uv sync --locked --extra dev
+      - run: |
+          TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
+          HOME_DIR="${SETUP_COMPAT_HOME:-$TMP_ROOT/home}"
+          mkdir -p "$HOME_DIR"
+          export HOME="$HOME_DIR"
+          export STRONGCLAW_DATA_DIR="${STRONGCLAW_DATA_DIR:-$TMP_ROOT/data}"
+          export STRONGCLAW_STATE_DIR="${STRONGCLAW_STATE_DIR:-$TMP_ROOT/state}"
+          export TMP_ROOT
+          PYTHONPATH=src uv run python - <<'PY'
+          import os
+          import pathlib
+          from clawops.common import write_json
+          from clawops.openclaw_config import render_openclaw_profile
+          from clawops.strongclaw_bootstrap import ensure_varlock_installed, install_lossless_claw_asset
+
+          repo_root = pathlib.Path(".").resolve()
+          tmp_root = pathlib.Path(os.environ["TMP_ROOT"]).expanduser().resolve()
+          ensure_varlock_installed()
+          install_lossless_claw_asset(repo_root)
+          rendered = render_openclaw_profile(
+              profile_name="hypermemory",
+              repo_root=repo_root,
+              home_dir=pathlib.Path.home(),
+          )
+          write_json(tmp_root / "openclaw.json", rendered)
+          PY
+      - run: |
+          TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
+          STRONGCLAW_DATA_DIR="${STRONGCLAW_DATA_DIR:-$TMP_ROOT/data}"
+          test -f "$STRONGCLAW_DATA_DIR/plugins/lossless-claw/openclaw.plugin.json"
+      - run: |
+          TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+          TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
+          export TMP_ROOT
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          payload = json.loads((pathlib.Path(os.environ["TMP_ROOT"]) / "openclaw.json").read_text(encoding="utf-8"))
+          plugin_config = payload["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
+          assert plugin_config["configPath"].endswith("platform/configs/memory/hypermemory.yaml")
+          assert plugin_config["autoRecall"] is True
+          PY
