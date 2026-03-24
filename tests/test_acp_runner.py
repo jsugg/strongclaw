@@ -9,8 +9,9 @@ import pathlib
 import shutil
 import subprocess
 
-from clawops.acp_runner import _lock_name
+from clawops.acp_runner import _lock_name, _resolve_session_spec
 from clawops.acp_runner import main as acp_runner_main
+from clawops.acp_runner import parse_args
 
 
 def _write_fake_acpx(bin_dir: pathlib.Path, *, exit_code: int = 0) -> None:
@@ -21,6 +22,27 @@ def _write_fake_acpx(bin_dir: pathlib.Path, *, exit_code: int = 0) -> None:
         "printf 'fake-acpx %s\\n' \"$*\"\n"
         "printf 'stderr from fake-acpx\\n' >&2\n"
         f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    target.chmod(0o755)
+
+
+def _write_fake_status_command(
+    bin_dir: pathlib.Path,
+    name: str,
+    *,
+    stdout_text: str,
+    exit_code: int = 0,
+) -> None:
+    target = bin_dir / name
+    target.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'if [[ "$*" == *"login status"* ]] || [[ "$*" == *"auth status"* ]]; then\n'
+        f"  printf '%s\\n' {stdout_text!r}\n"
+        f"  exit {exit_code}\n"
+        "fi\n"
+        "exit 0\n",
         encoding="utf-8",
     )
     target.chmod(0o755)
@@ -52,6 +74,7 @@ def test_acp_runner_writes_summary_and_logs(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_acpx(bin_dir)
+    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
     state_dir = repo_root / ".runs" / "acp"
@@ -62,7 +85,7 @@ def test_acp_runner_writes_summary_and_logs(
             "--branch",
             "main",
             "--session-type",
-            "coder",
+            "developer",
             "--repo-root",
             str(repo_root),
             "--worktree",
@@ -78,19 +101,23 @@ def test_acp_runner_writes_summary_and_logs(
     assert exit_code == 0
     summary_stdout = json.loads(captured.out)
     assert summary_stdout["status"] == "succeeded"
+    assert summary_stdout["auth_mode"] == "subscription"
 
     summary_path = _session_summary_path(state_dir)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["ok"] is True
     assert summary["branch"] == "main"
-    assert summary["session_type"] == "coder"
-    assert summary["worktree"] == str(worktree.resolve())
-    assert summary["command"] == ["acpx", "codex", "Summarize the worktree"]
+    assert summary["session_type"] == "developer"
+    assert summary["workspace_root"] == str(worktree.resolve())
+    assert summary["command"] == ["acpx", "codex", "exec", "Summarize the worktree"]
 
     stdout_path = pathlib.Path(summary["stdout_path"])
     stderr_path = pathlib.Path(summary["stderr_path"])
-    assert "fake-acpx codex Summarize the worktree" in stdout_path.read_text(encoding="utf-8")
+    audit_path = pathlib.Path(summary["audit_path"])
+    assert "fake-acpx codex exec Summarize the worktree" in stdout_path.read_text(encoding="utf-8")
     assert "stderr from fake-acpx" in stderr_path.read_text(encoding="utf-8")
+    audit_payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit_payload["credential_state"] == "ready"
 
 
 def test_acp_runner_fails_preflight_when_acpx_is_missing(
@@ -108,6 +135,7 @@ def test_acp_runner_fails_preflight_when_acpx_is_missing(
     if git_path is None:
         raise AssertionError("git is required for this test")
     (git_bin / "git").symlink_to(git_path)
+    _write_fake_status_command(git_bin, "claude", stdout_text='{"status":"authenticated"}')
     monkeypatch.setenv("PATH", git_bin.as_posix())
 
     state_dir = repo_root / ".runs" / "acp"
@@ -137,7 +165,7 @@ def test_acp_runner_fails_preflight_when_acpx_is_missing(
     assert "acpx executable not found in PATH" in summary["message"]
 
 
-def test_acp_runner_detects_branch_lock_conflicts(
+def test_acp_runner_detects_lock_conflicts(
     tmp_path: pathlib.Path,
     monkeypatch: object,
     capsys: object,
@@ -150,10 +178,30 @@ def test_acp_runner_detects_branch_lock_conflicts(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_acpx(bin_dir)
+    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
     state_dir = repo_root / ".runs" / "acp"
-    lock_path = state_dir / "locks" / _lock_name("main")
+    args = parse_args(
+        [
+            "--backend",
+            "codex",
+            "--branch",
+            "main",
+            "--session-type",
+            "developer",
+            "--repo-root",
+            str(repo_root),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(state_dir),
+            "--prompt",
+            "Summarize the worktree",
+        ]
+    )
+    spec = _resolve_session_spec(args)
+    lock_path = state_dir / "locks" / _lock_name(spec.lock_identity)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     with lock_path.open("a+", encoding="utf-8") as handle:
@@ -165,7 +213,7 @@ def test_acp_runner_detects_branch_lock_conflicts(
                 "--branch",
                 "main",
                 "--session-type",
-                "coder",
+                "developer",
                 "--repo-root",
                 str(repo_root),
                 "--worktree",
@@ -180,4 +228,49 @@ def test_acp_runner_detects_branch_lock_conflicts(
         assert exit_code == 1
         summary = json.loads(captured.out)
         assert summary["status"] == "lock_conflict"
-        assert "branch already locked" in summary["message"]
+        assert "session already locked" in summary["message"]
+
+
+def test_acp_runner_supports_non_git_local_dir_without_branch(
+    tmp_path: pathlib.Path,
+    monkeypatch: object,
+    capsys: object,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    workspace = project_root / "workspace"
+    workspace.mkdir()
+    (workspace / "README.md").write_text("hello\n", encoding="utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_acpx(bin_dir)
+    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    exit_code = acp_runner_main(
+        [
+            "--backend",
+            "codex",
+            "--project-root",
+            str(project_root),
+            "--workspace",
+            str(workspace),
+            "--workspace-kind",
+            "local_dir",
+            "--role",
+            "developer",
+            "--lane",
+            "feature-a",
+            "--prompt",
+            "Summarize the local workspace",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    summary = json.loads(captured.out)
+    assert summary["workspace_kind"] == "local_dir"
+    assert summary["branch"] is None
+    assert summary["role"] == "developer"
+    assert summary["lane"] == "feature-a"
