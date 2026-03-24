@@ -48,10 +48,13 @@ jobs:
           .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
       - name: Upload Linux host artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: linux-fresh-host-artifacts
-          path: ${{ runner.temp }}/strongclaw-linux-host
+          path: |
+            ${{ runner.temp }}/strongclaw-linux-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-linux-host/home/.config/systemd/user
           include-hidden-files: true
 
   macos-fresh-host:
@@ -100,10 +103,31 @@ jobs:
           launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
           .venv/bin/python -m clawops ops --repo-root . sidecars down || true
           .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+      - name: Dump macOS host logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          for path in \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.out.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.err.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.out.log" \
+            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.err.log"; do
+            if [[ -f "${path}" ]]; then
+              echo "--- ${path}"
+              tail -n 200 "${path}"
+            fi
+          done
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" || true
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" || true
       - name: Upload macOS host artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: macos-fresh-host-artifacts
-          path: ${{ runner.temp }}/strongclaw-macos-host
+          path: |
+            ${{ runner.temp }}/strongclaw-macos-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-macos-host/home/Library/LaunchAgents
           include-hidden-files: true
