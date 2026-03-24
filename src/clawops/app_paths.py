@@ -129,8 +129,20 @@ def strongclaw_compose_state_dir(
     return strongclaw_state_dir(home_dir=resolved_home, environ=env, os_name=os_name) / "compose"
 
 
-def strongclaw_repo_local_compose_state_dir(repo_root: pathlib.Path) -> pathlib.Path:
+def strongclaw_repo_local_compose_state_dir(
+    repo_root: pathlib.Path,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the repo-local compose-state directory used by development sidecars."""
+    env = os.environ if environ is None else environ
+    override = _resolve_override_path(
+        "STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR",
+        home_dir=_resolve_home_dir(),
+        environ=env,
+    )
+    if override is not None:
+        return override
     return repo_root.expanduser().resolve() / "platform" / "compose" / "state"
 
 

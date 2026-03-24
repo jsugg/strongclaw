@@ -104,11 +104,12 @@ jobs:
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS="2700"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${TMP_ROOT}/repo-local-compose"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           export DOCKER_CONFIG="${DOCKER_CONFIG}"
           export DOCKER_HOST="${DOCKER_HOST}"
-          mkdir -p "${HOME}"
+          mkdir -p "${HOME}" "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
 
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
           .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify

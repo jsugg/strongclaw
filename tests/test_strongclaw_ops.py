@@ -43,6 +43,17 @@ def test_compose_state_dir_explicit_override_wins(
     assert strongclaw_ops._compose_state_dir(tmp_path, repo_local_state=False) == override_dir
 
 
+def test_compose_state_dir_repo_local_override_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Repo-local compose-state commands should honor the dedicated override."""
+    override_dir = tmp_path / "repo-local-override"
+
+    monkeypatch.setenv("STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR", str(override_dir))
+
+    assert strongclaw_ops._compose_state_dir(tmp_path, repo_local_state=True) == override_dir
+
+
 def test_compose_env_exports_openclaw_and_compose_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
