@@ -7,7 +7,7 @@ import sqlite3
 
 from pytest import MonkeyPatch
 
-from clawops.op_journal import OperationJournal
+from clawops.op_journal import LeaseConflictError, OperationJournal
 
 
 def test_begin_is_idempotent(tmp_path: pathlib.Path) -> None:
@@ -274,3 +274,66 @@ def test_connect_retries_transient_open_error(
     journal.init()
 
     assert attempts["count"] == 2
+
+
+def test_session_leases_are_visible_and_releasable(tmp_path: pathlib.Path) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    journal.init()
+
+    lease = journal.acquire_lease(
+        lock_identity="project:workspace:lane:developer:implement",
+        session_identity="codex:project:workspace:lane:developer",
+        backend="codex",
+        project_id="project",
+        workspace_id="workspace",
+        lane="lane",
+        role="developer",
+        operation_kind="implement",
+        holder=str(tmp_path),
+        ttl_seconds=60,
+        metadata={"foo": "bar"},
+    )
+
+    active = journal.list_leases(active_only=True)
+    assert [item.lease_id for item in active] == [lease.lease_id]
+
+    released = journal.release_lease(lease.lease_id, released_by="tester")
+    assert released.status == "released"
+    assert journal.list_leases(active_only=True) == []
+
+
+def test_session_lease_conflicts_raise(tmp_path: pathlib.Path) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    journal.init()
+    journal.acquire_lease(
+        lock_identity="project:workspace:lane:developer:implement",
+        session_identity="codex:project:workspace:lane:developer",
+        backend="codex",
+        project_id="project",
+        workspace_id="workspace",
+        lane="lane",
+        role="developer",
+        operation_kind="implement",
+        holder=str(tmp_path),
+        ttl_seconds=60,
+    )
+
+    try:
+        journal.acquire_lease(
+            lock_identity="project:workspace:lane:developer:implement",
+            session_identity="claude:project:workspace:lane:developer",
+            backend="claude",
+            project_id="project",
+            workspace_id="workspace",
+            lane="lane",
+            role="developer",
+            operation_kind="implement",
+            holder=str(tmp_path),
+            ttl_seconds=60,
+        )
+    except LeaseConflictError as exc:
+        assert "active lease already exists" in str(exc)
+    else:
+        raise AssertionError("expected duplicate active lease to fail")

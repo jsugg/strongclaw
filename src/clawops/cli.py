@@ -14,6 +14,7 @@ from clawops import (
     charts,
     config_cli,
     context_service,
+    credential_broker,
     harness,
     hypermemory,
     json_merge,
@@ -73,6 +74,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("op-journal", op_journal.main, "Manage the SQLite operation journal."),
     CommandSpec("policy", policy_engine.main, "Evaluate policy payloads against YAML rules."),
     CommandSpec("context", context_service.main, "Index, query, or pack repository context."),
+    CommandSpec(
+        "credential-status",
+        credential_broker.main,
+        "Report machine-readable backend credential readiness.",
+    ),
     CommandSpec(
         "memory",
         memory_tools.main,
