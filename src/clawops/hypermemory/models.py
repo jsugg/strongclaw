@@ -112,6 +112,7 @@ class LocalSentenceTransformersRerankConfig:
     model: str = ""
     batch_size: int = 8
     max_length: int = 2_048
+    device: str = "auto"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -418,8 +419,8 @@ class SearchDiagnostics:
         return {
             "lexicalMs": round(self.lexical_ms, 3),
             "sqliteDenseMs": round(self.sqlite_dense_ms, 3),
-            "qdrantDenseMs": round(self.qdrant_dense_ms, 3),
-            "qdrantSparseMs": round(self.qdrant_sparse_ms, 3),
+            "qdrantDenseSearchMs": round(self.qdrant_dense_ms, 3),
+            "qdrantSparseSearchMs": round(self.qdrant_sparse_ms, 3),
             "fusionMs": round(self.fusion_ms, 3),
             "rerankMs": round(self.rerank_ms, 3),
             "lexicalCandidates": self.lexical_candidates,

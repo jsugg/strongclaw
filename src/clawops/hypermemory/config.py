@@ -404,6 +404,11 @@ def _load_local_rerank(
             local.get("max_length", rerank.get("max_length")),
             default=2_048,
         ),
+        device=_as_blankable_string(
+            "rerank.local.device",
+            local.get("device", rerank.get("device")),
+            default="auto",
+        ),
     )
 
 

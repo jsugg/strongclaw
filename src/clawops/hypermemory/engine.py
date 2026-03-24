@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import pathlib
 import sqlite3
 from collections import defaultdict
@@ -37,7 +38,7 @@ from clawops.hypermemory.qdrant_backend import QdrantBackend
 from clawops.hypermemory.retrieval import search_index
 from clawops.hypermemory.schema import SCHEMA_VERSION, ensure_schema
 from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
-from clawops.observability import emit_structured_log, observed_span
+from clawops.observability import TelemetryValue, emit_structured_log, observed_span
 
 BANK_HEADERS = {
     "fact": "# World Model\n\n## Entries\n",
@@ -79,6 +80,7 @@ class HypermemoryEngine:
     def status(self) -> dict[str, Any]:
         """Return index and governance status."""
         sparse_fingerprint_current: str | None = None
+        rerank_resolved_device = self._rerank_resolved_device()
         missing_corpus_paths = self._missing_corpus_paths()
         with self.connect() as conn:
             document_count = self._count_rows(conn, "documents")
@@ -130,8 +132,14 @@ class HypermemoryEngine:
             "rerankFallbackProvider": self.config.rerank.fallback_provider,
             "rerankFailOpen": self.config.rerank.fail_open,
             "rerankModel": self.config.rerank.model_for(),
+            "rerankDevice": self.config.rerank.local.device,
+            "rerankResolvedDevice": rerank_resolved_device,
             "rerankFallbackModel": self.config.rerank.model_for(
                 self.config.rerank.fallback_provider
+            ),
+            "rerankCandidatePool": self.config.hybrid.rerank_candidate_pool,
+            "rerankOperationalRequired": (
+                self.config.rerank.enabled and self.config.hybrid.rerank_candidate_pool > 0
             ),
             "qdrantEnabled": bool(qdrant_health.get("enabled", False)),
             "qdrantHealthy": bool(qdrant_health.get("healthy", False)),
@@ -473,13 +481,16 @@ class HypermemoryEngine:
                         rerank_candidate_pool=hybrid_config.rerank_candidate_pool,
                         include_explain=include_explain,
                     )
+                diagnostics = replace(
+                    diagnostics,
+                    qdrant_dense_ms=qdrant_dense_search_ms,
+                    qdrant_sparse_ms=qdrant_sparse_search_ms,
+                )
                 telemetry_payload: dict[str, Any] = {
                     "requestedBackend": requested_backend,
                     "resolvedBackend": resolved_backend,
                     "fallbackActivated": fallback_activated,
                     "results": len(hits),
-                    "qdrantDenseSearchMs": round(qdrant_dense_search_ms, 3),
-                    "qdrantSparseSearchMs": round(qdrant_sparse_search_ms, 3),
                 }
                 telemetry_payload.update(diagnostics.to_dict())
                 span.set_attributes(telemetry_payload)
@@ -510,6 +521,8 @@ class HypermemoryEngine:
                 attributes={
                     "configuredProvider": self.config.rerank.provider,
                     "fallbackProvider": self.config.rerank.fallback_provider,
+                    "configuredDevice": self.config.rerank.local.device,
+                    "resolvedDevice": self._rerank_resolved_device(),
                     "candidateCount": len(documents),
                 },
             ) as span:
@@ -518,9 +531,11 @@ class HypermemoryEngine:
                     response = self._rerank_provider.score(query, documents)
                 except Exception as err:
                     latency_ms = (perf_counter() - started_at) * 1000.0
-                    error_payload = {
+                    error_payload: dict[str, TelemetryValue] = {
                         "configuredProvider": self.config.rerank.provider,
                         "fallbackProvider": self.config.rerank.fallback_provider,
+                        "configuredDevice": self.config.rerank.local.device,
+                        "resolvedDevice": self._rerank_resolved_device(),
                         "candidateCount": len(documents),
                         "rerankMs": round(latency_ms, 3),
                         "error": str(err),
@@ -542,6 +557,8 @@ class HypermemoryEngine:
                     "configuredProvider": self.config.rerank.provider,
                     "provider": observed_response.provider,
                     "fallbackProvider": self.config.rerank.fallback_provider,
+                    "configuredDevice": self.config.rerank.local.device,
+                    "resolvedDevice": self._rerank_resolved_device(),
                     "fallbackUsed": observed_response.fallback_used,
                     "applied": observed_response.applied,
                     "failOpen": observed_response.fail_open,
@@ -555,6 +572,58 @@ class HypermemoryEngine:
                 return observed_response
 
         return score
+
+    def _rerank_resolved_device(self) -> str:
+        """Return the current runtime device selected for reranking, if available."""
+        resolver = getattr(self._rerank_provider, "resolved_device", None)
+        if not callable(resolver):
+            return ""
+        try:
+            return cast(str, resolver())
+        except Exception:
+            return ""
+
+    def _rerank_probe_documents(self, conn: sqlite3.Connection, *, limit: int = 2) -> list[str]:
+        """Return a small set of indexed snippets for rerank verification."""
+        rows = conn.execute(
+            """
+            SELECT rel_path, snippet
+            FROM search_items
+            WHERE trim(snippet) <> ''
+            ORDER BY CASE lane WHEN 'memory' THEN 0 ELSE 1 END, id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [f"{row['rel_path']}\n{row['snippet']}" for row in rows]
+
+    def _verify_rerank_provider(
+        self,
+        *,
+        query: str,
+        documents: Sequence[str],
+    ) -> dict[str, Any]:
+        """Verify that the configured rerank provider returns usable scores."""
+        started_at = perf_counter()
+        response = self._rerank_provider.score(query, documents)
+        latency_ms = (perf_counter() - started_at) * 1000.0
+        if not response.applied:
+            raise RuntimeError("rerank provider returned no applied scores")
+        if response.provider == "none":
+            raise RuntimeError("rerank provider resolved to none")
+        if len(response.scores) != len(documents):
+            raise RuntimeError(
+                "rerank provider returned "
+                f"{len(response.scores)} scores for {len(documents)} documents"
+            )
+        if any(not math.isfinite(score) for score in response.scores):
+            raise RuntimeError("rerank provider returned a non-finite score")
+        return {
+            "provider": response.provider,
+            "fallbackUsed": response.fallback_used,
+            "candidateCount": len(documents),
+            "rerankMs": round(latency_ms, 3),
+        }
 
     def verify(self) -> dict[str, Any]:
         """Verify the supported sparse+dense backend contract for hypermemory."""
@@ -625,6 +694,32 @@ class HypermemoryEngine:
                         errors.append("sparse lane returned no candidates")
                 except Exception as err:
                     errors.append(f"sparse lane failed: {err}")
+                rerank_required = (
+                    self.config.rerank.enabled and self.config.hybrid.rerank_candidate_pool > 0
+                )
+                rerank_check: dict[str, Any] = {
+                    "required": rerank_required,
+                    "candidatePool": self.config.hybrid.rerank_candidate_pool,
+                }
+                lane_checks["rerank"] = rerank_check
+                if rerank_required:
+                    probe_documents = self._rerank_probe_documents(
+                        conn,
+                        limit=min(self.config.hybrid.rerank_candidate_pool, 2),
+                    )
+                    rerank_check["documents"] = len(probe_documents)
+                    if not probe_documents:
+                        errors.append("unable to build rerank probe documents from indexed content")
+                    else:
+                        try:
+                            rerank_check.update(
+                                self._verify_rerank_provider(
+                                    query=probe_query,
+                                    documents=probe_documents,
+                                )
+                            )
+                        except Exception as err:
+                            errors.append(f"rerank provider failed: {err}")
 
         return {
             "ok": not errors,

@@ -2491,7 +2491,10 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
         "printf 'doctor_host\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
     )
 
-    _write_recording_script(bin_dir / "uname", "printf 'Darwin\\n'\n")
+    _write_recording_script(
+        bin_dir / "uname",
+        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\n' "printf 'Darwin\\n'\n",
+    )
     _write_recording_script(bin_dir / "brew", f'printf "%s\\n" "$*" >> "{brew_log}"\n')
     _write_recording_script(
         bin_dir / "python3",
@@ -2511,7 +2514,10 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     _write_recording_script(bin_dir / "jq", "exit 0\n")
     _write_recording_script(bin_dir / "sqlite3", "exit 0\n")
     _write_recording_script(bin_dir / "bun", "exit 0\n")
-    _write_recording_script(bin_dir / "uv", "exit 0\n")
+    _write_recording_script(
+        bin_dir / "uv",
+        f'printf "uv %s\\n" "$*" >> "{log_path}"\n',
+    )
     _write_recording_script(bin_dir / "openclaw", "exit 0\n")
     _write_recording_script(bin_dir / "acpx", "exit 0\n")
     home_dir = tmp_path / "home"
@@ -2542,6 +2548,7 @@ def test_darwin_bootstrap_reuses_existing_toolchain_without_brew_reinstalling_no
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "preflight",
+        f"uv sync --project {harness_root} --python 3.12 --locked --extra dev",
         "npm install -g openclaw@2026.3.13 acpx@0.3.0",
         "bootstrap_lossless_context_engine",
         "render_openclaw_config",
@@ -2591,7 +2598,10 @@ def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
         "printf 'doctor_host\\n' >> \"$BOOTSTRAP_LOG_PATH\"\n",
     )
 
-    _write_recording_script(bin_dir / "uname", "printf 'Darwin\\n'\n")
+    _write_recording_script(
+        bin_dir / "uname",
+        'if [[ "${1:-}" == "-m" ]]; then printf "x86_64\\n"; exit 0; fi\n' "printf 'Darwin\\n'\n",
+    )
     _write_recording_script(bin_dir / "python3", 'if [[ "${1:-}" == "-c" ]]; then exit 0; fi\n')
     _write_recording_script(
         bin_dir / "node", 'if [[ "${1:-}" == "-e" ]]; then exit 0; fi\nprintf "v24.13.1\\n"\n'
@@ -2600,7 +2610,10 @@ def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
     _write_recording_script(bin_dir / "jq", "exit 0\n")
     _write_recording_script(bin_dir / "sqlite3", "exit 0\n")
     _write_recording_script(bin_dir / "bun", "exit 0\n")
-    _write_recording_script(bin_dir / "uv", "exit 0\n")
+    _write_recording_script(
+        bin_dir / "uv",
+        f'printf "uv %s\\n" "$*" >> "{log_path}"\n',
+    )
     _write_recording_script(
         bin_dir / "varlock",
         'if [[ "${1:-}" == "--version" ]]; then printf "varlock 0.5.0\\n"; exit 0; fi\n' "exit 0\n",
@@ -2629,6 +2642,7 @@ def test_darwin_bootstrap_installs_lossless_claw_for_hypermemory_profile(
     assert result.returncode == 0
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "preflight",
+        f"uv sync --project {harness_root} --python 3.12 --locked --extra dev",
         "npm install -g openclaw@2026.3.13 acpx@0.3.0",
         "bootstrap_lossless_context_engine",
         "render_openclaw_config",

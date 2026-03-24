@@ -72,6 +72,12 @@ make install
 make setup
 ```
 
+`make install` and the managed bootstrap path prefer Python `3.12` on supported
+Darwin/Linux hosts as the compatibility baseline. That keeps the default
+hypermemory local-rerank path installable on Intel macOS while remaining valid
+across Apple Silicon Macs, Linux laptops, and supported 64-bit Raspberry Pi
+setups. Python `3.13` remains supported for explicit use and CI coverage.
+
 `make setup` runs the guided `clawops setup` workflow inside the managed
 environment. It bootstraps host prerequisites, creates or repairs
 `platform/configs/varlock/.env.local`, offers local or managed Varlock secret
@@ -101,6 +107,12 @@ x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or
 macOS x86_64 with Python 3.13 or 32-bit Raspberry Pi Linux, StrongClaw skips
 the local dependency and relies on `compatible-http` or fail-open behavior
 instead of breaking installation.
+On Intel macOS/Python 3.12 that compatibility path is pinned to
+`sentence-transformers==3.4.1`, `torch==2.2.2`, and `numpy<2`. The shipped
+config defaults `rerank.local.device` to `auto`, which selects `cuda` on
+supported GPU hosts, `mps` on supported Apple Silicon hosts, and `cpu`
+otherwise. If auto-selected acceleration fails at runtime, the local reranker
+falls back to CPU automatically.
 
 If you want the HTTP fallback available, set `HYPERMEMORY_RERANK_BASE_URL` and,
 optionally, `HYPERMEMORY_RERANK_MODEL` / `HYPERMEMORY_RERANK_API_KEY`.

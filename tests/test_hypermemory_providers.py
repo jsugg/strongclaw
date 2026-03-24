@@ -141,16 +141,17 @@ def test_compatible_http_rerank_provider_accepts_tei_style_payload() -> None:
     assert fake_session.calls[0]["url"] == "http://127.0.0.1:8081/rerank"
 
 
-def test_local_sentence_transformers_rerank_provider_scores_documents(
+def test_local_sentence_transformers_rerank_provider_auto_selects_cuda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
     original_import_module = importlib.import_module
 
     class _FakeCrossEncoder:
-        def __init__(self, model: str, *, max_length: int) -> None:
+        def __init__(self, model: str, *, max_length: int, device: str) -> None:
             captured["model"] = model
             captured["max_length"] = max_length
+            captured["device"] = device
 
         def predict(
             self,
@@ -170,7 +171,14 @@ def test_local_sentence_transformers_rerank_provider_scores_documents(
         lambda name: (
             SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
             if name == "sentence_transformers"
-            else original_import_module(name)
+            else (
+                SimpleNamespace(
+                    cuda=SimpleNamespace(is_available=lambda: True),
+                    backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False)),
+                )
+                if name == "torch"
+                else original_import_module(name)
+            )
         ),
     )
 
@@ -187,8 +195,123 @@ def test_local_sentence_transformers_rerank_provider_scores_documents(
     assert scores == [2.0, -1.0]
     assert captured["model"] == "BAAI/bge-reranker-v2-m3"
     assert captured["max_length"] == 1_024
+    assert captured["device"] == "cuda"
     assert captured["batch_size"] == 4
     assert captured["pairs"] == [("gateway token", "alpha"), ("gateway token", "beta")]
+    assert provider.resolved_device() == "cuda"
+
+
+def test_local_sentence_transformers_rerank_provider_respects_explicit_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    original_import_module = importlib.import_module
+
+    class _FakeCrossEncoder:
+        def __init__(self, model: str, *, max_length: int, device: str) -> None:
+            captured["model"] = model
+            captured["max_length"] = max_length
+            captured["device"] = device
+
+        def predict(
+            self,
+            pairs: list[tuple[str, str]],
+            *,
+            batch_size: int,
+            show_progress_bar: bool,
+        ) -> list[float]:
+            captured["pairs"] = pairs
+            captured["batch_size"] = batch_size
+            captured["show_progress_bar"] = show_progress_bar
+            return [1.5]
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
+            if name == "sentence_transformers"
+            else original_import_module(name)
+        ),
+    )
+
+    provider = LocalSentenceTransformersRerankProvider(
+        LocalSentenceTransformersRerankConfig(
+            model="BAAI/bge-reranker-v2-m3",
+            batch_size=2,
+            max_length=512,
+            device="cpu",
+        )
+    )
+
+    scores = provider.score_documents("gateway token", ["alpha"])
+
+    assert scores == [1.5]
+    assert captured["device"] == "cpu"
+    assert provider.resolved_device() == "cpu"
+
+
+def test_local_sentence_transformers_rerank_provider_falls_back_to_cpu_after_auto_device_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {"devices": []}
+    original_import_module = importlib.import_module
+
+    class _FakeCrossEncoder:
+        def __init__(self, model: str, *, max_length: int, device: str) -> None:
+            del model, max_length
+            self._device = device
+            captured["devices"].append(device)
+
+        def predict(
+            self,
+            pairs: list[tuple[str, str]],
+            *,
+            batch_size: int,
+            show_progress_bar: bool,
+        ) -> list[float]:
+            del pairs, batch_size, show_progress_bar
+            if self._device == "mps":
+                raise RuntimeError("accelerator out of memory")
+            return [0.9]
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
+            if name == "sentence_transformers"
+            else (
+                SimpleNamespace(
+                    cuda=SimpleNamespace(is_available=lambda: False),
+                    backends=SimpleNamespace(
+                        mps=SimpleNamespace(
+                            is_available=lambda: True,
+                            is_built=lambda: True,
+                        )
+                    ),
+                )
+                if name == "torch"
+                else original_import_module(name)
+            )
+        ),
+    )
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
+
+    provider = LocalSentenceTransformersRerankProvider(
+        LocalSentenceTransformersRerankConfig(
+            model="BAAI/bge-reranker-v2-m3",
+            batch_size=2,
+            max_length=512,
+        )
+    )
+
+    scores = provider.score_documents("gateway token", ["alpha"])
+
+    assert scores == [0.9]
+    assert captured["devices"] == ["mps", "cpu"]
+    assert provider.resolved_device() == "cpu"
 
 
 def test_rerank_provider_falls_back_to_compatible_http_when_local_is_unavailable(

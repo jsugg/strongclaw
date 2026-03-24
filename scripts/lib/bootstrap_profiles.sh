@@ -16,7 +16,7 @@ profile_requires_qmd() {
   local profile
   profile="$(resolve_bootstrap_profile "${1:-}")"
   case "$profile" in
-    openclaw-qmd | memory-lancedb-pro | acp | browser-lab) return 0 ;;
+    openclaw-qmd | memory-lancedb-pro | acp) return 0 ;;
     *) return 1 ;;
   esac
 }

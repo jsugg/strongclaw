@@ -287,7 +287,8 @@ def test_make_install_uses_uv_managed_environment() -> None:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
     makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
 
-    assert "$(UV) sync $(DEV_SYNC_FLAGS)" in makefile
+    assert "PREFERRED_PYTHON := $(shell ./scripts/lib/preferred_python.sh 2>/dev/null)" in makefile
+    assert "$(UV_SYNC) $(DEV_SYNC_FLAGS)" in makefile
     assert "clawops setup" in makefile
     assert "clawops doctor" in makefile
     assert "$(PIP) install -e ." not in makefile

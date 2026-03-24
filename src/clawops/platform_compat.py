@@ -12,6 +12,7 @@ DEFAULT_OPENCLAW_VERSION = "2026.3.13"
 DEFAULT_ACPX_VERSION = "0.3.0"
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
+DEFAULT_MANAGED_PROJECT_PYTHON_VERSION = "3.12"
 SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT = "torch==2.8.0"
 DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT = "torch==2.2.2"
 _SUPPORTED_LOCAL_RERANK_PYTHON_VERSIONS = {(3, 12), (3, 13)}
@@ -88,6 +89,13 @@ def resolve_memory_plugin_lancedb_version(host: HostPlatform) -> str:
     return DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
 
 
+def resolve_preferred_project_python_version(host: HostPlatform) -> str | None:
+    """Return the managed Python version to prefer for install/setup flows."""
+    if host.os_name in {"darwin", "linux"}:
+        return DEFAULT_MANAGED_PROJECT_PYTHON_VERSION
+    return None
+
+
 def supports_hypermemory_local_rerank(
     host: HostPlatform, *, python_version: str | None = None
 ) -> bool:
@@ -139,6 +147,7 @@ def build_compatibility_record(
         "service_manager": resolve_service_manager(host),
         "openclaw_version": DEFAULT_OPENCLAW_VERSION,
         "acpx_version": DEFAULT_ACPX_VERSION,
+        "preferred_project_python_version": resolve_preferred_project_python_version(host),
         "memory_plugin_default_lancedb_version": DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
         "memory_plugin_lancedb_version": resolved_lancedb,
         "memory_plugin_override_required": resolved_lancedb
@@ -166,6 +175,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "service_manager",
             "openclaw_version",
             "acpx_version",
+            "preferred_project_python_version",
             "memory_plugin_default_lancedb_version",
             "memory_plugin_lancedb_version",
             "memory_plugin_override_required",
