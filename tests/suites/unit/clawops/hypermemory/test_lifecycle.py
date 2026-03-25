@@ -1,7 +1,10 @@
+import pathlib
 from dataclasses import replace
 
+from clawops.hypermemory import HypermemoryEngine, load_config
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import DecayConfig
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_compute_decay_score_fresh_item() -> None:
@@ -80,3 +83,33 @@ def test_tier_manager_no_change() -> None:
         )
         == "working"
     )
+
+
+def test_hypermemory_lifecycle_promotes_high_value_memory(tmp_path: pathlib.Path) -> None:
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(config, decay=replace(config.decay, enabled=True))
+    engine = HypermemoryEngine(config)
+    engine.reindex()
+    engine.store(
+        kind="fact",
+        text="The deployment checklist is the primary release gate.",
+        importance=0.95,
+    )
+
+    with engine.connect() as conn:
+        conn.execute("""
+            UPDATE search_items
+            SET access_count = 12, tier = 'working'
+            WHERE snippet LIKE '%primary release gate%'
+            """)
+        conn.commit()
+
+    payload = engine.run_lifecycle()
+    world_text = (workspace / "bank" / "world.md").read_text(encoding="utf-8")
+
+    assert payload["changed"] >= 1
+    assert "tier=core" in world_text
