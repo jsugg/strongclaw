@@ -57,6 +57,13 @@ def export_memory_pro_import(
     so this export stays scope-specific and preserves the original source
     coordinates in metadata for auditability.
     """
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.export_memory_pro_import(
+            scope=scope,
+            include_daily=include_daily,
+            auto_index=auto_index,
+        )
     resolved_scope = validate_scope(scope or self.config.governance.default_scope)
     if auto_index and self.is_dirty():
         self.reindex()
@@ -131,6 +138,22 @@ def store(
     _skip_dedup: bool = False,
 ) -> dict[str, Any]:
     """Append a durable memory entry to the appropriate canonical Markdown file."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.store(
+            kind=kind,
+            text=text,
+            entity=entity,
+            confidence=confidence,
+            scope=scope,
+            fact_key=fact_key,
+            importance=importance,
+            tier=tier,
+            supersedes=supersedes,
+            _skip_preindex_sync=_skip_preindex_sync,
+            _skip_preflush_on_reindex=_skip_preflush_on_reindex,
+            _skip_dedup=_skip_dedup,
+        )
     entry_text = text.strip()
     if not entry_text:
         raise ValueError("text must not be empty")
@@ -240,6 +263,14 @@ def update(
     replace_all: bool = False,
 ) -> dict[str, Any]:
     """Replace text inside a writable memory file."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.update(
+            rel_path=rel_path,
+            find_text=find_text,
+            replace_text=replace_text,
+            replace_all=replace_all,
+        )
     path = self._resolve_writable_path(rel_path)
     if not path.exists():
         raise FileNotFoundError(path)
@@ -264,6 +295,9 @@ def update(
 
 def reflect(self, *, mode: ReflectionMode = "safe") -> dict[str, Any]:
     """Promote retained daily-log entries into durable bank pages via proposals."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.reflect(mode=mode)
     proposed = 0
     applied = 0
     pending = 0
@@ -322,6 +356,9 @@ def capture(
     mode: Literal["llm", "regex", "both"] | None = None,
 ) -> dict[str, Any]:
     """Extract and store durable memory candidates from conversation messages."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.capture(messages=messages, mode=mode)
     resolved_mode = cast(Literal["llm", "regex", "both"], mode or self.config.capture.mode)
     candidates: list[CaptureCandidate] = []
     if (
@@ -401,6 +438,14 @@ def forget(
     hard_delete: bool = False,
 ) -> dict[str, Any]:
     """Invalidate or delete a durable memory entry."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.forget(
+            query=query,
+            path=path,
+            entry_text=entry_text,
+            hard_delete=hard_delete,
+        )
     target = self._resolve_entry_reference(query=query, path=path, entry_text=entry_text)
     if target is None:
         return {"ok": True, "forgotten": False}
@@ -435,6 +480,20 @@ def supersede(
     tier: Tier | None = None,
 ) -> dict[str, Any]:
     """Store a new entry that supersedes an existing durable entry."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.supersede(
+            item_id=item_id,
+            old_entry_text=old_entry_text,
+            new_text=new_text,
+            kind=kind,
+            entity=entity,
+            confidence=confidence,
+            scope=scope,
+            fact_key=fact_key,
+            importance=importance,
+            tier=tier,
+        )
     target = self._resolve_entry_reference(item_id=item_id, entry_text=old_entry_text)
     if target is None:
         raise FileNotFoundError("unable to resolve the superseded entry")
@@ -489,6 +548,9 @@ def record_bad_recall(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
 
 def flush_metadata(self) -> dict[str, Any]:
     """Flush lifecycle metadata from SQLite rows back into canonical Markdown."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.flush_metadata()
     if not self.config.db_path.exists():
         return {"ok": True, "updatedFiles": 0, "updatedEntries": 0}
     updated_files = 0
@@ -551,6 +613,9 @@ def flush_metadata(self) -> dict[str, Any]:
 
 def run_lifecycle(self) -> dict[str, Any]:
     """Evaluate lifecycle scores and promote or demote tiers."""
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is not None:
+        return canonical_store.run_lifecycle()
     if not self.config.decay.enabled:
         return {"ok": True, "evaluated": 0, "changed": 0}
     manager = TierManager(self.config.decay)
