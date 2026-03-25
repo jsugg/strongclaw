@@ -492,6 +492,26 @@ class CanonicalStoreService:
         }
         return store_payload
 
+    def record_access(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record retrieval access for durable typed memory items."""
+        return self._increment_feedback_counts(
+            item_ids=item_ids,
+            column="access_count",
+            date_column="last_access_date",
+        )
+
+    def record_injection(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that items were auto-injected into a prompt."""
+        return self._increment_feedback_counts(item_ids=item_ids, column="injected_count")
+
+    def record_confirmation(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that recalled items were confirmed useful."""
+        return self._increment_feedback_counts(item_ids=item_ids, column="confirmed_count")
+
+    def record_bad_recall(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that recalled items were contradicted or unhelpful."""
+        return self._increment_feedback_counts(item_ids=item_ids, column="bad_recall_count")
+
     def flush_metadata(self) -> dict[str, Any]:
         if not self.config.db_path.exists():
             return {"ok": True, "updatedFiles": 0, "updatedEntries": 0}
