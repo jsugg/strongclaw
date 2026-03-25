@@ -12,6 +12,7 @@ from typing import Any, cast
 from clawops.hypermemory.config import matches_glob, resolve_under_workspace
 from clawops.hypermemory.models import EvidenceEntry, ReindexSummary
 from clawops.hypermemory.parser import build_document
+from clawops.hypermemory.utils import normalized_retrieval_text, point_id, sha256
 from clawops.observability import emit_structured_log, observed_span
 
 
@@ -126,7 +127,7 @@ def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
                                 item.item_type,
                                 item.title,
                                 item.snippet,
-                                self._normalized_retrieval_text(item.title, item.snippet),
+                                normalized_retrieval_text(item.title, item.snippet),
                                 item.start_line,
                                 item.end_line,
                                 item.confidence,
@@ -166,16 +167,14 @@ def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
                         vector_rows.append(
                             {
                                 "item_id": int(item_row_id),
-                                "point_id": self._point_id(
+                                "point_id": point_id(
                                     document_rel_path=document.rel_path,
                                     item_type=item.item_type,
                                     start_line=item.start_line,
                                     end_line=item.end_line,
                                     snippet=item.snippet,
                                 ),
-                                "content": self._normalized_retrieval_text(
-                                    item.title, item.snippet
-                                ),
+                                "content": normalized_retrieval_text(item.title, item.snippet),
                                 "payload": {
                                     "item_id": int(item_row_id),
                                     "rel_path": document.rel_path,
@@ -443,7 +442,7 @@ def _insert_typed_row(
         typed_counts["entity"] += 1
         return
     if item.item_type == "proposal":
-        proposal_id = item.proposal_id or self._sha256(item.snippet)
+        proposal_id = item.proposal_id or sha256(item.snippet)
         proposal_kind = self._proposal_kind(item.snippet)
         target = self._store_target(kind=proposal_kind, entity=next(iter(item.entities), None))
         conn.execute(

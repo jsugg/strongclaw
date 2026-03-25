@@ -7,7 +7,6 @@ derived-index build logic (to keep the dependency graph acyclic).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator, Sequence
@@ -25,6 +24,7 @@ from clawops.hypermemory.providers import EmbeddingProvider
 from clawops.hypermemory.qdrant_backend import VectorBackend
 from clawops.hypermemory.services.index_service import IndexService
 from clawops.hypermemory.sparse import SparseEncoder
+from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log, observed_span
 
 
@@ -75,7 +75,7 @@ class BackendService:
                 "sparse_vector_name": self._config.qdrant.sparse_vector_name,
             },
         }
-        return self.sha256(json.dumps(payload, sort_keys=True))
+        return sha256(json.dumps(payload, sort_keys=True))
 
     def embedding_batches(
         self, vector_rows: list[dict[str, Any]]
@@ -320,7 +320,7 @@ class BackendService:
                             str(entry["point_id"]),
                             self._config.embedding.model,
                             len(vector),
-                            self.sha256(str(entry["content"])),
+                            sha256(str(entry["content"])),
                             int(entry.get("sparse_term_count", 0)),
                             sparse_encoder.fingerprint if include_sparse else "",
                             datetime.now(tz=UTC).isoformat() if include_sparse else "",
@@ -356,7 +356,3 @@ class BackendService:
 
     def canonical_backend(self, backend: SearchBackend) -> SearchBackend:
         return backend
-
-    @staticmethod
-    def sha256(value: str) -> str:
-        return hashlib.sha256(value.encode("utf-8")).hexdigest()
