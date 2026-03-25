@@ -26,14 +26,20 @@ QDRANT_URL_ENV = "TEST_QDRANT_URL"
 def _wait_for_qdrant(url: str) -> None:
     """Wait for a Qdrant HTTP endpoint to report healthy."""
     last_error: Exception | None = None
-    for _ in range(30):
-        try:
-            response = requests.get(f"{url.rstrip('/')}/healthz", timeout=1.0)
-            response.raise_for_status()
-            return
-        except requests.RequestException as err:
-            last_error = err
-            time.sleep(1.0)
+    for endpoint in ("readyz", "healthz"):
+        for _ in range(30):
+            try:
+                response = requests.get(f"{url.rstrip('/')}/{endpoint}", timeout=1.0)
+                if endpoint == "readyz" and response.status_code == 404:
+                    break
+                response.raise_for_status()
+                return
+            except requests.RequestException as err:
+                last_error = err
+                time.sleep(1.0)
+        if endpoint == "healthz":
+            break
+        last_error = RuntimeError(f"{url} does not expose /readyz")
     detail = "unknown error" if last_error is None else str(last_error)
     raise RuntimeError(f"Qdrant did not become healthy at {url}: {detail}")
 
@@ -224,8 +230,7 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
 
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _DeterministicEmbeddingProvider()
+    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
     engine.reindex()
 
     status = engine.status()
@@ -283,8 +288,7 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
 
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _DeterministicEmbeddingProvider()
+    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
     engine.reindex()
 
     collection_response = requests.get(

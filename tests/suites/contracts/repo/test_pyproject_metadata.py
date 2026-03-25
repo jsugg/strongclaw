@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+
+from tests.fixtures.repo import REPO_ROOT
 
 
 def _project_dependencies() -> list[str]:
-    root = Path(__file__).resolve().parents[1]
-    payload = tomllib.loads(root.joinpath("pyproject.toml").read_text(encoding="utf-8"))
+    payload = tomllib.loads(REPO_ROOT.joinpath("pyproject.toml").read_text(encoding="utf-8"))
     dependencies = payload["project"]["dependencies"]
     assert isinstance(dependencies, list)
     return [str(item) for item in dependencies]
