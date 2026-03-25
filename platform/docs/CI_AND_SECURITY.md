@@ -21,12 +21,22 @@ setup, service activation, and repo-local sidecar/browser-lab flows on hosted
 Linux and macOS runners.
 
 - Each run writes a GitHub job summary with the runner label, runtime provider,
-  cache toggles, and phase timings.
+  cache toggles, phase timings, and the effective hosted macOS Colima sizing.
 - Each run uploads a `fresh-host-reports` artifact subtree with runtime
   diagnostics (`docker info`, image inventory, launchd state, and runtime
   status output) alongside the rendered host artifacts.
-- `workflow_dispatch` can benchmark hosted macOS runner/runtime/cache
-  combinations without changing the required PR gate.
+- Hosted macOS acceptance is pinned to `macos-15-intel`. GitHub's standard
+  `macos-15` arm64 runners are available on public repositories, but GitHub
+  documents that nested virtualization is not supported on arm64 macOS hosted
+  runners, so Colima/OrbStack cannot provide a Docker backend there.
+- The hosted macOS job installs Lima and Colima directly, then sizes Colima for
+  the runner instead of using the old fixed `2 CPU / 4 GiB` VM.
+- `workflow_dispatch` can benchmark cache toggles for the supported hosted
+  macOS path without changing the required PR gate.
+- The workflow can restore immutable Docker image tarballs for the macOS aux
+  stack and browser-lab stack. Those cache entries are keyed from the pinned
+  compose files so cache hits avoid re-pulling the same images without changing
+  the validation surface.
 
 ## Vendored plugin verification
 

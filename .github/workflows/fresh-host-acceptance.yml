@@ -6,22 +6,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      macos_runner_label:
-        description: Hosted runner label for the macOS fresh-host job.
-        required: true
-        type: choice
-        default: macos-15-intel
-        options:
-          - macos-15-intel
-          - macos-15
-      macos_runtime_provider:
-        description: Docker-compatible runtime to benchmark on hosted macOS.
-        required: true
-        type: choice
-        default: colima
-        options:
-          - colima
-          - orbstack
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
         required: true
@@ -29,6 +13,11 @@ on:
         default: false
       enable_homebrew_cache:
         description: Restore the hosted macOS Homebrew download cache.
+        required: true
+        type: boolean
+        default: false
+      enable_docker_image_cache:
+        description: Restore the hosted macOS immutable Docker image cache.
         required: true
         type: boolean
         default: false
@@ -42,9 +31,12 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
   DEFAULT_PACKAGE_CACHE_ENABLED: "false"
   DEFAULT_HOMEBREW_CACHE_ENABLED: "false"
+  DEFAULT_DOCKER_IMAGE_CACHE_ENABLED: "false"
+  MACOS_COLIMA_VERSION: "v0.10.1"
+  MACOS_LIMA_VERSION: "v2.0.3"
+  MACOS_COLIMA_DISK_GIB: "20"
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm
 
@@ -283,7 +275,8 @@ jobs:
 
   macos-fresh-host:
     name: macOS Fresh Host
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runner_label || 'macos-15-intel' }}
+    # GitHub-hosted arm64 macOS runners do not support nested virtualization.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -308,13 +301,31 @@ jobs:
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/Library/Caches/Homebrew
-          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
+          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
           restore-keys: |
             fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS Docker image cache
+        id: macos_docker_image_cache
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .github-cache/docker-images
+          key: fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.yaml', 'platform/compose/docker-compose.browser-lab.yaml') }}
+          restore-keys: |
+            fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-
+      - name: Detect hosted macOS Docker image cache contents
+        id: macos_docker_image_cache_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_dir="${GITHUB_WORKSPACE}/.github-cache/docker-images"
+          ready="false"
+          if [[ -f "${cache_dir}/aux-stack.tar" && -f "${cache_dir}/browser-lab.tar" ]]; then
+            ready="true"
+          fi
+          echo "ready=${ready}" >> "${GITHUB_OUTPUT}"
       - name: Prepare macOS fresh-host environment
         shell: bash
-        env:
-          MACOS_RUNTIME_PROVIDER: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
         run: |
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
@@ -326,45 +337,69 @@ jobs:
             echo "FRESH_HOST_PHASES_FILE=${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
             echo "FRESH_HOST_REPORT_DIR=${RUNNER_TEMP}/fresh-host-reports/macos"
             echo "FRESH_HOST_REPORT_JSON=${RUNNER_TEMP}/fresh-host-reports/macos/report.json"
-            echo "FRESH_HOST_RUNTIME_PROVIDER=${MACOS_RUNTIME_PROVIDER}"
+            echo "FRESH_HOST_RUNTIME_PROVIDER=colima"
+            echo "FRESH_HOST_DOCKER_IMAGE_CACHE_DIR=${GITHUB_WORKSPACE}/.github-cache/docker-images"
           } >> "${GITHUB_ENV}"
       - name: Install Docker tooling for hosted macOS
         shell: bash
         env:
-          MACOS_RUNTIME_PROVIDER: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_INSTALL_UPGRADE: "1"
         run: |
           set -euo pipefail
           SECONDS=0
           set +e
-          if [[ "${MACOS_RUNTIME_PROVIDER}" == "orbstack" ]]; then
-            brew install orbstack
-            orb config set setup.use_admin false
-            orb start
-            mkdir -p "${RUNNER_HOME}/.docker"
-            export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
-            export DOCKER_HOST="unix://${RUNNER_HOME}/.orbstack/run/docker.sock"
-            echo "DOCKER_CONFIG=${DOCKER_CONFIG}" >> "${GITHUB_ENV}"
-            echo "DOCKER_HOST=${DOCKER_HOST}" >> "${GITHUB_ENV}"
+          arch_name="$(uname -m)"
+          rc=0
+          if [[ "${arch_name}" != "x86_64" ]]; then
+            echo "GitHub-hosted arm64 macOS runners do not support nested virtualization; Fresh Host Acceptance requires macos-15-intel." >&2
+            rc=1
           else
-            brew install colima docker docker-compose
+            sudo mkdir -p /usr/local/libexec
+            sudo chown "$(id -u):$(id -g)" /usr/local/libexec
+            curl -fsSL "https://github.com/lima-vm/lima/releases/download/${MACOS_LIMA_VERSION}/lima-${MACOS_LIMA_VERSION#v}-Darwin-${arch_name}.tar.gz" | sudo tar xz -C /usr/local
+            curl -fsSL "https://github.com/abiosoft/colima/releases/download/${MACOS_COLIMA_VERSION}/colima-Darwin-${arch_name}" -o /tmp/colima
+            sudo install -m 0755 /tmp/colima /usr/local/bin/colima
+            brew install docker docker-compose
             mkdir -p "${RUNNER_HOME}/.docker/cli-plugins"
             ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${RUNNER_HOME}/.docker/cli-plugins/docker-compose"
-            colima start --cpu 2 --memory 4 --disk 20
             export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
             export DOCKER_HOST="unix://${RUNNER_HOME}/.colima/default/docker.sock"
-            echo "DOCKER_CONFIG=${DOCKER_CONFIG}" >> "${GITHUB_ENV}"
-            echo "DOCKER_HOST=${DOCKER_HOST}" >> "${GITHUB_ENV}"
-          fi
-          for _ in $(seq 1 30); do
-            if docker info >/dev/null 2>&1; then
-              break
+            host_cpu_count="$(sysctl -n hw.ncpu)"
+            host_memory_bytes="$(sysctl -n hw.memsize)"
+            host_memory_gib="$(( host_memory_bytes / 1073741824 ))"
+            if (( host_memory_gib < 1 )); then
+              host_memory_gib=1
             fi
-            sleep 2
-          done
-          docker version
-          docker compose version
-          docker info
-          rc=$?
+            colima_memory_gib="$(( host_memory_gib - 3 ))"
+            if (( colima_memory_gib < 6 )); then
+              colima_memory_gib=6
+            fi
+            if (( colima_memory_gib > 10 )); then
+              colima_memory_gib=10
+            fi
+            {
+              echo "DOCKER_CONFIG=${DOCKER_CONFIG}"
+              echo "DOCKER_HOST=${DOCKER_HOST}"
+              echo "FRESH_HOST_HOST_CPU_COUNT=${host_cpu_count}"
+              echo "FRESH_HOST_HOST_MEMORY_GIB=${host_memory_gib}"
+              echo "FRESH_HOST_COLIMA_CPU_COUNT=${host_cpu_count}"
+              echo "FRESH_HOST_COLIMA_MEMORY_GIB=${colima_memory_gib}"
+            } >> "${GITHUB_ENV}"
+            colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz --mount-type=virtiofs
+            for _ in $(seq 1 45); do
+              if docker info >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+            docker version
+            docker compose version
+            docker info
+            rc=$?
+          fi
           set -e
           status="success"
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
@@ -388,6 +423,7 @@ jobs:
           printf 'Normalize hosted macOS machine name\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
       - name: Warm hosted macOS aux-stack images
+        if: ${{ steps.macos_docker_image_cache_state.outputs.ready != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -403,6 +439,7 @@ jobs:
           printf 'Warm hosted macOS aux-stack images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
       - name: Warm hosted macOS browser-lab images
+        if: ${{ steps.macos_docker_image_cache_state.outputs.ready != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -416,6 +453,43 @@ jobs:
           status="success"
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
           printf 'Warm hosted macOS browser-lab images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Load hosted macOS Docker image cache
+        if: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/aux-stack.tar"
+          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/browser-lab.tar"
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Load hosted macOS Docker image cache\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Snapshot hosted macOS Docker image cache
+        if: ${{ success() && steps.macos_docker_image_cache_state.outputs.ready != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true')) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          mkdir -p "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}"
+          docker image save -o "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/aux-stack.tar" \
+            postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416 \
+            ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193 \
+            otel/opentelemetry-collector-contrib:0.120.0@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917 \
+            qdrant/qdrant:v1.15.5@sha256:0fb8897412abc81d1c0430a899b9a81eb8328aa634e7242d1bc804c1fe8fe863
+          docker image save -o "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/browser-lab.tar" \
+            ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029 \
+            mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:0f0547cc1492898e84a6fd0847bcfdde15e483b333a66e88b547c9ce15aea6c7
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Snapshot hosted macOS Docker image cache\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
       - name: Bootstrap macOS host
         shell: bash
@@ -570,9 +644,7 @@ jobs:
         run: |
           set +e
           mkdir -p "${FRESH_HOST_REPORT_DIR}"
-          if [[ "${FRESH_HOST_RUNTIME_PROVIDER}" == "orbstack" ]]; then
-            orb status > "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
-          else
+          if command -v colima >/dev/null 2>&1; then
             colima status > "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
             colima list >> "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
           fi
@@ -581,15 +653,26 @@ jobs:
           docker images --format '{{json .}}' > "${FRESH_HOST_REPORT_DIR}/docker-images.jsonl" 2>&1 || true
           launchctl print "gui/$(id -u)/ai.openclaw.gateway" > "${FRESH_HOST_REPORT_DIR}/launchctl-gateway.txt" 2>&1 || true
           launchctl print "gui/$(id -u)/ai.openclaw.sidecars" > "${FRESH_HOST_REPORT_DIR}/launchctl-sidecars.txt" 2>&1 || true
+          sysctl -n hw.ncpu > "${FRESH_HOST_REPORT_DIR}/host-cpu-count.txt" 2>&1 || true
+          sysctl -n hw.memsize > "${FRESH_HOST_REPORT_DIR}/host-memory-bytes.txt" 2>&1 || true
+          du -sh "${RUNNER_HOME}/.colima" > "${FRESH_HOST_REPORT_DIR}/colima-disk-usage.txt" 2>&1 || true
+          du -sh "${RUNNER_HOME}/Library/Caches/Homebrew" > "${FRESH_HOST_REPORT_DIR}/homebrew-cache-usage.txt" 2>&1 || true
+          du -sh "${GITHUB_WORKSPACE}/.github-cache" > "${FRESH_HOST_REPORT_DIR}/workflow-cache-usage.txt" 2>&1 || true
+          if [[ -d "${RUNNER_HOME}/.colima/_lima/colima" ]]; then
+            mkdir -p "${FRESH_HOST_REPORT_DIR}/colima-logs"
+            find "${RUNNER_HOME}/.colima/_lima/colima" -maxdepth 1 -type f -name '*.log' -exec cp {} "${FRESH_HOST_REPORT_DIR}/colima-logs/" \; || true
+          fi
       - name: Write macOS summary
         if: always()
         shell: bash
         env:
           FRESH_HOST_JOB_NAME: macOS Fresh Host
           FRESH_HOST_JOB_STATUS: ${{ job.status }}
-          FRESH_HOST_RUNNER_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runner_label || 'macos-15-intel' }}
+          FRESH_HOST_RUNNER_LABEL: macos-15-intel
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
           FRESH_HOST_HOMEBREW_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_DOCKER_IMAGE_CACHE_READY: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
         run: |
           python3 - <<'PY'
           from __future__ import annotations
@@ -625,6 +708,12 @@ jobs:
               "runtimeProvider": os.environ["FRESH_HOST_RUNTIME_PROVIDER"],
               "packageCacheEnabled": os.environ["FRESH_HOST_PACKAGE_CACHE_ENABLED"] == "true",
               "homebrewCacheEnabled": os.environ["FRESH_HOST_HOMEBREW_CACHE_ENABLED"] == "true",
+              "dockerImageCacheEnabled": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED"] == "true",
+              "dockerImageCacheReady": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_READY"] == "true",
+              "hostCpuCount": os.environ.get("FRESH_HOST_HOST_CPU_COUNT"),
+              "hostMemoryGiB": os.environ.get("FRESH_HOST_HOST_MEMORY_GIB"),
+              "colimaCpuCount": os.environ.get("FRESH_HOST_COLIMA_CPU_COUNT"),
+              "colimaMemoryGiB": os.environ.get("FRESH_HOST_COLIMA_MEMORY_GIB"),
               "phases": phases,
               "reportDir": os.environ["FRESH_HOST_REPORT_DIR"],
           }
@@ -641,6 +730,16 @@ jobs:
               handle.write(f"| Runtime | {report['runtimeProvider']} |\n")
               handle.write(f"| Package cache | {report['packageCacheEnabled']} |\n")
               handle.write(f"| Homebrew cache | {report['homebrewCacheEnabled']} |\n")
+              handle.write(f"| Docker image cache | {report['dockerImageCacheEnabled']} |\n")
+              handle.write(f"| Docker image cache restored | {report['dockerImageCacheReady']} |\n")
+              if report["hostCpuCount"] and report["hostMemoryGiB"]:
+                  handle.write(
+                      f"| Host resources | {report['hostCpuCount']} CPU / {report['hostMemoryGiB']} GiB |\n"
+                  )
+              if report["colimaCpuCount"] and report["colimaMemoryGiB"]:
+                  handle.write(
+                      f"| Colima resources | {report['colimaCpuCount']} CPU / {report['colimaMemoryGiB']} GiB |\n"
+                  )
               handle.write("\n")
               if phases:
                   handle.write("| Phase | Status | Duration |\n| --- | --- | --- |\n")
