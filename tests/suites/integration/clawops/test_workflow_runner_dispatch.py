@@ -77,7 +77,7 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
                 {
                     "name": "dispatch",
                     "kind": "worker_dispatch",
-                    "journal_db": "workflow.sqlite",
+                    "journal_db": str(tmp_path / "workflow.sqlite"),
                     "task": {
                         "project": {"root": str(project)},
                         "workspace": {"kind": "local_dir", "path": str(workspace)},
