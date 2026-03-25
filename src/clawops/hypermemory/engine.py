@@ -72,23 +72,12 @@ from clawops.hypermemory._engine.storage import (
     _typed_entry_text,
 )
 from clawops.hypermemory._engine.storage import benchmark_cases as _benchmark_cases
-from clawops.hypermemory._engine.storage import capture as _capture
-from clawops.hypermemory._engine.storage import (
-    export_memory_pro_import as _export_memory_pro_import,
-)
-from clawops.hypermemory._engine.storage import flush_metadata as _flush_metadata
-from clawops.hypermemory._engine.storage import forget as _forget
 from clawops.hypermemory._engine.storage import get_fact as _get_fact
 from clawops.hypermemory._engine.storage import list_facts as _list_facts
 from clawops.hypermemory._engine.storage import record_access as _record_access
 from clawops.hypermemory._engine.storage import record_bad_recall as _record_bad_recall
 from clawops.hypermemory._engine.storage import record_confirmation as _record_confirmation
 from clawops.hypermemory._engine.storage import record_injection as _record_injection
-from clawops.hypermemory._engine.storage import reflect as _reflect
-from clawops.hypermemory._engine.storage import run_lifecycle as _run_lifecycle
-from clawops.hypermemory._engine.storage import store as _store
-from clawops.hypermemory._engine.storage import supersede as _supersede
-from clawops.hypermemory._engine.storage import update as _update
 from clawops.hypermemory._engine.verify import (
     _collection_has_hypermemory_vector_lanes,
     _hypermemory_probe_query,
@@ -119,6 +108,7 @@ from clawops.hypermemory.providers import (
 from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
 from clawops.hypermemory.schema import ensure_schema
 from clawops.hypermemory.services.backend_service import BackendService
+from clawops.hypermemory.services.canonical_store_service import CanonicalStoreService
 from clawops.hypermemory.services.index_service import IndexService
 from clawops.hypermemory.sparse import SparseEncoder
 from clawops.hypermemory.utils import (
@@ -162,6 +152,14 @@ class HypermemoryEngine:
             embedding_provider=self._embedding_provider,
             vector_backend=self._qdrant_backend,
             index=self.index,
+        )
+        self.canonical_store = CanonicalStoreService(
+            config=self.config,
+            connect=self.connect,
+            is_dirty=self.is_dirty,
+            reindex=self.reindex,
+            search=self.search,
+            get_fact=self.get_fact,
         )
 
     # ---- phase-1 composition: internal helper compatibility layer ----
@@ -343,8 +341,7 @@ class HypermemoryEngine:
         auto_index: bool = True,
     ) -> dict[str, Any]:
         """Export durable hypermemory entries as `memory-lancedb-pro` import JSON."""
-        return _export_memory_pro_import(
-            self,
+        return self.canonical_store.export_memory_pro_import(
             scope=scope,
             include_daily=include_daily,
             auto_index=auto_index,
@@ -367,8 +364,7 @@ class HypermemoryEngine:
         _skip_dedup: bool = False,
     ) -> dict[str, Any]:
         """Append a durable memory entry to the appropriate canonical Markdown file."""
-        return _store(
-            self,
+        return self.canonical_store.store(
             kind=kind,
             text=text,
             entity=entity,
@@ -392,8 +388,7 @@ class HypermemoryEngine:
         replace_all: bool = False,
     ) -> dict[str, Any]:
         """Replace text inside a writable memory file."""
-        return _update(
-            self,
+        return self.canonical_store.update(
             rel_path=rel_path,
             find_text=find_text,
             replace_text=replace_text,
@@ -402,7 +397,7 @@ class HypermemoryEngine:
 
     def reflect(self, *, mode: ReflectionMode = "safe") -> dict[str, Any]:
         """Promote retained daily-log entries into durable bank pages via proposals."""
-        return _reflect(self, mode=mode)
+        return self.canonical_store.reflect(mode=mode)
 
     def capture(
         self,
@@ -411,7 +406,7 @@ class HypermemoryEngine:
         mode: Literal["llm", "regex", "both"] | None = None,
     ) -> dict[str, Any]:
         """Extract and store durable memory candidates from conversation messages."""
-        return _capture(self, messages=messages, mode=mode)
+        return self.canonical_store.capture(messages=messages, mode=mode)
 
     def forget(
         self,
@@ -422,8 +417,7 @@ class HypermemoryEngine:
         hard_delete: bool = False,
     ) -> dict[str, Any]:
         """Invalidate or delete a durable memory entry."""
-        return _forget(
-            self,
+        return self.canonical_store.forget(
             query=query,
             path=path,
             entry_text=entry_text,
@@ -445,8 +439,7 @@ class HypermemoryEngine:
         tier: Tier | None = None,
     ) -> dict[str, Any]:
         """Store a new entry that supersedes an existing durable entry."""
-        return _supersede(
-            self,
+        return self.canonical_store.supersede(
             item_id=item_id,
             old_entry_text=old_entry_text,
             new_text=new_text,
@@ -477,11 +470,11 @@ class HypermemoryEngine:
 
     def flush_metadata(self) -> dict[str, Any]:
         """Flush lifecycle metadata from SQLite rows back into canonical Markdown."""
-        return _flush_metadata(self)
+        return self.canonical_store.flush_metadata()
 
     def run_lifecycle(self) -> dict[str, Any]:
         """Evaluate lifecycle scores and promote or demote tiers."""
-        return _run_lifecycle(self)
+        return self.canonical_store.run_lifecycle()
 
     def get_fact(
         self,
