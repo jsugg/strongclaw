@@ -35,8 +35,8 @@ def test_macos_job_runs_the_full_flow_for_all_events() -> None:
     assert "runs-on: macos-15-intel" in macos_section
     assert "macos_runner_label" not in workflow_text
     assert "macos_runtime_provider" not in workflow_text
-    assert "Warm hosted macOS images" in macos_section
-    assert ".github/scripts/fresh_host_images.py pull" in macos_section
+    assert "Ensure hosted macOS images" in macos_section
+    assert ".github/scripts/fresh_host_images.py ensure" in macos_section
     assert "FRESH_HOST_DOCKER_PULL_PARALLELISM" in macos_section
     assert "Exercise macOS repo-local sidecars" in macos_section
     assert "Exercise macOS repo-local browser-lab" in macos_section
@@ -54,6 +54,22 @@ def test_fresh_host_workflow_writes_summaries_and_uploads_reports() -> None:
     assert "fresh-host-reports/linux" in workflow_text
     assert "fresh-host-reports/macos" in workflow_text
     assert "Restore hosted macOS Docker image cache" in workflow_text
-    assert "Load hosted macOS Docker image cache" in workflow_text
-    assert "Snapshot hosted macOS Docker image cache" in workflow_text
-    assert ".github/scripts/fresh_host_images.py save" in workflow_text
+    assert "Ensure hosted macOS images" in workflow_text
+    assert ".github/scripts/fresh_host_images.py ensure" in workflow_text
+    assert "image-ensure-report.json" in workflow_text
+    assert "Package cache hit" in workflow_text
+    assert "Homebrew cache hit" in workflow_text
+    assert "Docker image cache hit" in workflow_text
+
+
+def test_fresh_host_workflow_points_tools_at_restored_cache_dirs() -> None:
+    workflow_text = _workflow_path().read_text(encoding="utf-8")
+
+    assert "FRESH_HOST_CACHE_ROOT" in workflow_text
+    assert "UV_CACHE_DIR" in workflow_text
+    assert "npm_config_cache" in workflow_text
+    assert "npm_config_prefer_offline" in workflow_text
+    assert "package-manager-cache: false" in workflow_text
+    assert "HOMEBREW_CACHE" in workflow_text
+    assert "path: ${{ env.HOMEBREW_CACHE }}" in workflow_text
+    assert 'cache_args+=(--cache-dir "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}")' in workflow_text

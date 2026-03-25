@@ -38,8 +38,11 @@ env:
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
+  FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm
+  npm_config_prefer_offline: "true"
+  HOMEBREW_CACHE: ${{ github.workspace }}/.github-cache/homebrew
 
 jobs:
   linux-fresh-host:
@@ -51,7 +54,9 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "22.22.1"
+          package-manager-cache: false
       - name: Restore package download caches
+        id: linux_package_cache
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -67,6 +72,7 @@ jobs:
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
           : > "${RUNNER_TEMP}/fresh-host-linux-phases.tsv"
+          mkdir -p "${FRESH_HOST_CACHE_ROOT}/npm" "${FRESH_HOST_CACHE_ROOT}/uv"
           {
             echo "TMP_ROOT=${RUNNER_TEMP}/strongclaw-linux-host"
             echo "STRONGCLAW_APP_HOME=${RUNNER_TEMP}/strongclaw-linux-host/home"
@@ -197,6 +203,7 @@ jobs:
           FRESH_HOST_RUNTIME_PROVIDER: docker
           FRESH_HOST_RUNNER_LABEL: ubuntu-latest
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
           FRESH_HOST_HOMEBREW_CACHE_ENABLED: false
         run: |
           python3 - <<'PY'
@@ -248,6 +255,7 @@ jobs:
               handle.write(f"| Runner | {report['runnerLabel']} |\n")
               handle.write(f"| Runtime | {report['runtimeProvider']} |\n")
               handle.write(f"| Package cache | {report['packageCacheEnabled']} |\n")
+              handle.write(f"| Package cache hit | {os.environ['FRESH_HOST_PACKAGE_CACHE_HIT'] == 'true'} |\n")
               handle.write("| Homebrew cache | false |\n")
               handle.write("\n")
               if phases:
@@ -289,7 +297,9 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "22.22.1"
+          package-manager-cache: false
       - name: Restore package download caches
+        id: macos_package_cache
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -300,10 +310,11 @@ jobs:
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Restore hosted macOS Homebrew download cache
+        id: macos_homebrew_cache
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          path: ~/Library/Caches/Homebrew
+          path: ${{ env.HOMEBREW_CACHE }}
           key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
           restore-keys: |
             fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
@@ -316,23 +327,17 @@ jobs:
           key: fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
             fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-
-      - name: Detect hosted macOS Docker image cache contents
-        id: macos_docker_image_cache_state
-        shell: bash
-        run: |
-          set -euo pipefail
-          cache_dir="${GITHUB_WORKSPACE}/.github-cache/docker-images"
-          ready="false"
-          if [[ -f "${cache_dir}/all-images.tar" ]]; then
-            ready="true"
-          fi
-          echo "ready=${ready}" >> "${GITHUB_OUTPUT}"
       - name: Prepare macOS fresh-host environment
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
           : > "${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
+          mkdir -p \
+            "${FRESH_HOST_CACHE_ROOT}/docker-images" \
+            "${FRESH_HOST_CACHE_ROOT}/homebrew" \
+            "${FRESH_HOST_CACHE_ROOT}/npm" \
+            "${FRESH_HOST_CACHE_ROOT}/uv"
           host_project_name="$(PYTHONPATH=src python3 - <<'PY'
           import os
           from pathlib import Path
@@ -445,54 +450,29 @@ jobs:
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
           printf 'Normalize hosted macOS machine name\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
-      - name: Warm hosted macOS images
-        if: ${{ steps.macos_docker_image_cache_state.outputs.ready != 'true' }}
+      - name: Ensure hosted macOS images
         shell: bash
+        env:
+          FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
         run: |
           set -euo pipefail
           SECONDS=0
           set +e
-          python3 .github/scripts/fresh_host_images.py pull \
+          cache_args=()
+          if [[ "${FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED}" == "true" ]]; then
+            cache_args+=(--cache-dir "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}")
+          fi
+          python3 .github/scripts/fresh_host_images.py ensure \
             --parallelism "${FRESH_HOST_DOCKER_PULL_PARALLELISM}" \
+            --report-path "${FRESH_HOST_REPORT_DIR}/image-ensure-report.json" \
+            "${cache_args[@]}" \
             "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" \
             "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}"
           rc=$?
           set -e
           status="success"
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
-          printf 'Warm hosted macOS images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
-          exit "${rc}"
-      - name: Load hosted macOS Docker image cache
-        if: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          SECONDS=0
-          set +e
-          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/all-images.tar"
-          rc=$?
-          set -e
-          status="success"
-          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
-          printf 'Load hosted macOS Docker image cache\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
-          exit "${rc}"
-      - name: Snapshot hosted macOS Docker image cache
-        if: ${{ success() && steps.macos_docker_image_cache_state.outputs.ready != 'true' && ((github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true')) }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          SECONDS=0
-          set +e
-          mkdir -p "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}"
-          python3 .github/scripts/fresh_host_images.py save \
-            --output "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/all-images.tar" \
-            "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" \
-            "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}"
-          rc=$?
-          set -e
-          status="success"
-          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
-          printf 'Snapshot hosted macOS Docker image cache\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          printf 'Ensure hosted macOS images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
       - name: Bootstrap macOS host
         shell: bash
@@ -671,7 +651,7 @@ jobs:
           sysctl -n hw.ncpu > "${FRESH_HOST_REPORT_DIR}/host-cpu-count.txt" 2>&1 || true
           sysctl -n hw.memsize > "${FRESH_HOST_REPORT_DIR}/host-memory-bytes.txt" 2>&1 || true
           du -sh "${RUNNER_HOME}/.colima" > "${FRESH_HOST_REPORT_DIR}/colima-disk-usage.txt" 2>&1 || true
-          du -sh "${RUNNER_HOME}/Library/Caches/Homebrew" > "${FRESH_HOST_REPORT_DIR}/homebrew-cache-usage.txt" 2>&1 || true
+          du -sh "${HOMEBREW_CACHE}" > "${FRESH_HOST_REPORT_DIR}/homebrew-cache-usage.txt" 2>&1 || true
           du -sh "${GITHUB_WORKSPACE}/.github-cache" > "${FRESH_HOST_REPORT_DIR}/workflow-cache-usage.txt" 2>&1 || true
           if [[ -d "${RUNNER_HOME}/.colima/_lima/colima" ]]; then
             mkdir -p "${FRESH_HOST_REPORT_DIR}/colima-logs"
@@ -685,9 +665,11 @@ jobs:
           FRESH_HOST_JOB_STATUS: ${{ job.status }}
           FRESH_HOST_RUNNER_LABEL: macos-15-intel
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}
           FRESH_HOST_HOMEBREW_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_HOMEBREW_CACHE_HIT: ${{ steps.macos_homebrew_cache.outputs.cache-hit == 'true' }}
           FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
-          FRESH_HOST_DOCKER_IMAGE_CACHE_READY: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
+          FRESH_HOST_DOCKER_IMAGE_CACHE_HIT: ${{ steps.macos_docker_image_cache.outputs.cache-hit == 'true' }}
           FRESH_HOST_DOCKER_PULL_PARALLELISM: ${{ env.FRESH_HOST_DOCKER_PULL_PARALLELISM }}
         run: |
           python3 - <<'PY'
@@ -703,6 +685,7 @@ jobs:
               return f"{minutes}m {remaining}s"
 
           phase_path = Path(os.environ["FRESH_HOST_PHASES_FILE"])
+          image_report_path = Path(os.environ["FRESH_HOST_REPORT_DIR"]) / "image-ensure-report.json"
           phases: list[dict[str, object]] = []
           if phase_path.exists():
               for raw_line in phase_path.read_text(encoding="utf-8").splitlines():
@@ -717,20 +700,26 @@ jobs:
                           "duration": format_duration(float(seconds_text)),
                       }
                   )
+          image_report: dict[str, object] = {}
+          if image_report_path.exists():
+              image_report = json.loads(image_report_path.read_text(encoding="utf-8"))
           report = {
               "jobName": os.environ["FRESH_HOST_JOB_NAME"],
               "jobStatus": os.environ["FRESH_HOST_JOB_STATUS"],
               "runnerLabel": os.environ["FRESH_HOST_RUNNER_LABEL"],
               "runtimeProvider": os.environ["FRESH_HOST_RUNTIME_PROVIDER"],
               "packageCacheEnabled": os.environ["FRESH_HOST_PACKAGE_CACHE_ENABLED"] == "true",
+              "packageCacheHit": os.environ["FRESH_HOST_PACKAGE_CACHE_HIT"] == "true",
               "homebrewCacheEnabled": os.environ["FRESH_HOST_HOMEBREW_CACHE_ENABLED"] == "true",
+              "homebrewCacheHit": os.environ["FRESH_HOST_HOMEBREW_CACHE_HIT"] == "true",
               "dockerImageCacheEnabled": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED"] == "true",
-              "dockerImageCacheReady": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_READY"] == "true",
+              "dockerImageCacheHit": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_HIT"] == "true",
               "dockerPullParallelism": os.environ["FRESH_HOST_DOCKER_PULL_PARALLELISM"],
               "hostCpuCount": os.environ.get("FRESH_HOST_HOST_CPU_COUNT"),
               "hostMemoryGiB": os.environ.get("FRESH_HOST_HOST_MEMORY_GIB"),
               "colimaCpuCount": os.environ.get("FRESH_HOST_COLIMA_CPU_COUNT"),
               "colimaMemoryGiB": os.environ.get("FRESH_HOST_COLIMA_MEMORY_GIB"),
+              "imageEnsure": image_report,
               "phases": phases,
               "reportDir": os.environ["FRESH_HOST_REPORT_DIR"],
           }
@@ -746,9 +735,11 @@ jobs:
               handle.write(f"| Runner | {report['runnerLabel']} |\n")
               handle.write(f"| Runtime | {report['runtimeProvider']} |\n")
               handle.write(f"| Package cache | {report['packageCacheEnabled']} |\n")
+              handle.write(f"| Package cache hit | {report['packageCacheHit']} |\n")
               handle.write(f"| Homebrew cache | {report['homebrewCacheEnabled']} |\n")
+              handle.write(f"| Homebrew cache hit | {report['homebrewCacheHit']} |\n")
               handle.write(f"| Docker image cache | {report['dockerImageCacheEnabled']} |\n")
-              handle.write(f"| Docker image cache restored | {report['dockerImageCacheReady']} |\n")
+              handle.write(f"| Docker image cache hit | {report['dockerImageCacheHit']} |\n")
               handle.write(f"| Docker pull parallelism | {report['dockerPullParallelism']} |\n")
               if report["hostCpuCount"] and report["hostMemoryGiB"]:
                   handle.write(
@@ -769,6 +760,15 @@ jobs:
                   handle.write(f"\nKnown phase total: {format_duration(float(total_seconds))}\n\n")
               else:
                   handle.write("No phase timings were recorded.\n\n")
+              image_report = report["imageEnsure"]
+              if image_report:
+                  handle.write("| Image ensure field | Value |\n| --- | --- |\n")
+                  handle.write(f"| Cache requested | {image_report.get('cache_requested')} |\n")
+                  handle.write(f"| Cache available | {image_report.get('cache_available')} |\n")
+                  handle.write(f"| Cache loaded | {image_report.get('cache_loaded')} |\n")
+                  handle.write(f"| Cache saved | {image_report.get('cache_saved')} |\n")
+                  handle.write(f"| Pulled images | {len(image_report.get('pulled_images', []))} |\n")
+                  handle.write("\n")
               handle.write(f"Diagnostics artifact root: `{report['reportDir']}`\n\n")
           PY
       - name: Upload macOS host artifacts
