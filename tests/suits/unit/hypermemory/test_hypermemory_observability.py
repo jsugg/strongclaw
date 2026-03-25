@@ -168,15 +168,19 @@ def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, _FakeQ
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-observability"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     return engine, fake_qdrant
 
 
 def _configure_rerank_engine(
     tmp_path: pathlib.Path,
+    *,
+    rerank_provider: object | None = None,
 ) -> tuple[HypermemoryEngine, _FakeQdrantBackend]:
     workspace = _build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
@@ -202,10 +206,13 @@ def _configure_rerank_engine(
         hybrid=replace(config.hybrid, rerank_candidate_pool=2),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-rerank-observability"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        rerank_provider=rerank_provider,
+        vector_backend=fake_qdrant,
+    )
     return engine, fake_qdrant
 
 
@@ -332,10 +339,12 @@ def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-observability"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -374,8 +383,10 @@ def test_hypermemory_emits_rerank_logs(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
-    engine, fake_qdrant = _configure_rerank_engine(tmp_path)
-    engine._rerank_provider = _StaticRerankProvider()
+    engine, fake_qdrant = _configure_rerank_engine(
+        tmp_path,
+        rerank_provider=_StaticRerankProvider(),
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -414,8 +425,10 @@ def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
 ) -> None:
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     exporter = _configure_test_tracing(monkeypatch)
-    engine, fake_qdrant = _configure_rerank_engine(tmp_path)
-    engine._rerank_provider = _FailingRerankProvider()
+    engine, fake_qdrant = _configure_rerank_engine(
+        tmp_path,
+        rerank_provider=_FailingRerankProvider(),
+    )
     engine.reindex()
 
     with engine.connect() as conn:

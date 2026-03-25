@@ -230,8 +230,7 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
 
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _DeterministicEmbeddingProvider()
+    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
     engine.reindex()
 
     status = engine.status()
@@ -289,8 +288,7 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
 
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _DeterministicEmbeddingProvider()
+    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
     engine.reindex()
 
     collection_response = requests.get(
