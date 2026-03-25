@@ -2,219 +2,81 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
+from dataclasses import dataclass
+from functools import lru_cache
+from importlib.resources import files
 
-SCHEMA_VERSION = "5.0"
-
-DROP_STATEMENTS = (
-    "DROP TABLE IF EXISTS backend_state",
-    "DROP TABLE IF EXISTS vector_items",
-    "DROP TABLE IF EXISTS sparse_terms",
-    "DROP TABLE IF EXISTS fact_registry",
-    "DROP TABLE IF EXISTS conflicts",
-    "DROP TABLE IF EXISTS evidence_links",
-    "DROP TABLE IF EXISTS proposals",
-    "DROP TABLE IF EXISTS facts",
-    "DROP TABLE IF EXISTS opinions",
-    "DROP TABLE IF EXISTS reflections",
-    "DROP TABLE IF EXISTS entities",
-    "DROP TABLE IF EXISTS search_items_fts",
-    "DROP TABLE IF EXISTS search_items",
-    "DROP TABLE IF EXISTS documents",
+_SCHEMA_RESOURCE = "resources/schema.sql"
+_SCHEMA_VERSION_RE = re.compile(r"^--\s*schema_version:\s*(?P<version>\S+)\s*$", re.MULTILINE)
+_TABLE_RE = re.compile(
+    r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+IF\s+NOT\s+EXISTS\s+(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)",
+    re.IGNORECASE,
 )
 
-SCHEMA_STATEMENTS = (
-    """
-    CREATE TABLE IF NOT EXISTS meta (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+
+@dataclass(frozen=True, slots=True)
+class SchemaDefinition:
+    """Packaged hypermemory schema definition."""
+
+    version: str
+    script: str
+    drop_statements: tuple[str, ...]
+
+
+def _load_schema_text() -> str:
+    resource = files("clawops.hypermemory").joinpath(_SCHEMA_RESOURCE)
+    return resource.read_text(encoding="utf-8")
+
+
+def _schema_version(script: str) -> str:
+    match = _SCHEMA_VERSION_RE.search(script)
+    if match is None:
+        raise ValueError("hypermemory schema resource must declare a schema_version comment")
+    return match.group("version")
+
+
+def _drop_statements(script: str) -> tuple[str, ...]:
+    names = [
+        match.group("name") for match in _TABLE_RE.finditer(script) if match.group("name") != "meta"
+    ]
+    return tuple(f"DROP TABLE IF EXISTS {name}" for name in reversed(names))
+
+
+@lru_cache(maxsize=1)
+def schema_definition() -> SchemaDefinition:
+    """Return the cached packaged schema definition."""
+    script = _load_schema_text()
+    return SchemaDefinition(
+        version=_schema_version(script),
+        script=script,
+        drop_statements=_drop_statements(script),
     )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS documents (
-        id INTEGER PRIMARY KEY,
-        rel_path TEXT NOT NULL UNIQUE,
-        abs_path TEXT NOT NULL,
-        lane TEXT NOT NULL,
-        source_name TEXT NOT NULL,
-        sha256 TEXT NOT NULL,
-        line_count INTEGER NOT NULL,
-        modified_at TEXT NOT NULL,
-        indexed_at TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS search_items (
-        id INTEGER PRIMARY KEY,
-        document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        lane TEXT NOT NULL,
-        source_name TEXT NOT NULL,
-        source_kind TEXT NOT NULL,
-        item_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        snippet TEXT NOT NULL,
-        normalized_text TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        confidence REAL,
-        scope TEXT NOT NULL,
-        modified_at TEXT NOT NULL,
-        contradiction_count INTEGER NOT NULL DEFAULT 0,
-        evidence_count INTEGER NOT NULL DEFAULT 0,
-        entities_json TEXT NOT NULL,
-        evidence_json TEXT NOT NULL,
-        importance REAL,
-        tier TEXT NOT NULL DEFAULT 'working',
-        access_count INTEGER NOT NULL DEFAULT 0,
-        last_access_date TEXT,
-        injected_count INTEGER NOT NULL DEFAULT 0,
-        confirmed_count INTEGER NOT NULL DEFAULT 0,
-        bad_recall_count INTEGER NOT NULL DEFAULT 0,
-        fact_key TEXT,
-        invalidated_at TEXT,
-        supersedes TEXT
-    )
-    """,
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS search_items_fts USING fts5(
-        title,
-        snippet,
-        entities,
-        tokenize = 'unicode61'
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS sparse_terms (
-        term TEXT PRIMARY KEY,
-        term_id INTEGER NOT NULL UNIQUE,
-        document_freq INTEGER NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS vector_items (
-        item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
-        point_id TEXT NOT NULL UNIQUE,
-        embedding_model TEXT NOT NULL,
-        embedding_dim INTEGER NOT NULL,
-        content_sha256 TEXT NOT NULL,
-        sparse_term_count INTEGER NOT NULL DEFAULT 0,
-        sparse_content_sha256 TEXT NOT NULL DEFAULT '',
-        sparse_updated_at TEXT NOT NULL DEFAULT '',
-        updated_at TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS backend_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS fact_registry (
-        fact_key TEXT PRIMARY KEY,
-        current_item_id INTEGER NOT NULL REFERENCES search_items(id),
-        category TEXT NOT NULL,
-        last_updated TEXT NOT NULL,
-        version_count INTEGER NOT NULL DEFAULT 1,
-        history_json TEXT NOT NULL DEFAULT '[]'
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS facts (
-        item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        scope TEXT NOT NULL,
-        text TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS opinions (
-        item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        scope TEXT NOT NULL,
-        text TEXT NOT NULL,
-        confidence REAL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS reflections (
-        item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        scope TEXT NOT NULL,
-        text TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS entities (
-        item_id INTEGER PRIMARY KEY REFERENCES search_items(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        scope TEXT NOT NULL,
-        name TEXT NOT NULL,
-        text TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS evidence_links (
-        id INTEGER PRIMARY KEY,
-        item_id INTEGER NOT NULL REFERENCES search_items(id) ON DELETE CASCADE,
-        rel_path TEXT NOT NULL,
-        start_line INTEGER NOT NULL,
-        end_line INTEGER NOT NULL,
-        relation TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS conflicts (
-        id INTEGER PRIMARY KEY,
-        item_id INTEGER NOT NULL REFERENCES search_items(id) ON DELETE CASCADE,
-        target_ref TEXT NOT NULL,
-        reason TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS proposals (
-        proposal_id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        scope TEXT NOT NULL,
-        status TEXT NOT NULL,
-        entry_line TEXT NOT NULL,
-        source_rel_path TEXT NOT NULL,
-        source_line INTEGER NOT NULL,
-        target_rel_path TEXT NOT NULL,
-        entity TEXT,
-        confidence REAL,
-        created_at TEXT NOT NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_search_items_invalidated ON search_items(invalidated_at)",
-    "CREATE INDEX IF NOT EXISTS idx_search_items_tier ON search_items(tier)",
-    "CREATE INDEX IF NOT EXISTS idx_search_items_fact_key ON search_items(fact_key)",
-)
+
+
+SCHEMA_VERSION = schema_definition().version
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Ensure the current schema version exists, recreating derived tables if needed."""
+    definition = schema_definition()
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute(SCHEMA_STATEMENTS[0])
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """)
     row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-    if row is None or str(row[0]) != SCHEMA_VERSION:
-        for statement in DROP_STATEMENTS:
+    if row is None or str(row[0]) != definition.version:
+        for statement in definition.drop_statements:
             conn.execute(statement)
-        for statement in SCHEMA_STATEMENTS:
-            conn.execute(statement)
+        conn.executescript(definition.script)
         conn.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
-            (SCHEMA_VERSION,),
+            (definition.version,),
         )
         conn.commit()

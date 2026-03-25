@@ -49,6 +49,9 @@ clawops = "clawops.cli:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.package-data]
+"clawops.hypermemory" = ["resources/*.yaml", "resources/*.sql"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

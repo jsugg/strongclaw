@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import pathlib
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+
 
 def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    plugin_root = repo_root / "platform/plugins/strongclaw-hypermemory"
+    plugin_root = REPO_ROOT / "platform/plugins/strongclaw-hypermemory"
     manifest = json.loads((plugin_root / "openclaw.plugin.json").read_text(encoding="utf-8"))
     package = json.loads((plugin_root / "package.json").read_text(encoding="utf-8"))
 
@@ -24,8 +25,7 @@ def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
 
 
 def test_hypermemory_plugin_uses_compatible_tool_names() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    plugin_source = (repo_root / "platform/plugins/strongclaw-hypermemory/index.js").read_text(
+    plugin_source = (REPO_ROOT / "platform/plugins/strongclaw-hypermemory/index.js").read_text(
         encoding="utf-8"
     )
 

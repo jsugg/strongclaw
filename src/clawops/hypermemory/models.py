@@ -7,6 +7,67 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 
+from clawops.hypermemory.defaults import (
+    ADMISSION_DEFAULTS,
+    ADMISSION_TYPE_PRIORS_DEFAULTS,
+    BACKEND_DEFAULTS,
+    CAPTURE_DEFAULTS,
+    CAPTURE_LLM_DEFAULTS,
+    DECAY_DEFAULTS,
+    DEDUP_DEFAULTS,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_AUTO_APPLY_SCOPE_PATTERNS as RESOURCE_DEFAULT_AUTO_APPLY_SCOPE_PATTERNS,
+)
+from clawops.hypermemory.defaults import DEFAULT_BANK_DIR as RESOURCE_DEFAULT_BANK_DIR
+from clawops.hypermemory.defaults import DEFAULT_DAILY_DIR as RESOURCE_DEFAULT_DAILY_DIR
+from clawops.hypermemory.defaults import DEFAULT_DB_PATH as RESOURCE_DEFAULT_DB_PATH
+from clawops.hypermemory.defaults import DEFAULT_DEFAULT_SCOPE as RESOURCE_DEFAULT_DEFAULT_SCOPE
+from clawops.hypermemory.defaults import (
+    DEFAULT_EMBEDDING_PROVIDER_LITERAL,
+    DEFAULT_FALLBACK_BACKEND_LITERAL,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_MEMORY_FILE_NAMES as RESOURCE_DEFAULT_MEMORY_FILE_NAMES,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_QDRANT_COLLECTION as RESOURCE_DEFAULT_QDRANT_COLLECTION,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_QDRANT_DENSE_VECTOR_NAME as RESOURCE_DEFAULT_QDRANT_DENSE_VECTOR_NAME,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_QDRANT_SPARSE_VECTOR_NAME as RESOURCE_DEFAULT_QDRANT_SPARSE_VECTOR_NAME,
+)
+from clawops.hypermemory.defaults import DEFAULT_QDRANT_URL as RESOURCE_DEFAULT_QDRANT_URL
+from clawops.hypermemory.defaults import (
+    DEFAULT_READABLE_SCOPE_PATTERNS as RESOURCE_DEFAULT_READABLE_SCOPE_PATTERNS,
+)
+from clawops.hypermemory.defaults import (
+    DEFAULT_RERANK_PROVIDER_LITERAL,
+    DEFAULT_SEARCH_BACKEND_LITERAL,
+)
+from clawops.hypermemory.defaults import DEFAULT_SEARCH_RESULTS as RESOURCE_DEFAULT_SEARCH_RESULTS
+from clawops.hypermemory.defaults import DEFAULT_SNIPPET_CHARS as RESOURCE_DEFAULT_SNIPPET_CHARS
+from clawops.hypermemory.defaults import (
+    DEFAULT_WRITABLE_SCOPE_PATTERNS as RESOURCE_DEFAULT_WRITABLE_SCOPE_PATTERNS,
+)
+from clawops.hypermemory.defaults import (
+    EMBEDDING_DEFAULTS,
+    FACT_REGISTRY_DEFAULTS,
+    FEEDBACK_DEFAULTS,
+    HYBRID_DEFAULTS,
+    INJECTION_DEFAULTS,
+    NOISE_DEFAULTS,
+    QDRANT_DEFAULTS,
+    RANKING_DEFAULTS,
+    RERANK_DEFAULTS,
+    RERANK_HTTP_DEFAULTS,
+    RERANK_LOCAL_DEFAULTS,
+    RETRIEVAL_DEFAULTS,
+    SEARCH_TYPE_WEIGHTS,
+)
+
 Lane = Literal["memory", "corpus"]
 SearchMode = Literal["all", "memory", "corpus"]
 SearchBackend = Literal["sqlite_fts", "qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"]
@@ -18,25 +79,24 @@ Tier = Literal["core", "working", "peripheral"]
 CaptureMode = Literal["llm", "regex", "both"]
 FactCategory = Literal["profile", "preference", "decision", "entity"]
 
-DEFAULT_MEMORY_FILE_NAMES = ("MEMORY.md", "memory.md")
-DEFAULT_DAILY_DIR = "memory"
-DEFAULT_BANK_DIR = "bank"
-DEFAULT_DB_PATH = ".openclaw/hypermemory.sqlite"
-DEFAULT_SNIPPET_CHARS = 400
-DEFAULT_SEARCH_RESULTS = 8
-DEFAULT_DEFAULT_SCOPE = "project:strongclaw"
-DEFAULT_READABLE_SCOPE_PATTERNS = ("project:", "agent:", "user:", "global")
-DEFAULT_WRITABLE_SCOPE_PATTERNS = ("project:", "agent:")
-DEFAULT_AUTO_APPLY_SCOPE_PATTERNS = ("project:", "agent:")
-DEFAULT_SEARCH_BACKEND: SearchBackend = "sqlite_fts"
-DEFAULT_FALLBACK_BACKEND: SearchBackend = "sqlite_fts"
-DEFAULT_HYPERMEMORY_SEARCH_BACKEND: SearchBackend = "qdrant_sparse_dense_hybrid"
-DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderKind = "disabled"
-DEFAULT_RERANK_PROVIDER: RerankProviderKind = "none"
-DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
-DEFAULT_QDRANT_COLLECTION = "strongclaw-hypermemory"
-DEFAULT_QDRANT_DENSE_VECTOR_NAME = "dense"
-DEFAULT_QDRANT_SPARSE_VECTOR_NAME = "sparse"
+DEFAULT_MEMORY_FILE_NAMES = RESOURCE_DEFAULT_MEMORY_FILE_NAMES
+DEFAULT_DAILY_DIR = RESOURCE_DEFAULT_DAILY_DIR
+DEFAULT_BANK_DIR = RESOURCE_DEFAULT_BANK_DIR
+DEFAULT_DB_PATH = RESOURCE_DEFAULT_DB_PATH
+DEFAULT_SNIPPET_CHARS = RESOURCE_DEFAULT_SNIPPET_CHARS
+DEFAULT_SEARCH_RESULTS = RESOURCE_DEFAULT_SEARCH_RESULTS
+DEFAULT_DEFAULT_SCOPE = RESOURCE_DEFAULT_DEFAULT_SCOPE
+DEFAULT_READABLE_SCOPE_PATTERNS = RESOURCE_DEFAULT_READABLE_SCOPE_PATTERNS
+DEFAULT_WRITABLE_SCOPE_PATTERNS = RESOURCE_DEFAULT_WRITABLE_SCOPE_PATTERNS
+DEFAULT_AUTO_APPLY_SCOPE_PATTERNS = RESOURCE_DEFAULT_AUTO_APPLY_SCOPE_PATTERNS
+DEFAULT_SEARCH_BACKEND: SearchBackend = DEFAULT_SEARCH_BACKEND_LITERAL
+DEFAULT_FALLBACK_BACKEND: SearchBackend = DEFAULT_FALLBACK_BACKEND_LITERAL
+DEFAULT_EMBEDDING_PROVIDER: EmbeddingProviderKind = DEFAULT_EMBEDDING_PROVIDER_LITERAL
+DEFAULT_RERANK_PROVIDER: RerankProviderKind = DEFAULT_RERANK_PROVIDER_LITERAL
+DEFAULT_QDRANT_URL = RESOURCE_DEFAULT_QDRANT_URL
+DEFAULT_QDRANT_COLLECTION = RESOURCE_DEFAULT_QDRANT_COLLECTION
+DEFAULT_QDRANT_DENSE_VECTOR_NAME = RESOURCE_DEFAULT_QDRANT_DENSE_VECTOR_NAME
+DEFAULT_QDRANT_SPARSE_VECTOR_NAME = RESOURCE_DEFAULT_QDRANT_SPARSE_VECTOR_NAME
 EntryType = Literal[
     "fact",
     "reflection",
@@ -47,6 +107,31 @@ EntryType = Literal[
     "section",
 ]
 ReflectionMode = Literal["safe", "propose", "apply"]
+
+
+def _mapping_bool(section: Mapping[str, object], key: str) -> bool:
+    """Return a validated boolean default from *section*."""
+    return cast(bool, section[key])
+
+
+def _mapping_int(section: Mapping[str, object], key: str) -> int:
+    """Return a validated integer default from *section*."""
+    return cast(int, section[key])
+
+
+def _mapping_float(section: Mapping[str, object], key: str) -> float:
+    """Return a validated numeric default from *section*."""
+    return cast(float, section[key])
+
+
+def _mapping_string(section: Mapping[str, object], key: str) -> str:
+    """Return a validated string default from *section*."""
+    return cast(str, section[key])
+
+
+def _mapping_optional_string(section: Mapping[str, object], key: str) -> str | None:
+    """Return a validated optional string default from *section*."""
+    return cast(str | None, section[key])
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -73,52 +158,52 @@ class GovernanceConfig:
 class RankingConfig:
     """Search ranking configuration."""
 
-    memory_lane_weight: float = 1.0
-    corpus_lane_weight: float = 1.0
-    lexical_weight: float = 0.75
-    coverage_weight: float = 0.35
-    confidence_weight: float = 0.15
-    recency_weight: float = 0.1
-    contradiction_penalty: float = 0.2
-    diversity_penalty: float = 0.35
-    recency_half_life_days: int = 45
-    rerank_weight: float = 0.35
+    memory_lane_weight: float = _mapping_float(RANKING_DEFAULTS, "memory_lane_weight")
+    corpus_lane_weight: float = _mapping_float(RANKING_DEFAULTS, "corpus_lane_weight")
+    lexical_weight: float = _mapping_float(RANKING_DEFAULTS, "lexical_weight")
+    coverage_weight: float = _mapping_float(RANKING_DEFAULTS, "coverage_weight")
+    confidence_weight: float = _mapping_float(RANKING_DEFAULTS, "confidence_weight")
+    recency_weight: float = _mapping_float(RANKING_DEFAULTS, "recency_weight")
+    contradiction_penalty: float = _mapping_float(RANKING_DEFAULTS, "contradiction_penalty")
+    diversity_penalty: float = _mapping_float(RANKING_DEFAULTS, "diversity_penalty")
+    recency_half_life_days: int = _mapping_int(RANKING_DEFAULTS, "recency_half_life_days")
+    rerank_weight: float = _mapping_float(RANKING_DEFAULTS, "rerank_weight")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DedupConfig:
     """Semantic and deterministic deduplication settings."""
 
-    enabled: bool = False
-    similarity_threshold: float = 0.92
-    check_cross_scope: bool = False
-    typed_slots_enabled: bool = True
-    llm_assisted_enabled: bool = False
-    llm_near_threshold: float = 0.85
+    enabled: bool = _mapping_bool(DEDUP_DEFAULTS, "enabled")
+    similarity_threshold: float = _mapping_float(DEDUP_DEFAULTS, "similarity_threshold")
+    check_cross_scope: bool = _mapping_bool(DEDUP_DEFAULTS, "check_cross_scope")
+    typed_slots_enabled: bool = _mapping_bool(DEDUP_DEFAULTS, "typed_slots_enabled")
+    llm_assisted_enabled: bool = _mapping_bool(DEDUP_DEFAULTS, "llm_assisted_enabled")
+    llm_near_threshold: float = _mapping_float(DEDUP_DEFAULTS, "llm_near_threshold")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CaptureLlmConfig:
     """LLM-backed capture extraction settings."""
 
-    endpoint: str = ""
-    model: str = ""
-    api_key_env: str | None = None
-    api_key: str | None = None
-    timeout_ms: int = 15_000
+    endpoint: str = _mapping_string(CAPTURE_LLM_DEFAULTS, "endpoint")
+    model: str = _mapping_string(CAPTURE_LLM_DEFAULTS, "model")
+    api_key_env: str | None = _mapping_optional_string(CAPTURE_LLM_DEFAULTS, "api_key_env")
+    api_key: str | None = _mapping_optional_string(CAPTURE_LLM_DEFAULTS, "api_key")
+    timeout_ms: int = _mapping_int(CAPTURE_LLM_DEFAULTS, "timeout_ms")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CaptureConfig:
     """Conversation capture configuration."""
 
-    enabled: bool = False
-    mode: CaptureMode = "llm"
-    min_message_length: int = 20
-    max_candidates_per_session: int = 10
-    incremental: bool = True
-    batch_size: int = 6
-    batch_overlap: int = 2
+    enabled: bool = _mapping_bool(CAPTURE_DEFAULTS, "enabled")
+    mode: CaptureMode = cast(CaptureMode, _mapping_string(CAPTURE_DEFAULTS, "mode"))
+    min_message_length: int = _mapping_int(CAPTURE_DEFAULTS, "min_message_length")
+    max_candidates_per_session: int = _mapping_int(CAPTURE_DEFAULTS, "max_candidates_per_session")
+    incremental: bool = _mapping_bool(CAPTURE_DEFAULTS, "incremental")
+    batch_size: int = _mapping_int(CAPTURE_DEFAULTS, "batch_size")
+    batch_overlap: int = _mapping_int(CAPTURE_DEFAULTS, "batch_overlap")
     llm: CaptureLlmConfig = dataclasses.field(default_factory=CaptureLlmConfig)
 
 
@@ -126,131 +211,140 @@ class CaptureConfig:
 class DecayConfig:
     """Decay scoring and tier-transition configuration."""
 
-    enabled: bool = False
-    half_life_days: float = 45.0
-    recency_weight: float = 0.4
-    frequency_weight: float = 0.3
-    intrinsic_weight: float = 0.3
-    beta_core: float = 0.8
-    beta_working: float = 1.0
-    beta_peripheral: float = 1.3
-    promote_to_core_access: int = 10
-    promote_to_core_composite: float = 0.7
-    promote_to_core_importance: float = 0.8
-    promote_to_working_access: int = 3
-    promote_to_working_composite: float = 0.4
-    demote_to_peripheral_composite: float = 0.15
-    demote_to_peripheral_age_days: int = 60
-    demote_to_peripheral_access: int = 3
-    demote_from_core_composite: float = 0.15
-    demote_from_core_access: int = 3
+    enabled: bool = _mapping_bool(DECAY_DEFAULTS, "enabled")
+    half_life_days: float = _mapping_float(DECAY_DEFAULTS, "half_life_days")
+    recency_weight: float = _mapping_float(DECAY_DEFAULTS, "recency_weight")
+    frequency_weight: float = _mapping_float(DECAY_DEFAULTS, "frequency_weight")
+    intrinsic_weight: float = _mapping_float(DECAY_DEFAULTS, "intrinsic_weight")
+    beta_core: float = _mapping_float(DECAY_DEFAULTS, "beta_core")
+    beta_working: float = _mapping_float(DECAY_DEFAULTS, "beta_working")
+    beta_peripheral: float = _mapping_float(DECAY_DEFAULTS, "beta_peripheral")
+    promote_to_core_access: int = _mapping_int(DECAY_DEFAULTS, "promote_to_core_access")
+    promote_to_core_composite: float = _mapping_float(DECAY_DEFAULTS, "promote_to_core_composite")
+    promote_to_core_importance: float = _mapping_float(DECAY_DEFAULTS, "promote_to_core_importance")
+    promote_to_working_access: int = _mapping_int(DECAY_DEFAULTS, "promote_to_working_access")
+    promote_to_working_composite: float = _mapping_float(
+        DECAY_DEFAULTS, "promote_to_working_composite"
+    )
+    demote_to_peripheral_composite: float = _mapping_float(
+        DECAY_DEFAULTS, "demote_to_peripheral_composite"
+    )
+    demote_to_peripheral_age_days: int = _mapping_int(
+        DECAY_DEFAULTS, "demote_to_peripheral_age_days"
+    )
+    demote_to_peripheral_access: int = _mapping_int(DECAY_DEFAULTS, "demote_to_peripheral_access")
+    demote_from_core_composite: float = _mapping_float(DECAY_DEFAULTS, "demote_from_core_composite")
+    demote_from_core_access: int = _mapping_int(DECAY_DEFAULTS, "demote_from_core_access")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class NoiseConfig:
     """Noise filtering thresholds for writes and capture."""
 
-    enabled: bool = True
-    min_text_length: int = 10
-    max_text_length: int = 2_000
+    enabled: bool = _mapping_bool(NOISE_DEFAULTS, "enabled")
+    min_text_length: int = _mapping_int(NOISE_DEFAULTS, "min_text_length")
+    max_text_length: int = _mapping_int(NOISE_DEFAULTS, "max_text_length")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class AdmissionConfig:
     """Optional capture-only admission control."""
 
-    enabled: bool = False
+    enabled: bool = _mapping_bool(ADMISSION_DEFAULTS, "enabled")
     type_priors: Mapping[str, float] = dataclasses.field(
-        default_factory=lambda: {
-            "fact": 0.85,
-            "entity": 0.80,
-            "opinion": 0.70,
-            "reflection": 0.75,
-        }
+        default_factory=lambda: dict(ADMISSION_TYPE_PRIORS_DEFAULTS)
     )
-    min_confidence: float = 0.3
+    min_confidence: float = _mapping_float(ADMISSION_DEFAULTS, "min_confidence")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class FactRegistryConfig:
     """Canonical fact registry behavior."""
 
-    enabled: bool = True
-    auto_infer_keys: bool = True
+    enabled: bool = _mapping_bool(FACT_REGISTRY_DEFAULTS, "enabled")
+    auto_infer_keys: bool = _mapping_bool(FACT_REGISTRY_DEFAULTS, "auto_infer_keys")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class FeedbackConfig:
     """Feedback-signal scoring configuration."""
 
-    enabled: bool = False
-    reward_weight: float = 0.15
-    penalty_weight: float = 0.2
-    suppress_threshold: int = 3
-    suppress_penalty: float = 0.5
+    enabled: bool = _mapping_bool(FEEDBACK_DEFAULTS, "enabled")
+    reward_weight: float = _mapping_float(FEEDBACK_DEFAULTS, "reward_weight")
+    penalty_weight: float = _mapping_float(FEEDBACK_DEFAULTS, "penalty_weight")
+    suppress_threshold: int = _mapping_int(FEEDBACK_DEFAULTS, "suppress_threshold")
+    suppress_penalty: float = _mapping_float(FEEDBACK_DEFAULTS, "suppress_penalty")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RetrievalExtensionsConfig:
     """Retrieval behavior extensions outside the hybrid core."""
 
-    adaptive_pool: bool = False
-    adaptive_pool_max_multiplier: int = 4
+    adaptive_pool: bool = _mapping_bool(RETRIEVAL_DEFAULTS, "adaptive_pool")
+    adaptive_pool_max_multiplier: int = _mapping_int(
+        RETRIEVAL_DEFAULTS, "adaptive_pool_max_multiplier"
+    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class BackendConfig:
     """Active and fallback search backend settings."""
 
-    active: SearchBackend = DEFAULT_SEARCH_BACKEND
-    fallback: SearchBackend = DEFAULT_FALLBACK_BACKEND
+    active: SearchBackend = cast(SearchBackend, _mapping_string(BACKEND_DEFAULTS, "active"))
+    fallback: SearchBackend = cast(SearchBackend, _mapping_string(BACKEND_DEFAULTS, "fallback"))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class EmbeddingConfig:
     """Embedding provider configuration."""
 
-    enabled: bool = False
-    provider: EmbeddingProviderKind = DEFAULT_EMBEDDING_PROVIDER
-    model: str = ""
-    base_url: str = ""
-    api_key_env: str | None = None
-    api_key: str | None = None
+    enabled: bool = _mapping_bool(EMBEDDING_DEFAULTS, "enabled")
+    provider: EmbeddingProviderKind = cast(
+        EmbeddingProviderKind, _mapping_string(EMBEDDING_DEFAULTS, "provider")
+    )
+    model: str = _mapping_string(EMBEDDING_DEFAULTS, "model")
+    base_url: str = _mapping_string(EMBEDDING_DEFAULTS, "base_url")
+    api_key_env: str | None = _mapping_optional_string(EMBEDDING_DEFAULTS, "api_key_env")
+    api_key: str | None = _mapping_optional_string(EMBEDDING_DEFAULTS, "api_key")
     dimensions: int | None = None
-    batch_size: int = 32
-    timeout_ms: int = 15_000
+    batch_size: int = _mapping_int(EMBEDDING_DEFAULTS, "batch_size")
+    timeout_ms: int = _mapping_int(EMBEDDING_DEFAULTS, "timeout_ms")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class LocalSentenceTransformersRerankConfig:
     """Local sentence-transformers rerank provider configuration."""
 
-    model: str = ""
-    batch_size: int = 8
-    max_length: int = 2_048
-    device: str = "auto"
+    model: str = _mapping_string(RERANK_LOCAL_DEFAULTS, "model")
+    batch_size: int = _mapping_int(RERANK_LOCAL_DEFAULTS, "batch_size")
+    max_length: int = _mapping_int(RERANK_LOCAL_DEFAULTS, "max_length")
+    device: str = _mapping_string(RERANK_LOCAL_DEFAULTS, "device")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CompatibleHttpRerankConfig:
     """Compatible HTTP rerank provider configuration."""
 
-    model: str = ""
-    base_url: str = ""
-    api_key_env: str | None = None
-    api_key: str | None = None
-    timeout_ms: int = 15_000
+    model: str = _mapping_string(RERANK_HTTP_DEFAULTS, "model")
+    base_url: str = _mapping_string(RERANK_HTTP_DEFAULTS, "base_url")
+    api_key_env: str | None = _mapping_optional_string(RERANK_HTTP_DEFAULTS, "api_key_env")
+    api_key: str | None = _mapping_optional_string(RERANK_HTTP_DEFAULTS, "api_key")
+    timeout_ms: int = _mapping_int(RERANK_HTTP_DEFAULTS, "timeout_ms")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RerankConfig:
     """Optional reranking configuration with primary and fallback providers."""
 
-    enabled: bool = False
-    provider: RerankProviderKind = DEFAULT_RERANK_PROVIDER
-    fallback_provider: RerankProviderKind = "none"
-    fail_open: bool = True
-    normalize_scores: bool = True
+    enabled: bool = _mapping_bool(RERANK_DEFAULTS, "enabled")
+    provider: RerankProviderKind = cast(
+        RerankProviderKind, _mapping_string(RERANK_DEFAULTS, "provider")
+    )
+    fallback_provider: RerankProviderKind = cast(
+        RerankProviderKind, _mapping_string(RERANK_DEFAULTS, "fallback_provider")
+    )
+    fail_open: bool = _mapping_bool(RERANK_DEFAULTS, "fail_open")
+    normalize_scores: bool = _mapping_bool(RERANK_DEFAULTS, "normalize_scores")
     local: LocalSentenceTransformersRerankConfig = dataclasses.field(
         default_factory=LocalSentenceTransformersRerankConfig
     )
@@ -272,35 +366,35 @@ class RerankConfig:
 class HybridConfig:
     """Hybrid retrieval configuration."""
 
-    dense_candidate_pool: int = 24
-    sparse_candidate_pool: int = 24
-    vector_weight: float = 0.65
-    text_weight: float = 0.35
-    fusion: FusionMode = "rrf"
-    rrf_k: int = 60
-    rerank_candidate_pool: int = 0
+    dense_candidate_pool: int = _mapping_int(HYBRID_DEFAULTS, "dense_candidate_pool")
+    sparse_candidate_pool: int = _mapping_int(HYBRID_DEFAULTS, "sparse_candidate_pool")
+    vector_weight: float = _mapping_float(HYBRID_DEFAULTS, "vector_weight")
+    text_weight: float = _mapping_float(HYBRID_DEFAULTS, "text_weight")
+    fusion: FusionMode = cast(FusionMode, _mapping_string(HYBRID_DEFAULTS, "fusion"))
+    rrf_k: int = _mapping_int(HYBRID_DEFAULTS, "rrf_k")
+    rerank_candidate_pool: int = _mapping_int(HYBRID_DEFAULTS, "rerank_candidate_pool")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class QdrantConfig:
     """Dense and sparse Qdrant backend configuration."""
 
-    enabled: bool = False
-    url: str = DEFAULT_QDRANT_URL
-    collection: str = DEFAULT_QDRANT_COLLECTION
-    dense_vector_name: str = DEFAULT_QDRANT_DENSE_VECTOR_NAME
-    sparse_vector_name: str = DEFAULT_QDRANT_SPARSE_VECTOR_NAME
-    timeout_ms: int = 3_000
-    api_key_env: str | None = None
-    api_key: str | None = None
+    enabled: bool = _mapping_bool(QDRANT_DEFAULTS, "enabled")
+    url: str = _mapping_string(QDRANT_DEFAULTS, "url")
+    collection: str = _mapping_string(QDRANT_DEFAULTS, "collection")
+    dense_vector_name: str = _mapping_string(QDRANT_DEFAULTS, "dense_vector_name")
+    sparse_vector_name: str = _mapping_string(QDRANT_DEFAULTS, "sparse_vector_name")
+    timeout_ms: int = _mapping_int(QDRANT_DEFAULTS, "timeout_ms")
+    api_key_env: str | None = _mapping_optional_string(QDRANT_DEFAULTS, "api_key_env")
+    api_key: str | None = _mapping_optional_string(QDRANT_DEFAULTS, "api_key")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class InjectionConfig:
     """Prompt injection caps for auto-recall."""
 
-    max_results: int = 3
-    max_chars_per_result: int = 280
+    max_results: int = _mapping_int(INJECTION_DEFAULTS, "max_results")
+    max_chars_per_result: int = _mapping_int(INJECTION_DEFAULTS, "max_chars_per_result")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -730,15 +824,7 @@ class ReflectionSummary:
         }
 
 
-TYPE_ORDER: dict[EntryType, float] = {
-    "fact": 1.15,
-    "entity": 1.1,
-    "opinion": 1.05,
-    "reflection": 1.0,
-    "proposal": 0.98,
-    "paragraph": 0.9,
-    "section": 0.8,
-}
+TYPE_ORDER: dict[EntryType, float] = cast(dict[EntryType, float], dict(SEARCH_TYPE_WEIGHTS))
 
 
 def normalize_text_tokens(text: str) -> tuple[str, ...]:
