@@ -14,6 +14,20 @@ The repository includes:
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
 - Upstream Integration Validation
 
+## Fresh-host acceptance
+
+`.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap,
+setup, service activation, and repo-local sidecar/browser-lab flows on hosted
+Linux and macOS runners.
+
+- Each run writes a GitHub job summary with the runner label, runtime provider,
+  cache toggles, and phase timings.
+- Each run uploads a `fresh-host-reports` artifact subtree with runtime
+  diagnostics (`docker info`, image inventory, launchd state, and runtime
+  status output) alongside the rendered host artifacts.
+- `workflow_dispatch` can benchmark hosted macOS runner/runtime/cache
+  combinations without changing the required PR gate.
+
 ## Vendored plugin verification
 
 The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on

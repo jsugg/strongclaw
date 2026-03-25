@@ -5,6 +5,33 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      macos_runner_label:
+        description: Hosted runner label for the macOS fresh-host job.
+        required: true
+        type: choice
+        default: macos-15-intel
+        options:
+          - macos-15-intel
+          - macos-15
+      macos_runtime_provider:
+        description: Docker-compatible runtime to benchmark on hosted macOS.
+        required: true
+        type: choice
+        default: colima
+        options:
+          - colima
+          - orbstack
+      enable_package_cache:
+        description: Restore uv and npm download caches for bootstrap.
+        required: true
+        type: boolean
+        default: false
+      enable_homebrew_cache:
+        description: Restore the hosted macOS Homebrew download cache.
+        required: true
+        type: boolean
+        default: false
 
 concurrency:
   group: fresh-host-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,6 +42,11 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
+  DEFAULT_PACKAGE_CACHE_ENABLED: "false"
+  DEFAULT_HOMEBREW_CACHE_ENABLED: "false"
+  UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
+  npm_config_cache: ${{ github.workspace }}/.github-cache/npm
 
 jobs:
   linux-fresh-host:
@@ -26,30 +58,217 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: "22.22.1"
-      - name: Bootstrap setup services and runtime flows
+      - name: Restore package download caches
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Prepare Linux fresh-host environment
         shell: bash
         run: |
           set -euxo pipefail
-          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-linux-host"
-          export HOME="${TMP_ROOT}/home"
+          mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
+          : > "${RUNNER_TEMP}/fresh-host-linux-phases.tsv"
+          {
+            echo "TMP_ROOT=${RUNNER_TEMP}/strongclaw-linux-host"
+            echo "STRONGCLAW_APP_HOME=${RUNNER_TEMP}/strongclaw-linux-host/home"
+            echo "STRONGCLAW_XDG_RUNTIME_DIR=${RUNNER_TEMP}/strongclaw-linux-host/xdg-runtime"
+            echo "FRESH_HOST_PHASES_FILE=${RUNNER_TEMP}/fresh-host-linux-phases.tsv"
+            echo "FRESH_HOST_REPORT_DIR=${RUNNER_TEMP}/fresh-host-reports/linux"
+            echo "FRESH_HOST_REPORT_JSON=${RUNNER_TEMP}/fresh-host-reports/linux/report.json"
+          } >> "${GITHUB_ENV}"
+      - name: Bootstrap Linux host
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
           export XDG_CONFIG_HOME="${HOME}/.config"
-          export XDG_RUNTIME_DIR="${TMP_ROOT}/xdg-runtime"
+          export XDG_RUNTIME_DIR="${STRONGCLAW_XDG_RUNTIME_DIR}"
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export PATH="${HOME}/.local/bin:${PATH}"
           export PYTHONPATH="src"
           mkdir -p "${HOME}" "${XDG_RUNTIME_DIR}"
           chmod 700 "${XDG_RUNTIME_DIR}"
-
           python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Bootstrap Linux host\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Setup Linux host
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export XDG_RUNTIME_DIR="${STRONGCLAW_XDG_RUNTIME_DIR}"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          export PYTHONPATH="src"
           .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Setup Linux host\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Verify Linux rendered units
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
           test -f "${HOME}/.config/systemd/user/openclaw-gateway.service"
           test -f "${HOME}/.config/systemd/user/openclaw-sidecars.service"
           test -f "${HOME}/.config/systemd/user/openclaw-browserlab.service"
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Verify Linux rendered units\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Exercise Linux repo-local sidecars
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export XDG_RUNTIME_DIR="${STRONGCLAW_XDG_RUNTIME_DIR}"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          export PYTHONPATH="src"
           .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
           .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Exercise Linux repo-local sidecars\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Exercise Linux repo-local browser-lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export XDG_RUNTIME_DIR="${STRONGCLAW_XDG_RUNTIME_DIR}"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          export PYTHONPATH="src"
           .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
           .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Exercise Linux repo-local browser-lab\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Collect Linux diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "${FRESH_HOST_REPORT_DIR}"
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export XDG_RUNTIME_DIR="${STRONGCLAW_XDG_RUNTIME_DIR}"
+          docker info > "${FRESH_HOST_REPORT_DIR}/docker-info.txt" 2>&1 || true
+          docker system df > "${FRESH_HOST_REPORT_DIR}/docker-system-df.txt" 2>&1 || true
+          docker images --format '{{json .}}' > "${FRESH_HOST_REPORT_DIR}/docker-images.jsonl" 2>&1 || true
+      - name: Write Linux summary
+        if: always()
+        shell: bash
+        env:
+          FRESH_HOST_JOB_NAME: Linux Fresh Host
+          FRESH_HOST_JOB_STATUS: ${{ job.status }}
+          FRESH_HOST_RUNTIME_PROVIDER: docker
+          FRESH_HOST_RUNNER_LABEL: ubuntu-latest
+          FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_HOMEBREW_CACHE_ENABLED: false
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          def format_duration(seconds: float) -> str:
+              total = int(round(seconds))
+              minutes, remaining = divmod(total, 60)
+              return f"{minutes}m {remaining}s"
+
+          phase_path = Path(os.environ["FRESH_HOST_PHASES_FILE"])
+          phases: list[dict[str, object]] = []
+          if phase_path.exists():
+              for raw_line in phase_path.read_text(encoding="utf-8").splitlines():
+                  if not raw_line.strip():
+                      continue
+                  name, seconds_text, status = raw_line.split("\t")
+                  phases.append(
+                      {
+                          "name": name,
+                          "seconds": int(seconds_text),
+                          "status": status,
+                          "duration": format_duration(float(seconds_text)),
+                      }
+                  )
+          report = {
+              "jobName": os.environ["FRESH_HOST_JOB_NAME"],
+              "jobStatus": os.environ["FRESH_HOST_JOB_STATUS"],
+              "runnerLabel": os.environ["FRESH_HOST_RUNNER_LABEL"],
+              "runtimeProvider": os.environ["FRESH_HOST_RUNTIME_PROVIDER"],
+              "packageCacheEnabled": os.environ["FRESH_HOST_PACKAGE_CACHE_ENABLED"] == "true",
+              "homebrewCacheEnabled": False,
+              "phases": phases,
+              "reportDir": os.environ["FRESH_HOST_REPORT_DIR"],
+          }
+          report_path = Path(os.environ["FRESH_HOST_REPORT_JSON"])
+          report_path.parent.mkdir(parents=True, exist_ok=True)
+          report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"## {report['jobName']}\n\n")
+              handle.write("| Field | Value |\n| --- | --- |\n")
+              handle.write(f"| Status | {report['jobStatus']} |\n")
+              handle.write(f"| Runner | {report['runnerLabel']} |\n")
+              handle.write(f"| Runtime | {report['runtimeProvider']} |\n")
+              handle.write(f"| Package cache | {report['packageCacheEnabled']} |\n")
+              handle.write("| Homebrew cache | false |\n")
+              handle.write("\n")
+              if phases:
+                  handle.write("| Phase | Status | Duration |\n| --- | --- | --- |\n")
+                  for phase in phases:
+                      handle.write(
+                          f"| {phase['name']} | {phase['status']} | {phase['duration']} |\n"
+                      )
+                  total_seconds = sum(int(phase["seconds"]) for phase in phases)
+                  handle.write(f"\nKnown phase total: {format_duration(float(total_seconds))}\n\n")
+              else:
+                  handle.write("No phase timings were recorded.\n\n")
+              handle.write(f"Diagnostics artifact root: `{report['reportDir']}`\n\n")
+          PY
       - name: Upload Linux host artifacts
         if: always()
         continue-on-error: true
@@ -59,59 +278,173 @@ jobs:
           path: |
             ${{ runner.temp }}/strongclaw-linux-host/home/.openclaw
             ${{ runner.temp }}/strongclaw-linux-host/home/.config/systemd/user
+            ${{ runner.temp }}/fresh-host-reports/linux
           include-hidden-files: true
 
   macos-fresh-host:
     name: macOS Fresh Host
-    runs-on: macos-15-intel
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runner_label || 'macos-15-intel' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-      - name: Install Docker tooling for hosted macOS
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+      - name: Restore package download caches
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS Homebrew download cache
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
+          restore-keys: |
+            fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
+      - name: Prepare macOS fresh-host environment
         shell: bash
+        env:
+          MACOS_RUNTIME_PROVIDER: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
         run: |
           set -euxo pipefail
-          brew install colima docker docker-compose
-          mkdir -p "${HOME}/.docker/cli-plugins"
-          ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${HOME}/.docker/cli-plugins/docker-compose"
-          colima start --cpu 2 --memory 4 --disk 20
+          mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
+          : > "${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
+          {
+            echo "RUNNER_HOME=${HOME}"
+            echo "TMP_ROOT=${RUNNER_TEMP}/strongclaw-macos-host"
+            echo "STRONGCLAW_APP_HOME=${RUNNER_TEMP}/strongclaw-macos-host/home"
+            echo "FRESH_HOST_PHASES_FILE=${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
+            echo "FRESH_HOST_REPORT_DIR=${RUNNER_TEMP}/fresh-host-reports/macos"
+            echo "FRESH_HOST_REPORT_JSON=${RUNNER_TEMP}/fresh-host-reports/macos/report.json"
+            echo "FRESH_HOST_RUNTIME_PROVIDER=${MACOS_RUNTIME_PROVIDER}"
+          } >> "${GITHUB_ENV}"
+      - name: Install Docker tooling for hosted macOS
+        shell: bash
+        env:
+          MACOS_RUNTIME_PROVIDER: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || env.DEFAULT_MACOS_RUNTIME_PROVIDER }}
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          if [[ "${MACOS_RUNTIME_PROVIDER}" == "orbstack" ]]; then
+            brew install orbstack
+            orb config set setup.use_admin false
+            orb start
+            mkdir -p "${RUNNER_HOME}/.docker"
+            export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
+            export DOCKER_HOST="unix://${RUNNER_HOME}/.orbstack/run/docker.sock"
+            echo "DOCKER_CONFIG=${DOCKER_CONFIG}" >> "${GITHUB_ENV}"
+            echo "DOCKER_HOST=${DOCKER_HOST}" >> "${GITHUB_ENV}"
+          else
+            brew install colima docker docker-compose
+            mkdir -p "${RUNNER_HOME}/.docker/cli-plugins"
+            ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${RUNNER_HOME}/.docker/cli-plugins/docker-compose"
+            colima start --cpu 2 --memory 4 --disk 20
+            export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
+            export DOCKER_HOST="unix://${RUNNER_HOME}/.colima/default/docker.sock"
+            echo "DOCKER_CONFIG=${DOCKER_CONFIG}" >> "${GITHUB_ENV}"
+            echo "DOCKER_HOST=${DOCKER_HOST}" >> "${GITHUB_ENV}"
+          fi
+          for _ in $(seq 1 30); do
+            if docker info >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
           docker version
           docker compose version
-          echo "DOCKER_CONFIG=${HOME}/.docker" >> "${GITHUB_ENV}"
-          echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+          docker info
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Install Docker tooling for hosted macOS\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
       - name: Normalize hosted macOS machine name
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
+          SECONDS=0
+          set +e
           sudo scutil --set ComputerName "openclaw-ci"
           sudo scutil --set LocalHostName "openclaw-ci"
           sudo scutil --set HostName "openclaw-ci"
           scutil --get ComputerName
           scutil --get LocalHostName
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Normalize hosted macOS machine name\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
       - name: Warm hosted macOS aux-stack images
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          set -euxo pipefail
-          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          set -euo pipefail
+          SECONDS=0
+          set +e
           export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
           mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
           docker compose -f platform/compose/docker-compose.aux-stack.yaml pull postgres litellm qdrant otel-collector
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Warm hosted macOS aux-stack images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
       - name: Warm hosted macOS browser-lab images
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
-          set -euxo pipefail
-          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
+          set -euo pipefail
+          SECONDS=0
+          set +e
           export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
           mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
           docker compose -f platform/compose/docker-compose.browser-lab.yaml pull browserlab-proxy browserlab-playwright
-      - name: Bootstrap setup services and runtime flows
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Warm hosted macOS browser-lab images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Bootstrap macOS host
         shell: bash
         run: |
-          set -euxo pipefail
-          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
-          export HOME="${TMP_ROOT}/home"
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PYTHONPATH="src"
+          mkdir -p "${HOME}"
+          python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Bootstrap macOS host\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Setup macOS host and activate services
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
           export XDG_CONFIG_HOME="${HOME}/.config"
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
@@ -120,44 +453,108 @@ jobs:
           export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
-          export DOCKER_CONFIG="${DOCKER_CONFIG}"
-          export DOCKER_HOST="${DOCKER_HOST}"
-          mkdir -p "${HOME}"
-
-          python3 -m clawops bootstrap --repo-root . --home-dir "${HOME}" --profile openclaw-default
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify --no-activate-services
-            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist"
-            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist"
-            test -f "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist"
-          else
-            .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
-            launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
-            launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
-            mkdir -p "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
-            .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
-            .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
-            .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
-            .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
-            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
-            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
-            launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
-            .venv/bin/python -m clawops ops --repo-root . sidecars down || true
-            .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
-          fi
+          mkdir -p "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
+          .venv/bin/python -m clawops setup --repo-root . --home-dir "${HOME}" --profile openclaw-default --non-interactive --no-verify
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Setup macOS host and activate services\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Verify macOS launchd services
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" | grep "state = running"
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" | grep "last exit code = 0"
+          test -f "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist"
+          test -f "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist"
+          test -f "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist"
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Verify macOS launchd services\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Exercise macOS repo-local sidecars
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PYTHONPATH="src"
+          .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . sidecars down --repo-local-state
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Exercise macOS repo-local sidecars\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Exercise macOS repo-local browser-lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECONDS=0
+          set +e
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PYTHONPATH="src"
+          .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
+          .venv/bin/python -m clawops ops --repo-root . browser-lab down --repo-local-state
+          rc=$?
+          set -e
+          status="success"
+          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
+          printf 'Exercise macOS repo-local browser-lab\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          exit "${rc}"
+      - name: Cleanup macOS host services
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          SECONDS=0
+          export HOME="${STRONGCLAW_APP_HOME}"
+          export XDG_CONFIG_HOME="${HOME}/.config"
+          export OPENCLAW_CONFIG_PROFILE="openclaw-default"
+          export OPENCLAW_MODEL_SETUP_MODE="skip"
+          export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
+          export PYTHONPATH="src"
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.sidecars.plist" || true
+          launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.browserlab.plist" || true
+          .venv/bin/python -m clawops ops --repo-root . sidecars down || true
+          .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
+          printf 'Cleanup macOS host services\t%s\tsuccess\n' "${SECONDS}" >> "${FRESH_HOST_PHASES_FILE}"
       - name: Dump macOS host logs on failure
         if: failure()
         shell: bash
         run: |
           set +e
-          export TMP_ROOT="${RUNNER_TEMP}/strongclaw-macos-host"
-          export OPENCLAW_STATE_DIR="${TMP_ROOT}/home/.openclaw"
+          export OPENCLAW_STATE_DIR="${STRONGCLAW_APP_HOME}/.openclaw"
           export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
           for path in \
-            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.out.log" \
-            "${TMP_ROOT}/home/.openclaw/logs/launchd-gateway.err.log" \
-            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.out.log" \
-            "${TMP_ROOT}/home/.openclaw/logs/launchd-sidecars.err.log"; do
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.out.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.err.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.out.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.err.log"; do
             if [[ -f "${path}" ]]; then
               echo "--- ${path}"
               tail -n 200 "${path}"
@@ -167,6 +564,96 @@ jobs:
           docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector || true
           launchctl print "gui/$(id -u)/ai.openclaw.gateway" || true
           launchctl print "gui/$(id -u)/ai.openclaw.sidecars" || true
+      - name: Collect macOS diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "${FRESH_HOST_REPORT_DIR}"
+          if [[ "${FRESH_HOST_RUNTIME_PROVIDER}" == "orbstack" ]]; then
+            orb status > "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
+          else
+            colima status > "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
+            colima list >> "${FRESH_HOST_REPORT_DIR}/runtime-status.txt" 2>&1 || true
+          fi
+          docker info > "${FRESH_HOST_REPORT_DIR}/docker-info.txt" 2>&1 || true
+          docker system df > "${FRESH_HOST_REPORT_DIR}/docker-system-df.txt" 2>&1 || true
+          docker images --format '{{json .}}' > "${FRESH_HOST_REPORT_DIR}/docker-images.jsonl" 2>&1 || true
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" > "${FRESH_HOST_REPORT_DIR}/launchctl-gateway.txt" 2>&1 || true
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" > "${FRESH_HOST_REPORT_DIR}/launchctl-sidecars.txt" 2>&1 || true
+      - name: Write macOS summary
+        if: always()
+        shell: bash
+        env:
+          FRESH_HOST_JOB_NAME: macOS Fresh Host
+          FRESH_HOST_JOB_STATUS: ${{ job.status }}
+          FRESH_HOST_RUNNER_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runner_label || 'macos-15-intel' }}
+          FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_HOMEBREW_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          def format_duration(seconds: float) -> str:
+              total = int(round(seconds))
+              minutes, remaining = divmod(total, 60)
+              return f"{minutes}m {remaining}s"
+
+          phase_path = Path(os.environ["FRESH_HOST_PHASES_FILE"])
+          phases: list[dict[str, object]] = []
+          if phase_path.exists():
+              for raw_line in phase_path.read_text(encoding="utf-8").splitlines():
+                  if not raw_line.strip():
+                      continue
+                  name, seconds_text, status = raw_line.split("\t")
+                  phases.append(
+                      {
+                          "name": name,
+                          "seconds": int(seconds_text),
+                          "status": status,
+                          "duration": format_duration(float(seconds_text)),
+                      }
+                  )
+          report = {
+              "jobName": os.environ["FRESH_HOST_JOB_NAME"],
+              "jobStatus": os.environ["FRESH_HOST_JOB_STATUS"],
+              "runnerLabel": os.environ["FRESH_HOST_RUNNER_LABEL"],
+              "runtimeProvider": os.environ["FRESH_HOST_RUNTIME_PROVIDER"],
+              "packageCacheEnabled": os.environ["FRESH_HOST_PACKAGE_CACHE_ENABLED"] == "true",
+              "homebrewCacheEnabled": os.environ["FRESH_HOST_HOMEBREW_CACHE_ENABLED"] == "true",
+              "phases": phases,
+              "reportDir": os.environ["FRESH_HOST_REPORT_DIR"],
+          }
+          report_path = Path(os.environ["FRESH_HOST_REPORT_JSON"])
+          report_path.parent.mkdir(parents=True, exist_ok=True)
+          report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"## {report['jobName']}\n\n")
+              handle.write("| Field | Value |\n| --- | --- |\n")
+              handle.write(f"| Status | {report['jobStatus']} |\n")
+              handle.write(f"| Runner | {report['runnerLabel']} |\n")
+              handle.write(f"| Runtime | {report['runtimeProvider']} |\n")
+              handle.write(f"| Package cache | {report['packageCacheEnabled']} |\n")
+              handle.write(f"| Homebrew cache | {report['homebrewCacheEnabled']} |\n")
+              handle.write("\n")
+              if phases:
+                  handle.write("| Phase | Status | Duration |\n| --- | --- | --- |\n")
+                  for phase in phases:
+                      handle.write(
+                          f"| {phase['name']} | {phase['status']} | {phase['duration']} |\n"
+                      )
+                  total_seconds = sum(int(phase["seconds"]) for phase in phases)
+                  handle.write(f"\nKnown phase total: {format_duration(float(total_seconds))}\n\n")
+              else:
+                  handle.write("No phase timings were recorded.\n\n")
+              handle.write(f"Diagnostics artifact root: `{report['reportDir']}`\n\n")
+          PY
       - name: Upload macOS host artifacts
         if: always()
         continue-on-error: true
@@ -176,4 +663,5 @@ jobs:
           path: |
             ${{ runner.temp }}/strongclaw-macos-host/home/.openclaw
             ${{ runner.temp }}/strongclaw-macos-host/home/Library/LaunchAgents
+            ${{ runner.temp }}/fresh-host-reports/macos
           include-hidden-files: true
