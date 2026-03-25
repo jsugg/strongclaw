@@ -35,8 +35,9 @@ def test_macos_job_runs_the_full_flow_for_all_events() -> None:
     assert "runs-on: macos-15-intel" in macos_section
     assert "macos_runner_label" not in workflow_text
     assert "macos_runtime_provider" not in workflow_text
-    assert "Warm hosted macOS aux-stack images" in macos_section
-    assert "Warm hosted macOS browser-lab images" in macos_section
+    assert "Warm hosted macOS images" in macos_section
+    assert ".github/scripts/fresh_host_images.py pull" in macos_section
+    assert "FRESH_HOST_DOCKER_PULL_PARALLELISM" in macos_section
     assert "Exercise macOS repo-local sidecars" in macos_section
     assert "Exercise macOS repo-local browser-lab" in macos_section
     assert "STRONGCLAW_COMPOSE_VARIANT: ci-hosted-macos" in macos_section
@@ -55,3 +56,4 @@ def test_fresh_host_workflow_writes_summaries_and_uploads_reports() -> None:
     assert "Restore hosted macOS Docker image cache" in workflow_text
     assert "Load hosted macOS Docker image cache" in workflow_text
     assert "Snapshot hosted macOS Docker image cache" in workflow_text
+    assert ".github/scripts/fresh_host_images.py save" in workflow_text

@@ -34,6 +34,7 @@ env:
   DEFAULT_PACKAGE_CACHE_ENABLED: "false"
   DEFAULT_HOMEBREW_CACHE_ENABLED: "false"
   DEFAULT_DOCKER_IMAGE_CACHE_ENABLED: "false"
+  FRESH_HOST_DOCKER_PULL_PARALLELISM: "3"
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
@@ -322,7 +323,7 @@ jobs:
           set -euo pipefail
           cache_dir="${GITHUB_WORKSPACE}/.github-cache/docker-images"
           ready="false"
-          if [[ -f "${cache_dir}/aux-stack.tar" && -f "${cache_dir}/browser-lab.tar" ]]; then
+          if [[ -f "${cache_dir}/all-images.tar" ]]; then
             ready="true"
           fi
           echo "ready=${ready}" >> "${GITHUB_OUTPUT}"
@@ -444,35 +445,22 @@ jobs:
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
           printf 'Normalize hosted macOS machine name\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
-      - name: Warm hosted macOS aux-stack images
+      - name: Warm hosted macOS images
         if: ${{ steps.macos_docker_image_cache_state.outputs.ready != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           SECONDS=0
           set +e
-          export COMPOSE_PROJECT_NAME="strongclaw-prepull-sidecars"
-          docker compose -f "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" pull postgres litellm qdrant otel-collector
+          python3 .github/scripts/fresh_host_images.py pull \
+            --parallelism "${FRESH_HOST_DOCKER_PULL_PARALLELISM}" \
+            "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" \
+            "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}"
           rc=$?
           set -e
           status="success"
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
-          printf 'Warm hosted macOS aux-stack images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
-          exit "${rc}"
-      - name: Warm hosted macOS browser-lab images
-        if: ${{ steps.macos_docker_image_cache_state.outputs.ready != 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          SECONDS=0
-          set +e
-          export COMPOSE_PROJECT_NAME="strongclaw-prepull-browserlab"
-          docker compose -f "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}" pull browserlab-proxy browserlab-playwright
-          rc=$?
-          set -e
-          status="success"
-          if [[ ${rc} -ne 0 ]]; then status="failure"; fi
-          printf 'Warm hosted macOS browser-lab images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
+          printf 'Warm hosted macOS images\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
       - name: Load hosted macOS Docker image cache
         if: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
@@ -481,8 +469,7 @@ jobs:
           set -euo pipefail
           SECONDS=0
           set +e
-          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/aux-stack.tar"
-          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/browser-lab.tar"
+          docker load -i "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/all-images.tar"
           rc=$?
           set -e
           status="success"
@@ -497,14 +484,10 @@ jobs:
           SECONDS=0
           set +e
           mkdir -p "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}"
-          docker image save -o "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/aux-stack.tar" \
-            postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416 \
-            ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193 \
-            otel/opentelemetry-collector-contrib:0.120.0@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917 \
-            qdrant/qdrant:v1.15.5@sha256:0fb8897412abc81d1c0430a899b9a81eb8328aa634e7242d1bc804c1fe8fe863
-          docker image save -o "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/browser-lab.tar" \
-            ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029 \
-            mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:0f0547cc1492898e84a6fd0847bcfdde15e483b333a66e88b547c9ce15aea6c7
+          python3 .github/scripts/fresh_host_images.py save \
+            --output "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}/all-images.tar" \
+            "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" \
+            "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}"
           rc=$?
           set -e
           status="success"
@@ -705,6 +688,7 @@ jobs:
           FRESH_HOST_HOMEBREW_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_homebrew_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_HOMEBREW_CACHE_ENABLED == 'true') }}
           FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
           FRESH_HOST_DOCKER_IMAGE_CACHE_READY: ${{ steps.macos_docker_image_cache_state.outputs.ready == 'true' }}
+          FRESH_HOST_DOCKER_PULL_PARALLELISM: ${{ env.FRESH_HOST_DOCKER_PULL_PARALLELISM }}
         run: |
           python3 - <<'PY'
           from __future__ import annotations
@@ -742,6 +726,7 @@ jobs:
               "homebrewCacheEnabled": os.environ["FRESH_HOST_HOMEBREW_CACHE_ENABLED"] == "true",
               "dockerImageCacheEnabled": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED"] == "true",
               "dockerImageCacheReady": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_READY"] == "true",
+              "dockerPullParallelism": os.environ["FRESH_HOST_DOCKER_PULL_PARALLELISM"],
               "hostCpuCount": os.environ.get("FRESH_HOST_HOST_CPU_COUNT"),
               "hostMemoryGiB": os.environ.get("FRESH_HOST_HOST_MEMORY_GIB"),
               "colimaCpuCount": os.environ.get("FRESH_HOST_COLIMA_CPU_COUNT"),
@@ -764,6 +749,7 @@ jobs:
               handle.write(f"| Homebrew cache | {report['homebrewCacheEnabled']} |\n")
               handle.write(f"| Docker image cache | {report['dockerImageCacheEnabled']} |\n")
               handle.write(f"| Docker image cache restored | {report['dockerImageCacheReady']} |\n")
+              handle.write(f"| Docker pull parallelism | {report['dockerPullParallelism']} |\n")
               if report["hostCpuCount"] and report["hostMemoryGiB"]:
                   handle.write(
                       f"| Host resources | {report['hostCpuCount']} CPU / {report['hostMemoryGiB']} GiB |\n"
