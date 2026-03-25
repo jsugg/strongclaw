@@ -6,6 +6,16 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      macos_runtime_provider:
+        description: Hosted macOS container runtime provider.
+        required: true
+        type: string
+        default: colima
+      docker_pull_parallelism:
+        description: Parallelism for hosted macOS Docker image pulling.
+        required: true
+        type: string
+        default: "6"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
         required: true
@@ -21,6 +31,11 @@ on:
         required: true
         type: boolean
         default: false
+      enable_runtime_download_cache:
+        description: Restore cached hosted macOS runtime binaries for Colima/Lima.
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
   group: fresh-host-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,10 +46,12 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
   DEFAULT_PACKAGE_CACHE_ENABLED: "false"
   DEFAULT_HOMEBREW_CACHE_ENABLED: "false"
   DEFAULT_DOCKER_IMAGE_CACHE_ENABLED: "false"
-  FRESH_HOST_DOCKER_PULL_PARALLELISM: "3"
+  DEFAULT_RUNTIME_DOWNLOAD_CACHE_ENABLED: "true"
+  FRESH_HOST_DOCKER_PULL_PARALLELISM: "6"
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
@@ -327,8 +344,21 @@ jobs:
           key: fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
             fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS runtime download cache
+        id: macos_runtime_download_cache
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_runtime_download_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_RUNTIME_DOWNLOAD_CACHE_ENABLED == 'true') }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .github-cache/macos-runtime-tools
+          key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
+          restore-keys: |
+            fresh-host-macos-runtime-tools-${{ runner.arch }}-
       - name: Prepare macOS fresh-host environment
         shell: bash
+        env:
+          INPUT_MACOS_RUNTIME_PROVIDER: ${{ inputs.macos_runtime_provider }}
+          INPUT_DOCKER_PULL_PARALLELISM: ${{ inputs.docker_pull_parallelism }}
+          INPUT_RUNTIME_DOWNLOAD_CACHE_ENABLED: ${{ inputs.enable_runtime_download_cache }}
         run: |
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
@@ -336,8 +366,17 @@ jobs:
           mkdir -p \
             "${FRESH_HOST_CACHE_ROOT}/docker-images" \
             "${FRESH_HOST_CACHE_ROOT}/homebrew" \
+            "${FRESH_HOST_CACHE_ROOT}/macos-runtime-tools" \
             "${FRESH_HOST_CACHE_ROOT}/npm" \
             "${FRESH_HOST_CACHE_ROOT}/uv"
+          selected_runtime_provider="${DEFAULT_MACOS_RUNTIME_PROVIDER}"
+          selected_pull_parallelism="${FRESH_HOST_DOCKER_PULL_PARALLELISM}"
+          runtime_download_cache_enabled="${DEFAULT_RUNTIME_DOWNLOAD_CACHE_ENABLED}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            selected_runtime_provider="${INPUT_MACOS_RUNTIME_PROVIDER}"
+            selected_pull_parallelism="${INPUT_DOCKER_PULL_PARALLELISM}"
+            runtime_download_cache_enabled="${INPUT_RUNTIME_DOWNLOAD_CACHE_ENABLED}"
+          fi
           host_project_name="$(PYTHONPATH=src python3 - <<'PY'
           import os
           from pathlib import Path
@@ -362,8 +401,11 @@ jobs:
             echo "FRESH_HOST_PHASES_FILE=${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
             echo "FRESH_HOST_REPORT_DIR=${RUNNER_TEMP}/fresh-host-reports/macos"
             echo "FRESH_HOST_REPORT_JSON=${RUNNER_TEMP}/fresh-host-reports/macos/report.json"
-            echo "FRESH_HOST_RUNTIME_PROVIDER=colima"
+            echo "FRESH_HOST_RUNTIME_PROVIDER=${selected_runtime_provider}"
+            echo "FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM=${selected_pull_parallelism}"
+            echo "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED=${runtime_download_cache_enabled}"
             echo "FRESH_HOST_DOCKER_IMAGE_CACHE_DIR=${GITHUB_WORKSPACE}/.github-cache/docker-images"
+            echo "FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR=${GITHUB_WORKSPACE}/.github-cache/macos-runtime-tools"
             echo "FRESH_HOST_MACOS_AUX_COMPOSE_FILE=${GITHUB_WORKSPACE}/platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml"
             echo "FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE=${GITHUB_WORKSPACE}/platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml"
             echo "FRESH_HOST_MACOS_HOST_PROJECT=${host_project_name}"
@@ -380,6 +422,8 @@ jobs:
           SECONDS=0
           set +e
           arch_name="$(uname -m)"
+          runtime_provider="${FRESH_HOST_RUNTIME_PROVIDER}"
+          runtime_cache_dir="${FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR}/${arch_name}"
           rc=0
           if [[ "${arch_name}" != "x86_64" ]]; then
             echo "GitHub-hosted arm64 macOS runners do not support nested virtualization; Fresh Host Acceptance requires macos-15-intel." >&2
@@ -387,46 +431,85 @@ jobs:
           else
             sudo mkdir -p /usr/local/libexec
             sudo chown "$(id -u):$(id -g)" /usr/local/libexec
-            curl -fsSL "https://github.com/lima-vm/lima/releases/download/${MACOS_LIMA_VERSION}/lima-${MACOS_LIMA_VERSION#v}-Darwin-${arch_name}.tar.gz" | sudo tar xz -C /usr/local
-            curl -fsSL "https://github.com/abiosoft/colima/releases/download/${MACOS_COLIMA_VERSION}/colima-Darwin-${arch_name}" -o /tmp/colima
-            sudo install -m 0755 /tmp/colima /usr/local/bin/colima
-            brew install docker docker-compose
-            mkdir -p "${RUNNER_HOME}/.docker/cli-plugins"
-            ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${RUNNER_HOME}/.docker/cli-plugins/docker-compose"
-            export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
-            export DOCKER_HOST="unix://${RUNNER_HOME}/.colima/default/docker.sock"
             host_cpu_count="$(sysctl -n hw.ncpu)"
             host_memory_bytes="$(sysctl -n hw.memsize)"
             host_memory_gib="$(( host_memory_bytes / 1073741824 ))"
             if (( host_memory_gib < 1 )); then
               host_memory_gib=1
             fi
-            colima_memory_gib="$(( host_memory_gib - 3 ))"
-            if (( colima_memory_gib < 6 )); then
-              colima_memory_gib=6
-            fi
-            if (( colima_memory_gib > 10 )); then
-              colima_memory_gib=10
-            fi
-            {
-              echo "DOCKER_CONFIG=${DOCKER_CONFIG}"
-              echo "DOCKER_HOST=${DOCKER_HOST}"
-              echo "FRESH_HOST_HOST_CPU_COUNT=${host_cpu_count}"
-              echo "FRESH_HOST_HOST_MEMORY_GIB=${host_memory_gib}"
-              echo "FRESH_HOST_COLIMA_CPU_COUNT=${host_cpu_count}"
-              echo "FRESH_HOST_COLIMA_MEMORY_GIB=${colima_memory_gib}"
-            } >> "${GITHUB_ENV}"
-            colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz
-            for _ in $(seq 1 45); do
-              if docker info >/dev/null 2>&1; then
-                break
+            if [[ "${runtime_provider}" == "colima" ]]; then
+              mkdir -p "${runtime_cache_dir}"
+              lima_cache_root="${runtime_cache_dir}/lima-${MACOS_LIMA_VERSION}-${arch_name}"
+              colima_cache_path="${runtime_cache_dir}/colima-${MACOS_COLIMA_VERSION}-${arch_name}"
+              if [[ ! -d "${lima_cache_root}" ]]; then
+                tmp_lima_dir="$(mktemp -d)"
+                mkdir -p "${tmp_lima_dir}/root"
+                curl -fsSL "https://github.com/lima-vm/lima/releases/download/${MACOS_LIMA_VERSION}/lima-${MACOS_LIMA_VERSION#v}-Darwin-${arch_name}.tar.gz" | tar xz -C "${tmp_lima_dir}/root"
+                rm -rf "${lima_cache_root}"
+                mv "${tmp_lima_dir}/root" "${lima_cache_root}"
+                rm -rf "${tmp_lima_dir}"
+                echo "Downloaded Lima payload into runtime cache: ${lima_cache_root}"
+              else
+                echo "Using cached Lima payload: ${lima_cache_root}"
               fi
-              sleep 2
-            done
-            docker version
-            docker compose version
-            docker info
-            rc=$?
+              if [[ ! -x "${colima_cache_path}" ]]; then
+                curl -fsSL "https://github.com/abiosoft/colima/releases/download/${MACOS_COLIMA_VERSION}/colima-Darwin-${arch_name}" -o "${colima_cache_path}.tmp"
+                chmod 0755 "${colima_cache_path}.tmp"
+                mv "${colima_cache_path}.tmp" "${colima_cache_path}"
+                echo "Downloaded Colima binary into runtime cache: ${colima_cache_path}"
+              else
+                echo "Using cached Colima binary: ${colima_cache_path}"
+              fi
+              sudo rsync -a "${lima_cache_root}/" /usr/local/
+              sudo install -m 0755 "${colima_cache_path}" /usr/local/bin/colima
+              brew install docker docker-compose
+              mkdir -p "${RUNNER_HOME}/.docker/cli-plugins"
+              ln -sf "$(brew --prefix docker-compose)/bin/docker-compose" "${RUNNER_HOME}/.docker/cli-plugins/docker-compose"
+              export DOCKER_CONFIG="${RUNNER_HOME}/.docker"
+              export DOCKER_HOST="unix://${RUNNER_HOME}/.colima/default/docker.sock"
+              colima_memory_gib="$(( host_memory_gib - 3 ))"
+              if (( colima_memory_gib < 6 )); then
+                colima_memory_gib=6
+              fi
+              if (( colima_memory_gib > 10 )); then
+                colima_memory_gib=10
+              fi
+              {
+                echo "DOCKER_CONFIG=${DOCKER_CONFIG}"
+                echo "DOCKER_HOST=${DOCKER_HOST}"
+                echo "FRESH_HOST_HOST_CPU_COUNT=${host_cpu_count}"
+                echo "FRESH_HOST_HOST_MEMORY_GIB=${host_memory_gib}"
+                echo "FRESH_HOST_COLIMA_CPU_COUNT=${host_cpu_count}"
+                echo "FRESH_HOST_COLIMA_MEMORY_GIB=${colima_memory_gib}"
+              } >> "${GITHUB_ENV}"
+              colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz
+            elif [[ "${runtime_provider}" == "orbstack" ]]; then
+              brew install orbstack
+              export PATH="${RUNNER_HOME}/.orbstack/bin:${PATH}"
+              orb config set setup.use_admin false || true
+              orb start
+              docker context use orbstack || true
+              {
+                echo "PATH=${RUNNER_HOME}/.orbstack/bin:${PATH}"
+                echo "FRESH_HOST_HOST_CPU_COUNT=${host_cpu_count}"
+                echo "FRESH_HOST_HOST_MEMORY_GIB=${host_memory_gib}"
+              } >> "${GITHUB_ENV}"
+            else
+              echo "Unsupported hosted macOS runtime provider: ${runtime_provider}" >&2
+              rc=1
+            fi
+            if [[ ${rc} -eq 0 ]]; then
+              for _ in $(seq 1 60); do
+                if docker info >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 2
+              done
+              docker version
+              docker compose version
+              docker info
+              rc=$?
+            fi
           fi
           set -e
           status="success"
@@ -463,7 +546,7 @@ jobs:
             cache_args+=(--cache-dir "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}")
           fi
           python3 .github/scripts/fresh_host_images.py ensure \
-            --parallelism "${FRESH_HOST_DOCKER_PULL_PARALLELISM}" \
+            --parallelism "${FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM}" \
             --report-path "${FRESH_HOST_REPORT_DIR}/image-ensure-report.json" \
             "${cache_args[@]}" \
             "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" \
@@ -670,7 +753,8 @@ jobs:
           FRESH_HOST_HOMEBREW_CACHE_HIT: ${{ steps.macos_homebrew_cache.outputs.cache-hit == 'true' }}
           FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_docker_image_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_DOCKER_IMAGE_CACHE_ENABLED == 'true') }}
           FRESH_HOST_DOCKER_IMAGE_CACHE_HIT: ${{ steps.macos_docker_image_cache.outputs.cache-hit == 'true' }}
-          FRESH_HOST_DOCKER_PULL_PARALLELISM: ${{ env.FRESH_HOST_DOCKER_PULL_PARALLELISM }}
+          FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_runtime_download_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_RUNTIME_DOWNLOAD_CACHE_ENABLED == 'true') }}
+          FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT: ${{ steps.macos_runtime_download_cache.outputs.cache-hit == 'true' }}
         run: |
           python3 - <<'PY'
           from __future__ import annotations
@@ -714,7 +798,9 @@ jobs:
               "homebrewCacheHit": os.environ["FRESH_HOST_HOMEBREW_CACHE_HIT"] == "true",
               "dockerImageCacheEnabled": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_ENABLED"] == "true",
               "dockerImageCacheHit": os.environ["FRESH_HOST_DOCKER_IMAGE_CACHE_HIT"] == "true",
-              "dockerPullParallelism": os.environ["FRESH_HOST_DOCKER_PULL_PARALLELISM"],
+              "runtimeDownloadCacheEnabled": os.environ["FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED"] == "true",
+              "runtimeDownloadCacheHit": os.environ["FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT"] == "true",
+              "dockerPullParallelism": os.environ["FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM"],
               "hostCpuCount": os.environ.get("FRESH_HOST_HOST_CPU_COUNT"),
               "hostMemoryGiB": os.environ.get("FRESH_HOST_HOST_MEMORY_GIB"),
               "colimaCpuCount": os.environ.get("FRESH_HOST_COLIMA_CPU_COUNT"),
@@ -740,6 +826,8 @@ jobs:
               handle.write(f"| Homebrew cache hit | {report['homebrewCacheHit']} |\n")
               handle.write(f"| Docker image cache | {report['dockerImageCacheEnabled']} |\n")
               handle.write(f"| Docker image cache hit | {report['dockerImageCacheHit']} |\n")
+              handle.write(f"| Runtime download cache | {report['runtimeDownloadCacheEnabled']} |\n")
+              handle.write(f"| Runtime download cache hit | {report['runtimeDownloadCacheHit']} |\n")
               handle.write(f"| Docker pull parallelism | {report['dockerPullParallelism']} |\n")
               if report["hostCpuCount"] and report["hostMemoryGiB"]:
                   handle.write(

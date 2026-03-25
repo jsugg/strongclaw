@@ -20,6 +20,11 @@ CACHE_TAR_NAME = "all-images.tar"
 CACHE_MANIFEST_NAME = "all-images.json"
 
 
+def _log(message: str) -> None:
+    """Emit one CI-friendly debug line."""
+    print(f"[fresh-host-images] {message}", flush=True)
+
+
 def _image_refs_from_compose(compose_path: pathlib.Path) -> list[str]:
     """Extract image references from one compose file in declaration order."""
     images: list[str] = []
@@ -79,6 +84,19 @@ def _cache_manifest_path(cache_dir: pathlib.Path) -> pathlib.Path:
     return cache_dir / CACHE_MANIFEST_NAME
 
 
+def _read_cache_manifest(cache_dir: pathlib.Path) -> dict[str, object]:
+    """Read the cache manifest if one exists."""
+    manifest_path = _cache_manifest_path(cache_dir)
+    if not manifest_path.is_file():
+        return {}
+    return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _path_size_mib(path: pathlib.Path) -> float:
+    """Return the size of one file in MiB."""
+    return path.stat().st_size / (1024 * 1024)
+
+
 def list_local_images(images: Sequence[str]) -> list[str]:
     """Return images that are already present in the local Docker daemon."""
     present: list[str] = []
@@ -99,12 +117,17 @@ def load_image_cache(cache_dir: pathlib.Path) -> bool:
     tar_path = _cache_tar_path(cache_dir)
     if not tar_path.is_file():
         return False
+    started = time.monotonic()
     result = subprocess.run(
         ["docker", "load", "-i", str(tar_path)],
         check=False,
     )
     if result.returncode != 0:
         raise RuntimeError(f"docker load failed for {tar_path}")
+    _log(
+        f"Loaded Docker image cache from {tar_path} in {time.monotonic() - started:.1f}s "
+        f"({ _path_size_mib(tar_path):.1f} MiB)."
+    )
     return True
 
 
@@ -163,6 +186,7 @@ def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     tar_path = _cache_tar_path(cache_dir)
     manifest_path = _cache_manifest_path(cache_dir)
+    started = time.monotonic()
     save_result = save_images(images, output_path=tar_path)
     if save_result != 0:
         raise RuntimeError(f"docker image save failed for {tar_path}")
@@ -173,6 +197,10 @@ def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> None:
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _log(
+        f"Saved Docker image cache to {tar_path} in {time.monotonic() - started:.1f}s "
+        f"({ _path_size_mib(tar_path):.1f} MiB)."
     )
 
 
@@ -193,8 +221,12 @@ def ensure_images(
 ) -> int:
     """Ensure compose images exist locally, using a cache tarball when available."""
     images = collect_images(compose_paths)
+    _log(f"Collected {len(images)} image(s): {', '.join(images)}")
     local_before = list_local_images(images)
     missing_before_load = [image for image in images if image not in local_before]
+    _log(
+        f"Local images before cache load: {len(local_before)} present, {len(missing_before_load)} missing."
+    )
 
     cache_requested = cache_dir is not None
     cache_available = False
@@ -202,20 +234,33 @@ def ensure_images(
     cache_saved = False
     if cache_dir is not None:
         cache_available = _cache_tar_path(cache_dir).is_file()
+        _log(f"Cache requested from {cache_dir}; tar present={cache_available}.")
+        manifest = _read_cache_manifest(cache_dir)
+        if manifest:
+            manifest_images = manifest.get("images")
+            manifest_image_count = len(manifest_images) if isinstance(manifest_images, list) else 0
+            _log(
+                "Cache manifest: "
+                f"{manifest_image_count} image(s), createdAt={manifest.get('createdAt')}"
+            )
     if missing_before_load and cache_dir is not None and cache_available:
         cache_loaded = load_image_cache(cache_dir)
 
     local_after_load = list_local_images(images)
     missing_after_load = [image for image in images if image not in local_after_load]
+    _log(f"After cache load: {len(local_after_load)} present, {len(missing_after_load)} missing.")
     pulled_images: list[str] = []
     if missing_after_load:
         pull_result = pull_images(missing_after_load, parallelism=parallelism)
         if pull_result != 0:
             return pull_result
         pulled_images = list(missing_after_load)
+    else:
+        _log("No image pulls were required after cache load.")
 
     local_after_pull = list_local_images(images)
     missing_after_pull = [image for image in images if image not in local_after_pull]
+    _log(f"After pull: {len(local_after_pull)} present, {len(missing_after_pull)} missing.")
     if missing_after_pull:
         print(
             "Images remain unavailable after cache load and pull: " + ", ".join(missing_after_pull),
