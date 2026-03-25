@@ -150,6 +150,7 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
             "bootstrap",
             "setup",
             "verify-launchd",
+            "deactivate-services",
             "exercise-sidecars",
         ),
         activate_services=True,
@@ -770,6 +771,29 @@ def _best_effort(command: list[str], *, cwd: Path, env: dict[str, str]) -> str |
     return f"{' '.join(command)} failed: {output}"
 
 
+def _deactivate_macos_host_services(context: FreshHostContext) -> list[str]:
+    """Stop launchd-managed macOS services before repo-local exercises."""
+    repo_root, home_dir = _repo_paths(context)
+    env = _phase_env(context)
+    warnings: list[str] = []
+    domain = f"gui/{os.getuid()}"
+    launch_agents = home_dir / "Library" / "LaunchAgents"
+    commands = [
+        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.gateway.plist")],
+        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.sidecars.plist")],
+        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
+        _venv_clawops_command(context, "ops", "--repo-root", ".", "sidecars", "down"),
+        _venv_clawops_command(context, "ops", "--repo-root", ".", "browser-lab", "down"),
+    ]
+    for command in commands:
+        warning = _best_effort(command, cwd=repo_root, env=env)
+        if warning is not None:
+            warnings.append(warning)
+    for warning in warnings:
+        _log(warning)
+    return commands[-1]
+
+
 def _cleanup_macos(context: FreshHostContext) -> list[str]:
     """Best-effort cleanup for macOS launchd and compose state."""
     repo_root, home_dir = _repo_paths(context)
@@ -835,6 +859,10 @@ def _run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | 
     if phase_name == "verify-launchd":
         _verify_macos_launchd(context)
         return None
+    if phase_name == "deactivate-services":
+        if context.platform != "macos":
+            raise FreshHostError("deactivate-services is only supported for macOS scenarios")
+        return _deactivate_macos_host_services(context)
     if phase_name == "exercise-sidecars":
         return (
             _exercise_linux_sidecars(context)

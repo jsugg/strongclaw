@@ -66,6 +66,36 @@ def test_scenario_phase_names_match_macos_browser_lab(
     assert context.compose_variant == "ci-hosted-macos"
 
 
+def test_scenario_phase_names_deactivate_host_services_before_repo_local_sidecars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sidecars scenarios should tear down host services before repo-local exercise."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    assert fresh_host.scenario_phase_names(context) == [
+        "normalize-machine-name",
+        "bootstrap",
+        "setup",
+        "verify-launchd",
+        "deactivate-services",
+        "exercise-sidecars",
+    ]
+
+
 def test_prepare_context_sets_macos_variant_and_primary_compose_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -126,6 +156,39 @@ def test_load_context_rejects_directory_path(tmp_path: Path) -> None:
     """Loading a context should fail cleanly when the path is not a JSON file."""
     with pytest.raises(fresh_host.FreshHostError, match="expected JSON file"):
         fresh_host.load_context(tmp_path)
+
+
+def test_run_named_phase_supports_macos_service_deactivation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sidecars macOS scenario should dispatch the deactivation phase."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    monkeypatch.setattr(
+        fresh_host,
+        "_deactivate_macos_host_services",
+        lambda loaded_context: ["echo", loaded_context.scenario_id, "deactivate-services"],
+    )
+
+    assert fresh_host._run_named_phase(context, "deactivate-services") == [
+        "echo",
+        "macos-sidecars",
+        "deactivate-services",
+    ]
 
 
 def test_run_scenario_records_successful_phase_sequence(
