@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from tests.utils.helpers import fresh_host, hosted_docker
+from tests.utils.helpers._hosted_docker import images as hosted_docker_images
+from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
 
 
 def test_pull_images_retries_with_reduced_parallelism(
@@ -23,8 +25,8 @@ def test_pull_images_retries_with_reduced_parallelism(
             return image, 1, 0.1, "unexpected EOF"
         return image, 0, 0.1, ""
 
-    monkeypatch.setattr(hosted_docker, "_pull_one_image", fake_pull_one_image)
-    monkeypatch.setattr(hosted_docker.time, "sleep", lambda _: None)
+    monkeypatch.setattr(hosted_docker_images, "pull_one_image", fake_pull_one_image)
+    monkeypatch.setattr(hosted_docker_images.time, "sleep", lambda _: None)
 
     report = hosted_docker.pull_images(
         ["postgres:16", "qdrant:v1"],
@@ -44,7 +46,7 @@ def test_pull_one_image_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=["docker", "pull", "postgres:16"], timeout=42)
 
-    monkeypatch.setattr(hosted_docker.subprocess, "run", fake_run)
+    monkeypatch.setattr(hosted_docker_images.subprocess, "run", fake_run)
 
     image, returncode, _, output = hosted_docker._pull_one_image("postgres:16", 42)
 
@@ -80,7 +82,7 @@ def test_resolve_compose_images_uses_first_seen_order(
         compose_path = Path(command[3])
         return subprocess.CompletedProcess(command, 0, stdout=outputs[compose_path], stderr="")
 
-    monkeypatch.setattr(hosted_docker, "_run_checked", fake_run_checked)
+    monkeypatch.setattr(hosted_docker_images, "run_checked", fake_run_checked)
 
     images = hosted_docker.resolve_compose_images(
         [compose_a, compose_b],
@@ -142,8 +144,8 @@ def test_wait_for_docker_ready_retries_after_probe_timeout(
             raise subprocess.TimeoutExpired(command, timeout_seconds)
         return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
 
-    monkeypatch.setattr(hosted_docker, "_run_command", fake_run_command)
-    monkeypatch.setattr(hosted_docker.time, "sleep", lambda _: None)
+    monkeypatch.setattr(hosted_docker_shell, "run_command", fake_run_command)
+    monkeypatch.setattr(hosted_docker_shell.time, "sleep", lambda _: None)
 
     hosted_docker._wait_for_docker_ready(
         cwd=tmp_path,

@@ -9,6 +9,8 @@ import pytest
 
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
+from tests.utils.helpers._fresh_host import macos as fresh_host_macos
+from tests.utils.helpers._fresh_host import scenario as fresh_host_scenario
 
 
 def test_prepare_context_writes_context_and_env_file(
@@ -179,8 +181,8 @@ def test_run_named_phase_supports_macos_service_deactivation(
     )
 
     monkeypatch.setattr(
-        fresh_host,
-        "_deactivate_macos_host_services",
+        fresh_host_macos,
+        "deactivate_macos_host_services",
         lambda loaded_context: ["echo", loaded_context.scenario_id, "deactivate-services"],
     )
 
@@ -219,7 +221,7 @@ def test_run_scenario_records_successful_phase_sequence(
         assert loaded_context.scenario_id == "linux"
         return ["echo", phase_name]
 
-    monkeypatch.setattr(fresh_host, "_run_named_phase", fake_run_named_phase)
+    monkeypatch.setattr(fresh_host_scenario, "run_named_phase", fake_run_named_phase)
 
     report = fresh_host.run_scenario(Path(context.context_path))
 
