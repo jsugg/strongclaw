@@ -74,10 +74,6 @@ from clawops.hypermemory._engine.storage import (
 from clawops.hypermemory._engine.storage import benchmark_cases as _benchmark_cases
 from clawops.hypermemory._engine.storage import get_fact as _get_fact
 from clawops.hypermemory._engine.storage import list_facts as _list_facts
-from clawops.hypermemory._engine.storage import record_access as _record_access
-from clawops.hypermemory._engine.storage import record_bad_recall as _record_bad_recall
-from clawops.hypermemory._engine.storage import record_confirmation as _record_confirmation
-from clawops.hypermemory._engine.storage import record_injection as _record_injection
 from clawops.hypermemory._engine.verify import (
     _collection_has_hypermemory_vector_lanes,
     _hypermemory_probe_query,
@@ -454,19 +450,19 @@ class HypermemoryEngine:
 
     def record_access(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
         """Record retrieval access for durable typed memory items."""
-        return _record_access(self, item_ids=item_ids)
+        return self.canonical_store.record_access(item_ids=item_ids)
 
     def record_injection(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
         """Record that items were auto-injected into a prompt."""
-        return _record_injection(self, item_ids=item_ids)
+        return self.canonical_store.record_injection(item_ids=item_ids)
 
     def record_confirmation(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
         """Record that recalled items were confirmed useful."""
-        return _record_confirmation(self, item_ids=item_ids)
+        return self.canonical_store.record_confirmation(item_ids=item_ids)
 
     def record_bad_recall(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
         """Record that recalled items were contradicted or unhelpful."""
-        return _record_bad_recall(self, item_ids=item_ids)
+        return self.canonical_store.record_bad_recall(item_ids=item_ids)
 
     def flush_metadata(self) -> dict[str, Any]:
         """Flush lifecycle metadata from SQLite rows back into canonical Markdown."""

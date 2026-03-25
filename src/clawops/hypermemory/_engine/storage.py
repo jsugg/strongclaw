@@ -190,26 +190,34 @@ def supersede(
 
 def record_access(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
     """Record retrieval access for durable typed memory items."""
-    return self._increment_feedback_counts(
-        item_ids=item_ids,
-        column="access_count",
-        date_column="last_access_date",
-    )
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for record_access")
+    return canonical_store.record_access(item_ids=item_ids)
 
 
 def record_injection(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
     """Record that items were auto-injected into a prompt."""
-    return self._increment_feedback_counts(item_ids=item_ids, column="injected_count")
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for record_injection")
+    return canonical_store.record_injection(item_ids=item_ids)
 
 
 def record_confirmation(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
     """Record that recalled items were confirmed useful."""
-    return self._increment_feedback_counts(item_ids=item_ids, column="confirmed_count")
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for record_confirmation")
+    return canonical_store.record_confirmation(item_ids=item_ids)
 
 
 def record_bad_recall(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
     """Record that recalled items were contradicted or unhelpful."""
-    return self._increment_feedback_counts(item_ids=item_ids, column="bad_recall_count")
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for record_bad_recall")
+    return canonical_store.record_bad_recall(item_ids=item_ids)
 
 
 def flush_metadata(self) -> dict[str, Any]:
