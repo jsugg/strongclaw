@@ -5,8 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from clawops.common import ensure_parent
-from clawops.hypermemory.config import HypermemoryConfig
-from clawops.hypermemory.engine_backend import (
+from clawops.hypermemory._engine.backend import (
     _backend_fingerprint,
     _backend_state_value,
     _backend_uses_qdrant,
@@ -30,7 +29,7 @@ from clawops.hypermemory.engine_backend import (
     _write_backend_state,
     _write_sparse_state,
 )
-from clawops.hypermemory.engine_indexing import (
+from clawops.hypermemory._engine.indexing import (
     _clear_derived_rows,
     _count_rows,
     _count_sparse_vector_items,
@@ -44,7 +43,17 @@ from clawops.hypermemory.engine_indexing import (
     _rebuild_fact_registry,
     reindex,
 )
-from clawops.hypermemory.engine_memory import (
+from clawops.hypermemory._engine.query import (
+    _exact_fact_lookup,
+    _filter_current_fact_hits,
+    _row_to_search_hit,
+    _search_invalidated_hits,
+    is_dirty,
+    read,
+    search,
+    status,
+)
+from clawops.hypermemory._engine.storage import (
     _age_days,
     _allows_memory_pro_export_path,
     _append_unique_entry,
@@ -96,23 +105,16 @@ from clawops.hypermemory.engine_memory import (
     supersede,
     update,
 )
-from clawops.hypermemory.engine_query import (
+from clawops.hypermemory._engine.verify import (
     _collection_has_hypermemory_vector_lanes,
-    _exact_fact_lookup,
-    _filter_current_fact_hits,
     _hypermemory_probe_query,
     _observed_rerank_scorer,
     _rerank_probe_documents,
     _rerank_resolved_device,
-    _row_to_search_hit,
-    _search_invalidated_hits,
     _verify_rerank_provider,
-    is_dirty,
-    read,
-    search,
-    status,
     verify,
 )
+from clawops.hypermemory.config import HypermemoryConfig
 from clawops.hypermemory.providers import create_embedding_provider, create_rerank_provider
 from clawops.hypermemory.qdrant_backend import QdrantBackend
 from clawops.hypermemory.schema import ensure_schema
