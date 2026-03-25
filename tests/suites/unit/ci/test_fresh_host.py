@@ -1,0 +1,200 @@
+"""Unit coverage for fresh-host CI helpers."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from tests.utils.helpers import fresh_host
+
+
+def test_prepare_context_writes_context_and_env_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Context preparation should persist files and downstream env exports."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    assert Path(context.context_path).is_file()
+    assert Path(context.report_path).is_file()
+    exports = github_env.read_text(encoding="utf-8")
+    assert f"FRESH_HOST_CONTEXT={context.context_path}" in exports
+    assert f"STRONGCLAW_APP_HOME={context.app_home}" in exports
+
+
+def test_scenario_phase_names_match_macos_pull_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """macOS pull-request runs should stop before service activation phases."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    assert fresh_host.scenario_phase_names(context) == [
+        "normalize-machine-name",
+        "bootstrap",
+        "setup",
+        "verify-rendered-files",
+    ]
+
+
+def test_run_scenario_records_successful_phase_sequence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario execution should append one successful phase result per planned phase."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    calls: list[str] = []
+
+    def fake_run_named_phase(
+        loaded_context: fresh_host.FreshHostContext,
+        phase_name: str,
+    ) -> list[str]:
+        calls.append(phase_name)
+        assert loaded_context.scenario_id == "linux"
+        return ["echo", phase_name]
+
+    monkeypatch.setattr(fresh_host, "_run_named_phase", fake_run_named_phase)
+
+    report = fresh_host.run_scenario(Path(context.context_path))
+
+    assert report.status == "success"
+    assert calls == fresh_host.scenario_phase_names(context)
+    assert [phase.name for phase in report.phases] == calls
+    assert all(phase.status == "success" for phase in report.phases)
+
+
+def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Managed commands should execute through the venv path, not the symlink target."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    venv_bin = workspace / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    target_python = tmp_path / "python-target"
+    target_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    (venv_bin / "python").symlink_to(target_python)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    command = fresh_host._venv_clawops_command(context, "setup")
+
+    assert command[0] == str(venv_bin / "python")
+    assert command[0] != str(target_python.resolve())
+
+
+def test_write_summary_includes_child_reports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Summary rendering should include child runtime and image reports when present."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    report_path = Path(context.report_path)
+    report = fresh_host.load_report(report_path)
+    report.status = "success"
+    report.phases.append(
+        fresh_host.PhaseResult(
+            name="bootstrap",
+            status="success",
+            duration_seconds=12.3,
+            started_at="2026-03-25T00:00:00+00:00",
+            finished_at="2026-03-25T00:00:12+00:00",
+            command=["echo", "bootstrap"],
+        )
+    )
+    fresh_host.write_report(report, report_path)
+    Path(context.runtime_report_path or "").write_text(
+        json.dumps(
+            {
+                "runtime_provider": "colima",
+                "host_cpu_count": 4,
+                "host_memory_gib": 8,
+                "docker_host": "unix:///tmp/docker.sock",
+                "failure_reason": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    Path(context.image_report_path or "").write_text(
+        json.dumps(
+            {
+                "images": ["postgres:16"],
+                "missing_before_pull": ["postgres:16"],
+                "pull_attempt_count": 2,
+                "retried_images": ["postgres:16"],
+                "pulled_images": ["postgres:16"],
+                "failure_reason": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary_path = tmp_path / "summary.md"
+    fresh_host.write_summary(Path(context.context_path), summary_path)
+
+    summary_text = summary_path.read_text(encoding="utf-8")
+    assert "## macOS Fresh Host" in summary_text
+    assert "| Runtime provider | colima |" in summary_text
+    assert "| Images requested | 1 |" in summary_text
