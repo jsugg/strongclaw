@@ -140,7 +140,7 @@ clawops config memory --set-profile hypermemory
 1. Render the standalone plugin overlay with local paths:
 
 ```bash
-PYTHONPATH=src python3 -m clawops.openclaw_config \
+uv run clawops render-openclaw-config \
   --template platform/configs/openclaw/75-strongclaw-hypermemory.example.json5 \
   --repo-root "$(pwd)" \
   --output /tmp/strongclaw-hypermemory.json
@@ -160,7 +160,7 @@ The standalone overlay points the plugin at [platform/configs/memory/hypermemory
 For the combined context-engine + memory stack, use the integrated overlay:
 
 ```bash
-PYTHONPATH=src python3 -m clawops.openclaw_config \
+uv run clawops render-openclaw-config \
   --template platform/configs/openclaw/77-hypermemory.example.json5 \
   --repo-root "$(pwd)" \
   --output /tmp/strongclaw-hypermemory-stack.json
@@ -171,16 +171,16 @@ PYTHONPATH=src python3 -m clawops.openclaw_config \
 You can work with the engine directly without enabling the OpenClaw plugin:
 
 ```bash
-PYTHONPATH=src python3 -m clawops hypermemory status --json
-PYTHONPATH=src python3 -m clawops hypermemory verify --json --config platform/configs/memory/hypermemory.yaml
-PYTHONPATH=src python3 -m clawops hypermemory index --json
-PYTHONPATH=src python3 -m clawops hypermemory search --query "deployment playbook" --json
-PYTHONPATH=src python3 -m clawops hypermemory store --type fact --text "Deploy approvals require two reviewers." --importance 0.8 --json
-PYTHONPATH=src python3 -m clawops hypermemory capture --messages '[[0,"user","My timezone is UTC-3"]]' --mode regex --json
-PYTHONPATH=src python3 -m clawops hypermemory list-facts --json
-PYTHONPATH=src python3 -m clawops hypermemory forget --entry-text "Deploy approvals require two reviewers." --json
-PYTHONPATH=src python3 -m clawops hypermemory lifecycle --json
-PYTHONPATH=src python3 -m clawops hypermemory reflect --json
+uv run clawops hypermemory status --json
+uv run clawops hypermemory verify --json --config platform/configs/memory/hypermemory.yaml
+uv run clawops hypermemory index --json
+uv run clawops hypermemory search --query "deployment playbook" --json
+uv run clawops hypermemory store --type fact --text "Deploy approvals require two reviewers." --importance 0.8 --json
+uv run clawops hypermemory capture --messages '[[0,"user","My timezone is UTC-3"]]' --mode regex --json
+uv run clawops hypermemory list-facts --json
+uv run clawops hypermemory forget --entry-text "Deploy approvals require two reviewers." --json
+uv run clawops hypermemory lifecycle --json
+uv run clawops hypermemory reflect --json
 ```
 
 ## Migrating to `memory-lancedb-pro`
@@ -190,7 +190,7 @@ StrongClaw vendors and verifies `memory-lancedb-pro`, but its import CLI accepts
 1. Promote retained notes you want to keep as durable bank entries:
 
 ```bash
-PYTHONPATH=src python3 -m clawops hypermemory reflect --mode safe --json
+uv run clawops hypermemory reflect --mode safe --json
 ```
 
 2. Export the scope you want to migrate:

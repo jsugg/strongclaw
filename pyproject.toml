@@ -120,6 +120,7 @@ reportUnsupportedDunderAll = "none"
 [tool.pytest.ini_options]
 testpaths = ["tests/suites"]
 python_files = ["test_*.py"]
+pythonpath = ["src"]
 addopts = "-ra --strict-markers --strict-config"
 markers = [
   "unit: isolated unit tests",
