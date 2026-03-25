@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 TESTS_ROOT = Path(__file__).resolve().parent
 _QDRANT_MARKED_FILES = {

@@ -8,7 +8,6 @@ import pathlib
 import shutil
 import socket
 import subprocess
-import textwrap
 import time
 import uuid
 from collections.abc import Iterator
@@ -19,6 +18,7 @@ import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, load_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
 
@@ -107,52 +107,6 @@ def qdrant_url() -> Iterator[str]:
         )
 
 
-def _write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
-    config_path.write_text(
-        textwrap.dedent("""
-            storage:
-              db_path: .openclaw/test-hypermemory.sqlite
-            workspace:
-              root: .
-              include_default_memory: true
-              memory_file_names:
-                - MEMORY.md
-                - memory.md
-              daily_dir: memory
-              bank_dir: bank
-            corpus:
-              paths:
-                - name: docs
-                  path: docs
-                  pattern: "**/*.md"
-            limits:
-              max_snippet_chars: 240
-              default_max_results: 6
-            """).strip() + "\n",
-        encoding="utf-8",
-    )
-
-
-def _build_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
-    workspace = tmp_path / "workspace"
-    (workspace / "docs").mkdir(parents=True)
-    (workspace / "memory").mkdir(parents=True)
-    (workspace / "bank").mkdir(parents=True)
-    (workspace / "MEMORY.md").write_text(
-        "# Project Memory\n\n- Fact: The deploy process uses blue/green cutovers.\n",
-        encoding="utf-8",
-    )
-    (workspace / "docs" / "runbook.md").write_text(
-        """
-        # Gateway Runbook
-
-        Rotate the gateway token before enabling a new browser profile.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    return workspace
-
-
 class _DeterministicEmbeddingProvider:
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [self._embed(text) for text in texts]
@@ -212,9 +166,9 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
     tmp_path: pathlib.Path, qdrant_url: str
 ) -> None:
 
-    workspace = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path, include_daily_memory=False)
     config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
+    write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
     collection = f"hypermemory-int-{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:12]}"
     config = replace(
@@ -270,9 +224,9 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     tmp_path: pathlib.Path,
     qdrant_url: str,
 ) -> None:
-    workspace = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path, include_daily_memory=False)
     config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
+    write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
     collection = f"hypermemory-sparse-{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:12]}"
     config = replace(

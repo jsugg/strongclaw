@@ -10,7 +10,6 @@ from collections.abc import Callable
 import requests
 from pytest import MonkeyPatch
 
-from clawops.common import write_yaml
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
@@ -21,6 +20,8 @@ from clawops.wrappers.github import (
     merge_pull_request,
 )
 from clawops.wrappers.webhook import execute_webhook_approved, invoke_webhook
+from tests.utils.helpers.journal import create_journal
+from tests.utils.helpers.policy import write_policy_file
 
 type InvokeWrapper = Callable[[WrapperContext, str], dict[str, object]]
 type ExecuteWrapper = Callable[[WrapperContext, str], dict[str, object]]
@@ -210,10 +211,9 @@ def build_context(
     }
     if require_approval:
         policy["approval"] = {"require_for_actions": [spec.action]}
-    write_yaml(policy_path, policy)
+    write_policy_file(policy_path, policy)
 
-    journal = OperationJournal(tmp_path / f"{spec.name}-journal.sqlite")
-    journal.init()
+    journal = create_journal(tmp_path / f"{spec.name}-journal.sqlite")
     ctx = WrapperContext(
         policy_engine=PolicyEngine.from_file(policy_path), journal=journal, dry_run=dry_run
     )

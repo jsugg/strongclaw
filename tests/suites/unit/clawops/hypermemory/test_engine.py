@@ -13,7 +13,7 @@ from clawops.hypermemory import (
     default_config_path,
     load_config,
 )
-from tests.fixtures.hypermemory import (
+from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
     FakeQdrantBackend,
     StaticRerankProvider,

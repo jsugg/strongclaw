@@ -4,72 +4,21 @@ from __future__ import annotations
 
 import json
 import pathlib
-import textwrap
 
 import pytest
 
 from clawops.memory_tools import main as memory_main
 from clawops.process_runner import CommandResult
-
-
-def _write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
-    config_path.write_text(
-        textwrap.dedent("""
-            storage:
-              db_path: .openclaw/test-hypermemory.sqlite
-            workspace:
-              root: .
-              include_default_memory: true
-              memory_file_names:
-                - MEMORY.md
-                - memory.md
-              daily_dir: memory
-              bank_dir: bank
-            corpus:
-              paths:
-                - name: docs
-                  path: docs
-                  pattern: "**/*.md"
-            limits:
-              max_snippet_chars: 240
-              default_max_results: 6
-            """).strip() + "\n",
-        encoding="utf-8",
-    )
-
-
-def _build_workspace(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
-    workspace = tmp_path / "workspace"
-    (workspace / "docs").mkdir(parents=True)
-    (workspace / "memory").mkdir(parents=True)
-    (workspace / "bank").mkdir(parents=True)
-    (workspace / "MEMORY.md").write_text(
-        "# Project Memory\n\n- Fact: The deploy process uses blue/green cutovers.\n",
-        encoding="utf-8",
-    )
-    (workspace / "memory" / "2026-03-16.md").write_text(
-        """
-        # Daily Log
-
-        ## Retain
-        - Fact: Alice owns the deployment playbook.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    (workspace / "docs" / "runbook.md").write_text(
-        "# Gateway Runbook\n\nRotate the gateway token before enabling a new browser profile.\n",
-        encoding="utf-8",
-    )
-    config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
-    return workspace, config_path
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_memory_migrate_hypermemory_to_pro_writes_import_and_report(
     tmp_path: pathlib.Path,
     capsys: object,
 ) -> None:
-    workspace, config_path = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
     output_path = workspace / ".runs" / "memory" / "import.json"
     report_path = workspace / ".runs" / "memory" / "migration.json"
 
@@ -104,7 +53,9 @@ def test_memory_verify_pro_parity_uses_import_snapshot(
     tmp_path: pathlib.Path,
     capsys: object,
 ) -> None:
-    workspace, config_path = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
     snapshot_path = workspace / ".runs" / "memory" / "import.json"
     report_path = workspace / ".runs" / "memory" / "parity.json"
 
@@ -154,7 +105,9 @@ def test_memory_import_pro_snapshot_invokes_openclaw_cli_and_writes_report(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace, config_path = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
     snapshot_path = workspace / ".runs" / "memory" / "import.json"
     report_path = workspace / ".runs" / "memory" / "import-report.json"
 

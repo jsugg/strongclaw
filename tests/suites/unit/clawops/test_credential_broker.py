@@ -6,37 +6,15 @@ import os
 import pathlib
 
 from clawops.credential_broker import CredentialBroker
-
-
-def _write_status_script(
-    bin_dir: pathlib.Path,
-    name: str,
-    *,
-    stdout_text: str,
-    exit_code: int = 0,
-) -> None:
-    target = bin_dir / name
-    target.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        'if [[ "$*" == *"login status"* ]] || [[ "$*" == *"auth status"* ]]; then\n'
-        f"  printf '%s\\n' {stdout_text!r}\n"
-        f"  exit {exit_code}\n"
-        "fi\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    target.chmod(0o755)
+from tests.utils.helpers.cli import PathPrepender, write_status_script
 
 
 def test_subscription_readiness_is_machine_readable_and_sanitizes_env(
-    tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
 ) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_status_script(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
 
     broker = CredentialBroker()
     status = broker.evaluate(
@@ -54,13 +32,11 @@ def test_subscription_readiness_is_machine_readable_and_sanitizes_env(
 
 
 def test_policy_violation_fails_closed_when_only_subscription_is_available(
-    tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
 ) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_status_script(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
 
     status = CredentialBroker().evaluate(
         "codex",
@@ -74,17 +50,15 @@ def test_policy_violation_fails_closed_when_only_subscription_is_available(
 
 
 def test_claude_subscription_status_supports_json_output(
-    tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
 ) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_status_script(
-        bin_dir,
+    write_status_script(
+        cli_bin_dir,
         "claude",
         stdout_text='{"status":"authenticated","authMethod":"claudeai"}',
     )
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    prepend_path(cli_bin_dir)
 
     status = CredentialBroker().evaluate(
         "claude",
