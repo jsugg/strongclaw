@@ -9,7 +9,7 @@ import textwrap
 import pytest
 
 from clawops.hypermemory import load_config, main
-from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
+from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_hypermemory_load_config_resolves_required_env_backed_strings(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tests.utils.helpers.network import (
+    Endpoint,
     HttpServerFactory,
     ListenerFactory,
     disconnecting_listener,
@@ -29,3 +30,16 @@ def disconnecting_listener_factory() -> ListenerFactory:
 def http_server_factory() -> HttpServerFactory:
     """Expose the static HTTP server context manager as a fixture-bound factory."""
     return http_server
+
+
+__all__ = [
+    "Endpoint",
+    "HttpServerFactory",
+    "ListenerFactory",
+    "disconnecting_listener",
+    "disconnecting_listener_factory",
+    "http_server",
+    "http_server_factory",
+    "tcp_listener",
+    "tcp_listener_factory",
+]

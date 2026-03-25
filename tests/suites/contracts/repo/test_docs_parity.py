@@ -6,7 +6,7 @@ import pathlib
 import re
 
 from clawops.context_service import load_config
-from tests.utils.helpers.repo import REPO_ROOT
+from tests.fixtures.repo import REPO_ROOT
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 

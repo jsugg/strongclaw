@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 
-from tests.utils.helpers.repo import REPO_ROOT
+from tests.fixtures.repo import REPO_ROOT
 
 
 def _project_dependencies() -> list[str]:
