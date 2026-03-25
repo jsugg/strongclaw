@@ -78,8 +78,9 @@ jobs:
           done
           echo "Qdrant failed to become ready" >&2
           exit 1
-      - run: PYTHONPATH=src uv run pytest -q -m "hypermemory and qdrant"
+      - run: uv run pytest -q -m "hypermemory and qdrant"
         env:
+          QDRANT_TEST_MODE: real
           TEST_QDRANT_URL: http://127.0.0.1:6333
   verify-strongclaw-hypermemory-host:
     name: Run strongclaw-hypermemory Host Checks

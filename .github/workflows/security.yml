@@ -32,7 +32,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run pre-commit run actionlint --all-files
       - run: uv run pre-commit run shellcheck --all-files
-      - run: PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml --cov-report=term-missing
+      - run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml --cov-report=term-missing
       - run: PYTHONPATH=src uv run python -m compileall -q src tests
       - name: Coverage summary
         run: |
@@ -114,6 +114,7 @@ jobs:
           name: security-artifacts
           path: |
             coverage.xml
+            pytest.xml
             sbom.spdx.json
 
   run-codeql-analysis:

@@ -8,231 +8,188 @@ import pytest
 
 from clawops.common import load_yaml, write_text, write_yaml
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
-from tests.fixtures.network import HttpServerFactory, ListenerFactory
+from tests.fixtures.network import Endpoint, NetworkRuntime
 from tests.fixtures.repo import REPO_ROOT
 
 pytestmark = pytest.mark.network_local
 
 
+def _port_mapping(endpoint: Endpoint, target_port: int) -> str:
+    host, port = endpoint
+    return f"{host}:{port}:{target_port}"
+
+
+def _write_sidecars_compose(
+    compose_path: pathlib.Path,
+    *,
+    postgres: Endpoint,
+    litellm: Endpoint,
+    otlp: Endpoint,
+    metrics: Endpoint,
+    qdrant: Endpoint,
+) -> None:
+    write_yaml(
+        compose_path,
+        {
+            "services": {
+                "postgres": {
+                    "ports": [_port_mapping(postgres, 5432)],
+                    "healthcheck": {"test": ["CMD", "true"]},
+                },
+                "litellm": {
+                    "ports": [_port_mapping(litellm, 4000)],
+                    "healthcheck": {"test": ["CMD", "true"]},
+                },
+                "otel-collector": {
+                    "ports": [
+                        _port_mapping(otlp, 4318),
+                        _port_mapping(metrics, 9464),
+                    ]
+                },
+                "qdrant": {
+                    "ports": [_port_mapping(qdrant, 6333)],
+                    "healthcheck": {"test": ["CMD", "true"]},
+                },
+            }
+        },
+    )
+
+
+def _write_observability_inputs(
+    overlay_path: pathlib.Path,
+    compose_path: pathlib.Path,
+    *,
+    otlp: Endpoint,
+    metrics: Endpoint,
+) -> None:
+    otlp_host, otlp_port = otlp
+    write_text(
+        overlay_path,
+        (
+            "{\n"
+            '  "diagnostics": {"enabled": true, "otel": {"enabled": true, "endpoint": '
+            f'"http://{otlp_host}:{otlp_port}", "protocol": "http/protobuf", '
+            '"metrics": true, "traces": true}},\n'
+            '  "logging": {"redactSensitive": "tools", "redactPatterns": ["sk-.*"]},\n'
+            '  "plugins": {"allow": ["diagnostics-otel"], "entries": {"diagnostics-otel": {"enabled": true}}}\n'
+            "}\n"
+        ),
+    )
+    write_yaml(
+        compose_path,
+        {
+            "services": {
+                "otel-collector": {
+                    "ports": [
+                        _port_mapping(otlp, 4318),
+                        _port_mapping(metrics, 9464),
+                    ]
+                }
+            }
+        },
+    )
+
+
 def test_verify_sidecars_supports_runtime_probes(
     tmp_path: pathlib.Path,
-    tcp_listener_factory: ListenerFactory,
-    http_server_factory: HttpServerFactory,
+    network_runtime: NetworkRuntime,
 ) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener_factory() as (postgres_host, postgres_port):
-        with http_server_factory(b"alive\n") as (litellm_host, litellm_port):
-            with tcp_listener_factory() as (otlp_host, otlp_port):
-                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with http_server_factory(b"ok\n") as (qdrant_host, qdrant_port):
-                        write_yaml(
-                            compose_path,
-                            {
-                                "services": {
-                                    "postgres": {
-                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "litellm": {
-                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "otel-collector": {
-                                        "ports": [
-                                            f"{otlp_host}:{otlp_port}:4318",
-                                            f"{metrics_host}:{metrics_port}:9464",
-                                        ]
-                                    },
-                                    "qdrant": {
-                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                }
-                            },
-                        )
+    _write_sidecars_compose(
+        compose_path,
+        postgres=network_runtime.tcp_listener(),
+        litellm=network_runtime.http_listener(b"alive\n"),
+        otlp=network_runtime.tcp_listener(),
+        metrics=network_runtime.http_listener(b"otel metrics\n"),
+        qdrant=network_runtime.http_listener(b"ok\n"),
+    )
 
-                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
-                        assert report.ok is True
+    report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is True
 
 
 def test_verify_sidecars_reports_http_disconnects_without_crashing(
     tmp_path: pathlib.Path,
-    tcp_listener_factory: ListenerFactory,
-    disconnecting_listener_factory: ListenerFactory,
-    http_server_factory: HttpServerFactory,
+    network_runtime: NetworkRuntime,
 ) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener_factory() as (postgres_host, postgres_port):
-        with disconnecting_listener_factory() as (litellm_host, litellm_port):
-            with tcp_listener_factory() as (otlp_host, otlp_port):
-                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with http_server_factory(b"ok\n") as (qdrant_host, qdrant_port):
-                        write_yaml(
-                            compose_path,
-                            {
-                                "services": {
-                                    "postgres": {
-                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "litellm": {
-                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "otel-collector": {
-                                        "ports": [
-                                            f"{otlp_host}:{otlp_port}:4318",
-                                            f"{metrics_host}:{metrics_port}:9464",
-                                        ]
-                                    },
-                                    "qdrant": {
-                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                }
-                            },
-                        )
+    _write_sidecars_compose(
+        compose_path,
+        postgres=network_runtime.tcp_listener(),
+        litellm=network_runtime.disconnecting_listener(),
+        otlp=network_runtime.tcp_listener(),
+        metrics=network_runtime.http_listener(b"otel metrics\n"),
+        qdrant=network_runtime.http_listener(b"ok\n"),
+    )
 
-                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
-                        assert report.ok is False
-                        litellm_check = next(
-                            check for check in report.checks if check.name == "litellm-runtime"
-                        )
-                        assert litellm_check.ok is False
-                        assert "http reachability failed" in litellm_check.message
+    report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is False
+    litellm_check = next(check for check in report.checks if check.name == "litellm-runtime")
+    assert litellm_check.ok is False
+    assert "http reachability failed" in litellm_check.message
 
 
 def test_verify_sidecars_reports_qdrant_runtime_failures(
     tmp_path: pathlib.Path,
-    tcp_listener_factory: ListenerFactory,
-    disconnecting_listener_factory: ListenerFactory,
-    http_server_factory: HttpServerFactory,
+    network_runtime: NetworkRuntime,
 ) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener_factory() as (postgres_host, postgres_port):
-        with http_server_factory(b"alive\n") as (litellm_host, litellm_port):
-            with tcp_listener_factory() as (otlp_host, otlp_port):
-                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with disconnecting_listener_factory() as (qdrant_host, qdrant_port):
-                        write_yaml(
-                            compose_path,
-                            {
-                                "services": {
-                                    "postgres": {
-                                        "ports": [f"{postgres_host}:{postgres_port}:5432"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "litellm": {
-                                        "ports": [f"{litellm_host}:{litellm_port}:4000"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                    "otel-collector": {
-                                        "ports": [
-                                            f"{otlp_host}:{otlp_port}:4318",
-                                            f"{metrics_host}:{metrics_port}:9464",
-                                        ]
-                                    },
-                                    "qdrant": {
-                                        "ports": [f"{qdrant_host}:{qdrant_port}:6333"],
-                                        "healthcheck": {"test": ["CMD", "true"]},
-                                    },
-                                }
-                            },
-                        )
+    _write_sidecars_compose(
+        compose_path,
+        postgres=network_runtime.tcp_listener(),
+        litellm=network_runtime.http_listener(b"alive\n"),
+        otlp=network_runtime.tcp_listener(),
+        metrics=network_runtime.http_listener(b"otel metrics\n"),
+        qdrant=network_runtime.disconnecting_listener(),
+    )
 
-                        report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
-                        assert report.ok is False
-                        qdrant_check = next(
-                            check for check in report.checks if check.name == "qdrant-runtime"
-                        )
-                        assert qdrant_check.ok is False
-                        assert "http reachability failed" in qdrant_check.message
+    report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is False
+    qdrant_check = next(check for check in report.checks if check.name == "qdrant-runtime")
+    assert qdrant_check.ok is False
+    assert "http reachability failed" in qdrant_check.message
 
 
 def test_verify_observability_supports_runtime_probes(
     tmp_path: pathlib.Path,
-    tcp_listener_factory: ListenerFactory,
-    http_server_factory: HttpServerFactory,
+    network_runtime: NetworkRuntime,
 ) -> None:
     overlay_path = tmp_path / "50-observability.json5"
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener_factory() as (otlp_host, otlp_port):
-        with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
-            write_text(
-                overlay_path,
-                (
-                    "{\n"
-                    '  "diagnostics": {"enabled": true, "otel": {"enabled": true, "endpoint": '
-                    f'"http://{otlp_host}:{otlp_port}", "protocol": "http/protobuf", '
-                    '"metrics": true, "traces": true}},\n'
-                    '  "logging": {"redactSensitive": "tools", "redactPatterns": ["sk-.*"]},\n'
-                    '  "plugins": {"allow": ["diagnostics-otel"], "entries": {"diagnostics-otel": {"enabled": true}}}\n'
-                    "}\n"
-                ),
-            )
-            write_yaml(
-                compose_path,
-                {
-                    "services": {
-                        "otel-collector": {
-                            "ports": [
-                                f"{otlp_host}:{otlp_port}:4318",
-                                f"{metrics_host}:{metrics_port}:9464",
-                            ]
-                        }
-                    }
-                },
-            )
+    _write_observability_inputs(
+        overlay_path,
+        compose_path,
+        otlp=network_runtime.tcp_listener(),
+        metrics=network_runtime.http_listener(b"otel metrics\n"),
+    )
 
-            report = verify_observability(
-                overlay_path=overlay_path,
-                compose_path=compose_path,
-                skip_runtime=False,
-            )
-            assert report.ok is True
+    report = verify_observability(
+        overlay_path=overlay_path,
+        compose_path=compose_path,
+        skip_runtime=False,
+    )
+    assert report.ok is True
 
 
 def test_verify_observability_accepts_empty_metrics_body_when_endpoint_is_reachable(
     tmp_path: pathlib.Path,
-    tcp_listener_factory: ListenerFactory,
-    http_server_factory: HttpServerFactory,
+    network_runtime: NetworkRuntime,
 ) -> None:
     overlay_path = tmp_path / "50-observability.json5"
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener_factory() as (otlp_host, otlp_port):
-        with http_server_factory(b"") as (metrics_host, metrics_port):
-            write_text(
-                overlay_path,
-                (
-                    "{\n"
-                    '  "diagnostics": {"enabled": true, "otel": {"enabled": true, "endpoint": '
-                    f'"http://{otlp_host}:{otlp_port}", "protocol": "http/protobuf", '
-                    '"metrics": true, "traces": true}},\n'
-                    '  "logging": {"redactSensitive": "tools", "redactPatterns": ["sk-.*"]},\n'
-                    '  "plugins": {"allow": ["diagnostics-otel"], "entries": {"diagnostics-otel": {"enabled": true}}}\n'
-                    "}\n"
-                ),
-            )
-            write_yaml(
-                compose_path,
-                {
-                    "services": {
-                        "otel-collector": {
-                            "ports": [
-                                f"{otlp_host}:{otlp_port}:4318",
-                                f"{metrics_host}:{metrics_port}:9464",
-                            ]
-                        }
-                    }
-                },
-            )
+    _write_observability_inputs(
+        overlay_path,
+        compose_path,
+        otlp=network_runtime.tcp_listener(),
+        metrics=network_runtime.http_listener(b""),
+    )
 
-            report = verify_observability(
-                overlay_path=overlay_path,
-                compose_path=compose_path,
-                skip_runtime=False,
-            )
-            assert report.ok is True
+    report = verify_observability(
+        overlay_path=overlay_path,
+        compose_path=compose_path,
+        skip_runtime=False,
+    )
+    assert report.ok is True
 
 
 def test_verify_channels_matches_repo_docs_and_guidance() -> None:

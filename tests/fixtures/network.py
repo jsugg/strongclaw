@@ -12,6 +12,8 @@ from tests.utils.helpers.network import (
     http_server,
     tcp_listener,
 )
+from tests.utils.helpers.network_runtime import NetworkRuntime
+from tests.utils.helpers.test_context import TestContext
 
 
 @pytest.fixture
@@ -32,14 +34,22 @@ def http_server_factory() -> HttpServerFactory:
     return http_server
 
 
+@pytest.fixture
+def network_runtime(test_context: TestContext) -> NetworkRuntime:
+    """Return a managed network runtime bound to the current test context."""
+    return NetworkRuntime(context=test_context)
+
+
 __all__ = [
     "Endpoint",
     "HttpServerFactory",
     "ListenerFactory",
+    "NetworkRuntime",
     "disconnecting_listener",
     "disconnecting_listener_factory",
     "http_server",
     "http_server_factory",
+    "network_runtime",
     "tcp_listener",
     "tcp_listener_factory",
 ]

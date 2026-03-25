@@ -24,6 +24,8 @@ def _module_marker_names(path: Path) -> set[str]:
 
 def _extract_marker_names(node: ast.expr) -> set[str]:
     """Extract marker names from one supported pytestmark expression."""
+    if isinstance(node, ast.Call):
+        return _extract_marker_names(node.func)
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
         if isinstance(node.value.value, ast.Name) and node.value.value.id == "pytest":
             if node.value.attr == "mark":
