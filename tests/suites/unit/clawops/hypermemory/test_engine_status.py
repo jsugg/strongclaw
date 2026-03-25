@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.utils.helpers.hypermemory import (
+from tests.fixtures.hypermemory import (
     FailingRerankProvider,
     FakeQdrantBackend,
     StaticRerankProvider,
