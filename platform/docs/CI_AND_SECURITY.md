@@ -38,10 +38,12 @@ Linux and macOS runners.
   setup, launchd activation, and repo-local stack flows.
 - `workflow_dispatch` can benchmark cache toggles for the supported hosted
   macOS path without changing the required PR gate.
-- The workflow can restore immutable Docker image tarballs for the macOS aux
-  stack and browser-lab stack. Those cache entries are keyed from the pinned
-  compose files so cache hits avoid re-pulling the same images without changing
-  the validation surface.
+- The workflow stays declarative by delegating runtime setup, image warming,
+  diagnostics, and summary generation to executable helper scripts under
+  `tests/scripts/`. Hosted macOS image warming still resolves the pinned compose
+  images ahead of the scenario run, but now uses bounded retries and heartbeat
+  logging instead of restoring immutable Docker image tarballs from the
+  workflow cache.
 
 ## Vendored plugin verification
 
