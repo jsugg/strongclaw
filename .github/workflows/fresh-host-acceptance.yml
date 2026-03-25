@@ -102,9 +102,9 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
       - run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
@@ -183,13 +183,13 @@ jobs:
       - run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
       - run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
-      - if: always()
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ (github.event_name == 'workflow_dispatch' && inputs.enable_package_cache) || (github.event_name != 'workflow_dispatch' && env.DEFAULT_PACKAGE_CACHE_ENABLED == 'true') }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}

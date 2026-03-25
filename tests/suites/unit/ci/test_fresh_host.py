@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
 
 
@@ -94,6 +95,37 @@ def test_prepare_context_sets_macos_variant_and_primary_compose_file(
     ]
     assert "STRONGCLAW_COMPOSE_VARIANT=ci-hosted-macos" in exports
     assert f"FRESH_HOST_PRIMARY_COMPOSE_FILE={context.compose_files[0]}" in exports
+
+
+def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
+    """The executable CLI should accept both current macOS scenario ids."""
+    sidecars = fresh_host_script._parse_args(
+        [
+            "prepare-context",
+            "--scenario",
+            "macos-sidecars",
+            "--runner-temp",
+            "/tmp/runner",
+        ]
+    )
+    browser_lab = fresh_host_script._parse_args(
+        [
+            "prepare-context",
+            "--scenario",
+            "macos-browser-lab",
+            "--runner-temp",
+            "/tmp/runner",
+        ]
+    )
+
+    assert sidecars.scenario == "macos-sidecars"
+    assert browser_lab.scenario == "macos-browser-lab"
+
+
+def test_load_context_rejects_directory_path(tmp_path: Path) -> None:
+    """Loading a context should fail cleanly when the path is not a JSON file."""
+    with pytest.raises(fresh_host.FreshHostError, match="expected JSON file"):
+        fresh_host.load_context(tmp_path)
 
 
 def test_run_scenario_records_successful_phase_sequence(

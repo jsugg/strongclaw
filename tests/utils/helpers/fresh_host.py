@@ -221,6 +221,8 @@ def _write_json(payload: object, path: Path) -> None:
 
 def _read_json(path: Path) -> dict[str, object]:
     """Read one JSON payload."""
+    if not path.is_file():
+        raise FreshHostError(f"expected JSON file but found {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 

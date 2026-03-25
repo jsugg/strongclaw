@@ -27,7 +27,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prepare_parser = subparsers.add_parser("prepare-context", help="Create a fresh-host context.")
-    prepare_parser.add_argument("--scenario", required=True, choices=("linux", "macos"))
+    prepare_parser.add_argument(
+        "--scenario",
+        required=True,
+        choices=("linux", "macos-sidecars", "macos-browser-lab"),
+    )
     prepare_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     prepare_parser.add_argument("--runner-temp", type=Path, required=True)
     prepare_parser.add_argument("--workspace", type=Path, default=REPO_ROOT)
