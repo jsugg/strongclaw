@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import pathlib
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+from tests.fixtures.repo import REPO_ROOT
 
 
 def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
