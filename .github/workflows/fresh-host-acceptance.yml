@@ -388,7 +388,7 @@ jobs:
               echo "FRESH_HOST_COLIMA_CPU_COUNT=${host_cpu_count}"
               echo "FRESH_HOST_COLIMA_MEMORY_GIB=${colima_memory_gib}"
             } >> "${GITHUB_ENV}"
-            colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz --mount-type=virtiofs
+            colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz
             for _ in $(seq 1 45); do
               if docker info >/dev/null 2>&1; then
                 break
@@ -597,6 +597,32 @@ jobs:
           if [[ ${rc} -ne 0 ]]; then status="failure"; fi
           printf 'Exercise macOS repo-local browser-lab\t%s\t%s\n' "${SECONDS}" "${status}" >> "${FRESH_HOST_PHASES_FILE}"
           exit "${rc}"
+      - name: Dump macOS host logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          export OPENCLAW_STATE_DIR="${STRONGCLAW_APP_HOME}/.openclaw"
+          export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
+          mkdir -p "${FRESH_HOST_REPORT_DIR}"
+          for path in \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.out.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.err.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.out.log" \
+            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.err.log"; do
+            if [[ -f "${path}" ]]; then
+              echo "--- ${path}"
+              tail -n 200 "${path}"
+            fi
+          done
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml ps > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-ps.txt" 2>&1 || true
+          docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-logs.txt" 2>&1 || true
+          launchctl print "gui/$(id -u)/ai.openclaw.gateway" > "${FRESH_HOST_REPORT_DIR}/launchctl-gateway-failure.txt" 2>&1 || true
+          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" > "${FRESH_HOST_REPORT_DIR}/launchctl-sidecars-failure.txt" 2>&1 || true
+          cat "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-ps.txt" || true
+          cat "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-logs.txt" || true
+          cat "${FRESH_HOST_REPORT_DIR}/launchctl-gateway-failure.txt" || true
+          cat "${FRESH_HOST_REPORT_DIR}/launchctl-sidecars-failure.txt" || true
       - name: Cleanup macOS host services
         if: always()
         shell: bash
@@ -617,27 +643,6 @@ jobs:
           .venv/bin/python -m clawops ops --repo-root . sidecars down || true
           .venv/bin/python -m clawops ops --repo-root . browser-lab down || true
           printf 'Cleanup macOS host services\t%s\tsuccess\n' "${SECONDS}" >> "${FRESH_HOST_PHASES_FILE}"
-      - name: Dump macOS host logs on failure
-        if: failure()
-        shell: bash
-        run: |
-          set +e
-          export OPENCLAW_STATE_DIR="${STRONGCLAW_APP_HOME}/.openclaw"
-          export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
-          for path in \
-            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.out.log" \
-            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.err.log" \
-            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.out.log" \
-            "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-sidecars.err.log"; do
-            if [[ -f "${path}" ]]; then
-              echo "--- ${path}"
-              tail -n 200 "${path}"
-            fi
-          done
-          docker compose -f platform/compose/docker-compose.aux-stack.yaml ps || true
-          docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector || true
-          launchctl print "gui/$(id -u)/ai.openclaw.gateway" || true
-          launchctl print "gui/$(id -u)/ai.openclaw.sidecars" || true
       - name: Collect macOS diagnostics
         if: always()
         shell: bash
