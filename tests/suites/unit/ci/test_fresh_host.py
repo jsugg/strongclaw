@@ -36,20 +36,20 @@ def test_prepare_context_writes_context_and_env_file(
     assert f"STRONGCLAW_APP_HOME={context.app_home}" in exports
 
 
-def test_scenario_phase_names_match_macos_pull_request(
+def test_scenario_phase_names_match_macos_browser_lab(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """macOS pull-request runs should stop before service activation phases."""
+    """Browser-lab scenarios should skip machine-name and launchd phases."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
 
     context = fresh_host.prepare_context(
-        scenario_id="macos",
+        scenario_id="macos-browser-lab",
         repo_root=workspace,
         runner_temp=runner_temp,
         workspace=workspace,
@@ -57,11 +57,43 @@ def test_scenario_phase_names_match_macos_pull_request(
     )
 
     assert fresh_host.scenario_phase_names(context) == [
-        "normalize-machine-name",
         "bootstrap",
         "setup",
-        "verify-rendered-files",
+        "exercise-browser-lab",
     ]
+    assert context.activate_services is False
+    assert context.compose_variant == "ci-hosted-macos"
+
+
+def test_prepare_context_sets_macos_variant_and_primary_compose_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sidecars scenarios should export the hosted macOS compose variant details."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    exports = github_env.read_text(encoding="utf-8")
+    assert context.compose_variant == "ci-hosted-macos"
+    assert context.compose_files == [
+        str(
+            (workspace / "platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml").resolve()
+        )
+    ]
+    assert "STRONGCLAW_COMPOSE_VARIANT=ci-hosted-macos" in exports
+    assert f"FRESH_HOST_PRIMARY_COMPOSE_FILE={context.compose_files[0]}" in exports
 
 
 def test_run_scenario_records_successful_phase_sequence(
@@ -143,9 +175,11 @@ def test_write_summary_includes_child_reports(
     workspace.mkdir()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
     monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    monkeypatch.setenv("FRESH_HOST_PACKAGE_CACHE_ENABLED", "true")
+    monkeypatch.setenv("FRESH_HOST_PACKAGE_CACHE_HIT", "false")
 
     context = fresh_host.prepare_context(
-        scenario_id="macos",
+        scenario_id="macos-sidecars",
         repo_root=workspace,
         runner_temp=runner_temp,
         workspace=workspace,
@@ -195,6 +229,7 @@ def test_write_summary_includes_child_reports(
     fresh_host.write_summary(Path(context.context_path), summary_path)
 
     summary_text = summary_path.read_text(encoding="utf-8")
-    assert "## macOS Fresh Host" in summary_text
+    assert "## macOS Fresh Host Sidecars" in summary_text
+    assert "| Package cache | true |" in summary_text
     assert "| Runtime provider | colima |" in summary_text
     assert "| Images requested | 1 |" in summary_text

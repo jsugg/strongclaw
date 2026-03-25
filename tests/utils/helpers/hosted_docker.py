@@ -5,7 +5,10 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import shutil
 import subprocess
+import tarfile
+import tempfile
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -166,6 +169,41 @@ def _macos_env() -> dict[str, str]:
     return env
 
 
+def _download_to_cache(
+    url: str,
+    output_path: Path,
+    *,
+    label: str,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    """Download one runtime payload into the cache when it is missing."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.is_file():
+        _log(f"Using cached {label}: {output_path}")
+        return
+    temporary_path = output_path.with_name(f"{output_path.name}.tmp")
+    _run_checked(
+        [
+            "curl",
+            "-fL",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "--retry-connrefused",
+            url,
+            "-o",
+            str(temporary_path),
+        ],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=600,
+    )
+    temporary_path.replace(output_path)
+    _log(f"Downloaded {label} into runtime cache: {output_path}")
+
+
 def install_runtime(
     context_path: Path, *, github_env_file: Path | None = None
 ) -> RuntimeInstallReport:
@@ -185,9 +223,17 @@ def install_runtime(
     host_memory_gib = (
         max(1, host_memory_bytes // 1073741824) if host_memory_bytes is not None else None
     )
-    colima_cpu_count = int(os.environ.get("FRESH_HOST_COLIMA_CPU_COUNT", "2"))
-    colima_memory_gib = int(os.environ.get("FRESH_HOST_COLIMA_MEMORY_GIB", "4"))
+    effective_host_cpu_count = host_cpu_count or 2
+    effective_host_memory_gib = host_memory_gib or 9
+    colima_cpu_count = effective_host_cpu_count
+    colima_memory_gib = min(10, max(6, effective_host_memory_gib - 3))
     colima_disk_gib = int(os.environ.get("MACOS_COLIMA_DISK_GIB", "20"))
+    runtime_cache_root = os.environ.get("FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR", "").strip()
+    runtime_cache_dir = (
+        Path(runtime_cache_root).expanduser().resolve() / arch if runtime_cache_root else None
+    )
+    lima_version = os.environ.get("MACOS_LIMA_VERSION", "").strip()
+    colima_version = os.environ.get("MACOS_COLIMA_VERSION", "").strip()
     docker_config = str((Path.home() / ".docker").resolve())
     docker_host = f"unix://{Path.home() / '.colima' / 'default' / 'docker.sock'}"
     env = _macos_env()
@@ -204,10 +250,69 @@ def install_runtime(
             raise FreshHostError(
                 f"Unsupported hosted macOS runtime provider: {runtime_provider}. Hosted CI uses colima."
             )
-
+        if not lima_version or not colima_version:
+            raise FreshHostError("MACOS_LIMA_VERSION and MACOS_COLIMA_VERSION must be configured")
         _run_checked(
-            ["brew", "install", "colima", "docker", "docker-compose"], cwd=repo_root, env=env
+            ["sudo", "mkdir", "-p", "/usr/local/libexec"],
+            cwd=repo_root,
+            env=env,
+            timeout_seconds=120,
         )
+        _run_checked(
+            ["sudo", "chown", f"{os.getuid()}:{os.getgid()}", "/usr/local/libexec"],
+            cwd=repo_root,
+            env=env,
+            timeout_seconds=120,
+        )
+        if runtime_cache_dir is None:
+            raise FreshHostError(
+                "FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR must be configured for hosted macOS"
+            )
+        runtime_cache_dir.mkdir(parents=True, exist_ok=True)
+        _log(
+            "Runtime provider="
+            f"{runtime_provider} cache-dir={runtime_cache_dir} host-cpu={effective_host_cpu_count} "
+            f"host-memory-gib={effective_host_memory_gib}"
+        )
+        lima_archive_path = runtime_cache_dir / f"lima-{lima_version}-{arch}.tar.gz"
+        colima_binary_path = runtime_cache_dir / f"colima-{colima_version}-{arch}"
+        _download_to_cache(
+            (
+                f"https://github.com/lima-vm/lima/releases/download/{lima_version}/"
+                f"lima-{lima_version.removeprefix('v')}-Darwin-{arch}.tar.gz"
+            ),
+            lima_archive_path,
+            label="Lima payload",
+            cwd=repo_root,
+            env=env,
+        )
+        _download_to_cache(
+            (
+                f"https://github.com/abiosoft/colima/releases/download/{colima_version}/"
+                f"colima-Darwin-{arch}"
+            ),
+            colima_binary_path,
+            label="Colima binary",
+            cwd=repo_root,
+            env=env,
+        )
+        colima_binary_path.chmod(0o755)
+        with tempfile.TemporaryDirectory() as temporary_root:
+            with tarfile.open(lima_archive_path, mode="r:gz") as archive:
+                archive.extractall(path=temporary_root, filter="data")
+            _run_checked(
+                ["sudo", "rsync", "-a", f"{temporary_root}/", "/usr/local/"],
+                cwd=repo_root,
+                env=env,
+                timeout_seconds=600,
+            )
+        _run_checked(
+            ["sudo", "install", "-m", "0755", str(colima_binary_path), "/usr/local/bin/colima"],
+            cwd=repo_root,
+            env=env,
+            timeout_seconds=120,
+        )
+        _run_checked(["brew", "install", "docker", "docker-compose"], cwd=repo_root, env=env)
         docker_plugin_dir = Path.home() / ".docker" / "cli-plugins"
         docker_plugin_dir.mkdir(parents=True, exist_ok=True)
         compose_prefix = _run_checked(
@@ -232,11 +337,18 @@ def install_runtime(
                 str(colima_memory_gib),
                 "--disk",
                 str(colima_disk_gib),
+                "--arch",
+                "x86_64",
+                "--vm-type",
+                "vz",
+                "--mount-type",
+                "virtiofs",
             ],
             cwd=repo_root,
             env=env,
+            timeout_seconds=1800,
         )
-        for _ in range(30):
+        for _ in range(60):
             ready = _run_command(
                 ["docker", "info"],
                 cwd=repo_root,
@@ -265,7 +377,7 @@ def install_runtime(
         colima_memory_gib=colima_memory_gib,
         docker_host=docker_host,
         docker_config=docker_config,
-        installed_tools=["colima", "docker", "docker-compose"],
+        installed_tools=["lima", "colima", "docker", "docker-compose"],
         failure_reason=failure_reason,
         created_at=_now_iso(),
     )
@@ -443,13 +555,15 @@ def pull_images(
 def ensure_images(context_path: Path) -> ImageEnsureReport:
     """Ensure the scenario's compose images exist locally."""
     context = load_context(context_path)
-    report_path = Path(context.image_report_path or "").resolve()
+    report_path = Path(context.image_report_path).resolve() if context.image_report_path else None
     repo_root = Path(context.repo_root).resolve()
     compose_files = [Path(path).resolve() for path in context.compose_files]
     compose_state_dir = Path(context.tmp_root).resolve() / "compose-prepull"
     compose_state_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(compose_state_dir)
+    if context.compose_variant is not None:
+        env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
 
     if not context.ensure_images:
         report = ImageEnsureReport(
@@ -465,7 +579,8 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
             failure_reason=None,
             created_at=_now_iso(),
         )
-        _write_json(asdict(report), report_path)
+        if report_path is not None:
+            _write_json(asdict(report), report_path)
         return report
 
     images = resolve_compose_images(compose_files, cwd=repo_root, env=env)
@@ -505,7 +620,8 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
         failure_reason=failure_reason,
         created_at=_now_iso(),
     )
-    _write_json(asdict(report), report_path)
+    if report_path is not None:
+        _write_json(asdict(report), report_path)
     if failure_reason is not None:
         raise FreshHostError(failure_reason)
     return report
@@ -527,6 +643,23 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
         diagnostics_dir / "docker-system-df.txt": ["docker", "system", "df"],
         diagnostics_dir / "docker-images.jsonl": ["docker", "images", "--format", "{{json .}}"],
     }
+    if context.compose_files:
+        primary_compose_file = context.compose_files[0]
+        commands[diagnostics_dir / "compose-ps.txt"] = [
+            "docker",
+            "compose",
+            "-f",
+            primary_compose_file,
+            "ps",
+        ]
+        commands[diagnostics_dir / "compose-logs.txt"] = [
+            "docker",
+            "compose",
+            "-f",
+            primary_compose_file,
+            "logs",
+            "--no-color",
+        ]
     for output_path, command in commands.items():
         try:
             completed = _run_command(
@@ -546,3 +679,42 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
             + "\n",
             encoding="utf-8",
         )
+    extra_files = {
+        diagnostics_dir / "host-cpu-count.txt": str(_sysctl_int("hw.ncpu") or ""),
+        diagnostics_dir / "host-memory-bytes.txt": str(_sysctl_int("hw.memsize") or ""),
+    }
+    for output_path, content in extra_files.items():
+        output_path.write_text(f"{content}\n", encoding="utf-8")
+    cache_targets = {
+        diagnostics_dir / "colima-disk-usage.txt": str(Path.home() / ".colima"),
+        diagnostics_dir / "homebrew-cache-usage.txt": os.environ.get("HOMEBREW_CACHE", ""),
+        diagnostics_dir / "workflow-cache-usage.txt": os.environ.get("FRESH_HOST_CACHE_ROOT", ""),
+    }
+    for output_path, raw_target_path in cache_targets.items():
+        if not raw_target_path:
+            continue
+        target_path = Path(raw_target_path)
+        try:
+            completed = _run_command(
+                ["du", "-sh", str(target_path)],
+                cwd=repo_root,
+                env=env,
+                timeout_seconds=120,
+                capture_output=True,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            output_path.write_text(f"{exc}\n", encoding="utf-8")
+            continue
+        output_path.write_text(
+            "\n".join(
+                chunk for chunk in (completed.stdout.strip(), completed.stderr.strip()) if chunk
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    colima_logs_dir = Path.home() / ".colima" / "_lima" / "colima"
+    if colima_logs_dir.is_dir():
+        target_dir = diagnostics_dir / "colima-logs"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for log_path in colima_logs_dir.glob("*.log"):
+            shutil.copyfile(log_path, target_dir / log_path.name)

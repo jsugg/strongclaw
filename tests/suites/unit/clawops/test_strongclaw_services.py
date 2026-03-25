@@ -85,6 +85,29 @@ def test_wait_for_launchd_service_raises_on_failed_exit(
         )
 
 
+def test_wait_for_launchd_service_retries_transient_launchctl_print_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient launchctl print failures should be retried until the deadline."""
+    responses = iter(
+        [
+            _result(returncode=113),
+            _result(stdout="state = running\nlast exit code = (never exited)\n"),
+            _result(stdout="state = waiting\nlast exit code = 0\n"),
+        ]
+    )
+
+    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
+    monkeypatch.setattr(strongclaw_services, "run_command", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+
+    strongclaw_services._wait_for_launchd_service(
+        strongclaw_services.LAUNCHD_SIDECARS_LABEL,
+        persistent=False,
+        timeout_seconds=3,
+    )
+
+
 def test_render_service_files_includes_launchd_docker_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
@@ -94,6 +117,7 @@ def test_render_service_files_includes_launchd_docker_env(
     monkeypatch.setattr(strongclaw_services, "launchd_dir", lambda: output_dir)
     monkeypatch.setenv("DOCKER_HOST", "unix:///tmp/docker.sock")
     monkeypatch.setenv("DOCKER_CONFIG", "/tmp/docker&config")
+    monkeypatch.setenv("STRONGCLAW_COMPOSE_VARIANT", "ci-hosted-macos")
     monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
 
     payload = strongclaw_services.render_service_files(
@@ -109,6 +133,8 @@ def test_render_service_files_includes_launchd_docker_env(
     assert "<key>DOCKER_CONFIG</key>" in rendered_sidecars
     assert "<string>/tmp/docker&amp;config</string>" in rendered_sidecars
     assert "<key>DOCKER_CONTEXT</key>" not in rendered_sidecars
+    assert "<key>STRONGCLAW_COMPOSE_VARIANT</key>" in rendered_sidecars
+    assert "<string>ci-hosted-macos</string>" in rendered_sidecars
 
 
 def test_render_service_files_omits_launchd_passthrough_env_when_unset(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from clawops import strongclaw_bootstrap
 
 
@@ -41,6 +43,97 @@ def test_uv_sync_managed_environment_uses_uv_default_dev_group(monkeypatch, tmp_
         ],
         "timeout_seconds": 3600,
     }
+
+
+def test_uv_sync_managed_environment_retries_transient_failure(monkeypatch, tmp_path) -> None:
+    """Bootstrap should retry uv sync after a transient command failure."""
+
+    uv_binary = tmp_path / "uv"
+    seen_commands: list[list[str]] = []
+    seen_sleeps: list[int] = []
+
+    monkeypatch.setattr(
+        strongclaw_bootstrap,
+        "ensure_uv_installed",
+        lambda **_: uv_binary,
+    )
+
+    def fake_stream_checked(command: list[str], **kwargs: object) -> None:
+        seen_commands.append(command)
+        assert kwargs["timeout_seconds"] == 3600
+        if len(seen_commands) == 1:
+            raise strongclaw_bootstrap.CommandError("temporary download timeout")
+
+    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
+    monkeypatch.setattr(strongclaw_bootstrap.time, "sleep", seen_sleeps.append)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    assert (
+        strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path) == uv_binary
+    )
+    assert seen_commands == [
+        [
+            str(uv_binary),
+            "sync",
+            "--project",
+            str(repo_root),
+            "--python",
+            "3.12",
+            "--locked",
+        ],
+        [
+            str(uv_binary),
+            "sync",
+            "--project",
+            str(repo_root),
+            "--python",
+            "3.12",
+            "--locked",
+        ],
+    ]
+    assert seen_sleeps == [5]
+
+
+def test_uv_sync_managed_environment_raises_after_retry_budget(monkeypatch, tmp_path) -> None:
+    """Bootstrap should surface the last uv sync failure after exhausting retries."""
+
+    uv_binary = tmp_path / "uv"
+    seen_sleeps: list[int] = []
+    call_count = 0
+
+    monkeypatch.setattr(
+        strongclaw_bootstrap,
+        "ensure_uv_installed",
+        lambda **_: uv_binary,
+    )
+
+    def fake_stream_checked(command: list[str], **kwargs: object) -> None:
+        nonlocal call_count
+        call_count += 1
+        assert command == [
+            str(uv_binary),
+            "sync",
+            "--project",
+            str(repo_root),
+            "--python",
+            "3.12",
+            "--locked",
+        ]
+        assert kwargs["timeout_seconds"] == 3600
+        raise strongclaw_bootstrap.CommandError("persistent download timeout")
+
+    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
+    monkeypatch.setattr(strongclaw_bootstrap.time, "sleep", seen_sleeps.append)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    with pytest.raises(strongclaw_bootstrap.CommandError, match="persistent download timeout"):
+        strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path)
+    assert call_count == 3
+    assert seen_sleeps == [5, 10]
 
 
 def test_resolve_node_command_falls_back_to_nodejs(monkeypatch) -> None:

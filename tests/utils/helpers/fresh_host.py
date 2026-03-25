@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal
 
-ScenarioId = Literal["linux", "macos"]
+ScenarioId = Literal["linux", "macos-sidecars", "macos-browser-lab"]
 PlatformName = Literal["linux", "macos"]
 PhaseStatus = Literal["success", "failure", "skipped"]
 
@@ -36,7 +36,15 @@ class ScenarioSpec:
     platform: PlatformName
     job_name: str
     compose_files: tuple[str, ...]
+    compose_variant: str | None
+    phase_names: tuple[str, ...]
+    activate_services: bool
+    ensure_images: bool
     normalize_machine_name: bool
+    verify_launchd: bool
+    verify_rendered_files: bool
+    exercise_sidecars: bool
+    exercise_browser_lab: bool
 
 
 @dataclass(slots=True)
@@ -76,6 +84,7 @@ class FreshHostContext:
     runtime_provider: str | None
     docker_pull_parallelism: int
     docker_pull_max_attempts: int
+    compose_variant: str | None
     activate_services: bool
     ensure_images: bool
     normalize_machine_name: bool
@@ -83,6 +92,7 @@ class FreshHostContext:
     verify_rendered_files: bool
     exercise_sidecars: bool
     exercise_browser_lab: bool
+    phase_names: list[str]
     compose_files: list[str]
 
 
@@ -113,17 +123,61 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
             "platform/compose/docker-compose.aux-stack.yaml",
             "platform/compose/docker-compose.browser-lab.yaml",
         ),
-        normalize_machine_name=False,
-    ),
-    "macos": ScenarioSpec(
-        scenario_id="macos",
-        platform="macos",
-        job_name="macOS Fresh Host",
-        compose_files=(
-            "platform/compose/docker-compose.aux-stack.yaml",
-            "platform/compose/docker-compose.browser-lab.yaml",
+        compose_variant=None,
+        phase_names=(
+            "bootstrap",
+            "setup",
+            "verify-rendered-files",
+            "exercise-sidecars",
+            "exercise-browser-lab",
         ),
+        activate_services=False,
+        ensure_images=False,
+        normalize_machine_name=False,
+        verify_launchd=False,
+        verify_rendered_files=True,
+        exercise_sidecars=True,
+        exercise_browser_lab=True,
+    ),
+    "macos-sidecars": ScenarioSpec(
+        scenario_id="macos-sidecars",
+        platform="macos",
+        job_name="macOS Fresh Host Sidecars",
+        compose_files=("platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml",),
+        compose_variant="ci-hosted-macos",
+        phase_names=(
+            "normalize-machine-name",
+            "bootstrap",
+            "setup",
+            "verify-launchd",
+            "exercise-sidecars",
+        ),
+        activate_services=True,
+        ensure_images=True,
         normalize_machine_name=True,
+        verify_launchd=True,
+        verify_rendered_files=False,
+        exercise_sidecars=True,
+        exercise_browser_lab=False,
+    ),
+    "macos-browser-lab": ScenarioSpec(
+        scenario_id="macos-browser-lab",
+        platform="macos",
+        job_name="macOS Fresh Host Browser Lab",
+        compose_files=("platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml",),
+        compose_variant="ci-hosted-macos",
+        phase_names=(
+            "bootstrap",
+            "setup",
+            "exercise-browser-lab",
+        ),
+        activate_services=False,
+        ensure_images=True,
+        normalize_machine_name=False,
+        verify_launchd=False,
+        verify_rendered_files=False,
+        exercise_sidecars=False,
+        exercise_browser_lab=True,
     ),
 }
 
@@ -227,8 +281,6 @@ def prepare_context(
         The resolved fresh-host context.
     """
     spec = _require_scenario(scenario_id)
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
-    activate_services = not (spec.platform == "macos" and event_name == "pull_request")
     tmp_root = runner_temp / f"strongclaw-{spec.platform}-host"
     report_dir = runner_temp / "fresh-host-reports" / scenario_id
     context_dir = runner_temp / "fresh-host" / scenario_id
@@ -272,28 +324,44 @@ def prepare_context(
         ),
         docker_pull_parallelism=int(
             os.environ.get(
-                "FRESH_HOST_DOCKER_PULL_PARALLELISM",
-                str(DEFAULT_DOCKER_PULL_PARALLELISM),
+                "FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM",
+                os.environ.get(
+                    "FRESH_HOST_DOCKER_PULL_PARALLELISM",
+                    str(DEFAULT_DOCKER_PULL_PARALLELISM),
+                ),
             )
         ),
         docker_pull_max_attempts=int(
             os.environ.get(
-                "FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS",
-                str(DEFAULT_DOCKER_PULL_MAX_ATTEMPTS),
+                "FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS",
+                os.environ.get(
+                    "FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS",
+                    str(DEFAULT_DOCKER_PULL_MAX_ATTEMPTS),
+                ),
             )
         ),
-        activate_services=activate_services,
-        ensure_images=spec.platform == "macos" and activate_services,
+        compose_variant=spec.compose_variant,
+        activate_services=spec.activate_services,
+        ensure_images=spec.ensure_images,
         normalize_machine_name=spec.normalize_machine_name,
-        verify_launchd=spec.platform == "macos" and activate_services,
-        verify_rendered_files=spec.platform == "linux"
-        or (spec.platform == "macos" and not activate_services),
-        exercise_sidecars=activate_services,
-        exercise_browser_lab=activate_services,
+        verify_launchd=spec.verify_launchd,
+        verify_rendered_files=spec.verify_rendered_files,
+        exercise_sidecars=spec.exercise_sidecars,
+        exercise_browser_lab=spec.exercise_browser_lab,
+        phase_names=list(spec.phase_names),
         compose_files=[
             str((repo_root / relative_path).resolve()) for relative_path in spec.compose_files
         ],
     )
+    for env_name in (
+        "FRESH_HOST_CACHE_ROOT",
+        "UV_CACHE_DIR",
+        "npm_config_cache",
+        "HOMEBREW_CACHE",
+    ):
+        raw_path = os.environ.get(env_name, "").strip()
+        if raw_path:
+            Path(raw_path).expanduser().resolve().mkdir(parents=True, exist_ok=True)
     report = FreshHostReport(
         scenario_id=context.scenario_id,
         job_name=context.job_name,
@@ -321,10 +389,16 @@ def prepare_context(
         exports["STRONGCLAW_XDG_RUNTIME_DIR"] = context.xdg_runtime_dir
     if context.runtime_provider is not None:
         exports["FRESH_HOST_RUNTIME_PROVIDER"] = context.runtime_provider
+    if context.compose_variant is not None:
+        exports["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
     if context.runtime_report_path is not None:
         exports["FRESH_HOST_RUNTIME_REPORT_JSON"] = context.runtime_report_path
     if context.image_report_path is not None:
         exports["FRESH_HOST_IMAGE_REPORT_JSON"] = context.image_report_path
+    exports["FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM"] = str(context.docker_pull_parallelism)
+    exports["FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS"] = str(context.docker_pull_max_attempts)
+    if len(context.compose_files) == 1:
+        exports["FRESH_HOST_PRIMARY_COMPOSE_FILE"] = context.compose_files[0]
     _write_github_env(exports, github_env_file)
     _log(f"Prepared context for scenario={context.scenario_id} at {context.context_path}.")
     return context
@@ -360,6 +434,8 @@ def _phase_env(context: FreshHostContext) -> dict[str, str]:
         f"{context.app_home}/.config/varlock/bin:{path_prefix}"
         f":/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
     )
+    if context.compose_variant is not None:
+        env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
     return env
 
 
@@ -694,8 +770,6 @@ def _best_effort(command: list[str], *, cwd: Path, env: dict[str, str]) -> str |
 
 def _cleanup_macos(context: FreshHostContext) -> list[str]:
     """Best-effort cleanup for macOS launchd and compose state."""
-    if not context.activate_services:
-        return []
     repo_root, home_dir = _repo_paths(context)
     env = _phase_env(context)
     xdg_runtime_dir = home_dir / ".xdg-runtime"
@@ -710,6 +784,24 @@ def _cleanup_macos(context: FreshHostContext) -> list[str]:
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
         _venv_clawops_command(context, "ops", "--repo-root", ".", "sidecars", "down"),
         _venv_clawops_command(context, "ops", "--repo-root", ".", "browser-lab", "down"),
+        _venv_clawops_command(
+            context,
+            "ops",
+            "--repo-root",
+            ".",
+            "sidecars",
+            "down",
+            "--repo-local-state",
+        ),
+        _venv_clawops_command(
+            context,
+            "ops",
+            "--repo-root",
+            ".",
+            "browser-lab",
+            "down",
+            "--repo-local-state",
+        ),
     ]
     for command in commands:
         warning = _best_effort(command, cwd=repo_root, env=env)
@@ -723,21 +815,7 @@ def _cleanup_macos(context: FreshHostContext) -> list[str]:
 
 def scenario_phase_names(context: FreshHostContext) -> list[str]:
     """Return the ordered phase plan for one scenario context."""
-    if context.platform == "linux":
-        return [
-            "bootstrap",
-            "setup",
-            "verify-rendered-files",
-            "exercise-sidecars",
-            "exercise-browser-lab",
-        ]
-
-    phase_names = ["normalize-machine-name", "bootstrap", "setup", "verify-rendered-files"]
-    if context.exercise_sidecars:
-        phase_names.append("exercise-sidecars")
-    if context.exercise_browser_lab:
-        phase_names.append("exercise-browser-lab")
-    return phase_names
+    return list(context.phase_names)
 
 
 def _run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | None:
@@ -751,8 +829,9 @@ def _run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | 
     if phase_name == "verify-rendered-files":
         if context.platform == "linux":
             _verify_linux_rendered_units(context)
-        else:
-            _verify_macos_launchd(context)
+        return None
+    if phase_name == "verify-launchd":
+        _verify_macos_launchd(context)
         return None
     if phase_name == "exercise-sidecars":
         return (
@@ -901,6 +980,23 @@ def collect_diagnostics(context_path: Path) -> FreshHostReport:
             ],
             diagnostics_dir / "docker-ps.txt": ["docker", "ps", "-a"],
         }
+        if context.compose_files:
+            primary_compose_file = context.compose_files[0]
+            commands[diagnostics_dir / "compose-ps.txt"] = [
+                "docker",
+                "compose",
+                "-f",
+                primary_compose_file,
+                "ps",
+            ]
+            commands[diagnostics_dir / "compose-logs.txt"] = [
+                "docker",
+                "compose",
+                "-f",
+                primary_compose_file,
+                "logs",
+                "--no-color",
+            ]
         if shutil.which("colima") is not None:
             commands[diagnostics_dir / "colima-status.txt"] = ["colima", "status"]
             commands[diagnostics_dir / "colima-list.txt"] = ["colima", "list"]
@@ -909,6 +1005,16 @@ def collect_diagnostics(context_path: Path) -> FreshHostReport:
         if note is not None:
             notes.append(note)
             _log(note)
+    if context.platform == "macos":
+        for log_name in (
+            "launchd-gateway.out.log",
+            "launchd-gateway.err.log",
+            "launchd-sidecars.out.log",
+            "launchd-sidecars.err.log",
+        ):
+            source_path = _context_path(context.app_home) / ".openclaw" / "logs" / log_name
+            if source_path.is_file():
+                shutil.copyfile(source_path, diagnostics_dir / log_name)
     phase = PhaseResult(
         name="collect-diagnostics",
         status="success",
@@ -952,6 +1058,19 @@ def write_summary(context_path: Path, summary_file: Path) -> None:
     """Render one GitHub step summary for the scenario report."""
     context = load_context(context_path)
     report = load_report(_context_path(context.report_path))
+    cache_rows: list[tuple[str, str]] = []
+    summary_env_keys = (
+        ("Package cache", "FRESH_HOST_PACKAGE_CACHE_ENABLED"),
+        ("Package cache hit", "FRESH_HOST_PACKAGE_CACHE_HIT"),
+        ("Homebrew cache", "FRESH_HOST_HOMEBREW_CACHE_ENABLED"),
+        ("Homebrew cache hit", "FRESH_HOST_HOMEBREW_CACHE_HIT"),
+        ("Runtime download cache", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED"),
+        ("Runtime download cache hit", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT"),
+    )
+    for label, env_name in summary_env_keys:
+        raw_value = os.environ.get(env_name)
+        if raw_value is not None:
+            cache_rows.append((label, str(raw_value).lower()))
     lines: list[str] = [
         f"## {report.job_name}",
         "",
@@ -961,9 +1080,13 @@ def write_summary(context_path: Path, summary_file: Path) -> None:
         f"| Platform | {report.platform} |",
         f"| Status | {report.status} |",
         f"| Runtime provider | {report.runtime_provider or 'n/a'} |",
-        f"| Activate services | {context.activate_services} |",
+        f"| Activate services in setup | {context.activate_services} |",
+        f"| Docker pull parallelism | {context.docker_pull_parallelism} |",
+        f"| Docker pull max attempts | {context.docker_pull_max_attempts} |",
         "",
     ]
+    for label, value in cache_rows:
+        lines.insert(-1, f"| {label} | {value} |")
     if report.phases:
         lines.extend(
             [
@@ -1008,6 +1131,8 @@ def write_summary(context_path: Path, summary_file: Path) -> None:
                 f"| Runtime provider | {runtime_report.get('runtime_provider')} |",
                 f"| Host CPU count | {runtime_report.get('host_cpu_count')} |",
                 f"| Host memory GiB | {runtime_report.get('host_memory_gib')} |",
+                f"| Colima CPU count | {runtime_report.get('colima_cpu_count')} |",
+                f"| Colima memory GiB | {runtime_report.get('colima_memory_gib')} |",
                 f"| Docker host | {runtime_report.get('docker_host')} |",
                 f"| Failure reason | {runtime_report.get('failure_reason')} |",
                 "",

@@ -8,6 +8,7 @@ import os
 import pathlib
 import platform
 import shutil
+import time
 from collections.abc import Sequence
 
 from clawops.platform_compat import detect_host_platform, resolve_memory_plugin_lancedb_version
@@ -46,6 +47,8 @@ from clawops.strongclaw_runtime import (
 
 EXPECTED_QMD_BIN = pathlib.Path.home() / ".bun" / "bin" / "qmd"
 DEFAULT_QMD_PACKAGE = f"@tobilu/qmd@{DEFAULT_QMD_VERSION}"
+_UV_SYNC_MAX_ATTEMPTS = 3
+_UV_SYNC_RETRY_DELAY_SECONDS = 5
 
 
 def _stream_checked(
@@ -428,8 +431,21 @@ def uv_sync_managed_environment(
         "3.12",
         "--locked",
     ]
-    _stream_checked(command, timeout_seconds=3600)
-    return uv_binary
+    for attempt in range(1, _UV_SYNC_MAX_ATTEMPTS + 1):
+        try:
+            _stream_checked(command, timeout_seconds=3600)
+            return uv_binary
+        except CommandError:
+            if attempt == _UV_SYNC_MAX_ATTEMPTS:
+                raise
+            delay_seconds = _UV_SYNC_RETRY_DELAY_SECONDS * attempt
+            print(
+                "uv sync failed during bootstrap; "
+                f"retrying in {delay_seconds}s (attempt {attempt + 1}/{_UV_SYNC_MAX_ATTEMPTS})",
+                flush=True,
+            )
+            time.sleep(delay_seconds)
+    raise AssertionError("unreachable")
 
 
 def _render_post_bootstrap_config(

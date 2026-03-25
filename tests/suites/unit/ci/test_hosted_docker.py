@@ -100,11 +100,10 @@ def test_ensure_images_noops_when_context_disables_image_warming(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
 
     context = fresh_host.prepare_context(
-        scenario_id="macos",
+        scenario_id="linux",
         repo_root=workspace,
         runner_temp=runner_temp,
         workspace=workspace,
@@ -115,7 +114,7 @@ def test_ensure_images_noops_when_context_disables_image_warming(
 
     assert report.images == []
     assert report.pull_attempt_count == 0
-    assert Path(context.image_report_path or "").is_file()
+    assert context.image_report_path is None
 
 
 def test_install_runtime_rejects_non_macos_context(

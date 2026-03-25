@@ -32,6 +32,7 @@ LAUNCHD_PASSTHROUGH_ENV_VARS: Final[tuple[str, ...]] = (
     "DOCKER_CONFIG",
     "DOCKER_CONTEXT",
     "DOCKER_HOST",
+    "STRONGCLAW_COMPOSE_VARIANT",
 )
 LAUNCHD_GATEWAY_TIMEOUT_SECONDS: Final[int] = 30
 LAUNCHD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 1800
@@ -163,15 +164,19 @@ def _wait_for_launchd_service(label: str, *, persistent: bool, timeout_seconds: 
     """Wait for one launchd service to reach its steady state."""
     domain = _launchd_domain()
     deadline = time.monotonic() + timeout_seconds
+    last_error_detail = f"launchctl print failed for {label}"
     while True:
         current = run_command(["launchctl", "print", f"{domain}/{label}"], timeout_seconds=15)
         if not current.ok:
-            detail = (
+            last_error_detail = (
                 current.stderr.strip()
                 or current.stdout.strip()
                 or f"launchctl print failed for {label}"
             )
-            raise RuntimeError(detail)
+            if time.monotonic() >= deadline:
+                raise RuntimeError(last_error_detail)
+            time.sleep(1)
+            continue
         state = _launchd_field(current.stdout, "state")
         last_exit_code = _launchd_field(current.stdout, "last exit code")
         if persistent and state == "running":
