@@ -22,10 +22,23 @@ def test_workflow_dispatch_supports_cache_benchmarks() -> None:
 
     assert dispatch["macos_runtime_provider"]["default"] == "colima"
     assert dispatch["docker_pull_parallelism"]["default"] == "6"
+    assert dispatch["enable_package_cache"]["default"] is True
+    assert dispatch["enable_homebrew_cache"]["default"] is True
+    assert dispatch["enable_docker_image_cache"]["default"] is True
+    assert dispatch["enable_runtime_download_cache"]["default"] is True
     assert dispatch["enable_package_cache"]["type"] == "boolean"
     assert dispatch["enable_homebrew_cache"]["type"] == "boolean"
     assert dispatch["enable_docker_image_cache"]["type"] == "boolean"
     assert dispatch["enable_runtime_download_cache"]["type"] == "boolean"
+
+
+def test_workflow_dispatch_concurrency_keeps_distinct_benchmarks_alive() -> None:
+    workflow_text = _workflow_path().read_text(encoding="utf-8")
+
+    assert "github.event_name == 'workflow_dispatch'" in workflow_text
+    assert "inputs.macos_runtime_provider" in workflow_text
+    assert "inputs.docker_pull_parallelism" in workflow_text
+    assert "inputs.enable_runtime_download_cache" in workflow_text
 
 
 def test_macos_job_runs_the_full_flow_for_all_events() -> None:
@@ -78,5 +91,16 @@ def test_fresh_host_workflow_points_tools_at_restored_cache_dirs() -> None:
     assert "path: ${{ env.HOMEBREW_CACHE }}" in workflow_text
     assert 'cache_args+=(--cache-dir "${FRESH_HOST_DOCKER_IMAGE_CACHE_DIR}")' in workflow_text
     assert "FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR" in workflow_text
-    assert "Using cached Colima binary" in workflow_text
-    assert "Using cached Lima payload" in workflow_text
+    assert '"Colima binary"' in workflow_text
+    assert '"Lima payload"' in workflow_text
+    assert (
+        "Runtime provider=${runtime_provider} cache-enabled=${runtime_download_cache_enabled}"
+        in workflow_text
+    )
+    assert "MACOS_ORBSTACK_VERSION" in workflow_text
+    assert "MACOS_ORBSTACK_BUILD" in workflow_text
+    assert (
+        "OrbStack_v${MACOS_ORBSTACK_VERSION}_${MACOS_ORBSTACK_BUILD}_${orbstack_arch}.dmg"
+        in workflow_text
+    )
+    assert "orbctl _internal brew-postflight" in workflow_text

@@ -227,6 +227,8 @@ def ensure_images(
     _log(
         f"Local images before cache load: {len(local_before)} present, {len(missing_before_load)} missing."
     )
+    if missing_before_load:
+        _log("Missing before cache load: " + ", ".join(missing_before_load))
 
     cache_requested = cache_dir is not None
     cache_available = False
@@ -249,6 +251,8 @@ def ensure_images(
     local_after_load = list_local_images(images)
     missing_after_load = [image for image in images if image not in local_after_load]
     _log(f"After cache load: {len(local_after_load)} present, {len(missing_after_load)} missing.")
+    if missing_after_load:
+        _log("Missing after cache load: " + ", ".join(missing_after_load))
     pulled_images: list[str] = []
     if missing_after_load:
         pull_result = pull_images(missing_after_load, parallelism=parallelism)
@@ -304,14 +308,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     pull_parser = subparsers.add_parser("pull", help="Pull compose images concurrently.")
     pull_parser.add_argument("compose_files", nargs="+", type=pathlib.Path)
-    pull_parser.add_argument("--parallelism", type=int, default=3)
+    pull_parser.add_argument("--parallelism", type=int, default=6)
 
     ensure_parser = subparsers.add_parser(
         "ensure",
         help="Load cached images when available and pull only missing images.",
     )
     ensure_parser.add_argument("compose_files", nargs="+", type=pathlib.Path)
-    ensure_parser.add_argument("--parallelism", type=int, default=3)
+    ensure_parser.add_argument("--parallelism", type=int, default=6)
     ensure_parser.add_argument("--cache-dir", type=pathlib.Path)
     ensure_parser.add_argument("--report-path", type=pathlib.Path)
 
