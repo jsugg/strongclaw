@@ -15,7 +15,7 @@ on:
         description: Parallelism for hosted macOS Docker image pulling.
         required: true
         type: string
-        default: "6"
+        default: "3"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
         required: true
@@ -65,14 +65,11 @@ env:
   DEFAULT_HOMEBREW_CACHE_ENABLED: "true"
   DEFAULT_DOCKER_IMAGE_CACHE_ENABLED: "true"
   DEFAULT_RUNTIME_DOWNLOAD_CACHE_ENABLED: "true"
-  FRESH_HOST_DOCKER_PULL_PARALLELISM: "6"
+  FRESH_HOST_DOCKER_PULL_PARALLELISM: "3"
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
   MACOS_ORBSTACK_VERSION: "1.11.3"
-  MACOS_ORBSTACK_BUILD: "19358"
-  MACOS_ORBSTACK_SHA256_ARM64: "ff3ba392672d31d2549b777b4638de89cf10aef592944014863160a2e05778dc"
-  MACOS_ORBSTACK_SHA256_X86_64: "a0b39329e90353cf34a7d0edcdc47f9aec333ee140defbbbf3d68460d15b731f"
   FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm
@@ -457,16 +454,6 @@ jobs:
             mv "${output_path}.tmp" "${output_path}"
             echo "Downloaded ${label} into runtime cache: ${output_path}"
           }
-          verify_sha256() {
-            local file_path="$1"
-            local expected_sha="$2"
-            local actual_sha
-            actual_sha="$(shasum -a 256 "${file_path}" | awk '{print $1}')"
-            if [[ "${actual_sha}" != "${expected_sha}" ]]; then
-              echo "Checksum mismatch for ${file_path}: expected ${expected_sha}, got ${actual_sha}" >&2
-              return 1
-            fi
-          }
           if [[ "${arch_name}" != "x86_64" ]]; then
             echo "GitHub-hosted arm64 macOS runners do not support nested virtualization; Fresh Host Acceptance requires macos-15-intel." >&2
             rc=1
@@ -531,43 +518,8 @@ jobs:
                 colima start --cpu "${host_cpu_count}" --memory "${colima_memory_gib}" --disk "${MACOS_COLIMA_DISK_GIB}" --arch x86_64 --vm-type=vz || rc=1
               fi
             elif [[ "${runtime_provider}" == "orbstack" ]]; then
-              orbstack_arch="amd64"
-              orbstack_sha="${MACOS_ORBSTACK_SHA256_X86_64}"
-              orbstack_dmg_path="${runtime_cache_dir}/OrbStack_v${MACOS_ORBSTACK_VERSION}_${MACOS_ORBSTACK_BUILD}_${orbstack_arch}.dmg"
-              download_to_cache \
-                "https://cdn-updates.orbstack.dev/${orbstack_arch}/OrbStack_v${MACOS_ORBSTACK_VERSION}_${MACOS_ORBSTACK_BUILD}_${orbstack_arch}.dmg" \
-                "${orbstack_dmg_path}" \
-                "OrbStack disk image" \
-                || rc=1
-              if [[ ${rc} -eq 0 ]]; then
-                verify_sha256 "${orbstack_dmg_path}" "${orbstack_sha}" || rc=1
-              fi
-              if [[ ${rc} -eq 0 ]]; then
-                mount_point="$(mktemp -d)"
-                hdiutil attach -nobrowse -mountpoint "${mount_point}" "${orbstack_dmg_path}" || rc=1
-                if [[ ${rc} -eq 0 ]]; then
-                  sudo rm -rf /Applications/OrbStack.app
-                  sudo rsync -a "${mount_point}/OrbStack.app/" /Applications/OrbStack.app/ || rc=1
-                  hdiutil detach "${mount_point}" || true
-                fi
-                rm -rf "${mount_point}"
-              fi
-              if [[ ${rc} -eq 0 ]]; then
-                sudo install -m 0755 /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb
-                sudo install -m 0755 /Applications/OrbStack.app/Contents/MacOS/bin/orbctl /usr/local/bin/orbctl
-                /Applications/OrbStack.app/Contents/MacOS/bin/orbctl _internal brew-postflight || true
-                open -gj -a /Applications/OrbStack.app || true
-                export PATH="${RUNNER_HOME}/.orbstack/bin:/Applications/OrbStack.app/Contents/MacOS/bin:${PATH}"
-                orbctl version || true
-                orb config set setup.use_admin false || true
-                orb start || rc=1
-                docker context use orbstack || true
-                {
-                  echo "PATH=${RUNNER_HOME}/.orbstack/bin:/Applications/OrbStack.app/Contents/MacOS/bin:${PATH}"
-                  echo "FRESH_HOST_HOST_CPU_COUNT=${host_cpu_count}"
-                  echo "FRESH_HOST_HOST_MEMORY_GIB=${host_memory_gib}"
-                } >> "${GITHUB_ENV}"
-              fi
+              echo "OrbStack ${MACOS_ORBSTACK_VERSION} is unsupported on GitHub-hosted Intel macOS runners: vmgr rejects CPUs newer than Ice Lake. Hosted CI must use colima." >&2
+              rc=1
             else
               echo "Unsupported hosted macOS runtime provider: ${runtime_provider}" >&2
               rc=1
@@ -929,7 +881,12 @@ jobs:
                   handle.write(f"| Cache available | {image_report.get('cache_available')} |\n")
                   handle.write(f"| Cache loaded | {image_report.get('cache_loaded')} |\n")
                   handle.write(f"| Cache saved | {image_report.get('cache_saved')} |\n")
+                  handle.write(f"| Cache loaded images | {len(image_report.get('cache_loaded_images', []))} |\n")
+                  handle.write(f"| Cache saved images | {len(image_report.get('cache_saved_images', []))} |\n")
+                  handle.write(f"| Cache load errors | {len(image_report.get('cache_load_errors', []))} |\n")
+                  handle.write(f"| Cache save errors | {len(image_report.get('cache_save_errors', []))} |\n")
                   handle.write(f"| Pulled images | {len(image_report.get('pulled_images', []))} |\n")
+                  handle.write(f"| Failure reason | {image_report.get('failure_reason')} |\n")
                   handle.write("\n")
               handle.write(f"Diagnostics artifact root: `{report['reportDir']}`\n\n")
           PY

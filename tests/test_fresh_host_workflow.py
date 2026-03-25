@@ -21,7 +21,7 @@ def test_workflow_dispatch_supports_cache_benchmarks() -> None:
     dispatch = workflow.get("on", workflow[True])["workflow_dispatch"]["inputs"]
 
     assert dispatch["macos_runtime_provider"]["default"] == "colima"
-    assert dispatch["docker_pull_parallelism"]["default"] == "6"
+    assert dispatch["docker_pull_parallelism"]["default"] == "3"
     assert dispatch["enable_package_cache"]["default"] is True
     assert dispatch["enable_homebrew_cache"]["default"] is True
     assert dispatch["enable_docker_image_cache"]["default"] is True
@@ -98,9 +98,4 @@ def test_fresh_host_workflow_points_tools_at_restored_cache_dirs() -> None:
         in workflow_text
     )
     assert "MACOS_ORBSTACK_VERSION" in workflow_text
-    assert "MACOS_ORBSTACK_BUILD" in workflow_text
-    assert (
-        "OrbStack_v${MACOS_ORBSTACK_VERSION}_${MACOS_ORBSTACK_BUILD}_${orbstack_arch}.dmg"
-        in workflow_text
-    )
-    assert "orbctl _internal brew-postflight" in workflow_text
+    assert "Hosted CI must use colima" in workflow_text

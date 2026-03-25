@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import pathlib
 import re
@@ -63,6 +64,10 @@ class EnsureReport:
     cache_available: bool
     cache_loaded: bool
     cache_saved: bool
+    cache_loaded_images: list[str]
+    cache_load_errors: list[str]
+    cache_saved_images: list[str]
+    cache_save_errors: list[str]
     local_before: list[str]
     missing_before_load: list[str]
     missing_after_load: list[str]
@@ -71,6 +76,7 @@ class EnsureReport:
     pull_parallelism: int
     cache_tar_path: str | None
     cache_manifest_path: str | None
+    failure_reason: str | None
     created_at: str
 
 
@@ -84,6 +90,17 @@ def _cache_manifest_path(cache_dir: pathlib.Path) -> pathlib.Path:
     return cache_dir / CACHE_MANIFEST_NAME
 
 
+def _cache_entry_name(image: str) -> str:
+    """Return one deterministic cache archive name for an image reference."""
+    digest = hashlib.sha256(image.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"{digest}.tar"
+
+
+def _cache_entry_path(cache_dir: pathlib.Path, image: str) -> pathlib.Path:
+    """Return one per-image cache tar path."""
+    return cache_dir / _cache_entry_name(image)
+
+
 def _read_cache_manifest(cache_dir: pathlib.Path) -> dict[str, object]:
     """Read the cache manifest if one exists."""
     manifest_path = _cache_manifest_path(cache_dir)
@@ -95,6 +112,11 @@ def _read_cache_manifest(cache_dir: pathlib.Path) -> dict[str, object]:
 def _path_size_mib(path: pathlib.Path) -> float:
     """Return the size of one file in MiB."""
     return path.stat().st_size / (1024 * 1024)
+
+
+def _sum_path_sizes_mib(paths: Iterable[pathlib.Path]) -> float:
+    """Return the total size of existing files in MiB."""
+    return sum(_path_size_mib(path) for path in paths if path.is_file())
 
 
 def list_local_images(images: Sequence[str]) -> list[str]:
@@ -112,23 +134,48 @@ def list_local_images(images: Sequence[str]) -> list[str]:
     return present
 
 
-def load_image_cache(cache_dir: pathlib.Path) -> bool:
-    """Load cached images from one tarball if it exists."""
-    tar_path = _cache_tar_path(cache_dir)
-    if not tar_path.is_file():
-        return False
+def load_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Load cached images best-effort from per-image tarballs."""
+    manifest = _read_cache_manifest(cache_dir)
+    entries = manifest.get("entries")
+    cache_paths: list[tuple[str, pathlib.Path]] = []
+    if isinstance(entries, dict):
+        for image in images:
+            entry_name = entries.get(image)
+            if not isinstance(entry_name, str):
+                continue
+            cache_path = cache_dir / entry_name
+            if cache_path.is_file():
+                cache_paths.append((image, cache_path))
+    else:
+        legacy_tar_path = _cache_tar_path(cache_dir)
+        if legacy_tar_path.is_file():
+            cache_paths.append(("legacy-all-images", legacy_tar_path))
+    if not cache_paths:
+        return [], []
+
+    loaded_images: list[str] = []
+    load_errors: list[str] = []
     started = time.monotonic()
-    result = subprocess.run(
-        ["docker", "load", "-i", str(tar_path)],
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"docker load failed for {tar_path}")
+    for image, tar_path in cache_paths:
+        result = subprocess.run(
+            ["docker", "load", "-i", str(tar_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            loaded_images.append(image)
+            continue
+        output = "\n".join(
+            chunk for chunk in (result.stdout.strip(), result.stderr.strip()) if chunk
+        )
+        load_errors.append(f"{image}: {output or 'docker load failed'}")
     _log(
-        f"Loaded Docker image cache from {tar_path} in {time.monotonic() - started:.1f}s "
-        f"({ _path_size_mib(tar_path):.1f} MiB)."
+        f"Loaded {len(loaded_images)}/{len(cache_paths)} cache archive(s) from {cache_dir} in "
+        f"{time.monotonic() - started:.1f}s ({_sum_path_sizes_mib(path for _, path in cache_paths):.1f} MiB)."
     )
-    return True
+    return loaded_images, load_errors
 
 
 def _pull_one_image(image: str) -> tuple[str, int, float, str]:
@@ -181,27 +228,42 @@ def save_images(images: Sequence[str], *, output_path: pathlib.Path) -> int:
     return result.returncode
 
 
-def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> None:
-    """Persist the current image set into the cache directory."""
+def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Persist the current image set into per-image cache tarballs best-effort."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    tar_path = _cache_tar_path(cache_dir)
     manifest_path = _cache_manifest_path(cache_dir)
     started = time.monotonic()
-    save_result = save_images(images, output_path=tar_path)
-    if save_result != 0:
-        raise RuntimeError(f"docker image save failed for {tar_path}")
+    saved_images: list[str] = []
+    save_errors: list[str] = []
+    manifest_entries: dict[str, str] = {}
+    saved_paths: list[pathlib.Path] = []
+    legacy_tar_path = _cache_tar_path(cache_dir)
+    if legacy_tar_path.exists():
+        legacy_tar_path.unlink()
+    for image in images:
+        tar_path = _cache_entry_path(cache_dir, image)
+        save_result = save_images([image], output_path=tar_path)
+        if save_result != 0:
+            save_errors.append(f"{image}: docker image save failed")
+            if tar_path.exists():
+                tar_path.unlink()
+            continue
+        saved_images.append(image)
+        manifest_entries[image] = tar_path.name
+        saved_paths.append(tar_path)
     manifest = {
         "createdAt": datetime.now(tz=UTC).isoformat(),
-        "images": list(images),
-        "tarPath": str(tar_path),
+        "entries": manifest_entries,
+        "images": saved_images,
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     _log(
-        f"Saved Docker image cache to {tar_path} in {time.monotonic() - started:.1f}s "
-        f"({ _path_size_mib(tar_path):.1f} MiB)."
+        f"Saved {len(saved_images)}/{len(images)} image cache archive(s) in "
+        f"{time.monotonic() - started:.1f}s ({_sum_path_sizes_mib(saved_paths):.1f} MiB)."
     )
+    return saved_images, save_errors
 
 
 def _write_report(report: EnsureReport, report_path: pathlib.Path) -> None:
@@ -234,9 +296,18 @@ def ensure_images(
     cache_available = False
     cache_loaded = False
     cache_saved = False
+    cache_loaded_images: list[str] = []
+    cache_load_errors: list[str] = []
+    cache_saved_images: list[str] = []
+    cache_save_errors: list[str] = []
+    failure_reason: str | None = None
     if cache_dir is not None:
-        cache_available = _cache_tar_path(cache_dir).is_file()
-        _log(f"Cache requested from {cache_dir}; tar present={cache_available}.")
+        manifest = _read_cache_manifest(cache_dir)
+        cache_available = bool(
+            _cache_tar_path(cache_dir).is_file()
+            or any(_cache_entry_path(cache_dir, image).is_file() for image in images)
+        )
+        _log(f"Cache requested from {cache_dir}; cache present={cache_available}.")
         manifest = _read_cache_manifest(cache_dir)
         if manifest:
             manifest_images = manifest.get("images")
@@ -246,7 +317,10 @@ def ensure_images(
                 f"{manifest_image_count} image(s), createdAt={manifest.get('createdAt')}"
             )
     if missing_before_load and cache_dir is not None and cache_available:
-        cache_loaded = load_image_cache(cache_dir)
+        cache_loaded_images, cache_load_errors = load_image_cache(cache_dir, missing_before_load)
+        cache_loaded = bool(cache_loaded_images)
+        if cache_load_errors:
+            _log("Cache load errors: " + " | ".join(cache_load_errors))
 
     local_after_load = list_local_images(images)
     missing_after_load = [image for image in images if image not in local_after_load]
@@ -257,6 +331,35 @@ def ensure_images(
     if missing_after_load:
         pull_result = pull_images(missing_after_load, parallelism=parallelism)
         if pull_result != 0:
+            failure_reason = "docker pull failed"
+            local_after_pull = list_local_images(images)
+            missing_after_pull = [image for image in images if image not in local_after_pull]
+            report = EnsureReport(
+                compose_files=[str(path) for path in compose_paths],
+                images=list(images),
+                cache_requested=cache_requested,
+                cache_available=cache_available,
+                cache_loaded=cache_loaded,
+                cache_saved=cache_saved,
+                cache_loaded_images=cache_loaded_images,
+                cache_load_errors=cache_load_errors,
+                cache_saved_images=cache_saved_images,
+                cache_save_errors=cache_save_errors,
+                local_before=local_before,
+                missing_before_load=missing_before_load,
+                missing_after_load=missing_after_load,
+                pulled_images=pulled_images,
+                missing_after_pull=missing_after_pull,
+                pull_parallelism=parallelism,
+                cache_tar_path=str(_cache_tar_path(cache_dir)) if cache_dir is not None else None,
+                cache_manifest_path=(
+                    str(_cache_manifest_path(cache_dir)) if cache_dir is not None else None
+                ),
+                failure_reason=failure_reason,
+                created_at=datetime.now(tz=UTC).isoformat(),
+            )
+            if report_path is not None:
+                _write_report(report, report_path)
             return pull_result
         pulled_images = list(missing_after_load)
     else:
@@ -266,15 +369,44 @@ def ensure_images(
     missing_after_pull = [image for image in images if image not in local_after_pull]
     _log(f"After pull: {len(local_after_pull)} present, {len(missing_after_pull)} missing.")
     if missing_after_pull:
+        failure_reason = "images remain unavailable after pull"
         print(
             "Images remain unavailable after cache load and pull: " + ", ".join(missing_after_pull),
             file=sys.stderr,
         )
+        report = EnsureReport(
+            compose_files=[str(path) for path in compose_paths],
+            images=list(images),
+            cache_requested=cache_requested,
+            cache_available=cache_available,
+            cache_loaded=cache_loaded,
+            cache_saved=cache_saved,
+            cache_loaded_images=cache_loaded_images,
+            cache_load_errors=cache_load_errors,
+            cache_saved_images=cache_saved_images,
+            cache_save_errors=cache_save_errors,
+            local_before=local_before,
+            missing_before_load=missing_before_load,
+            missing_after_load=missing_after_load,
+            pulled_images=pulled_images,
+            missing_after_pull=missing_after_pull,
+            pull_parallelism=parallelism,
+            cache_tar_path=str(_cache_tar_path(cache_dir)) if cache_dir is not None else None,
+            cache_manifest_path=(
+                str(_cache_manifest_path(cache_dir)) if cache_dir is not None else None
+            ),
+            failure_reason=failure_reason,
+            created_at=datetime.now(tz=UTC).isoformat(),
+        )
+        if report_path is not None:
+            _write_report(report, report_path)
         return 1
 
     if cache_dir is not None and (not cache_available or bool(pulled_images)):
-        save_image_cache(cache_dir, images)
-        cache_saved = True
+        cache_saved_images, cache_save_errors = save_image_cache(cache_dir, images)
+        cache_saved = bool(cache_saved_images)
+        if cache_save_errors:
+            _log("Cache save errors: " + " | ".join(cache_save_errors))
 
     report = EnsureReport(
         compose_files=[str(path) for path in compose_paths],
@@ -283,6 +415,10 @@ def ensure_images(
         cache_available=cache_available,
         cache_loaded=cache_loaded,
         cache_saved=cache_saved,
+        cache_loaded_images=cache_loaded_images,
+        cache_load_errors=cache_load_errors,
+        cache_saved_images=cache_saved_images,
+        cache_save_errors=cache_save_errors,
         local_before=local_before,
         missing_before_load=missing_before_load,
         missing_after_load=missing_after_load,
@@ -291,6 +427,7 @@ def ensure_images(
         pull_parallelism=parallelism,
         cache_tar_path=str(_cache_tar_path(cache_dir)) if cache_dir is not None else None,
         cache_manifest_path=str(_cache_manifest_path(cache_dir)) if cache_dir is not None else None,
+        failure_reason=failure_reason,
         created_at=datetime.now(tz=UTC).isoformat(),
     )
     if report_path is not None:
@@ -308,14 +445,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     pull_parser = subparsers.add_parser("pull", help="Pull compose images concurrently.")
     pull_parser.add_argument("compose_files", nargs="+", type=pathlib.Path)
-    pull_parser.add_argument("--parallelism", type=int, default=6)
+    pull_parser.add_argument("--parallelism", type=int, default=3)
 
     ensure_parser = subparsers.add_parser(
         "ensure",
         help="Load cached images when available and pull only missing images.",
     )
     ensure_parser.add_argument("compose_files", nargs="+", type=pathlib.Path)
-    ensure_parser.add_argument("--parallelism", type=int, default=6)
+    ensure_parser.add_argument("--parallelism", type=int, default=3)
     ensure_parser.add_argument("--cache-dir", type=pathlib.Path)
     ensure_parser.add_argument("--report-path", type=pathlib.Path)
 

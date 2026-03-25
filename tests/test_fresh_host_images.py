@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 from typing import Any
@@ -101,19 +102,25 @@ def test_ensure_images_loads_cache_then_pulls_only_missing(tmp_path: pathlib.Pat
 
     module.list_local_images = lambda images: next(list_calls)
 
-    def fake_load_image_cache(cache_path: pathlib.Path) -> bool:
+    def fake_load_image_cache(
+        cache_path: pathlib.Path, images: list[str]
+    ) -> tuple[list[str], list[str]]:
         assert cache_path == cache_dir
+        assert images == ["mcr.microsoft.com/playwright:v1.41.1-jammy"]
         state["cache_loaded"] = True
-        return True
+        return ["mcr.microsoft.com/playwright:v1.41.1-jammy"], []
 
     def fake_pull_images(images: list[str], *, parallelism: int) -> int:
         pulled.append(list(images))
         assert parallelism == 2
         return 0
 
-    def fake_save_image_cache(cache_path: pathlib.Path, images: list[str]) -> None:
+    def fake_save_image_cache(
+        cache_path: pathlib.Path, images: list[str]
+    ) -> tuple[list[str], list[str]]:
         saved.append(list(images))
         assert cache_path == cache_dir
+        return list(images), []
 
     module.load_image_cache = fake_load_image_cache
     module.pull_images = fake_pull_images
@@ -142,12 +149,39 @@ def test_ensure_images_skips_cache_when_not_requested(tmp_path: pathlib.Path) ->
     state: dict[str, bool] = {"cache_loaded": False}
 
     module.list_local_images = lambda images: next(list_calls)
-    module.load_image_cache = lambda cache_path: state.__setitem__("cache_loaded", True)
+    module.load_image_cache = lambda cache_path, images: (
+        state.__setitem__("cache_loaded", True) or [],
+        [],
+    )
     module.pull_images = lambda images, *, parallelism: pulled.append(list(images)) or 0
-    module.save_image_cache = lambda cache_path, images: None
+    module.save_image_cache = lambda cache_path, images: (list(images), [])
 
     rc = module.ensure_images([compose_path], parallelism=1, cache_dir=None, report_path=None)
 
     assert rc == 0
     assert state["cache_loaded"] is False
     assert pulled == [["postgres:16"]]
+
+
+def test_ensure_images_writes_failure_report_on_pull_error(tmp_path: pathlib.Path) -> None:
+    module = _load_module()
+    compose_path = tmp_path / "aux.yaml"
+    compose_path.write_text("services:\n  postgres:\n    image: postgres:16\n", encoding="utf-8")
+    report_path = tmp_path / "report.json"
+
+    list_calls = iter([[], [], []])
+    module.list_local_images = lambda images: next(list_calls)
+    module.pull_images = lambda images, *, parallelism: 1
+    module.load_image_cache = lambda cache_path, images: ([], [])
+
+    rc = module.ensure_images(
+        [compose_path],
+        parallelism=3,
+        cache_dir=None,
+        report_path=report_path,
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert rc == 1
+    assert report["failure_reason"] == "docker pull failed"
+    assert report["missing_after_pull"] == ["postgres:16"]
