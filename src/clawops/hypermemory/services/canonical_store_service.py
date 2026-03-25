@@ -9,12 +9,14 @@ shrink `HypermemoryEngine`.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
 
 from clawops.hypermemory._engine import storage as storage_impl
+from clawops.hypermemory._engine.query import _row_to_search_hit as row_to_search_hit_impl
 from clawops.hypermemory.capture import (
     CaptureCandidate,
     extract_candidates_llm,
@@ -48,14 +50,12 @@ class CanonicalStoreService:
         is_dirty: Callable[[], bool],
         reindex: Callable[..., ReindexSummary],
         search: Callable[..., list[SearchHit]],
-        get_fact: Callable[..., SearchHit | None],
     ) -> None:
         self.config: HypermemoryConfig = config
         self._connect = connect
         self._is_dirty = is_dirty
         self._reindex = reindex
         self._search = search
-        self._get_fact = get_fact
 
     # ---- engine-facing callables expected by storage_impl ----
 
@@ -71,10 +71,146 @@ class CanonicalStoreService:
     def search(self, query: str, **kwargs: Any) -> list[SearchHit]:
         return self._search(query, **kwargs)
 
-    def get_fact(self, fact_key: str, **kwargs: Any) -> SearchHit | None:
-        return self._get_fact(fact_key, **kwargs)
-
     # ---- public API surface delegated from HypermemoryEngine ----
+
+    def get_fact(
+        self,
+        fact_key: str,
+        *,
+        conn: sqlite3.Connection | None = None,
+        scope: str | None = None,
+    ) -> SearchHit | None:
+        """Return the current active value for a canonical fact slot."""
+        normalized_key = fact_key.strip()
+        if not normalized_key:
+            return None
+        owns_connection = conn is None
+        active_conn = self.connect() if conn is None else conn
+        try:
+            row = active_conn.execute(
+                """
+                    SELECT
+                        search_items.id,
+                        search_items.rel_path,
+                        search_items.start_line,
+                        search_items.end_line,
+                        search_items.snippet,
+                        search_items.lane,
+                        search_items.item_type,
+                        search_items.confidence,
+                        search_items.scope,
+                        search_items.evidence_count,
+                        search_items.contradiction_count,
+                        search_items.entities_json,
+                        search_items.modified_at,
+                        search_items.importance,
+                        search_items.tier,
+                        search_items.access_count,
+                        search_items.last_access_date,
+                        search_items.injected_count,
+                        search_items.confirmed_count,
+                        search_items.bad_recall_count,
+                        search_items.fact_key,
+                        search_items.invalidated_at,
+                        search_items.supersedes
+                    FROM fact_registry
+                    JOIN search_items ON search_items.id = fact_registry.current_item_id
+                    WHERE fact_registry.fact_key = ?
+                    """,
+                (normalized_key,),
+            ).fetchone()
+            if row is None:
+                return None
+            if scope is not None and str(row["scope"]) not in {scope, "global"}:
+                return None
+            return self._row_to_search_hit(row)
+        finally:
+            if owns_connection:
+                active_conn.close()
+
+    def list_facts(
+        self,
+        *,
+        category: str | None = None,
+        scope: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List current canonical facts from the registry."""
+        with self.connect() as conn:
+            params: list[Any] = []
+            category_clause = ""
+            if category:
+                category_clause = "AND fact_registry.category = ?"
+                params.append(category)
+            rows = conn.execute(
+                f"""
+                    SELECT
+                        fact_registry.fact_key,
+                        fact_registry.category,
+                        fact_registry.version_count,
+                        fact_registry.history_json,
+                        search_items.id,
+                        search_items.rel_path,
+                        search_items.start_line,
+                        search_items.end_line,
+                        search_items.snippet,
+                        search_items.scope,
+                        search_items.fact_key,
+                        search_items.supersedes
+                    FROM fact_registry
+                    JOIN search_items ON search_items.id = fact_registry.current_item_id
+                    WHERE 1 = 1
+                      {category_clause}
+                    ORDER BY fact_registry.fact_key
+                    """,
+                params,
+            ).fetchall()
+            payload: list[dict[str, Any]] = []
+            for row in rows:
+                if scope is not None and str(row["scope"]) not in {scope, "global"}:
+                    continue
+                payload.append(
+                    {
+                        "factKey": str(row["fact_key"]),
+                        "category": str(row["category"]),
+                        "versionCount": int(row["version_count"]),
+                        "history": json.loads(str(row["history_json"])),
+                        "item": self._row_to_search_hit(row).to_dict(),
+                    }
+                )
+            return payload
+
+    def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run simple benchmark cases against the current engine."""
+        results: list[dict[str, Any]] = []
+        passed = 0
+        for case in cases:
+            name = str(case["name"])
+            query = str(case["query"])
+            expected_paths = {str(entry) for entry in case.get("expectedPaths", [])}
+            hits = self.search(
+                query,
+                max_results=int(case.get("maxResults", self.config.default_max_results)),
+                lane=str(case.get("lane", "all")),  # type: ignore[arg-type]
+            )
+            actual_paths = {hit.path for hit in hits}
+            hit = expected_paths.issubset(actual_paths)
+            if hit:
+                passed += 1
+            results.append(
+                {
+                    "name": name,
+                    "query": query,
+                    "expectedPaths": sorted(expected_paths),
+                    "actualPaths": sorted(actual_paths),
+                    "passed": hit,
+                }
+            )
+        return {
+            "provider": "strongclaw-hypermemory",
+            "cases": results,
+            "passed": passed,
+            "total": len(results),
+        }
 
     def export_memory_pro_import(
         self,
@@ -631,6 +767,7 @@ class CanonicalStoreService:
     _apply_forget = storage_impl._apply_forget
     _invalidated_line = storage_impl._invalidated_line
     _synced_line_from_row = storage_impl._synced_line_from_row
+    _row_to_search_hit = row_to_search_hit_impl
     _is_semantically_duplicate = storage_impl._is_semantically_duplicate
     _increment_feedback_counts = storage_impl._increment_feedback_counts
     _age_days = storage_impl._age_days

@@ -71,9 +71,6 @@ from clawops.hypermemory._engine.storage import (
     _synced_line_from_row,
     _typed_entry_text,
 )
-from clawops.hypermemory._engine.storage import benchmark_cases as _benchmark_cases
-from clawops.hypermemory._engine.storage import get_fact as _get_fact
-from clawops.hypermemory._engine.storage import list_facts as _list_facts
 from clawops.hypermemory._engine.verify import (
     _collection_has_hypermemory_vector_lanes,
     _hypermemory_probe_query,
@@ -155,7 +152,6 @@ class HypermemoryEngine:
             is_dirty=self.is_dirty,
             reindex=self.reindex,
             search=self.search,
-            get_fact=self.get_fact,
         )
 
     # ---- phase-1 composition: internal helper compatibility layer ----
@@ -480,7 +476,7 @@ class HypermemoryEngine:
         scope: str | None = None,
     ) -> SearchHit | None:
         """Return the current active value for a canonical fact slot."""
-        return _get_fact(self, fact_key, conn=conn, scope=scope)
+        return self.canonical_store.get_fact(fact_key, conn=conn, scope=scope)
 
     def list_facts(
         self,
@@ -489,11 +485,11 @@ class HypermemoryEngine:
         scope: str | None = None,
     ) -> list[dict[str, Any]]:
         """List current canonical facts from the registry."""
-        return _list_facts(self, category=category, scope=scope)
+        return self.canonical_store.list_facts(category=category, scope=scope)
 
     def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
         """Run simple benchmark cases against the current engine."""
-        return _benchmark_cases(self, cases)
+        return self.canonical_store.benchmark_cases(cases)
 
     # Pure helper wrappers. `_engine/*` no longer depends on these being bound on the
     # engine, but we keep them for internal/test seams.
