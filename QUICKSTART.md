@@ -26,7 +26,7 @@ If you want shorter commands in an interactive shell, sync the dev environment
 once and activate `.venv` before running tools directly:
 
 ```bash
-uv sync --locked --extra dev
+uv sync --locked
 source .venv/bin/activate
 pytest -q
 deactivate

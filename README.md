@@ -195,7 +195,7 @@ If you want shorter commands in a shell session, sync the dev environment once
 and activate it before running tools directly:
 
 ```bash
-uv sync --locked --extra dev
+uv sync --locked
 source .venv/bin/activate
 pytest -q
 clawops --help

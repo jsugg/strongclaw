@@ -65,3 +65,14 @@ def test_ci_workflows_use_uv_default_dev_group() -> None:
     for workflow_path in workflow_dir.glob("*.yml"):
         text = workflow_path.read_text(encoding="utf-8")
         assert "--extra dev" not in text, workflow_path.as_posix()
+
+
+def test_operator_docs_use_uv_default_dev_group() -> None:
+    for relative_path in (
+        "README.md",
+        "QUICKSTART.md",
+        "SETUP_GUIDE.md",
+        "platform/docs/HOST_PLATFORMS.md",
+    ):
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "--extra dev" not in text, relative_path
