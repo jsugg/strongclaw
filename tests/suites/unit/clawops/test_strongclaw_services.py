@@ -9,6 +9,7 @@ import pytest
 from clawops import strongclaw_services
 from clawops.common import load_text
 from clawops.strongclaw_runtime import ExecResult
+from tests.fixtures.repo import REPO_ROOT
 
 
 def _result(*, stdout: str = "", stderr: str = "", returncode: int = 0) -> ExecResult:
@@ -90,15 +91,13 @@ def test_render_service_files_includes_launchd_docker_env(
     """Rendered launchd plists should inherit the active shell Docker settings."""
     output_dir = tmp_path / "LaunchAgents"
     state_dir = tmp_path / "state"
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-
     monkeypatch.setattr(strongclaw_services, "launchd_dir", lambda: output_dir)
     monkeypatch.setenv("DOCKER_HOST", "unix:///tmp/docker.sock")
     monkeypatch.setenv("DOCKER_CONFIG", "/tmp/docker&config")
     monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
 
     payload = strongclaw_services.render_service_files(
-        repo_root,
+        REPO_ROOT,
         service_manager="launchd",
         state_dir=state_dir,
     )
@@ -118,14 +117,12 @@ def test_render_service_files_omits_launchd_passthrough_env_when_unset(
     """Rendered launchd plists should stay unchanged when no Docker env is exported."""
     output_dir = tmp_path / "LaunchAgents"
     state_dir = tmp_path / "state"
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-
     monkeypatch.setattr(strongclaw_services, "launchd_dir", lambda: output_dir)
     for key in strongclaw_services.LAUNCHD_PASSTHROUGH_ENV_VARS:
         monkeypatch.delenv(key, raising=False)
 
     strongclaw_services.render_service_files(
-        repo_root,
+        REPO_ROOT,
         service_manager="launchd",
         state_dir=state_dir,
     )

@@ -11,6 +11,7 @@ from clawops.openclaw_config import (
     render_openclaw_profile,
     render_qmd_overlay,
 )
+from tests.fixtures.repo import REPO_ROOT
 
 
 def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) -> None:
@@ -109,7 +110,7 @@ def test_render_overlay_accepts_full_json5_syntax(tmp_path: pathlib.Path) -> Non
 
 
 def test_repo_qmd_template_includes_expected_default_corpus() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_qmd_overlay(
         template_path=repo_root / "platform/configs/openclaw/40-qmd-context.json5",
         repo_root=repo_root,
@@ -131,7 +132,7 @@ def test_repo_qmd_template_includes_expected_default_corpus() -> None:
 
 
 def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_profile(
         profile_name="openclaw-default",
         repo_root=repo_root,
@@ -147,7 +148,7 @@ def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> No
 
 
 def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_profile(
         profile_name="openclaw-qmd",
         repo_root=repo_root,
@@ -162,7 +163,7 @@ def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> No
 
 
 def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_profile(
         profile_name="acp",
         repo_root=repo_root,
@@ -177,7 +178,7 @@ def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
 
 
 def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_profile(
         profile_name="memory-lancedb-pro",
         repo_root=repo_root,
@@ -193,7 +194,7 @@ def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None
 
 
 def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_overlay(
         template_path=repo_root
         / "platform/configs/openclaw/75-strongclaw-hypermemory.example.json5",
@@ -216,7 +217,7 @@ def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
 def test_hypermemory_overlay_renders_repo_local_paths(
     tmp_path: pathlib.Path,
 ) -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     home_dir = tmp_path / "home"
     lossless_dir = strongclaw_lossless_claw_dir(home_dir=home_dir)
     lossless_dir.mkdir(parents=True)
@@ -236,7 +237,7 @@ def test_hypermemory_overlay_renders_repo_local_paths(
 
 
 def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_profile(
         profile_name="hypermemory",
         repo_root=repo_root,
@@ -259,7 +260,7 @@ def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
 
 
 def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/00-baseline.json5",
         repo_root=repo_root,
@@ -273,7 +274,7 @@ def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders()
 
 
 def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/exec-approvals.json",
         repo_root=repo_root,
@@ -289,7 +290,7 @@ def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
 
 
 def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/75-memory-lancedb-pro.local.json5",
         repo_root=repo_root,
@@ -311,7 +312,7 @@ def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
 
 
 def test_vendored_memory_lancedb_pro_bundle_is_pinned() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    repo_root = REPO_ROOT
     package = json.loads(
         (repo_root / "platform/plugins/memory-lancedb-pro/package.json").read_text(encoding="utf-8")
     )

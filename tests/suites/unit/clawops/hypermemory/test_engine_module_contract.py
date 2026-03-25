@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import importlib
-import pathlib
 
 import pytest
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+from tests.fixtures.repo import REPO_ROOT
 
 
 @pytest.mark.parametrize(

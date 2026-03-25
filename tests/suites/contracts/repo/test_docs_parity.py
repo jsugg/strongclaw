@@ -6,12 +6,9 @@ import pathlib
 import re
 
 from clawops.context_service import load_config
+from tests.fixtures.repo import REPO_ROOT
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-
-
-def _repo_root() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parents[1]
 
 
 def _official_markdown_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
@@ -30,8 +27,7 @@ def _official_markdown_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def test_markdown_relative_links_resolve() -> None:
-    repo_root = _repo_root()
-    markdown_files = _official_markdown_files(repo_root)
+    markdown_files = _official_markdown_files(REPO_ROOT)
     for markdown_file in markdown_files:
         text = markdown_file.read_text(encoding="utf-8")
         for target in LINK_RE.findall(text):
@@ -45,24 +41,22 @@ def test_markdown_relative_links_resolve() -> None:
 
 
 def test_shipped_context_config_loads() -> None:
-    repo_root = _repo_root()
-    config = load_config(repo_root / "platform/configs/context/context-service.yaml")
+    config = load_config(REPO_ROOT / "platform/configs/context/context-service.yaml")
     assert config.include_globs
     assert config.exclude_globs
     assert "platform/plugins/memory-lancedb-pro/**" in config.exclude_globs
 
 
 def test_operator_docs_surface_platform_verification_commands() -> None:
-    repo_root = _repo_root()
-    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
-    readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
-    host_platforms = (repo_root / "platform/docs/HOST_PLATFORMS.md").read_text(encoding="utf-8")
-    macos_runbook = (repo_root / "platform/docs/runbooks/macos-service-user-and-ssh.md").read_text(
+    quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    host_platforms = (REPO_ROOT / "platform/docs/HOST_PLATFORMS.md").read_text(encoding="utf-8")
+    macos_runbook = (REPO_ROOT / "platform/docs/runbooks/macos-service-user-and-ssh.md").read_text(
         encoding="utf-8"
     )
     linux_runbook = (
-        repo_root / "platform/docs/runbooks/linux-runtime-user-and-systemd.md"
+        REPO_ROOT / "platform/docs/runbooks/linux-runtime-user-and-systemd.md"
     ).read_text(encoding="utf-8")
 
     assert "clawops setup" in readme
@@ -82,10 +76,9 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
 
 
 def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
-    repo_root = _repo_root()
-    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
-    recovery = (repo_root / "platform/docs/BACKUP_AND_RECOVERY.md").read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    recovery = (REPO_ROOT / "platform/docs/BACKUP_AND_RECOVERY.md").read_text(encoding="utf-8")
 
     assert "clawops ops sidecars up --repo-local-state" in quickstart
     assert "clawops ops sidecars up --repo-local-state" in usage
@@ -100,14 +93,13 @@ def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
 
 
 def test_operator_docs_surface_supported_hypermemory_path() -> None:
-    repo_root = _repo_root()
-    readme = (repo_root / "README.md").read_text(encoding="utf-8")
-    quickstart = (repo_root / "QUICKSTART.md").read_text(encoding="utf-8")
-    setup = (repo_root / "SETUP_GUIDE.md").read_text(encoding="utf-8")
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
-    memory_doc = (repo_root / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
-    secrets = (repo_root / "platform/docs/SECRETS_AND_ENV.md").read_text(encoding="utf-8")
-    routing = (repo_root / "platform/docs/MODEL_ROUTING.md").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+    setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    memory_doc = (REPO_ROOT / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
+    secrets = (REPO_ROOT / "platform/docs/SECRETS_AND_ENV.md").read_text(encoding="utf-8")
+    routing = (REPO_ROOT / "platform/docs/MODEL_ROUTING.md").read_text(encoding="utf-8")
 
     assert "hypermemory" in readme
     assert "hypermemory" in quickstart
@@ -129,9 +121,8 @@ def test_operator_docs_surface_supported_hypermemory_path() -> None:
 
 
 def test_hypermemory_docs_surface_memory_pro_migration_bridge() -> None:
-    repo_root = _repo_root()
-    memory_doc = (repo_root / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    memory_doc = (REPO_ROOT / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
 
     assert "clawops memory migrate-hypermemory-to-pro" in memory_doc
     assert "clawops memory import-pro-snapshot" in memory_doc
@@ -142,9 +133,8 @@ def test_hypermemory_docs_surface_memory_pro_migration_bridge() -> None:
 
 
 def test_operator_docs_surface_approvals_cli() -> None:
-    repo_root = _repo_root()
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
-    wrappers = (repo_root / "platform/docs/POLICY_ENGINE_AND_WRAPPERS.md").read_text(
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    wrappers = (REPO_ROOT / "platform/docs/POLICY_ENGINE_AND_WRAPPERS.md").read_text(
         encoding="utf-8"
     )
 
@@ -155,10 +145,9 @@ def test_operator_docs_surface_approvals_cli() -> None:
 
 
 def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
-    repo_root = _repo_root()
-    usage = (repo_root / "USAGE_GUIDE.md").read_text(encoding="utf-8")
-    repo_doc = (repo_root / "repo/README.md").read_text(encoding="utf-8")
-    ci_doc = (repo_root / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    repo_doc = (REPO_ROOT / "repo/README.md").read_text(encoding="utf-8")
+    ci_doc = (REPO_ROOT / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
 
     assert "clawops memory migrate-hypermemory-to-pro" in usage
     assert "clawops memory verify-pro-parity" in usage
@@ -173,7 +162,6 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
 
 
 def test_operator_docs_no_longer_surface_root_shell_entrypoints() -> None:
-    repo_root = _repo_root()
-    for markdown_file in _official_markdown_files(repo_root):
+    for markdown_file in _official_markdown_files(REPO_ROOT):
         text = markdown_file.read_text(encoding="utf-8")
         assert "./scripts/" not in text

@@ -4,157 +4,32 @@ from __future__ import annotations
 
 import json
 import pathlib
-import textwrap
-from collections.abc import Sequence
 from dataclasses import replace
 
 import pytest
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
 from clawops import observability
 from clawops.hypermemory import (
     DenseSearchCandidate,
     HypermemoryEngine,
-    RerankResponse,
     SparseSearchCandidate,
     load_config,
 )
+from tests.fixtures.hypermemory import (
+    FailingRerankProvider,
+    FakeEmbeddingProvider,
+    FakeQdrantBackend,
+    StaticRerankProvider,
+    build_workspace,
+    write_hypermemory_config,
+)
+from tests.fixtures.observability import configure_test_tracing
 
 
-def _write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
-    config_path.write_text(
-        textwrap.dedent("""
-            storage:
-              db_path: .openclaw/test-hypermemory.sqlite
-            workspace:
-              root: .
-              include_default_memory: true
-              memory_file_names:
-                - MEMORY.md
-                - memory.md
-              daily_dir: memory
-              bank_dir: bank
-            corpus:
-              paths:
-                - name: docs
-                  path: docs
-                  pattern: "**/*.md"
-            limits:
-              max_snippet_chars: 240
-              default_max_results: 6
-            """).strip() + "\n",
-        encoding="utf-8",
-    )
-
-
-def _build_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
-    workspace = tmp_path / "workspace"
-    (workspace / "docs").mkdir(parents=True)
-    (workspace / "memory").mkdir(parents=True)
-    (workspace / "bank").mkdir(parents=True)
-    (workspace / "MEMORY.md").write_text(
-        "# Project Memory\n\n- Fact: The deploy process uses blue/green cutovers.\n",
-        encoding="utf-8",
-    )
-    (workspace / "docs" / "runbook.md").write_text(
-        """
-        # Gateway Runbook
-
-        Rotate the gateway token before enabling a new browser profile.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    return workspace
-
-
-class RecordingExporter(SpanExporter):
-    """Collect spans for assertions."""
-
-    def __init__(self) -> None:
-        self.spans: list[ReadableSpan] = []
-
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        self.spans.extend(spans)
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self) -> None:
-        return None
-
-
-class _FakeEmbeddingProvider:
-    def __init__(self, vector: list[float]) -> None:
-        self.vector = vector
-
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
-        return [list(self.vector) for _ in texts]
-
-
-class _FakeQdrantBackend:
-    def __init__(self) -> None:
-        self.search_results: list[DenseSearchCandidate] = []
-        self.sparse_search_results: list[SparseSearchCandidate] = []
-        self.raise_on_search = False
-
-    def health(self) -> dict[str, object]:
-        return {"enabled": True, "healthy": True, "collection": "test"}
-
-    def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
-        assert isinstance(include_sparse, bool)
-        assert vector_size > 0
-
-    def upsert_points(self, points: list[dict[str, object]]) -> None:
-        assert points
-
-    def delete_points(self, point_ids: list[str]) -> None:
-        assert isinstance(point_ids, list)
-
-    def search_dense(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
-    ) -> list[DenseSearchCandidate]:
-        del vector, limit, mode, scope
-        if self.raise_on_search:
-            raise RuntimeError("dense backend unavailable")
-        return list(self.search_results)
-
-    def search_sparse(
-        self,
-        *,
-        vector: dict[str, list[int] | list[float]],
-        limit: int,
-        mode: str,
-        scope: str | None,
-    ) -> list[SparseSearchCandidate]:
-        del vector, limit, mode, scope
-        return list(self.sparse_search_results)
-
-    def search(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
-    ) -> list[DenseSearchCandidate]:
-        return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
-
-
-class _StaticRerankProvider:
-    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
-        del query
-        scores = [0.2 + (0.2 * index) for index, _ in enumerate(documents)]
-        return RerankResponse(
-            scores=tuple(scores),
-            provider="local-sentence-transformers",
-            applied=True,
-        )
-
-
-class _FailingRerankProvider:
-    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
-        del query, documents
-        raise RuntimeError("rerank backend unavailable")
-
-
-def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, _FakeQdrantBackend]:
-    workspace = _build_workspace(tmp_path)
+def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, FakeQdrantBackend]:
+    workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
+    write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
     config = replace(
         config,
@@ -168,10 +43,10 @@ def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, _FakeQ
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-observability"),
     )
-    fake_qdrant = _FakeQdrantBackend()
+    fake_qdrant = FakeQdrantBackend()
     engine = HypermemoryEngine(
         config,
-        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        embedding_provider=FakeEmbeddingProvider([1.0, 0.0, 0.0]),
         vector_backend=fake_qdrant,
     )
     return engine, fake_qdrant
@@ -181,10 +56,10 @@ def _configure_rerank_engine(
     tmp_path: pathlib.Path,
     *,
     rerank_provider: object | None = None,
-) -> tuple[HypermemoryEngine, _FakeQdrantBackend]:
-    workspace = _build_workspace(tmp_path)
+) -> tuple[HypermemoryEngine, FakeQdrantBackend]:
+    workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
+    write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
     config = replace(
         config,
@@ -206,27 +81,14 @@ def _configure_rerank_engine(
         hybrid=replace(config.hybrid, rerank_candidate_pool=2),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-rerank-observability"),
     )
-    fake_qdrant = _FakeQdrantBackend()
+    fake_qdrant = FakeQdrantBackend()
     engine = HypermemoryEngine(
         config,
-        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        embedding_provider=FakeEmbeddingProvider([1.0, 0.0, 0.0]),
         rerank_provider=rerank_provider,
         vector_backend=fake_qdrant,
     )
     return engine, fake_qdrant
-
-
-def _configure_test_tracing(monkeypatch: pytest.MonkeyPatch) -> RecordingExporter:
-    exporter = RecordingExporter()
-    observability.reset_for_tests()
-    monkeypatch.setenv("CLAWOPS_OTEL_ENABLED", "1")
-    monkeypatch.setattr(observability, "_make_span_exporter", lambda: exporter)
-    monkeypatch.setattr(
-        observability,
-        "_make_span_processor",
-        lambda span_exporter: SimpleSpanProcessor(span_exporter),
-    )
-    return exporter
 
 
 def test_hypermemory_emits_structured_logs_for_dense_search(
@@ -265,7 +127,7 @@ def test_hypermemory_search_exports_trace_spans(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    exporter = _configure_test_tracing(monkeypatch)
+    exporter = configure_test_tracing(monkeypatch, observability)
     engine, fake_qdrant = _configure_engine(tmp_path)
     engine.reindex()
 
@@ -323,9 +185,9 @@ def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
-    workspace = _build_workspace(tmp_path)
+    workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
-    _write_hypermemory_config(workspace, config_path)
+    write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
     config = replace(
         config,
@@ -339,10 +201,10 @@ def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-observability"),
     )
-    fake_qdrant = _FakeQdrantBackend()
+    fake_qdrant = FakeQdrantBackend()
     engine = HypermemoryEngine(
         config,
-        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        embedding_provider=FakeEmbeddingProvider([1.0, 0.0, 0.0]),
         vector_backend=fake_qdrant,
     )
     engine.reindex()
@@ -385,7 +247,7 @@ def test_hypermemory_emits_rerank_logs(
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     engine, fake_qdrant = _configure_rerank_engine(
         tmp_path,
-        rerank_provider=_StaticRerankProvider(),
+        rerank_provider=StaticRerankProvider((0.2, 0.4)),
     )
     engine.reindex()
 
@@ -424,10 +286,10 @@ def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
-    exporter = _configure_test_tracing(monkeypatch)
+    exporter = configure_test_tracing(monkeypatch, observability)
     engine, fake_qdrant = _configure_rerank_engine(
         tmp_path,
-        rerank_provider=_FailingRerankProvider(),
+        rerank_provider=FailingRerankProvider(),
     )
     engine.reindex()
 

@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import pathlib
-
-
-def _repo_root() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parents[1]
+from tests.fixtures.repo import REPO_ROOT
 
 
 def test_makefile_uses_python_native_operational_targets() -> None:
-    makefile = (_repo_root() / "Makefile").read_text(encoding="utf-8")
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "preferred_python.sh" not in makefile
     assert "./scripts/" not in makefile
@@ -20,19 +16,18 @@ def test_makefile_uses_python_native_operational_targets() -> None:
 
 
 def test_service_templates_call_repo_venv_python() -> None:
-    repo_root = _repo_root()
-    gateway = (repo_root / "platform/systemd/openclaw-gateway.service").read_text(encoding="utf-8")
-    sidecars = (repo_root / "platform/systemd/openclaw-sidecars.service").read_text(
+    gateway = (REPO_ROOT / "platform/systemd/openclaw-gateway.service").read_text(encoding="utf-8")
+    sidecars = (REPO_ROOT / "platform/systemd/openclaw-sidecars.service").read_text(
         encoding="utf-8"
     )
-    launchd_gateway = (repo_root / "platform/launchd/ai.openclaw.gateway.plist.template").read_text(
+    launchd_gateway = (REPO_ROOT / "platform/launchd/ai.openclaw.gateway.plist.template").read_text(
         encoding="utf-8"
     )
     launchd_sidecars = (
-        repo_root / "platform/launchd/ai.openclaw.sidecars.plist.template"
+        REPO_ROOT / "platform/launchd/ai.openclaw.sidecars.plist.template"
     ).read_text(encoding="utf-8")
     launchd_browserlab = (
-        repo_root / "platform/launchd/ai.openclaw.browserlab.plist.template"
+        REPO_ROOT / "platform/launchd/ai.openclaw.browserlab.plist.template"
     ).read_text(encoding="utf-8")
 
     assert "scripts/ops/" not in gateway
@@ -56,7 +51,7 @@ def test_service_templates_call_repo_venv_python() -> None:
 
 
 def test_ci_workflows_do_not_call_root_scripts_directory() -> None:
-    workflow_dir = _repo_root() / ".github" / "workflows"
+    workflow_dir = REPO_ROOT / ".github" / "workflows"
     for workflow_path in workflow_dir.glob("*.yml"):
         text = workflow_path.read_text(encoding="utf-8")
         assert "./scripts/" not in text, workflow_path.as_posix()

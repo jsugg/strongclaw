@@ -116,3 +116,16 @@ typeCheckingMode = "standard"
 reportMissingImports = "error"
 reportMissingTypeStubs = false
 reportUnsupportedDunderAll = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/suites"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "unit: isolated unit tests",
+  "integration: cross-module and service-shaped tests",
+  "contract: repository and artifact contract checks",
+  "hypermemory: hypermemory-related coverage",
+  "qdrant: tests requiring or exercising qdrant behavior",
+  "network_local: tests that open local sockets or local HTTP servers",
+]

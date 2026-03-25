@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Sequence
 
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from pytest import MonkeyPatch
 
 from clawops import observability
@@ -16,20 +13,7 @@ from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
 from clawops.wrappers.webhook import invoke_webhook
-
-
-class RecordingExporter(SpanExporter):
-    """Collect spans for assertions."""
-
-    def __init__(self) -> None:
-        self.spans: list[ReadableSpan] = []
-
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        self.spans.extend(spans)
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self) -> None:
-        return None
+from tests.fixtures.observability import configure_test_tracing
 
 
 class _FakeResponse:
@@ -40,24 +24,11 @@ class _FakeResponse:
         self.headers: dict[str, str] = {}
 
 
-def _configure_test_tracing(monkeypatch: MonkeyPatch) -> RecordingExporter:
-    exporter = RecordingExporter()
-    observability.reset_for_tests()
-    monkeypatch.setenv("CLAWOPS_OTEL_ENABLED", "1")
-    monkeypatch.setattr(observability, "_make_span_exporter", lambda: exporter)
-    monkeypatch.setattr(
-        observability,
-        "_make_span_processor",
-        lambda span_exporter: SimpleSpanProcessor(span_exporter),
-    )
-    return exporter
-
-
 def test_wrapper_execution_exports_trace_span(
     tmp_path: pathlib.Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    exporter = _configure_test_tracing(monkeypatch)
+    exporter = configure_test_tracing(monkeypatch, observability)
     policy_path = tmp_path / "policy.yaml"
     write_yaml(
         policy_path,
@@ -101,7 +72,7 @@ def test_context_index_exports_trace_span(
     tmp_path: pathlib.Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    exporter = _configure_test_tracing(monkeypatch)
+    exporter = configure_test_tracing(monkeypatch, observability)
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "auth.py").write_text("def validate_jwt():\n    return True\n", encoding="utf-8")

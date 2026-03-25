@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import pathlib
+from tests.fixtures.repo import REPO_ROOT
 
 
 def test_varlock_schema_and_examples_do_not_reference_jira() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
     files = (
-        repo_root / "platform/configs/varlock/.env.schema",
-        repo_root / "platform/configs/varlock/.env.local.example",
-        repo_root / "platform/configs/varlock/.env.prod.example",
+        REPO_ROOT / "platform/configs/varlock/.env.schema",
+        REPO_ROOT / "platform/configs/varlock/.env.local.example",
+        REPO_ROOT / "platform/configs/varlock/.env.prod.example",
     )
 
     for path in files:
@@ -18,11 +17,10 @@ def test_varlock_schema_and_examples_do_not_reference_jira() -> None:
 
 
 def test_varlock_schema_and_examples_use_varlock_compatible_home_paths() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
     files = (
-        repo_root / "platform/configs/varlock/.env.schema",
-        repo_root / "platform/configs/varlock/.env.local.example",
-        repo_root / "platform/configs/varlock/.env.prod.example",
+        REPO_ROOT / "platform/configs/varlock/.env.schema",
+        REPO_ROOT / "platform/configs/varlock/.env.local.example",
+        REPO_ROOT / "platform/configs/varlock/.env.prod.example",
     )
 
     for path in files:
@@ -31,12 +29,11 @@ def test_varlock_schema_and_examples_use_varlock_compatible_home_paths() -> None
 
 
 def test_varlock_schema_and_examples_surface_hypermemory_hypermemory_keys() -> None:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
     files = (
-        repo_root / "platform/configs/varlock/.env.schema",
-        repo_root / "platform/configs/varlock/.env.local.example",
-        repo_root / "platform/configs/varlock/.env.prod.example",
-        repo_root / "platform/configs/varlock/.env.ci.example",
+        REPO_ROOT / "platform/configs/varlock/.env.schema",
+        REPO_ROOT / "platform/configs/varlock/.env.local.example",
+        REPO_ROOT / "platform/configs/varlock/.env.prod.example",
+        REPO_ROOT / "platform/configs/varlock/.env.ci.example",
     )
 
     for path in files:
