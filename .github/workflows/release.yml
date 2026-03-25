@@ -28,7 +28,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - name: Build release artifacts
         run: |
           python3 - <<'PY'

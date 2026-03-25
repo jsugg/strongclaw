@@ -427,8 +427,6 @@ def uv_sync_managed_environment(
         "--python",
         "3.12",
         "--locked",
-        "--extra",
-        "dev",
     ]
     _stream_checked(command, timeout_seconds=3600)
     return uv_binary

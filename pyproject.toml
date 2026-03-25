@@ -26,7 +26,7 @@ authors = [
   {name = "Juan P. Sugg", email = "juanpedrosugg@gmail.com"}
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8.0.0",
   "pytest-cov>=6.2.1",
@@ -54,6 +54,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.ruff]
 target-version = "py312"

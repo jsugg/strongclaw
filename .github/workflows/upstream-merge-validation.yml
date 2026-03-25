@@ -22,7 +22,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: uv run pre-commit run actionlint --all-files
       - run: uv run pre-commit run shellcheck --all-files
       - run: PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml --cov-report=term-missing

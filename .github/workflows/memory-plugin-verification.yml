@@ -35,7 +35,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: PYTHONPATH=src uv run python -m clawops config --repo-root . memory --set-profile memory-lancedb-pro --output "$RUNNER_TEMP/openclaw.json"
       - run: |
           tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-openclaw-cli.XXXXXX")"
@@ -68,7 +68,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: |
           for _ in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:6333/healthz >/dev/null; then
@@ -97,5 +97,5 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: cd platform/plugins/strongclaw-hypermemory && npm run test:openclaw-host
