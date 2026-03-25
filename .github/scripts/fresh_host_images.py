@@ -158,6 +158,37 @@ def list_local_archive_refs(images: Sequence[str]) -> list[str]:
     return list_local_images(archive_refs)
 
 
+def _image_id_for_ref(image: str) -> str | None:
+    """Return the local image ID for one ref when present."""
+    result = subprocess.run(
+        ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    image_id = result.stdout.strip()
+    return image_id or None
+
+
+def ensure_local_archive_ref(image: str) -> bool:
+    """Ensure the tag-preserving cache ref exists locally for one image."""
+    archive_ref = _cache_archive_source_ref(image)
+    if _image_id_for_ref(archive_ref) is not None:
+        return True
+    image_id = _image_id_for_ref(image)
+    if image_id is None:
+        return False
+    tag_result = subprocess.run(
+        ["docker", "image", "tag", image_id, archive_ref],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return tag_result.returncode == 0
+
+
 def load_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[list[str], list[str]]:
     """Load cached images best-effort from per-image tarballs."""
     manifest = _read_cache_manifest(cache_dir)
@@ -266,9 +297,15 @@ def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[li
         legacy_tar_path.unlink()
     for image in images:
         tar_path = _cache_entry_path(cache_dir, image)
-        save_result = save_images([_cache_archive_source_ref(image)], output_path=tar_path)
+        archive_ref = _cache_archive_source_ref(image)
+        if not ensure_local_archive_ref(image):
+            save_errors.append(f"{image}: cache archive ref {archive_ref} is unavailable locally")
+            if tar_path.exists():
+                tar_path.unlink()
+            continue
+        save_result = save_images([archive_ref], output_path=tar_path)
         if save_result != 0:
-            save_errors.append(f"{image}: docker image save failed")
+            save_errors.append(f"{image}: docker image save failed for {archive_ref}")
             if tar_path.exists():
                 tar_path.unlink()
             continue

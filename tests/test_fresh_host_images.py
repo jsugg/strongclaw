@@ -93,6 +93,43 @@ def test_cache_archive_source_ref_strips_digest_but_keeps_tag() -> None:
     )
 
 
+def test_ensure_local_archive_ref_tags_from_digest_image(monkeypatch: Any) -> None:
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(cmd: list[str], **_: Any) -> Any:
+        calls.append(tuple(cmd))
+
+        class Result:
+            def __init__(self, returncode: int, stdout: str = "") -> None:
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = ""
+
+        if cmd[:4] == ["docker", "image", "inspect", "postgres:16-alpine"]:
+            return Result(1)
+        if cmd[:4] == [
+            "docker",
+            "image",
+            "inspect",
+            "postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416",
+        ]:
+            return Result(0, "sha256:image-id\n")
+        if cmd[:3] == ["docker", "image", "tag"]:
+            assert cmd[3:] == ["sha256:image-id", "postgres:16-alpine"]
+            return Result(0)
+        raise AssertionError(f"unexpected subprocess call: {cmd}")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    ok = module.ensure_local_archive_ref(
+        "postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416"
+    )
+
+    assert ok is True
+    assert calls[-1] == ("docker", "image", "tag", "sha256:image-id", "postgres:16-alpine")
+
+
 def test_ensure_images_loads_cache_then_pulls_only_missing(tmp_path: pathlib.Path) -> None:
     module = _load_module()
     aux_compose = tmp_path / "aux.yaml"
@@ -208,6 +245,7 @@ def test_save_image_cache_uses_tag_preserving_archive_refs(tmp_path: pathlib.Pat
         return 0
 
     module.save_images = fake_save_images
+    module.ensure_local_archive_ref = lambda image: True
 
     saved_images, save_errors = module.save_image_cache(
         cache_dir,
@@ -225,6 +263,25 @@ def test_save_image_cache_uses_tag_preserving_archive_refs(tmp_path: pathlib.Pat
     assert [refs for refs, _ in saved_refs] == [
         ["postgres:16-alpine"],
         ["mcr.microsoft.com/playwright:v1.41.1-jammy"],
+    ]
+
+
+def test_save_image_cache_reports_missing_local_archive_ref(tmp_path: pathlib.Path) -> None:
+    module = _load_module()
+    cache_dir = tmp_path / "cache"
+    module.ensure_local_archive_ref = lambda image: False
+    module.save_images = lambda images, *, output_path: 0
+
+    saved_images, save_errors = module.save_image_cache(
+        cache_dir,
+        [
+            "postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416"
+        ],
+    )
+
+    assert saved_images == []
+    assert save_errors == [
+        "postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416: cache archive ref postgres:16-alpine is unavailable locally"
     ]
 
 
