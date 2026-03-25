@@ -5,7 +5,7 @@ PIP ?= $(PYTHON) -m pip
 UV ?= uv
 RUN ?= $(UV) run
 PRE_COMMIT ?= $(RUN) pre-commit
-PYTEST ?= $(UV) run --locked --extra dev pytest
+PYTEST ?= $(UV) run --locked pytest
 DEV_SYNC_FLAGS ?= --locked
 CONTEXT_CONFIG ?= platform/configs/context/context-service.yaml
 REPO_DIR ?= .
@@ -30,7 +30,7 @@ doctor: ## Run the deep StrongClaw readiness scan.
 	$(RUN) clawops doctor $(DOCTOR_ARGS)
 
 dev: ## Sync the locked dev environment and install pre-commit hooks.
-	$(UV_SYNC) $(DEV_SYNC_FLAGS) --extra dev
+	$(UV_SYNC) $(DEV_SYNC_FLAGS)
 	$(PRE_COMMIT) install --install-hooks
 
 fmt: ## Apply import sorting, lint autofixes, and formatting.
