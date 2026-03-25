@@ -39,6 +39,9 @@ def test_macos_job_runs_the_full_flow_for_all_events() -> None:
     assert "Warm hosted macOS browser-lab images" in macos_section
     assert "Exercise macOS repo-local sidecars" in macos_section
     assert "Exercise macOS repo-local browser-lab" in macos_section
+    assert "STRONGCLAW_COMPOSE_VARIANT: ci-hosted-macos" in macos_section
+    assert "docker-compose.aux-stack.ci-hosted-macos.yaml" in macos_section
+    assert "docker-compose.browser-lab.ci-hosted-macos.yaml" in macos_section
 
 
 def test_fresh_host_workflow_writes_summaries_and_uploads_reports() -> None:

@@ -278,6 +278,8 @@ jobs:
     # GitHub-hosted arm64 macOS runners do not support nested virtualization.
     runs-on: macos-15-intel
     timeout-minutes: 90
+    env:
+      STRONGCLAW_COMPOSE_VARIANT: ci-hosted-macos
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -310,7 +312,7 @@ jobs:
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: .github-cache/docker-images
-          key: fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.yaml', 'platform/compose/docker-compose.browser-lab.yaml') }}
+          key: fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
             fresh-host-docker-images-${{ runner.os }}-${{ runner.arch }}-
       - name: Detect hosted macOS Docker image cache contents
@@ -330,6 +332,23 @@ jobs:
           set -euxo pipefail
           mkdir -p "${RUNNER_TEMP}/fresh-host-reports"
           : > "${RUNNER_TEMP}/fresh-host-macos-phases.tsv"
+          host_project_name="$(PYTHONPATH=src python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from clawops.strongclaw_compose import compose_project_name
+
+          tmp_root = Path(os.environ["RUNNER_TEMP"]) / "strongclaw-macos-host" / "home"
+          state_dir = tmp_root / ".openclaw" / "compose"
+          print(
+              compose_project_name(
+                  compose_name="docker-compose.aux-stack.yaml",
+                  state_dir=state_dir,
+                  repo_local_state=False,
+              )
+              or ""
+          )
+          PY
+          )"
           {
             echo "RUNNER_HOME=${HOME}"
             echo "TMP_ROOT=${RUNNER_TEMP}/strongclaw-macos-host"
@@ -339,6 +358,9 @@ jobs:
             echo "FRESH_HOST_REPORT_JSON=${RUNNER_TEMP}/fresh-host-reports/macos/report.json"
             echo "FRESH_HOST_RUNTIME_PROVIDER=colima"
             echo "FRESH_HOST_DOCKER_IMAGE_CACHE_DIR=${GITHUB_WORKSPACE}/.github-cache/docker-images"
+            echo "FRESH_HOST_MACOS_AUX_COMPOSE_FILE=${GITHUB_WORKSPACE}/platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml"
+            echo "FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE=${GITHUB_WORKSPACE}/platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml"
+            echo "FRESH_HOST_MACOS_HOST_PROJECT=${host_project_name}"
           } >> "${GITHUB_ENV}"
       - name: Install Docker tooling for hosted macOS
         shell: bash
@@ -429,9 +451,8 @@ jobs:
           set -euo pipefail
           SECONDS=0
           set +e
-          export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
-          mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
-          docker compose -f platform/compose/docker-compose.aux-stack.yaml pull postgres litellm qdrant otel-collector
+          export COMPOSE_PROJECT_NAME="strongclaw-prepull-sidecars"
+          docker compose -f "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" pull postgres litellm qdrant otel-collector
           rc=$?
           set -e
           status="success"
@@ -445,9 +466,8 @@ jobs:
           set -euo pipefail
           SECONDS=0
           set +e
-          export STRONGCLAW_COMPOSE_STATE_DIR="${TMP_ROOT}/compose-prepull"
-          mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
-          docker compose -f platform/compose/docker-compose.browser-lab.yaml pull browserlab-proxy browserlab-playwright
+          export COMPOSE_PROJECT_NAME="strongclaw-prepull-browserlab"
+          docker compose -f "${FRESH_HOST_MACOS_BROWSER_LAB_COMPOSE_FILE}" pull browserlab-proxy browserlab-playwright
           rc=$?
           set -e
           status="success"
@@ -502,6 +522,7 @@ jobs:
           export OPENCLAW_CONFIG_PROFILE="openclaw-default"
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           mkdir -p "${HOME}"
@@ -525,6 +546,7 @@ jobs:
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS="2700"
           export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           mkdir -p "${STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR}"
@@ -565,6 +587,7 @@ jobs:
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           .venv/bin/python -m clawops ops --repo-root . sidecars up --repo-local-state
@@ -587,6 +610,7 @@ jobs:
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           .venv/bin/python -m clawops ops --repo-root . browser-lab up --repo-local-state
@@ -604,6 +628,8 @@ jobs:
           set +e
           export OPENCLAW_STATE_DIR="${STRONGCLAW_APP_HOME}/.openclaw"
           export STRONGCLAW_COMPOSE_STATE_DIR="${OPENCLAW_STATE_DIR}/compose"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
+          export COMPOSE_PROJECT_NAME="${FRESH_HOST_MACOS_HOST_PROJECT}"
           mkdir -p "${FRESH_HOST_REPORT_DIR}"
           for path in \
             "${STRONGCLAW_APP_HOME}/.openclaw/logs/launchd-gateway.out.log" \
@@ -615,8 +641,8 @@ jobs:
               tail -n 200 "${path}"
             fi
           done
-          docker compose -f platform/compose/docker-compose.aux-stack.yaml ps > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-ps.txt" 2>&1 || true
-          docker compose -f platform/compose/docker-compose.aux-stack.yaml logs --no-color postgres litellm qdrant otel-collector > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-logs.txt" 2>&1 || true
+          docker compose -f "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" ps > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-ps.txt" 2>&1 || true
+          docker compose -f "${FRESH_HOST_MACOS_AUX_COMPOSE_FILE}" logs --no-color postgres litellm qdrant otel-collector > "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-logs.txt" 2>&1 || true
           launchctl print "gui/$(id -u)/ai.openclaw.gateway" > "${FRESH_HOST_REPORT_DIR}/launchctl-gateway-failure.txt" 2>&1 || true
           launchctl print "gui/$(id -u)/ai.openclaw.sidecars" > "${FRESH_HOST_REPORT_DIR}/launchctl-sidecars-failure.txt" 2>&1 || true
           cat "${FRESH_HOST_REPORT_DIR}/compose-aux-stack-ps.txt" || true
@@ -635,6 +661,7 @@ jobs:
           export OPENCLAW_MODEL_SETUP_MODE="skip"
           export OPENCLAW_MDNS_HOSTNAME="openclaw-ci"
           export STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR="${HOME}/.openclaw/repo-local-compose"
+          export STRONGCLAW_COMPOSE_VARIANT="ci-hosted-macos"
           export PATH="${HOME}/.config/varlock/bin:${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}"
           export PYTHONPATH="src"
           launchctl bootout "gui/$(id -u)" "${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist" || true

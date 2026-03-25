@@ -31,6 +31,11 @@ Linux and macOS runners.
   runners, so Colima/OrbStack cannot provide a Docker backend there.
 - The hosted macOS job installs Lima and Colima directly, then sizes Colima for
   the runner instead of using the old fixed `2 CPU / 4 GiB` VM.
+- Hosted macOS acceptance uses the `ci-hosted-macos` compose variant so
+  sidecars and browser-lab mutable data live in Docker-managed volumes instead
+  of FUSE-backed host bind mounts. That avoids the hosted-Colima filesystem
+  regressions seen with Qdrant and Postgres while preserving the real `clawops`
+  setup, launchd activation, and repo-local stack flows.
 - `workflow_dispatch` can benchmark cache toggles for the supported hosted
   macOS path without changing the required PR gate.
 - The workflow can restore immutable Docker image tarballs for the macOS aux

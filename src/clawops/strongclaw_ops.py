@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Sequence
 
+from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
     DEFAULT_REPO_ROOT,
     CommandError,
@@ -38,7 +39,12 @@ def _compose_state_dir(repo_root: pathlib.Path, *, repo_local_state: bool) -> pa
     return resolve_openclaw_state_dir(repo_root) / "compose"
 
 
-def _compose_env(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, str]:
+def _compose_env(
+    repo_root: pathlib.Path,
+    *,
+    repo_local_state: bool,
+    compose_name: str,
+) -> dict[str, str]:
     """Build the compose execution environment."""
     openclaw_state_dir = resolve_openclaw_state_dir(repo_root)
     state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
@@ -47,12 +53,19 @@ def _compose_env(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str
     env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
     env["OPENCLAW_CONFIG"] = str(resolve_openclaw_config_path(repo_root))
+    project_name = compose_project_name(
+        compose_name=compose_name,
+        state_dir=state_dir,
+        repo_local_state=repo_local_state,
+    )
+    if project_name is not None:
+        env["COMPOSE_PROJECT_NAME"] = project_name
     return env
 
 
 def _compose_path(repo_root: pathlib.Path, compose_name: str) -> pathlib.Path:
     """Return one compose file path."""
-    return repo_root / "platform" / "compose" / compose_name
+    return resolve_compose_file(repo_root, compose_name)
 
 
 def _run_compose_command(
@@ -66,6 +79,11 @@ def _run_compose_command(
     """Run a docker compose command with StrongClaw state wiring."""
     ensure_docker_backend_ready()
     compose_path = _compose_path(repo_root, compose_name)
+    compose_env = _compose_env(
+        repo_root,
+        repo_local_state=repo_local_state,
+        compose_name=compose_name,
+    )
     command = [
         "docker",
         "compose",
@@ -77,7 +95,7 @@ def _run_compose_command(
     return run_command_inherited(
         wrapped,
         cwd=repo_root / "platform" / "compose",
-        env=_compose_env(repo_root, repo_local_state=repo_local_state),
+        env=compose_env,
         timeout_seconds=timeout_seconds,
     )
 
@@ -130,8 +148,9 @@ def browser_lab_down(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
 
 def status(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, object]:
     """Return the current sidecar compose status."""
-    env = _compose_env(repo_root, repo_local_state=repo_local_state)
-    compose_path = _compose_path(repo_root, "docker-compose.aux-stack.yaml")
+    compose_name = "docker-compose.aux-stack.yaml"
+    env = _compose_env(repo_root, repo_local_state=repo_local_state, compose_name=compose_name)
+    compose_path = _compose_path(repo_root, compose_name)
     compose_result = run_command(
         ["docker", "compose", "-f", str(compose_path), "ps", "--format", "json"],
         cwd=repo_root / "platform" / "compose",
@@ -175,7 +194,11 @@ def reset_compose_state(
     target_dir = target_root / component_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     compose_file = _compose_path(repo_root, compose_file_name)
-    env = _compose_env(repo_root, repo_local_state=True)
+    env = _compose_env(
+        repo_root,
+        repo_local_state=True,
+        compose_name=compose_file_name,
+    )
     inspect_result = run_command(
         ["docker", "compose", "-f", str(compose_file), "ps", "-q", service_name],
         cwd=repo_root / "platform" / "compose",
