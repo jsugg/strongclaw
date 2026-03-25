@@ -22,6 +22,8 @@ from tests.fixtures.hypermemory import (
     write_hypermemory_config,
 )
 
+pytestmark = pytest.mark.qdrant
+
 
 def test_hypermemory_verify_requires_an_operational_rerank_provider(
     tmp_path: pathlib.Path,

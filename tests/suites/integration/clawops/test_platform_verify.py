@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from clawops.common import load_yaml, write_text, write_yaml
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
 from tests.fixtures.network import HttpServerFactory, ListenerFactory
 from tests.fixtures.repo import REPO_ROOT
+
+pytestmark = pytest.mark.network_local
 
 
 def test_verify_sidecars_supports_runtime_probes(

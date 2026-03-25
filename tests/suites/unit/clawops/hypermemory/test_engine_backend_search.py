@@ -5,6 +5,8 @@ from __future__ import annotations
 import pathlib
 from dataclasses import replace
 
+import pytest
+
 from clawops.hypermemory import (
     DenseSearchCandidate,
     HypermemoryEngine,
@@ -17,6 +19,8 @@ from tests.fixtures.hypermemory import (
     build_workspace,
     write_hypermemory_config,
 )
+
+pytestmark = pytest.mark.qdrant
 
 
 def test_hypermemory_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) -> None:
