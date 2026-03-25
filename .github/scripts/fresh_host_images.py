@@ -101,6 +101,17 @@ def _cache_entry_path(cache_dir: pathlib.Path, image: str) -> pathlib.Path:
     return cache_dir / _cache_entry_name(image)
 
 
+def _cache_archive_source_ref(image: str) -> str:
+    """Return the tag-preserving ref to save into one cache archive.
+
+    Docker `save` on a digest-pinned reference restores as an untagged image ID on
+    `load`, which makes the archive ineffective for follow-up reconciliation.
+    Saving the tag-bearing ref preserves a usable local tag while still capturing
+    the already-pulled image bytes.
+    """
+    return image.split("@", maxsplit=1)[0]
+
+
 def _read_cache_manifest(cache_dir: pathlib.Path) -> dict[str, object]:
     """Read the cache manifest if one exists."""
     manifest_path = _cache_manifest_path(cache_dir)
@@ -132,6 +143,19 @@ def list_local_images(images: Sequence[str]) -> list[str]:
         if result.returncode == 0:
             present.append(image)
     return present
+
+
+def list_local_archive_refs(images: Sequence[str]) -> list[str]:
+    """Return tag-preserving cache refs that are present in the local daemon."""
+    archive_refs: list[str] = []
+    seen: set[str] = set()
+    for image in images:
+        archive_ref = _cache_archive_source_ref(image)
+        if archive_ref in seen:
+            continue
+        seen.add(archive_ref)
+        archive_refs.append(archive_ref)
+    return list_local_images(archive_refs)
 
 
 def load_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[list[str], list[str]]:
@@ -242,7 +266,7 @@ def save_image_cache(cache_dir: pathlib.Path, images: Sequence[str]) -> tuple[li
         legacy_tar_path.unlink()
     for image in images:
         tar_path = _cache_entry_path(cache_dir, image)
-        save_result = save_images([image], output_path=tar_path)
+        save_result = save_images([_cache_archive_source_ref(image)], output_path=tar_path)
         if save_result != 0:
             save_errors.append(f"{image}: docker image save failed")
             if tar_path.exists():
@@ -321,6 +345,14 @@ def ensure_images(
         cache_loaded = bool(cache_loaded_images)
         if cache_load_errors:
             _log("Cache load errors: " + " | ".join(cache_load_errors))
+        loaded_archive_refs = list_local_archive_refs(missing_before_load)
+        if loaded_archive_refs:
+            _log("Cache archives restored local tag refs: " + ", ".join(loaded_archive_refs))
+        if cache_loaded_images:
+            _log(
+                "Digest-pinned refs are expected to remain missing after docker load; "
+                "the follow-up pull reconciles registry digests against the prewarmed local layers."
+            )
 
     local_after_load = list_local_images(images)
     missing_after_load = [image for image in images if image not in local_after_load]

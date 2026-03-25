@@ -69,6 +69,7 @@ def test_fresh_host_workflow_writes_summaries_and_uploads_reports() -> None:
     assert "fresh-host-reports/linux" in workflow_text
     assert "fresh-host-reports/macos" in workflow_text
     assert "Restore hosted macOS Docker image cache" in workflow_text
+    assert "fresh-host-docker-images-v2-" in workflow_text
     assert "Ensure hosted macOS images" in workflow_text
     assert ".github/scripts/fresh_host_images.py ensure" in workflow_text
     assert "image-ensure-report.json" in workflow_text
