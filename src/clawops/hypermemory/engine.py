@@ -9,11 +9,6 @@ from typing import Any, Literal
 from clawops.common import ensure_parent
 from clawops.hypermemory._engine.backend import (
     _current_sparse_fingerprint,
-    _normalize_text,
-    _normalized_retrieval_text,
-    _point_id,
-    _sha256,
-    _slugify,
     _sparse_encoder_for_documents,
     _sparse_fingerprint_for_documents,
     _vector_rows_for_documents,
@@ -126,6 +121,13 @@ from clawops.hypermemory.schema import ensure_schema
 from clawops.hypermemory.services.backend_service import BackendService
 from clawops.hypermemory.services.index_service import IndexService
 from clawops.hypermemory.sparse import SparseEncoder
+from clawops.hypermemory.utils import (
+    normalize_text,
+    normalized_retrieval_text,
+    point_id,
+    sha256,
+    slugify,
+)
 
 
 class HypermemoryEngine:
@@ -504,6 +506,38 @@ class HypermemoryEngine:
         """Run simple benchmark cases against the current engine."""
         return _benchmark_cases(self, cases)
 
+    # Pure helper wrappers. `_engine/*` no longer depends on these being bound on the
+    # engine, but we keep them for internal/test seams.
+
+    def _normalized_retrieval_text(self, title: str, snippet: str) -> str:
+        return normalized_retrieval_text(title, snippet)
+
+    def _normalize_text(self, text: str) -> tuple[str, ...]:
+        return normalize_text(text)
+
+    def _point_id(
+        self,
+        *,
+        document_rel_path: str,
+        item_type: str,
+        start_line: int,
+        end_line: int,
+        snippet: str,
+    ) -> str:
+        return point_id(
+            document_rel_path=document_rel_path,
+            item_type=item_type,
+            start_line=start_line,
+            end_line=end_line,
+            snippet=snippet,
+        )
+
+    def _slugify(self, value: str) -> str:
+        return slugify(value)
+
+    def _sha256(self, value: str) -> str:
+        return sha256(value)
+
     # Internal/test seam bindings. These are intentionally attached to simplify tests
     # and to avoid duplicating utility functions across modules.
     _is_noise = _is_noise
@@ -560,9 +594,4 @@ class HypermemoryEngine:
     # Vector backend / sparse state helpers are implemented as delegating methods.
     _collection_has_hypermemory_vector_lanes = _collection_has_hypermemory_vector_lanes
     _hypermemory_probe_query = _hypermemory_probe_query
-    _normalized_retrieval_text = _normalized_retrieval_text
-    _normalize_text = _normalize_text
-    _point_id = _point_id
-    _slugify = _slugify
-    _sha256 = _sha256
     # End of HypermemoryEngine helper bindings.

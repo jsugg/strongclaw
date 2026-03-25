@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator, Sequence
@@ -18,6 +17,7 @@ from clawops.hypermemory.models import (
     SparseSearchCandidate,
 )
 from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
+from clawops.hypermemory.utils import normalized_retrieval_text, sha256
 from clawops.observability import emit_structured_log, observed_span
 
 
@@ -233,7 +233,7 @@ def _sync_dense_backend(
                         str(entry["point_id"]),
                         self.config.embedding.model,
                         len(vector),
-                        self._sha256(str(entry["content"])),
+                        sha256(str(entry["content"])),
                         int(entry.get("sparse_term_count", 0)),
                         sparse_encoder.fingerprint if include_sparse else "",
                         datetime.now(tz=UTC).isoformat() if include_sparse else "",
@@ -336,7 +336,7 @@ def _vector_rows_for_documents(self, documents: Sequence[IndexedDocument]) -> li
         for item in document.items:
             vector_rows.append(
                 {
-                    "content": self._normalized_retrieval_text(item.title, item.snippet),
+                    "content": normalized_retrieval_text(item.title, item.snippet),
                 }
             )
     return vector_rows
@@ -429,7 +429,7 @@ def _backend_fingerprint(self) -> str:
             "sparse_vector_name": self.config.qdrant.sparse_vector_name,
         },
     }
-    return self._sha256(json.dumps(payload, sort_keys=True))
+    return sha256(json.dumps(payload, sort_keys=True))
 
 
 def _backend_state_value(self, conn: sqlite3.Connection, key: str) -> str | None:
@@ -446,44 +446,3 @@ def _write_backend_state(self, conn: sqlite3.Connection, key: str, value: str) -
         "INSERT OR REPLACE INTO backend_state(key, value) VALUES (?, ?)",
         (key, value),
     )
-
-
-def _normalized_retrieval_text(self, title: str, snippet: str) -> str:
-    """Return normalized text used for lexical and dense retrieval."""
-    combined = f"{title} {snippet}"
-    return " ".join(token for token in self._normalize_text(combined))
-
-
-def _normalize_text(self, text: str) -> tuple[str, ...]:
-    """Normalize text into lowercase search tokens."""
-    collapsed = "".join(character.lower() if character.isalnum() else " " for character in text)
-    return tuple(token for token in collapsed.split() if token)
-
-
-def _point_id(
-    self,
-    *,
-    document_rel_path: str,
-    item_type: str,
-    start_line: int,
-    end_line: int,
-    snippet: str,
-) -> str:
-    """Return a stable point identifier for a search item."""
-    digest = self._sha256(
-        f"{document_rel_path}:{item_type}:{start_line}:{end_line}:{snippet.strip()}"
-    )[:32]
-    return f"{digest[0:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
-
-
-def _slugify(self, value: str) -> str:
-    """Return a stable slug for an entity file path."""
-    lowered = value.strip().lower()
-    slug = "".join(character if character.isalnum() else "-" for character in lowered)
-    collapsed = "-".join(part for part in slug.split("-") if part)
-    return collapsed or "entity"
-
-
-def _sha256(self, value: str) -> str:
-    """Return a SHA-256 hex digest for *value*."""
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()

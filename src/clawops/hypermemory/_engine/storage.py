@@ -40,6 +40,7 @@ from clawops.hypermemory.models import (
 )
 from clawops.hypermemory.noise import is_noise
 from clawops.hypermemory.parser import iter_retained_notes, parse_typed_entry
+from clawops.hypermemory.utils import sha256, slugify
 from clawops.observability import emit_structured_log
 
 
@@ -95,7 +96,7 @@ def export_memory_pro_import(
                 metadata["hypermemory"]["confidence"] = confidence
             memories.append(
                 {
-                    "id": f"strongclaw-hypermemory:{self._sha256(source_fingerprint)}",
+                    "id": f"strongclaw-hypermemory:{sha256(source_fingerprint)}",
                     "text": text,
                     "category": MEMORY_PRO_CATEGORY_MAP[item_type],
                     "importance": self._memory_pro_importance(
@@ -803,7 +804,7 @@ def _fact_category(self, fact_key: str) -> FactCategory:
 
 def _entry_hash_prefix(self, entry_line: str) -> str:
     """Return a short, stable reference for a canonical entry line."""
-    return self._sha256(entry_line.strip())[:8]
+    return sha256(entry_line.strip())[:8]
 
 
 def _search_hit_text(self, hit: SearchHit) -> str:
@@ -1194,7 +1195,7 @@ def _store_target(
         return bank_dir / "experience.md"
     if kind == "opinion":
         return bank_dir / "opinions.md"
-    name = self._slugify(entity or "general")
+    name = slugify(entity or "general")
     return bank_dir / "entities" / f"{name}.md"
 
 
@@ -1336,7 +1337,7 @@ def _build_proposal(
 ) -> ProposalRecord:
     """Build a stable proposal record."""
     normalized_scope = validate_scope(scope)
-    proposal_id = self._sha256(f"{source_rel_path}:{source_line}:{entry_line}")
+    proposal_id = sha256(f"{source_rel_path}:{source_line}:{entry_line}")
     scope_auto_apply = should_auto_apply(normalized_scope, self.config.governance)
     auto_apply = mode == "safe" and scope_auto_apply
     if mode == "apply":
