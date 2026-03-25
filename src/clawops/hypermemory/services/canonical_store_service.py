@@ -2,26 +2,39 @@
 
 This service owns canonical Markdown mutation and lifecycle maintenance.
 
-Today it delegates to the existing `_engine/storage.py` implementation functions.
-The purpose of this wrapper is to keep `HypermemoryEngine` smaller and to make
-composition boundaries explicit via constructor injection.
+Implementation started as a thin wrapper around `_engine/storage.py`, then was
+incrementally internalized to make composition boundaries explicit and to
+shrink `HypermemoryEngine`.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from clawops.hypermemory._engine import storage as storage_impl
+from clawops.hypermemory.capture import (
+    CaptureCandidate,
+    extract_candidates_llm,
+    extract_candidates_regex,
+    resolve_capture_api_key,
+)
 from clawops.hypermemory.config import HypermemoryConfig, resolve_under_workspace
-from clawops.hypermemory.governance import ensure_writable_scope
+from clawops.hypermemory.defaults import MEMORY_PRO_CATEGORY_MAP, WRITABLE_PREFIXES
+from clawops.hypermemory.governance import ensure_writable_scope, validate_scope
+from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import (
     ReflectionMode,
+    ReflectionSummary,
     ReindexSummary,
     SearchHit,
     Tier,
 )
+from clawops.hypermemory.parser import iter_retained_notes
+from clawops.hypermemory.utils import sha256
+from clawops.observability import emit_structured_log
 
 
 class CanonicalStoreService:
@@ -70,12 +83,61 @@ class CanonicalStoreService:
         include_daily: bool = False,
         auto_index: bool = True,
     ) -> dict[str, Any]:
-        return storage_impl.export_memory_pro_import(
-            self,
-            scope=scope,
-            include_daily=include_daily,
-            auto_index=auto_index,
-        )
+        resolved_scope = validate_scope(scope or self.config.governance.default_scope)
+        if auto_index and self.is_dirty():
+            self.reindex()
+        memories: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            for row in self._memory_pro_export_rows(conn, scope=resolved_scope):
+                rel_path = str(row["rel_path"])
+                if not self._allows_memory_pro_export_path(
+                    rel_path=rel_path, include_daily=include_daily
+                ):
+                    continue
+                item_type = str(row["item_type"])
+                text = str(row["text"]).strip()
+                if not text:
+                    continue
+                start_line = int(row["start_line"])
+                end_line = int(row["end_line"])
+                confidence = None if row["confidence"] is None else float(row["confidence"])
+                entities = self._load_entities_json(row["entities_json"])
+                evidence = self._load_evidence_json(row["evidence_json"])
+                source_fingerprint = (
+                    f"{item_type}:{resolved_scope}:{rel_path}:{start_line}:{end_line}:{text}"
+                )
+                metadata: dict[str, Any] = {
+                    "source": "strongclaw-hypermemory",
+                    "hypermemory": {
+                        "itemType": item_type,
+                        "scope": resolved_scope,
+                        "sourcePath": rel_path,
+                        "startLine": start_line,
+                        "endLine": end_line,
+                        "entities": entities,
+                        "evidence": evidence,
+                    },
+                }
+                if confidence is not None:
+                    metadata["hypermemory"]["confidence"] = confidence
+                memories.append(
+                    {
+                        "id": f"strongclaw-hypermemory:{sha256(source_fingerprint)}",
+                        "text": text,
+                        "category": MEMORY_PRO_CATEGORY_MAP[item_type],
+                        "importance": self._memory_pro_importance(
+                            item_type=item_type, confidence=confidence
+                        ),
+                        "timestamp": self._memory_pro_timestamp_ms(str(row["modified_at"])),
+                        "metadata": metadata,
+                    }
+                )
+        return {
+            "provider": "strongclaw-hypermemory",
+            "scope": resolved_scope,
+            "includeDaily": include_daily,
+            "memories": memories,
+        }
 
     def store(
         self,
@@ -228,7 +290,62 @@ class CanonicalStoreService:
         }
 
     def reflect(self, *, mode: ReflectionMode = "safe") -> dict[str, Any]:
-        return storage_impl.reflect(self, mode=mode)
+        proposed = 0
+        applied = 0
+        pending = 0
+        reflected: dict[str, int] = {"fact": 0, "reflection": 0, "opinion": 0, "entity": 0}
+        proposals_path = self.config.proposals_path
+        daily_dir = self.config.workspace_root / self.config.daily_dir
+        for path in sorted(daily_dir.glob("*.md")):
+            source_rel_path = resolve_under_workspace(self.config.workspace_root, path)
+            for note in iter_retained_notes(
+                path, default_scope=self.config.governance.default_scope
+            ):
+                note_kind = note.kind
+                if note_kind not in reflected:
+                    continue
+                typed_note_kind = cast(
+                    Literal["fact", "reflection", "opinion", "entity"],
+                    note_kind,
+                )
+                proposal = self._build_proposal(
+                    kind=typed_note_kind,
+                    entry_line=note.entry_line,
+                    scope=note.scope,
+                    source_rel_path=source_rel_path,
+                    source_line=note.source_line,
+                    entity=note.entity,
+                    confidence=note.confidence,
+                    mode=mode,
+                )
+                if self._append_unique_entry(
+                    proposals_path,
+                    kind="proposal",
+                    entry_line=self._format_proposal_line(proposal),
+                ):
+                    proposed += 1
+                if proposal.status == "applied":
+                    target = self._store_target(kind=proposal.kind, entity=proposal.entity)
+                    if self._append_unique_entry(
+                        target,
+                        kind=proposal.kind,
+                        entry_line=proposal.entry_line,
+                    ):
+                        reflected[proposal.kind] += 1
+                        applied += 1
+                else:
+                    pending += 1
+        summary = self.reindex()
+        lifecycle_summary: dict[str, Any] | None = None
+        if self.config.decay.enabled:
+            lifecycle_summary = self.run_lifecycle()
+        return ReflectionSummary(
+            proposed=proposed,
+            applied=applied,
+            pending=pending,
+            reflected=reflected,
+            index=summary,
+        ).to_dict() | ({"lifecycle": lifecycle_summary} if lifecycle_summary is not None else {})
 
     def capture(
         self,
@@ -236,7 +353,77 @@ class CanonicalStoreService:
         messages: Sequence[tuple[int, str, str]],
         mode: Literal["llm", "regex", "both"] | None = None,
     ) -> dict[str, Any]:
-        return storage_impl.capture(self, messages=messages, mode=mode)
+        resolved_mode = cast(Literal["llm", "regex", "both"], mode or self.config.capture.mode)
+        candidates: list[CaptureCandidate] = []
+        if (
+            resolved_mode in {"llm", "both"}
+            and self.config.capture.llm.endpoint
+            and self.config.capture.llm.model
+        ):
+            try:
+                candidates.extend(
+                    extract_candidates_llm(
+                        messages,
+                        endpoint=self.config.capture.llm.endpoint,
+                        model=self.config.capture.llm.model,
+                        api_key=resolve_capture_api_key(
+                            api_key_env=self.config.capture.llm.api_key_env,
+                            api_key=self.config.capture.llm.api_key,
+                        ),
+                        timeout_ms=self.config.capture.llm.timeout_ms,
+                        batch_size=self.config.capture.batch_size,
+                        batch_overlap=self.config.capture.batch_overlap,
+                    )
+                )
+            except Exception as err:
+                emit_structured_log(
+                    "clawops.hypermemory.capture.llm_error",
+                    {"error": str(err)},
+                )
+                if resolved_mode == "llm":
+                    candidates = []
+        if not candidates or resolved_mode in {"regex", "both"}:
+            regex_candidates = extract_candidates_regex(messages)
+            existing_keys = {candidate.text.casefold() for candidate in candidates}
+            for candidate in regex_candidates:
+                if candidate.text.casefold() not in existing_keys:
+                    candidates.append(candidate)
+        captured = 0
+        skipped_duplicate = 0
+        skipped_noise = 0
+        skipped_admission = 0
+        for candidate in candidates[: self.config.capture.max_candidates_per_session]:
+            if self._is_noise(candidate.text):
+                skipped_noise += 1
+                continue
+            if not self._passes_admission(candidate):
+                skipped_admission += 1
+                continue
+            result = self.store(
+                kind=cast(
+                    Literal["fact", "reflection", "opinion", "entity"],
+                    candidate.kind,
+                ),
+                text=candidate.text,
+                entity=candidate.entity,
+                confidence=candidate.confidence,
+                fact_key=candidate.fact_key,
+                importance=candidate.confidence,
+            )
+            if result.get("duplicate"):
+                skipped_duplicate += 1
+            elif result.get("stored") or result.get("superseded"):
+                captured += 1
+        payload = {
+            "ok": True,
+            "candidates": len(candidates),
+            "captured": captured,
+            "skippedDuplicate": skipped_duplicate,
+            "skippedNoise": skipped_noise,
+            "skippedAdmission": skipped_admission,
+        }
+        emit_structured_log("clawops.hypermemory.capture", payload)
+        return payload
 
     def forget(
         self,
@@ -306,10 +493,106 @@ class CanonicalStoreService:
         return store_payload
 
     def flush_metadata(self) -> dict[str, Any]:
-        return storage_impl.flush_metadata(self)
+        if not self.config.db_path.exists():
+            return {"ok": True, "updatedFiles": 0, "updatedEntries": 0}
+        updated_files = 0
+        updated_entries = 0
+        try:
+            with self.connect() as conn:
+                rows = conn.execute("""
+                    SELECT
+                        id,
+                        rel_path,
+                        start_line,
+                        snippet,
+                        item_type,
+                        scope,
+                        confidence,
+                        importance,
+                        tier,
+                        access_count,
+                        last_access_date,
+                        injected_count,
+                        confirmed_count,
+                        bad_recall_count,
+                        fact_key,
+                        invalidated_at,
+                        supersedes
+                    FROM search_items
+                    WHERE lane = 'memory'
+                      AND item_type IN ('fact', 'reflection', 'opinion', 'entity')
+                    ORDER BY rel_path, start_line DESC
+                    """).fetchall()
+                rows_by_path: dict[str, list[sqlite3.Row]] = defaultdict(list)
+                for row in rows:
+                    rel_path = str(row["rel_path"])
+                    if not rel_path.startswith(WRITABLE_PREFIXES):
+                        continue
+                    rows_by_path[rel_path].append(row)
+                for rel_path, path_rows in rows_by_path.items():
+                    path = self._resolve_writable_path(rel_path)
+                    if not path.exists():
+                        continue
+                    lines = path.read_text(encoding="utf-8").splitlines()
+                    changed = False
+                    for row in path_rows:
+                        line_index = int(row["start_line"]) - 1
+                        if line_index < 0 or line_index >= len(lines):
+                            continue
+                        updated_line = self._synced_line_from_row(lines[line_index], row=row)
+                        if updated_line is None or updated_line == lines[line_index]:
+                            continue
+                        lines[line_index] = updated_line
+                        changed = True
+                        updated_entries += 1
+                    if changed:
+                        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                        updated_files += 1
+        except sqlite3.DatabaseError:
+            return {"ok": True, "updatedFiles": 0, "updatedEntries": 0}
+        return {"ok": True, "updatedFiles": updated_files, "updatedEntries": updated_entries}
 
     def run_lifecycle(self) -> dict[str, Any]:
-        return storage_impl.run_lifecycle(self)
+        if not self.config.decay.enabled:
+            return {"ok": True, "evaluated": 0, "changed": 0}
+        manager = TierManager(self.config.decay)
+        changed = 0
+        evaluated = 0
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT id, modified_at, importance, tier, access_count
+                FROM search_items
+                WHERE lane = 'memory'
+                  AND item_type IN ('fact', 'reflection', 'opinion', 'entity')
+                  AND invalidated_at IS NULL
+                """).fetchall()
+            for row in rows:
+                evaluated += 1
+                current_tier = self._normalize_tier(str(row["tier"]))
+                composite = compute_decay_score(
+                    age_days=max(self._age_days(str(row["modified_at"])), 0.0),
+                    access_count=int(row["access_count"] or 0),
+                    importance=float(row["importance"] or 0.5),
+                    tier=current_tier,
+                    config=self.config.decay,
+                )
+                next_tier = manager.evaluate_tier(
+                    current_tier=current_tier,
+                    composite=composite,
+                    access_count=int(row["access_count"] or 0),
+                    importance=float(row["importance"] or 0.5),
+                    age_days=self._age_days(str(row["modified_at"])),
+                )
+                if next_tier == current_tier:
+                    continue
+                conn.execute(
+                    "UPDATE search_items SET tier = ? WHERE id = ?",
+                    (next_tier, int(row["id"])),
+                )
+                changed += 1
+            conn.commit()
+        flush_payload = self.flush_metadata()
+        return {"ok": True, "evaluated": evaluated, "changed": changed, "flush": flush_payload}
 
     # ---- internal/test seam bindings reused by storage_impl ----
 
