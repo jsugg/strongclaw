@@ -3,21 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, Literal
 
 from clawops.common import ensure_parent
 from clawops.hypermemory._engine.backend import (
-    _backend_fingerprint,
-    _backend_state_value,
-    _backend_uses_qdrant,
-    _backend_uses_sparse_vectors,
-    _canonical_backend,
     _current_sparse_fingerprint,
-    _dense_search,
-    _embed_texts,
-    _embedding_batches,
-    _load_sparse_encoder,
     _normalize_text,
     _normalized_retrieval_text,
     _point_id,
@@ -25,16 +16,10 @@ from clawops.hypermemory._engine.backend import (
     _slugify,
     _sparse_encoder_for_documents,
     _sparse_fingerprint_for_documents,
-    _sparse_search,
-    _sync_dense_backend,
     _vector_rows_for_documents,
-    _write_backend_state,
-    _write_sparse_state,
 )
 from clawops.hypermemory._engine.indexing import (
     _clear_derived_rows,
-    _count_rows,
-    _count_sparse_vector_items,
     _evidence_entries,
     _insert_typed_row,
     _iter_corpus_documents,
@@ -120,12 +105,14 @@ from clawops.hypermemory._engine.verify import (
 from clawops.hypermemory._engine.verify import verify as _verify
 from clawops.hypermemory.config import HypermemoryConfig
 from clawops.hypermemory.models import (
+    DenseSearchCandidate,
     FusionMode,
     ReflectionMode,
     ReindexSummary,
     SearchBackend,
     SearchHit,
     SearchMode,
+    SparseSearchCandidate,
     Tier,
 )
 from clawops.hypermemory.providers import (
@@ -136,6 +123,9 @@ from clawops.hypermemory.providers import (
 )
 from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
 from clawops.hypermemory.schema import ensure_schema
+from clawops.hypermemory.services.backend_service import BackendService
+from clawops.hypermemory.services.index_service import IndexService
+from clawops.hypermemory.sparse import SparseEncoder
 
 
 class HypermemoryEngine:
@@ -162,6 +152,111 @@ class HypermemoryEngine:
         )
         self._qdrant_backend: VectorBackend = (
             vector_backend if vector_backend is not None else QdrantBackend(config.qdrant)
+        )
+        self.index = IndexService(connect=self.connect)
+        self.backend = BackendService(
+            config=self.config,
+            connect=self.connect,
+            embedding_provider=self._embedding_provider,
+            vector_backend=self._qdrant_backend,
+            index=self.index,
+        )
+
+    # ---- phase-1 composition: internal helper compatibility layer ----
+    # `_engine/*` modules still call `self._...` today. We keep those names on the
+    # engine, but delegate selected responsibilities into stateful services.
+
+    def _backend_uses_qdrant(self) -> bool:
+        return self.backend.backend_uses_qdrant()
+
+    def _backend_uses_sparse_vectors(self) -> bool:
+        return self.backend.backend_uses_sparse_vectors()
+
+    def _canonical_backend(self, backend: SearchBackend) -> SearchBackend:
+        return self.backend.canonical_backend(backend)
+
+    def _backend_fingerprint(self) -> str:
+        return self.backend.backend_fingerprint()
+
+    def _backend_state_value(self, conn: sqlite3.Connection, key: str) -> str | None:
+        return self.index.backend_state_value(conn, key)
+
+    def _write_backend_state(self, conn: sqlite3.Connection, key: str, value: str) -> None:
+        self.index.write_backend_state(conn, key, value)
+
+    def _count_rows(self, conn: sqlite3.Connection, table_name: str) -> int:
+        return self.index.count_rows(conn, table_name)
+
+    def _count_sparse_vector_items(self, conn: sqlite3.Connection) -> int:
+        return self.index.count_sparse_vector_items(conn)
+
+    def _write_sparse_state(self, conn: sqlite3.Connection, sparse_encoder: SparseEncoder) -> None:
+        self.index.write_sparse_state(
+            conn,
+            sparse_encoder,
+            enabled=self._backend_uses_sparse_vectors(),
+        )
+
+    def _load_sparse_encoder(self, conn: sqlite3.Connection) -> SparseEncoder | None:
+        return self.index.load_sparse_encoder(
+            conn,
+            enabled=self._backend_uses_sparse_vectors(),
+        )
+
+    def _embedding_batches(
+        self,
+        vector_rows: list[dict[str, Any]],
+    ) -> Iterator[list[dict[str, Any]]]:
+        return self.backend.embedding_batches(vector_rows)
+
+    def _embed_texts(self, texts: Sequence[str], *, purpose: str) -> list[list[float]]:
+        return self.backend.embed_texts(texts, purpose=purpose)
+
+    def _dense_search(
+        self,
+        *,
+        query: str,
+        lane: SearchMode,
+        scope: str | None,
+        candidate_limit: int,
+    ) -> tuple[list[DenseSearchCandidate], float]:
+        return self.backend.dense_search(
+            query=query,
+            lane=lane,
+            scope=scope,
+            candidate_limit=candidate_limit,
+        )
+
+    def _sparse_search(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        query: str,
+        lane: SearchMode,
+        scope: str | None,
+        candidate_limit: int,
+    ) -> tuple[list[SparseSearchCandidate], float]:
+        return self.backend.sparse_search(
+            conn=conn,
+            query=query,
+            lane=lane,
+            scope=scope,
+            candidate_limit=candidate_limit,
+        )
+
+    def _sync_dense_backend(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        vector_rows: list[dict[str, Any]],
+        stale_point_ids: set[str],
+        sparse_encoder: SparseEncoder,
+    ) -> None:
+        self.backend.sync_vectors(
+            conn=conn,
+            vector_rows=vector_rows,
+            stale_point_ids=stale_point_ids,
+            sparse_encoder=sparse_encoder,
         )
 
     def connect(self) -> sqlite3.Connection:
@@ -458,27 +553,13 @@ class HypermemoryEngine:
     _build_proposal = _build_proposal
     _format_proposal_line = _format_proposal_line
     _proposal_kind = _proposal_kind
-    _dense_search = _dense_search
-    _sparse_search = _sparse_search
-    _sync_dense_backend = _sync_dense_backend
-    _embed_texts = _embed_texts
-    _embedding_batches = _embedding_batches
-    _count_sparse_vector_items = _count_sparse_vector_items
-    _canonical_backend = _canonical_backend
-    _backend_uses_qdrant = _backend_uses_qdrant
-    _backend_uses_sparse_vectors = _backend_uses_sparse_vectors
     _vector_rows_for_documents = _vector_rows_for_documents
     _sparse_encoder_for_documents = _sparse_encoder_for_documents
     _sparse_fingerprint_for_documents = _sparse_fingerprint_for_documents
     _current_sparse_fingerprint = _current_sparse_fingerprint
-    _write_sparse_state = _write_sparse_state
-    _load_sparse_encoder = _load_sparse_encoder
+    # Vector backend / sparse state helpers are implemented as delegating methods.
     _collection_has_hypermemory_vector_lanes = _collection_has_hypermemory_vector_lanes
     _hypermemory_probe_query = _hypermemory_probe_query
-    _backend_fingerprint = _backend_fingerprint
-    _backend_state_value = _backend_state_value
-    _write_backend_state = _write_backend_state
-    _count_rows = _count_rows
     _normalized_retrieval_text = _normalized_retrieval_text
     _normalize_text = _normalize_text
     _point_id = _point_id
