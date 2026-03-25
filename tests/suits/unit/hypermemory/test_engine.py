@@ -361,8 +361,7 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
             ),
         ),
     )
-    engine = HypermemoryEngine(config)
-    engine._qdrant_backend = _FakeQdrantBackend()
+    engine = HypermemoryEngine(config, vector_backend=_FakeQdrantBackend())
     engine.reindex()
 
     payload = engine.status()
@@ -418,10 +417,9 @@ def test_hypermemory_rerank_changes_planner_order_before_diversity(
             ),
         ),
     )
-    rerank_engine = HypermemoryEngine(rerank_config)
-    rerank_engine.reindex()
     rerank_provider = _StaticRerankProvider([0.0, 0.4, 1.0])
-    rerank_engine._rerank_provider = rerank_provider
+    rerank_engine = HypermemoryEngine(rerank_config, rerank_provider=rerank_provider)
+    rerank_engine.reindex()
 
     hits = rerank_engine.search(
         "gateway token deploy checklist",
@@ -462,9 +460,11 @@ def test_hypermemory_rerank_fail_open_preserves_provisional_order(
             ),
         ),
     )
-    fail_open_engine = HypermemoryEngine(fail_open_config)
+    fail_open_engine = HypermemoryEngine(
+        fail_open_config,
+        rerank_provider=_FailingRerankProvider(),
+    )
     fail_open_engine.reindex()
-    fail_open_engine._rerank_provider = _FailingRerankProvider()
 
     hits = fail_open_engine.search(
         "gateway token deploy checklist",
@@ -860,11 +860,13 @@ def test_hypermemory_hybrid_search_uses_dense_backend(tmp_path: pathlib.Path) ->
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-test"),
     )
-    engine = HypermemoryEngine(config)
     fake_embedder = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._embedding_provider = fake_embedder
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=fake_embedder,
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -906,10 +908,12 @@ def test_hypermemory_search_uses_runtime_candidate_pool_overrides(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-test"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -955,11 +959,13 @@ def test_hypermemory_dense_backend_falls_back_to_sqlite(tmp_path: pathlib.Path) 
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory-test"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
     fake_qdrant.raise_on_search = True
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     hits = engine.search("gateway token", lane="all")
@@ -989,10 +995,12 @@ def test_hypermemory_status_and_verify_report_sparse_backend_state(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1048,11 +1056,13 @@ def test_hypermemory_verify_requires_an_operational_rerank_provider(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
-    engine._rerank_provider = _StaticRerankProvider([0.8, 0.2])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        rerank_provider=_StaticRerankProvider([0.8, 0.2]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1102,11 +1112,13 @@ def test_hypermemory_verify_fails_when_rerank_provider_is_not_operational(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
-    engine._rerank_provider = _FailingRerankProvider()
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        rerank_provider=_FailingRerankProvider(),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1148,10 +1160,12 @@ def test_hypermemory_verify_fails_when_sparse_state_is_stale(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1197,11 +1211,13 @@ def test_hypermemory_verify_fails_when_qdrant_is_unhealthy(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
     fake_qdrant.health_payload = {"enabled": True, "healthy": False, "collection": "test"}
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1243,10 +1259,12 @@ def test_hypermemory_verify_fails_when_vector_sync_error_is_present(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:
@@ -1291,11 +1309,13 @@ def test_hypermemory_reindex_surfaces_vector_sync_errors(tmp_path: pathlib.Path)
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
     fake_qdrant.raise_on_ensure_collection = True
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
 
     with pytest.raises(RuntimeError, match="qdrant collection warmup timed out"):
         engine.reindex()
@@ -1326,8 +1346,6 @@ def test_hypermemory_verify_fails_when_collection_lacks_sparse_lane(
         ),
         qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
     )
-    engine = HypermemoryEngine(config)
-    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
     fake_qdrant = _FakeQdrantBackend()
     fake_qdrant.collection_details_payload = {
         "config": {
@@ -1336,7 +1354,11 @@ def test_hypermemory_verify_fails_when_collection_lacks_sparse_lane(
             }
         }
     }
-    engine._qdrant_backend = fake_qdrant
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=_FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
     engine.reindex()
 
     with engine.connect() as conn:

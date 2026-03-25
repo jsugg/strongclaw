@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
+from typing import Any, Literal
 
 from clawops.common import ensure_parent
 from clawops.hypermemory._engine.backend import (
@@ -41,18 +43,18 @@ from clawops.hypermemory._engine.indexing import (
     _missing_corpus_paths,
     _missing_required_corpus_paths,
     _rebuild_fact_registry,
-    reindex,
 )
+from clawops.hypermemory._engine.indexing import reindex as _reindex
 from clawops.hypermemory._engine.query import (
     _exact_fact_lookup,
     _filter_current_fact_hits,
     _row_to_search_hit,
     _search_invalidated_hits,
-    is_dirty,
-    read,
-    search,
-    status,
 )
+from clawops.hypermemory._engine.query import is_dirty as _is_dirty
+from clawops.hypermemory._engine.query import read as _read
+from clawops.hypermemory._engine.query import search as _search
+from clawops.hypermemory._engine.query import status as _status
 from clawops.hypermemory._engine.storage import (
     _age_days,
     _allows_memory_pro_export_path,
@@ -88,23 +90,25 @@ from clawops.hypermemory._engine.storage import (
     _store_target,
     _synced_line_from_row,
     _typed_entry_text,
-    benchmark_cases,
-    capture,
-    export_memory_pro_import,
-    flush_metadata,
-    forget,
-    get_fact,
-    list_facts,
-    record_access,
-    record_bad_recall,
-    record_confirmation,
-    record_injection,
-    reflect,
-    run_lifecycle,
-    store,
-    supersede,
-    update,
 )
+from clawops.hypermemory._engine.storage import benchmark_cases as _benchmark_cases
+from clawops.hypermemory._engine.storage import capture as _capture
+from clawops.hypermemory._engine.storage import (
+    export_memory_pro_import as _export_memory_pro_import,
+)
+from clawops.hypermemory._engine.storage import flush_metadata as _flush_metadata
+from clawops.hypermemory._engine.storage import forget as _forget
+from clawops.hypermemory._engine.storage import get_fact as _get_fact
+from clawops.hypermemory._engine.storage import list_facts as _list_facts
+from clawops.hypermemory._engine.storage import record_access as _record_access
+from clawops.hypermemory._engine.storage import record_bad_recall as _record_bad_recall
+from clawops.hypermemory._engine.storage import record_confirmation as _record_confirmation
+from clawops.hypermemory._engine.storage import record_injection as _record_injection
+from clawops.hypermemory._engine.storage import reflect as _reflect
+from clawops.hypermemory._engine.storage import run_lifecycle as _run_lifecycle
+from clawops.hypermemory._engine.storage import store as _store
+from clawops.hypermemory._engine.storage import supersede as _supersede
+from clawops.hypermemory._engine.storage import update as _update
 from clawops.hypermemory._engine.verify import (
     _collection_has_hypermemory_vector_lanes,
     _hypermemory_probe_query,
@@ -112,22 +116,53 @@ from clawops.hypermemory._engine.verify import (
     _rerank_probe_documents,
     _rerank_resolved_device,
     _verify_rerank_provider,
-    verify,
 )
+from clawops.hypermemory._engine.verify import verify as _verify
 from clawops.hypermemory.config import HypermemoryConfig
-from clawops.hypermemory.providers import create_embedding_provider, create_rerank_provider
-from clawops.hypermemory.qdrant_backend import QdrantBackend
+from clawops.hypermemory.models import (
+    FusionMode,
+    ReflectionMode,
+    ReindexSummary,
+    SearchBackend,
+    SearchHit,
+    SearchMode,
+    Tier,
+)
+from clawops.hypermemory.providers import (
+    EmbeddingProvider,
+    RerankProvider,
+    create_embedding_provider,
+    create_rerank_provider,
+)
+from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
 from clawops.hypermemory.schema import ensure_schema
 
 
 class HypermemoryEngine:
     """Markdown-canonical memory engine with a derived SQLite index."""
 
-    def __init__(self, config: HypermemoryConfig) -> None:
-        self.config = config
-        self._embedding_provider = create_embedding_provider(config.embedding)
-        self._rerank_provider = create_rerank_provider(config.rerank)
-        self._qdrant_backend = QdrantBackend(config.qdrant)
+    def __init__(
+        self,
+        config: HypermemoryConfig,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+        rerank_provider: RerankProvider | None = None,
+        vector_backend: VectorBackend | None = None,
+    ) -> None:
+        self.config: HypermemoryConfig = config
+        self._embedding_provider: EmbeddingProvider = (
+            embedding_provider
+            if embedding_provider is not None
+            else create_embedding_provider(config.embedding)
+        )
+        self._rerank_provider: RerankProvider = (
+            rerank_provider
+            if rerank_provider is not None
+            else create_rerank_provider(config.rerank)
+        )
+        self._qdrant_backend: VectorBackend = (
+            vector_backend if vector_backend is not None else QdrantBackend(config.qdrant)
+        )
 
     def connect(self) -> sqlite3.Connection:
         """Open a configured SQLite connection."""
@@ -137,32 +172,245 @@ class HypermemoryEngine:
         ensure_schema(conn)
         return conn
 
-    status = status
-    is_dirty = is_dirty
-    reindex = reindex
-    search = search
+    # Public API wrappers. These delegate to implementation functions in `_engine/*`.
+
+    def status(self) -> dict[str, Any]:
+        """Return index and governance status."""
+        return _status(self)
+
+    def is_dirty(self) -> bool:
+        """Return whether the derived index differs from canonical Markdown files."""
+        return _is_dirty(self)
+
+    def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
+        """Rebuild the derived index from canonical Markdown files."""
+        return _reindex(self, flush_metadata=flush_metadata)
+
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        min_score: float | None = None,
+        lane: SearchMode = "all",
+        scope: str | None = None,
+        auto_index: bool = True,
+        include_explain: bool = False,
+        backend: SearchBackend | None = None,
+        dense_candidate_pool: int | None = None,
+        sparse_candidate_pool: int | None = None,
+        fusion: FusionMode | None = None,
+        include_invalidated: bool = False,
+    ) -> list[SearchHit]:
+        """Search the derived store through the dual-lane retrieval planner."""
+        return _search(
+            self,
+            query,
+            max_results=max_results,
+            min_score=min_score,
+            lane=lane,
+            scope=scope,
+            auto_index=auto_index,
+            include_explain=include_explain,
+            backend=backend,
+            dense_candidate_pool=dense_candidate_pool,
+            sparse_candidate_pool=sparse_candidate_pool,
+            fusion=fusion,
+            include_invalidated=include_invalidated,
+        )
+
     _observed_rerank_scorer = _observed_rerank_scorer
     _rerank_resolved_device = _rerank_resolved_device
     _rerank_probe_documents = _rerank_probe_documents
     _verify_rerank_provider = _verify_rerank_provider
-    verify = verify
-    read = read
-    export_memory_pro_import = export_memory_pro_import
-    store = store
-    update = update
-    reflect = reflect
-    capture = capture
-    forget = forget
-    supersede = supersede
-    record_access = record_access
-    record_injection = record_injection
-    record_confirmation = record_confirmation
-    record_bad_recall = record_bad_recall
-    flush_metadata = flush_metadata
-    run_lifecycle = run_lifecycle
-    get_fact = get_fact
-    list_facts = list_facts
-    benchmark_cases = benchmark_cases
+
+    def verify(self) -> dict[str, Any]:
+        """Verify the supported sparse+dense backend contract for hypermemory."""
+        return _verify(self)
+
+    def read(
+        self,
+        rel_path: str,
+        *,
+        from_line: int | None = None,
+        lines: int | None = None,
+    ) -> dict[str, Any]:
+        """Read a canonical file returned by the memory index."""
+        return _read(self, rel_path, from_line=from_line, lines=lines)
+
+    def export_memory_pro_import(
+        self,
+        *,
+        scope: str | None = None,
+        include_daily: bool = False,
+        auto_index: bool = True,
+    ) -> dict[str, Any]:
+        """Export durable hypermemory entries as `memory-lancedb-pro` import JSON."""
+        return _export_memory_pro_import(
+            self,
+            scope=scope,
+            include_daily=include_daily,
+            auto_index=auto_index,
+        )
+
+    def store(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        text: str,
+        entity: str | None = None,
+        confidence: float | None = None,
+        scope: str | None = None,
+        fact_key: str | None = None,
+        importance: float | None = None,
+        tier: Tier | None = None,
+        supersedes: str | None = None,
+        _skip_preindex_sync: bool = False,
+        _skip_preflush_on_reindex: bool = False,
+        _skip_dedup: bool = False,
+    ) -> dict[str, Any]:
+        """Append a durable memory entry to the appropriate canonical Markdown file."""
+        return _store(
+            self,
+            kind=kind,
+            text=text,
+            entity=entity,
+            confidence=confidence,
+            scope=scope,
+            fact_key=fact_key,
+            importance=importance,
+            tier=tier,
+            supersedes=supersedes,
+            _skip_preindex_sync=_skip_preindex_sync,
+            _skip_preflush_on_reindex=_skip_preflush_on_reindex,
+            _skip_dedup=_skip_dedup,
+        )
+
+    def update(
+        self,
+        *,
+        rel_path: str,
+        find_text: str,
+        replace_text: str,
+        replace_all: bool = False,
+    ) -> dict[str, Any]:
+        """Replace text inside a writable memory file."""
+        return _update(
+            self,
+            rel_path=rel_path,
+            find_text=find_text,
+            replace_text=replace_text,
+            replace_all=replace_all,
+        )
+
+    def reflect(self, *, mode: ReflectionMode = "safe") -> dict[str, Any]:
+        """Promote retained daily-log entries into durable bank pages via proposals."""
+        return _reflect(self, mode=mode)
+
+    def capture(
+        self,
+        *,
+        messages: Sequence[tuple[int, str, str]],
+        mode: Literal["llm", "regex", "both"] | None = None,
+    ) -> dict[str, Any]:
+        """Extract and store durable memory candidates from conversation messages."""
+        return _capture(self, messages=messages, mode=mode)
+
+    def forget(
+        self,
+        *,
+        query: str | None = None,
+        path: str | None = None,
+        entry_text: str | None = None,
+        hard_delete: bool = False,
+    ) -> dict[str, Any]:
+        """Invalidate or delete a durable memory entry."""
+        return _forget(
+            self,
+            query=query,
+            path=path,
+            entry_text=entry_text,
+            hard_delete=hard_delete,
+        )
+
+    def supersede(
+        self,
+        *,
+        item_id: int | None = None,
+        old_entry_text: str | None = None,
+        new_text: str,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        entity: str | None = None,
+        confidence: float | None = None,
+        scope: str | None = None,
+        fact_key: str | None = None,
+        importance: float | None = None,
+        tier: Tier | None = None,
+    ) -> dict[str, Any]:
+        """Store a new entry that supersedes an existing durable entry."""
+        return _supersede(
+            self,
+            item_id=item_id,
+            old_entry_text=old_entry_text,
+            new_text=new_text,
+            kind=kind,
+            entity=entity,
+            confidence=confidence,
+            scope=scope,
+            fact_key=fact_key,
+            importance=importance,
+            tier=tier,
+        )
+
+    def record_access(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record retrieval access for durable typed memory items."""
+        return _record_access(self, item_ids=item_ids)
+
+    def record_injection(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that items were auto-injected into a prompt."""
+        return _record_injection(self, item_ids=item_ids)
+
+    def record_confirmation(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that recalled items were confirmed useful."""
+        return _record_confirmation(self, item_ids=item_ids)
+
+    def record_bad_recall(self, *, item_ids: Sequence[int]) -> dict[str, Any]:
+        """Record that recalled items were contradicted or unhelpful."""
+        return _record_bad_recall(self, item_ids=item_ids)
+
+    def flush_metadata(self) -> dict[str, Any]:
+        """Flush lifecycle metadata from SQLite rows back into canonical Markdown."""
+        return _flush_metadata(self)
+
+    def run_lifecycle(self) -> dict[str, Any]:
+        """Evaluate lifecycle scores and promote or demote tiers."""
+        return _run_lifecycle(self)
+
+    def get_fact(
+        self,
+        fact_key: str,
+        *,
+        conn: sqlite3.Connection | None = None,
+        scope: str | None = None,
+    ) -> SearchHit | None:
+        """Return the current active value for a canonical fact slot."""
+        return _get_fact(self, fact_key, conn=conn, scope=scope)
+
+    def list_facts(
+        self,
+        *,
+        category: str | None = None,
+        scope: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List current canonical facts from the registry."""
+        return _list_facts(self, category=category, scope=scope)
+
+    def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run simple benchmark cases against the current engine."""
+        return _benchmark_cases(self, cases)
+
+    # Internal/test seam bindings. These are intentionally attached to simplify tests
+    # and to avoid duplicating utility functions across modules.
     _is_noise = _is_noise
     _passes_admission = _passes_admission
     _normalize_tier = _normalize_tier
@@ -236,3 +484,4 @@ class HypermemoryEngine:
     _point_id = _point_id
     _slugify = _slugify
     _sha256 = _sha256
+    # End of HypermemoryEngine helper bindings.

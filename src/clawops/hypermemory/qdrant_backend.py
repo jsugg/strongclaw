@@ -6,7 +6,7 @@ import math
 import os
 import time
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import requests
 
@@ -20,6 +20,57 @@ from clawops.hypermemory.models import (
 _CandidateT = TypeVar("_CandidateT", DenseSearchCandidate, SparseSearchCandidate)
 _COLLECTION_RETRY_ATTEMPTS = 4
 _COLLECTION_READY_ATTEMPTS = 8
+
+
+class VectorBackend(Protocol):
+    """Contract for the dense/sparse vector retrieval backend.
+
+    The hypermemory engine treats Qdrant as an optional sidecar dependency.
+    This protocol exists to enable strict, test-friendly dependency injection
+    while keeping the runtime implementation pluggable.
+    """
+
+    def health(self) -> dict[str, Any]:
+        """Return a lightweight backend health payload."""
+        ...
+
+    def collection_details(self) -> dict[str, Any]:
+        """Return live collection details when available."""
+        ...
+
+    def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
+        """Create the collection when it does not exist."""
+        ...
+
+    def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
+        """Upsert dense and sparse points into the configured collection."""
+        ...
+
+    def delete_points(self, point_ids: Sequence[str]) -> None:
+        """Delete stale point IDs from the configured collection."""
+        ...
+
+    def search_dense(
+        self,
+        *,
+        vector: Sequence[float],
+        limit: int,
+        mode: SearchMode,
+        scope: str | None,
+    ) -> list[DenseSearchCandidate]:
+        """Run a dense search query and return item IDs plus scores."""
+        ...
+
+    def search_sparse(
+        self,
+        *,
+        vector: dict[str, list[int] | list[float]],
+        limit: int,
+        mode: SearchMode,
+        scope: str | None,
+    ) -> list[SparseSearchCandidate]:
+        """Run a sparse search query and return item IDs plus scores."""
+        ...
 
 
 class QdrantBackend:
