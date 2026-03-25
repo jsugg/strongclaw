@@ -10,9 +10,10 @@ def test_makefile_uses_python_native_operational_targets() -> None:
 
     assert "preferred_python.sh" not in makefile
     assert "./scripts/" not in makefile
-    assert "python -m clawops ops sidecars up" in makefile
-    assert "python -m clawops baseline verify" in makefile
-    assert "python -m clawops recovery backup-create" in makefile
+    assert "PYTHONPATH=src" not in makefile
+    assert "$(RUN) clawops ops sidecars up" in makefile
+    assert "$(RUN) clawops baseline verify" in makefile
+    assert "$(RUN) clawops recovery backup-create" in makefile
 
 
 def test_service_templates_call_repo_venv_python() -> None:

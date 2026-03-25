@@ -12,7 +12,7 @@ REPO_DIR ?= .
 RUNS_DIR ?=
 SETUP_ARGS ?=
 DOCTOR_ARGS ?=
-PREFERRED_PYTHON := $(shell PYTHONPATH=src $(PYTHON) -m clawops.platform_compat --field preferred_project_python_version 2>/dev/null)
+PREFERRED_PYTHON := $(shell $(PYTHON) src/clawops/platform_compat.py --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
 .PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
@@ -24,10 +24,10 @@ install: ## Sync the managed project environment.
 	$(UV_SYNC) $(DEV_SYNC_FLAGS)
 
 setup: ## Run the guided StrongClaw setup workflow.
-	PYTHONPATH=src $(RUN) clawops setup $(SETUP_ARGS)
+	$(RUN) clawops setup $(SETUP_ARGS)
 
 doctor: ## Run the deep StrongClaw readiness scan.
-	PYTHONPATH=src $(RUN) clawops doctor $(DOCTOR_ARGS)
+	$(RUN) clawops doctor $(DOCTOR_ARGS)
 
 dev: ## Sync the locked dev environment and install pre-commit hooks.
 	$(UV_SYNC) $(DEV_SYNC_FLAGS) --extra dev
@@ -68,28 +68,28 @@ dev-check: precommit ## Run pre-commit, tests, and a compile smoke.
 	$(RUN) python -m compileall -q src tests
 
 test: ## Run pytest in the managed dev environment.
-	PYTHONPATH=src $(PYTEST) -q
+	$(PYTEST) -q
 
 compile: ## Compile source and tests in the managed dev environment.
-	PYTHONPATH=src $(RUN) python -m compileall -q src tests
+	$(RUN) python -m compileall -q src tests
 
 render-config: ## Render the OpenClaw config bundle.
-	PYTHONPATH=src $(RUN) python -m clawops render-openclaw-config --repo-root .
+	$(RUN) clawops render-openclaw-config --repo-root .
 
 start-sidecars: ## Launch the sidecar services.
-	PYTHONPATH=src $(RUN) python -m clawops ops sidecars up
+	$(RUN) clawops ops sidecars up
 
 stop-sidecars: ## Stop the sidecar services.
-	PYTHONPATH=src $(RUN) python -m clawops ops sidecars down
+	$(RUN) clawops ops sidecars down
 
 verify: ## Run the baseline verification flow.
-	PYTHONPATH=src $(RUN) python -m clawops baseline verify
+	$(RUN) clawops baseline verify
 
 context-index: ## Build the repo lexical context index.
 	$(RUN) clawops context index --config $(CONTEXT_CONFIG) --repo $(REPO_DIR)
 
 run-harness: ## Execute the harness smoke suite.
-	PYTHONPATH=src $(RUN) python -m clawops baseline harness-smoke --runs-dir $(if $(RUNS_DIR),$(RUNS_DIR),.tmp/harness)
+	$(RUN) clawops baseline harness-smoke --runs-dir $(if $(RUNS_DIR),$(RUNS_DIR),.tmp/harness)
 
 backup: ## Create a recovery backup bundle.
-	PYTHONPATH=src $(RUN) python -m clawops recovery backup-create
+	$(RUN) clawops recovery backup-create
