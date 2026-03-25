@@ -117,6 +117,43 @@ def test_ensure_images_noops_when_context_disables_image_warming(
     assert context.image_report_path is None
 
 
+def test_wait_for_docker_ready_retries_after_probe_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Docker readiness probes should tolerate transient probe timeouts."""
+    attempts = {"count": 0}
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker", "info"]
+        assert cwd == tmp_path
+        assert env == {"DOCKER_HOST": "unix:///tmp/docker.sock"}
+        assert timeout_seconds == 30
+        assert capture_output is True
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise subprocess.TimeoutExpired(command, timeout_seconds)
+        return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
+
+    monkeypatch.setattr(hosted_docker, "_run_command", fake_run_command)
+    monkeypatch.setattr(hosted_docker.time, "sleep", lambda _: None)
+
+    hosted_docker._wait_for_docker_ready(
+        cwd=tmp_path,
+        env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        max_attempts=4,
+    )
+
+    assert attempts["count"] == 3
+
+
 def test_install_runtime_rejects_non_macos_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

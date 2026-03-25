@@ -136,6 +136,37 @@ def _run_checked(
     return completed
 
 
+def _wait_for_docker_ready(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    max_attempts: int = 60,
+    poll_seconds: int = 2,
+    probe_timeout_seconds: int = 30,
+) -> None:
+    """Wait until the Docker daemon answers successfully."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            ready = _run_command(
+                ["docker", "info"],
+                cwd=cwd,
+                env=env,
+                timeout_seconds=probe_timeout_seconds,
+                capture_output=True,
+            )
+        except subprocess.TimeoutExpired:
+            _log(
+                "Docker readiness probe timed out after "
+                f"{probe_timeout_seconds}s (attempt {attempt}/{max_attempts})."
+            )
+        else:
+            if ready.returncode == 0:
+                return
+        if attempt < max_attempts:
+            time.sleep(poll_seconds)
+    raise FreshHostError("docker did not become ready after starting colima")
+
+
 def _sysctl_int(name: str) -> int | None:
     """Return one integer sysctl value when available."""
     try:
@@ -348,23 +379,11 @@ def install_runtime(
             env=env,
             timeout_seconds=1800,
         )
-        for _ in range(60):
-            ready = _run_command(
-                ["docker", "info"],
-                cwd=repo_root,
-                env=env,
-                timeout_seconds=30,
-                capture_output=True,
-            )
-            if ready.returncode == 0:
-                break
-            time.sleep(2)
-        else:
-            raise FreshHostError("docker did not become ready after starting colima")
+        _wait_for_docker_ready(cwd=repo_root, env=env)
 
         _run_checked(["docker", "version"], cwd=repo_root, env=env)
         _run_checked(["docker", "compose", "version"], cwd=repo_root, env=env)
-        _run_checked(["docker", "info"], cwd=repo_root, env=env)
+        _run_checked(["docker", "info"], cwd=repo_root, env=env, timeout_seconds=120)
     except Exception as exc:  # noqa: BLE001
         failure_reason = str(exc)
 
