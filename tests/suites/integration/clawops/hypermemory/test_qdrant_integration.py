@@ -18,7 +18,7 @@ import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
+from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
 

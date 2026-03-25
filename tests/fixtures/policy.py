@@ -17,3 +17,11 @@ def policy_factory(tmp_path: pathlib.Path) -> PolicyFactory:
         return write_policy_file(tmp_path / name, payload)
 
     return _factory
+
+
+__all__ = [
+    "PolicyFactory",
+    "PolicyPayload",
+    "policy_factory",
+    "write_policy_file",
+]

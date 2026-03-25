@@ -4,7 +4,7 @@ import importlib
 
 import pytest
 
-from tests.utils.helpers.repo import REPO_ROOT
+from tests.fixtures.repo import REPO_ROOT
 
 
 @pytest.mark.parametrize(

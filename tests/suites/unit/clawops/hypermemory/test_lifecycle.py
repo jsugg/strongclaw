@@ -4,7 +4,7 @@ from dataclasses import replace
 from clawops.hypermemory import HypermemoryEngine, load_config
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import DecayConfig
-from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
+from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_compute_decay_score_fresh_item() -> None:

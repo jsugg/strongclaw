@@ -10,7 +10,7 @@ import subprocess
 from clawops.acp_runner import _lock_name, _resolve_session_spec
 from clawops.acp_runner import main as acp_runner_main
 from clawops.acp_runner import parse_args
-from tests.utils.helpers.cli import (
+from tests.fixtures.cli import (
     PathPrepender,
     require_system_executable,
     symlink_executable,

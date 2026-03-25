@@ -11,10 +11,10 @@ from clawops.context_service import service_from_config
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
 from clawops.wrappers.webhook import invoke_webhook
-from tests.utils.helpers.context import build_context_repo
-from tests.utils.helpers.journal import create_journal
-from tests.utils.helpers.observability import RecordingExporter
-from tests.utils.helpers.policy import write_policy_file
+from tests.fixtures.context import build_context_repo
+from tests.fixtures.journal import create_journal
+from tests.fixtures.observability import RecordingExporter
+from tests.fixtures.policy import write_policy_file
 
 
 class _FakeResponse:

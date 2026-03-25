@@ -6,8 +6,8 @@ import pathlib
 
 from clawops.common import load_yaml, write_text, write_yaml
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
-from tests.utils.helpers.network import HttpServerFactory, ListenerFactory
-from tests.utils.helpers.repo import REPO_ROOT
+from tests.fixtures.network import HttpServerFactory, ListenerFactory
+from tests.fixtures.repo import REPO_ROOT
 
 
 def test_verify_sidecars_supports_runtime_probes(

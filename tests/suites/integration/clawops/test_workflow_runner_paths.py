@@ -1,4 +1,4 @@
-"""Path resolution coverage for deterministic workflows."""
+"""Workflow runner path and trust-boundary coverage."""
 
 from __future__ import annotations
 
@@ -8,7 +8,52 @@ import pytest
 
 from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_yaml
-from clawops.workflow_runner import WorkflowRunner
+from clawops.workflow_runner import WorkflowRunner, main
+from tests.fixtures.repo import REPO_ROOT
+
+
+def test_workflow_main_allows_trusted_repo_workflows_in_dry_run() -> None:
+    result = main(
+        [
+            "--workflow",
+            str(REPO_ROOT / "platform/configs/workflows/daily_healthcheck.yaml"),
+            "--dry-run",
+        ]
+    )
+
+    assert result == 0
+
+
+def test_workflow_main_rejects_untrusted_paths_by_default(tmp_path: pathlib.Path) -> None:
+    workflow_path = tmp_path / "custom.yaml"
+    workflow_path.write_text(
+        "name: custom\nsteps:\n  - name: noop\n    kind: journal_init\n    db: ignored.sqlite\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="outside trusted roots"):
+        main(["--workflow", str(workflow_path), "--dry-run"])
+
+
+def test_workflow_main_allows_untrusted_paths_with_explicit_override(
+    tmp_path: pathlib.Path,
+) -> None:
+    workflow_path = tmp_path / "custom.yaml"
+    workflow_path.write_text(
+        "name: custom\nsteps:\n  - name: noop\n    kind: journal_init\n    db: ignored.sqlite\n",
+        encoding="utf-8",
+    )
+
+    result = main(
+        [
+            "--workflow",
+            str(workflow_path),
+            "--allow-untrusted-workflow",
+            "--dry-run",
+        ]
+    )
+
+    assert result == 0
 
 
 def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(

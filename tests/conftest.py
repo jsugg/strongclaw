@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.helpers.repo import REPO_ROOT
+from tests.fixtures.repo import REPO_ROOT
 
 TESTS_ROOT = Path(__file__).resolve().parent
 _QDRANT_MARKED_FILES = {
-    "test_engine_backends.py",
+    "test_engine_backend_search.py",
+    "test_engine_backend_verify.py",
     "test_qdrant_backend.py",
     "test_qdrant_integration.py",
 }
