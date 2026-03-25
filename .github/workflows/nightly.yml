@@ -25,7 +25,7 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml
+      - run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml
       - run: PYTHONPATH=src uv run python -m compileall -q src tests
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/nightly"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/security.jsonl"
@@ -38,4 +38,5 @@ jobs:
           name: nightly-artifacts
           path: |
             coverage.xml
+            pytest.xml
             ${{ runner.temp }}/strongclaw/nightly

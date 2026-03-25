@@ -30,7 +30,7 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: PYTHONPATH=src uv run --project . --locked pytest -q
+      - run: uv run --project . --locked pytest -q
       - run: PYTHONPATH=src uv run --project . --locked python -m compileall -q src tests
 
   setup-smoke:
