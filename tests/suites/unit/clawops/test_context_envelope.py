@@ -6,7 +6,6 @@ import pathlib
 
 import pytest
 
-from clawops.common import write_yaml
 from clawops.context_envelope import (
     ContextEnvelopeBuilder,
     ContextEnvelopeValidationError,
@@ -15,15 +14,14 @@ from clawops.context_envelope import (
 )
 from clawops.context_service import service_from_config
 from clawops.orchestration import ProjectDescriptor, WorkspaceDescriptor
+from tests.utils.helpers.context import build_context_repo
 
 
 def _build_service(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "app.py").write_text("def greet():\n    return 'hi'\n", encoding="utf-8")
-    config = tmp_path / "context.yaml"
-    write_yaml(config, {"index": {"db_path": ".clawops/context.sqlite"}})
-    return repo, config
+    return build_context_repo(
+        tmp_path,
+        files={"app.py": "def greet():\n    return 'hi'\n"},
+    )
 
 
 def test_context_envelope_reuses_identical_inputs(tmp_path: pathlib.Path) -> None:

@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import pathlib
-
-from clawops.common import write_yaml
 from clawops.policy_engine import PolicyEngine
+from tests.utils.helpers.policy import PolicyFactory
 
 
-def test_policy_denies_non_allowlisted_target(tmp_path: pathlib.Path) -> None:
-    policy_path = tmp_path / "policy.yaml"
-    write_yaml(
-        policy_path,
+def test_policy_denies_non_allowlisted_target(policy_factory: PolicyFactory) -> None:
+    policy_path = policy_factory(
         {
             "defaults": {"decision": "allow"},
             "zones": {
@@ -21,7 +17,7 @@ def test_policy_denies_non_allowlisted_target(tmp_path: pathlib.Path) -> None:
                 }
             },
             "allowlists": {"webhook_url": ["https://example.internal/hooks/deploy"]},
-        },
+        }
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(
@@ -36,10 +32,8 @@ def test_policy_denies_non_allowlisted_target(tmp_path: pathlib.Path) -> None:
     assert decision.decision == "deny"
 
 
-def test_policy_requires_approval_for_external_write(tmp_path: pathlib.Path) -> None:
-    policy_path = tmp_path / "policy.yaml"
-    write_yaml(
-        policy_path,
+def test_policy_requires_approval_for_external_write(policy_factory: PolicyFactory) -> None:
+    policy_path = policy_factory(
         {
             "defaults": {"decision": "allow"},
             "zones": {
@@ -49,7 +43,7 @@ def test_policy_requires_approval_for_external_write(tmp_path: pathlib.Path) -> 
                 }
             },
             "approval": {"require_for_actions": ["github.comment.create"]},
-        },
+        }
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(
@@ -66,10 +60,8 @@ def test_policy_requires_approval_for_external_write(tmp_path: pathlib.Path) -> 
     assert decision.review_policy_id == "approval.actions.github.comment.create"
 
 
-def test_policy_review_action_overrides_defaults(tmp_path: pathlib.Path) -> None:
-    policy_path = tmp_path / "policy.yaml"
-    write_yaml(
-        policy_path,
+def test_policy_review_action_overrides_defaults(policy_factory: PolicyFactory) -> None:
+    policy_path = policy_factory(
         {
             "defaults": {"decision": "allow"},
             "zones": {
@@ -89,7 +81,7 @@ def test_policy_review_action_overrides_defaults(tmp_path: pathlib.Path) -> None
                     }
                 },
             },
-        },
+        }
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(

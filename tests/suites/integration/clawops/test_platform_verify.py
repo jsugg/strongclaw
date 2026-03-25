@@ -6,17 +6,21 @@ import pathlib
 
 from clawops.common import load_yaml, write_text, write_yaml
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
-from tests.fixtures.network import disconnecting_listener, http_server, tcp_listener
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.network import HttpServerFactory, ListenerFactory
+from tests.utils.helpers.repo import REPO_ROOT
 
 
-def test_verify_sidecars_supports_runtime_probes(tmp_path: pathlib.Path) -> None:
+def test_verify_sidecars_supports_runtime_probes(
+    tmp_path: pathlib.Path,
+    tcp_listener_factory: ListenerFactory,
+    http_server_factory: HttpServerFactory,
+) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener() as (postgres_host, postgres_port):
-        with http_server(b"alive\n") as (litellm_host, litellm_port):
-            with tcp_listener() as (otlp_host, otlp_port):
-                with http_server(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with http_server(b"ok\n") as (qdrant_host, qdrant_port):
+    with tcp_listener_factory() as (postgres_host, postgres_port):
+        with http_server_factory(b"alive\n") as (litellm_host, litellm_port):
+            with tcp_listener_factory() as (otlp_host, otlp_port):
+                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
+                    with http_server_factory(b"ok\n") as (qdrant_host, qdrant_port):
                         write_yaml(
                             compose_path,
                             {
@@ -49,13 +53,16 @@ def test_verify_sidecars_supports_runtime_probes(tmp_path: pathlib.Path) -> None
 
 def test_verify_sidecars_reports_http_disconnects_without_crashing(
     tmp_path: pathlib.Path,
+    tcp_listener_factory: ListenerFactory,
+    disconnecting_listener_factory: ListenerFactory,
+    http_server_factory: HttpServerFactory,
 ) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener() as (postgres_host, postgres_port):
-        with disconnecting_listener() as (litellm_host, litellm_port):
-            with tcp_listener() as (otlp_host, otlp_port):
-                with http_server(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with http_server(b"ok\n") as (qdrant_host, qdrant_port):
+    with tcp_listener_factory() as (postgres_host, postgres_port):
+        with disconnecting_listener_factory() as (litellm_host, litellm_port):
+            with tcp_listener_factory() as (otlp_host, otlp_port):
+                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
+                    with http_server_factory(b"ok\n") as (qdrant_host, qdrant_port):
                         write_yaml(
                             compose_path,
                             {
@@ -91,13 +98,18 @@ def test_verify_sidecars_reports_http_disconnects_without_crashing(
                         assert "http reachability failed" in litellm_check.message
 
 
-def test_verify_sidecars_reports_qdrant_runtime_failures(tmp_path: pathlib.Path) -> None:
+def test_verify_sidecars_reports_qdrant_runtime_failures(
+    tmp_path: pathlib.Path,
+    tcp_listener_factory: ListenerFactory,
+    disconnecting_listener_factory: ListenerFactory,
+    http_server_factory: HttpServerFactory,
+) -> None:
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener() as (postgres_host, postgres_port):
-        with http_server(b"alive\n") as (litellm_host, litellm_port):
-            with tcp_listener() as (otlp_host, otlp_port):
-                with http_server(b"otel metrics\n") as (metrics_host, metrics_port):
-                    with disconnecting_listener() as (qdrant_host, qdrant_port):
+    with tcp_listener_factory() as (postgres_host, postgres_port):
+        with http_server_factory(b"alive\n") as (litellm_host, litellm_port):
+            with tcp_listener_factory() as (otlp_host, otlp_port):
+                with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
+                    with disconnecting_listener_factory() as (qdrant_host, qdrant_port):
                         write_yaml(
                             compose_path,
                             {
@@ -133,11 +145,15 @@ def test_verify_sidecars_reports_qdrant_runtime_failures(tmp_path: pathlib.Path)
                         assert "http reachability failed" in qdrant_check.message
 
 
-def test_verify_observability_supports_runtime_probes(tmp_path: pathlib.Path) -> None:
+def test_verify_observability_supports_runtime_probes(
+    tmp_path: pathlib.Path,
+    tcp_listener_factory: ListenerFactory,
+    http_server_factory: HttpServerFactory,
+) -> None:
     overlay_path = tmp_path / "50-observability.json5"
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener() as (otlp_host, otlp_port):
-        with http_server(b"otel metrics\n") as (metrics_host, metrics_port):
+    with tcp_listener_factory() as (otlp_host, otlp_port):
+        with http_server_factory(b"otel metrics\n") as (metrics_host, metrics_port):
             write_text(
                 overlay_path,
                 (
@@ -174,11 +190,13 @@ def test_verify_observability_supports_runtime_probes(tmp_path: pathlib.Path) ->
 
 def test_verify_observability_accepts_empty_metrics_body_when_endpoint_is_reachable(
     tmp_path: pathlib.Path,
+    tcp_listener_factory: ListenerFactory,
+    http_server_factory: HttpServerFactory,
 ) -> None:
     overlay_path = tmp_path / "50-observability.json5"
     compose_path = tmp_path / "compose.yaml"
-    with tcp_listener() as (otlp_host, otlp_port):
-        with http_server(b"") as (metrics_host, metrics_port):
+    with tcp_listener_factory() as (otlp_host, otlp_port):
+        with http_server_factory(b"") as (metrics_host, metrics_port):
             write_text(
                 overlay_path,
                 (

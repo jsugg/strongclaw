@@ -11,7 +11,7 @@ from clawops.openclaw_config import (
     render_openclaw_profile,
     render_qmd_overlay,
 )
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) -> None:

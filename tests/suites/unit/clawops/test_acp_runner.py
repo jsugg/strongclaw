@@ -4,48 +4,19 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import pathlib
-import shutil
 import subprocess
 
 from clawops.acp_runner import _lock_name, _resolve_session_spec
 from clawops.acp_runner import main as acp_runner_main
 from clawops.acp_runner import parse_args
-
-
-def _write_fake_acpx(bin_dir: pathlib.Path, *, exit_code: int = 0) -> None:
-    target = bin_dir / "acpx"
-    target.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        "printf 'fake-acpx %s\\n' \"$*\"\n"
-        "printf 'stderr from fake-acpx\\n' >&2\n"
-        f"exit {exit_code}\n",
-        encoding="utf-8",
-    )
-    target.chmod(0o755)
-
-
-def _write_fake_status_command(
-    bin_dir: pathlib.Path,
-    name: str,
-    *,
-    stdout_text: str,
-    exit_code: int = 0,
-) -> None:
-    target = bin_dir / name
-    target.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        'if [[ "$*" == *"login status"* ]] || [[ "$*" == *"auth status"* ]]; then\n'
-        f"  printf '%s\\n' {stdout_text!r}\n"
-        f"  exit {exit_code}\n"
-        "fi\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    target.chmod(0o755)
+from tests.utils.helpers.cli import (
+    PathPrepender,
+    require_system_executable,
+    symlink_executable,
+    write_fake_acpx,
+    write_status_script,
+)
 
 
 def _init_git_worktree(worktree: pathlib.Path) -> None:
@@ -63,7 +34,8 @@ def _session_summary_path(state_dir: pathlib.Path) -> pathlib.Path:
 
 def test_acp_runner_writes_summary_and_logs(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
     capsys: object,
 ) -> None:
     repo_root = tmp_path / "repo-root"
@@ -71,11 +43,9 @@ def test_acp_runner_writes_summary_and_logs(
     worktree.mkdir(parents=True)
     _init_git_worktree(worktree)
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_fake_acpx(bin_dir)
-    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    write_fake_acpx(cli_bin_dir)
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
 
     state_dir = repo_root / ".runs" / "acp"
     exit_code = acp_runner_main(
@@ -122,6 +92,7 @@ def test_acp_runner_writes_summary_and_logs(
 
 def test_acp_runner_fails_preflight_when_acpx_is_missing(
     tmp_path: pathlib.Path,
+    cli_bin_dir: pathlib.Path,
     monkeypatch: object,
     capsys: object,
 ) -> None:
@@ -129,14 +100,9 @@ def test_acp_runner_fails_preflight_when_acpx_is_missing(
     worktree = repo_root / "repo" / "upstream"
     worktree.mkdir(parents=True)
     _init_git_worktree(worktree)
-    git_bin = tmp_path / "bin"
-    git_bin.mkdir()
-    git_path = shutil.which("git")
-    if git_path is None:
-        raise AssertionError("git is required for this test")
-    (git_bin / "git").symlink_to(git_path)
-    _write_fake_status_command(git_bin, "claude", stdout_text='{"status":"authenticated"}')
-    monkeypatch.setenv("PATH", git_bin.as_posix())
+    symlink_executable(cli_bin_dir, require_system_executable("git"))
+    write_status_script(cli_bin_dir, "claude", stdout_text='{"status":"authenticated"}')
+    monkeypatch.setenv("PATH", cli_bin_dir.as_posix())
 
     state_dir = repo_root / ".runs" / "acp"
     exit_code = acp_runner_main(
@@ -167,7 +133,8 @@ def test_acp_runner_fails_preflight_when_acpx_is_missing(
 
 def test_acp_runner_detects_lock_conflicts(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
     capsys: object,
 ) -> None:
     repo_root = tmp_path / "repo-root"
@@ -175,11 +142,9 @@ def test_acp_runner_detects_lock_conflicts(
     worktree.mkdir(parents=True)
     _init_git_worktree(worktree)
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_fake_acpx(bin_dir)
-    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    write_fake_acpx(cli_bin_dir)
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
 
     state_dir = repo_root / ".runs" / "acp"
     args = parse_args(
@@ -233,7 +198,8 @@ def test_acp_runner_detects_lock_conflicts(
 
 def test_acp_runner_supports_non_git_local_dir_without_branch(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
     capsys: object,
 ) -> None:
     project_root = tmp_path / "project"
@@ -242,11 +208,9 @@ def test_acp_runner_supports_non_git_local_dir_without_branch(
     workspace.mkdir()
     (workspace / "README.md").write_text("hello\n", encoding="utf-8")
 
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_fake_acpx(bin_dir)
-    _write_fake_status_command(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    write_fake_acpx(cli_bin_dir)
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
 
     exit_code = acp_runner_main(
         [

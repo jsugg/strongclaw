@@ -7,13 +7,14 @@ import pathlib
 from pytest import MonkeyPatch
 
 from clawops import observability
-from clawops.common import write_yaml
 from clawops.context_service import service_from_config
-from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
 from clawops.wrappers.webhook import invoke_webhook
-from tests.fixtures.observability import configure_test_tracing
+from tests.utils.helpers.context import build_context_repo
+from tests.utils.helpers.journal import create_journal
+from tests.utils.helpers.observability import RecordingExporter
+from tests.utils.helpers.policy import write_policy_file
 
 
 class _FakeResponse:
@@ -27,11 +28,10 @@ class _FakeResponse:
 def test_wrapper_execution_exports_trace_span(
     tmp_path: pathlib.Path,
     monkeypatch: MonkeyPatch,
+    tracing_exporter: RecordingExporter,
 ) -> None:
-    exporter = configure_test_tracing(monkeypatch, observability)
-    policy_path = tmp_path / "policy.yaml"
-    write_yaml(
-        policy_path,
+    policy_path = write_policy_file(
+        tmp_path / "policy.yaml",
         {
             "defaults": {"decision": "allow"},
             "zones": {
@@ -43,8 +43,7 @@ def test_wrapper_execution_exports_trace_span(
             "allowlists": {"webhook_url": ["https://example.internal/hooks/deploy"]},
         },
     )
-    journal = OperationJournal(tmp_path / "journal.sqlite")
-    journal.init()
+    journal = create_journal(tmp_path / "journal.sqlite")
     ctx = WrapperContext(policy_engine=PolicyEngine.from_file(policy_path), journal=journal)
 
     monkeypatch.setattr(
@@ -61,7 +60,7 @@ def test_wrapper_execution_exports_trace_span(
     )
     observability.force_flush()
 
-    span = next(span for span in exporter.spans if span.name == "clawops.wrapper.execute")
+    span = next(span for span in tracing_exporter.spans if span.name == "clawops.wrapper.execute")
     assert result["ok"] is True
     assert span.attributes["kind"] == "webhook_post"
     assert span.attributes["status_code"] == 200
@@ -70,20 +69,18 @@ def test_wrapper_execution_exports_trace_span(
 
 def test_context_index_exports_trace_span(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    tracing_exporter: RecordingExporter,
 ) -> None:
-    exporter = configure_test_tracing(monkeypatch, observability)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "auth.py").write_text("def validate_jwt():\n    return True\n", encoding="utf-8")
-    config_path = tmp_path / "context.yaml"
-    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+    repo, config_path = build_context_repo(
+        tmp_path,
+        files={"auth.py": "def validate_jwt():\n    return True\n"},
+    )
 
     service = service_from_config(config_path, repo)
     stats = service.index_with_stats()
     observability.force_flush()
 
-    span = next(span for span in exporter.spans if span.name == "clawops.context.index")
+    span = next(span for span in tracing_exporter.spans if span.name == "clawops.context.index")
     assert stats.indexed_files == 1
     assert span.attributes["repo"] == repo.resolve().as_posix()
     assert span.attributes["indexed_files"] == 1

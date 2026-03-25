@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
