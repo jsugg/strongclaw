@@ -14,6 +14,7 @@ from tests.utils.helpers._fresh_host.shell import (
     system_clawops_command,
     venv_clawops_command,
     verify_file_exists,
+    wait_for_docker_backend,
 )
 from tests.utils.helpers._fresh_host.storage import context_path
 
@@ -81,6 +82,7 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local sidecars."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context, "ops", "--repo-root", ".", "sidecars", "up", "--repo-local-state"
     )
@@ -102,6 +104,7 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local browser-lab."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context,
         "ops",

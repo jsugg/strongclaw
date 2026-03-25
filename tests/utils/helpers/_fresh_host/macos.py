@@ -19,6 +19,7 @@ from tests.utils.helpers._fresh_host.shell import (
     system_clawops_command,
     venv_clawops_command,
     verify_file_exists,
+    wait_for_docker_backend,
 )
 
 
@@ -103,6 +104,7 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
     """Run one repo-local up/down cycle for a component."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context, "ops", "--repo-root", ".", component, "up", "--repo-local-state"
     )

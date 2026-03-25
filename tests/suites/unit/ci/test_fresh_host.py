@@ -9,8 +9,10 @@ import pytest
 
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
+from tests.utils.helpers._fresh_host import linux as fresh_host_linux
 from tests.utils.helpers._fresh_host import macos as fresh_host_macos
 from tests.utils.helpers._fresh_host import scenario as fresh_host_scenario
+from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 
 
 def test_prepare_context_writes_context_and_env_file(
@@ -37,6 +39,7 @@ def test_prepare_context_writes_context_and_env_file(
     exports = github_env.read_text(encoding="utf-8")
     assert f"FRESH_HOST_CONTEXT={context.context_path}" in exports
     assert f"STRONGCLAW_APP_HOME={context.app_home}" in exports
+    assert context.runtime_provider == "docker"
 
 
 def test_scenario_phase_names_match_macos_browser_lab(
@@ -259,6 +262,64 @@ def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
 
     assert command[0] == str(venv_bin / "python")
     assert command[0] != str(target_python.resolve())
+
+
+def test_wait_for_docker_backend_retries_after_transient_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient Linux docker probe failures should be retried before giving up."""
+    attempts = {"count": 0}
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            return type("Result", (), {"returncode": 1})()
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", lambda _: None)
+
+    fresh_host_shell.wait_for_docker_backend(cwd=tmp_path, env={"PATH": "/usr/bin"})
+
+    assert attempts["count"] == 3
+
+
+def test_exercise_linux_sidecars_waits_for_docker_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux sidecar exercises should wait for Docker backend readiness first."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "wait_for_docker_backend",
+        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+    )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "run_command",
+        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+    )
+
+    fresh_host_linux.exercise_linux_sidecars(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
 
 
 def test_write_summary_includes_child_reports(

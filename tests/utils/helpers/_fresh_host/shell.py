@@ -6,6 +6,7 @@ import os
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
@@ -107,6 +108,36 @@ def verify_file_exists(path: Path) -> None:
     """Raise when the requested file is missing."""
     if not path.is_file():
         raise FreshHostError(f"Expected file is missing: {path}")
+
+
+def wait_for_docker_backend(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    max_attempts: int = 5,
+    poll_seconds: int = 2,
+    probe_timeout_seconds: int = 15,
+) -> None:
+    """Wait until the local Docker backend is reachable."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            completed = subprocess.run(
+                ["docker", "info"],
+                cwd=cwd,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=probe_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            completed = None
+        if completed is not None and completed.returncode == 0:
+            return
+        if attempt < max_attempts:
+            log(f"Docker backend not ready yet (attempt {attempt}/{max_attempts}); retrying.")
+            time.sleep(poll_seconds)
+    raise FreshHostError("Docker backend is not reachable from this shell.")
 
 
 def best_effort(command: list[str], *, cwd: Path, env: dict[str, str]) -> str | None:

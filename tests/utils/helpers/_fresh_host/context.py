@@ -110,7 +110,7 @@ def prepare_context(
         runtime_report_path=str(runtime_report.resolve()) if runtime_report is not None else None,
         image_report_path=str(image_report.resolve()) if image_report is not None else None,
         diagnostics_dir=str(diagnostics_dir.resolve()),
-        runtime_provider=_selected_runtime_provider(),
+        runtime_provider="docker" if spec.platform == "linux" else _selected_runtime_provider(),
         docker_pull_parallelism=_selected_pull_parallelism(),
         docker_pull_max_attempts=_selected_pull_max_attempts(),
         compose_variant=spec.compose_variant,
