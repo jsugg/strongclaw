@@ -29,9 +29,9 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
-      - run: PYTHONPATH=src uv run --project . --locked --extra dev pytest -q
-      - run: PYTHONPATH=src uv run --project . --locked --extra dev python -m compileall -q src tests
+      - run: uv sync --locked
+      - run: PYTHONPATH=src uv run --project . --locked pytest -q
+      - run: PYTHONPATH=src uv run --project . --locked python -m compileall -q src tests
 
   setup-smoke:
     name: Node ${{ matrix.node-version }} setup smoke
@@ -52,7 +52,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: |
           TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
           TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"

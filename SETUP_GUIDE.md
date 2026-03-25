@@ -69,6 +69,16 @@ make test
 verifier also uses that managed test path, and bootstrap installs `uv` when
 the host does not already provide it.
 
+If you want shorter commands in an interactive shell, sync the dev environment
+once and activate `.venv` before running tools directly:
+
+```bash
+uv sync --locked
+source .venv/bin/activate
+pytest -q
+deactivate
+```
+
 ## 4. Prepare the Varlock env contract
 
 You can let the guided setup path create and repair the repo-local Varlock env

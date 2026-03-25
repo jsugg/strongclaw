@@ -23,7 +23,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/harness"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/harness/security.jsonl"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/harness/policy.jsonl"

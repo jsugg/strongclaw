@@ -8,9 +8,10 @@ import pathlib
 import pytest
 
 from clawops.common import write_yaml
-from clawops.op_journal import OperationJournal
 from clawops.workflow_runner import WorkflowRunner
-from tests.fixtures.workflow import write_fake_acpx, write_status_script
+from tests.fixtures.cli import write_fake_acpx, write_status_script
+from tests.fixtures.context import build_context_project
+from tests.fixtures.journal import create_journal
 
 
 def test_workflow_runner_supports_workspace_and_delivery_descriptors(
@@ -57,11 +58,7 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "state"))
-    project = tmp_path / "project"
-    workspace = project / "workspace"
-    config = project / "context.yaml"
-    project.mkdir()
-    workspace.mkdir()
+    project, workspace, config = build_context_project(tmp_path)
     (workspace / "main.py").write_text("def run_task():\n    return 'ok'\n", encoding="utf-8")
     write_yaml(config, {"index": {"db_path": ".clawops/context.sqlite"}})
 
@@ -122,8 +119,7 @@ def test_workflow_runner_approval_and_artifact_gates(
     artifact = tmp_path / "release-notes.md"
     artifact.write_text("done\n", encoding="utf-8")
 
-    journal = OperationJournal(db_path)
-    journal.init()
+    journal = create_journal(db_path)
     op = journal.begin(
         scope="session",
         kind="review",

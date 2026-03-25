@@ -7,12 +7,11 @@ import pathlib
 
 from clawops.approvals import main
 from clawops.op_journal import OperationJournal
+from tests.fixtures.journal import JournalFactory
 
 
-def _seed_pending_operation(tmp_path: pathlib.Path) -> tuple[OperationJournal, str]:
-    db_path = tmp_path / "journal.sqlite"
-    journal = OperationJournal(db_path)
-    journal.init()
+def _seed_pending_operation(journal_factory: JournalFactory) -> tuple[OperationJournal, str]:
+    journal = journal_factory()
     op = journal.begin(
         scope="github:repo",
         kind="github_pull_merge",
@@ -33,8 +32,8 @@ def _seed_pending_operation(tmp_path: pathlib.Path) -> tuple[OperationJournal, s
     return journal, pending.op_id
 
 
-def test_approvals_cli_queue_and_show(capsys: object, tmp_path: pathlib.Path) -> None:
-    journal, op_id = _seed_pending_operation(tmp_path)
+def test_approvals_cli_queue_and_show(capsys: object, journal_factory: JournalFactory) -> None:
+    journal, op_id = _seed_pending_operation(journal_factory)
 
     exit_code = main(["queue", "--db", str(journal.db_path)])
     captured = capsys.readouterr()
@@ -52,8 +51,12 @@ def test_approvals_cli_queue_and_show(capsys: object, tmp_path: pathlib.Path) ->
     assert shown["review_status"] == "pending"
 
 
-def test_approvals_cli_delegate_then_ingest_review(capsys: object, tmp_path: pathlib.Path) -> None:
-    journal, op_id = _seed_pending_operation(tmp_path)
+def test_approvals_cli_delegate_then_ingest_review(
+    capsys: object,
+    journal_factory: JournalFactory,
+    tmp_path: pathlib.Path,
+) -> None:
+    journal, op_id = _seed_pending_operation(journal_factory)
     payload_file = tmp_path / "review.json"
     payload_file.write_text('{"review_id":"rvw-123"}', encoding="utf-8")
 

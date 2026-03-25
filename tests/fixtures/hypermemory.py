@@ -1,209 +1,61 @@
-"""Shared StrongClaw hypermemory test helpers."""
+"""Pytest fixtures for hypermemory workspace builders."""
 
 from __future__ import annotations
 
 import pathlib
-import textwrap
-from collections.abc import Sequence
-from typing import Any
 
-from clawops.hypermemory import DenseSearchCandidate, RerankResponse
+import pytest
 
-
-def write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
-    """Write a minimal operator-shaped hypermemory config for tests."""
-    del workspace_root
-    config_path.write_text(
-        textwrap.dedent("""
-            storage:
-              db_path: .openclaw/test-hypermemory.sqlite
-            workspace:
-              root: .
-              include_default_memory: true
-              memory_file_names:
-                - MEMORY.md
-                - memory.md
-              daily_dir: memory
-              bank_dir: bank
-            corpus:
-              paths:
-                - name: docs
-                  path: docs
-                  pattern: "**/*.md"
-            limits:
-              max_snippet_chars: 240
-              default_max_results: 6
-            """).strip() + "\n",
-        encoding="utf-8",
-    )
+from tests.utils.helpers.hypermemory import (
+    FailingRerankProvider,
+    FakeEmbeddingProvider,
+    FakeQdrantBackend,
+    HypermemoryConfigWriter,
+    HypermemoryWorkspaceFactory,
+    StaticRerankProvider,
+    build_rerank_workspace,
+    build_workspace,
+    write_hypermemory_config,
+)
 
 
-def build_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
-    """Create a baseline workspace with docs, memory, and bank surfaces."""
-    workspace = tmp_path / "workspace"
-    (workspace / "docs").mkdir(parents=True)
-    (workspace / "memory").mkdir(parents=True)
-    (workspace / "bank").mkdir(parents=True)
-    (workspace / "MEMORY.md").write_text(
-        "# Project Memory\n\n- Fact: The deploy process uses blue/green cutovers.\n",
-        encoding="utf-8",
-    )
-    (workspace / "memory" / "2026-03-16.md").write_text(
-        """
-        # Daily Log
+@pytest.fixture
+def hypermemory_workspace_factory(tmp_path: pathlib.Path) -> HypermemoryWorkspaceFactory:
+    """Return a builder for baseline hypermemory workspaces."""
 
-        ## Retain
-        - Fact: Alice owns the deployment playbook.
-        - Opinion[c=0.90]: QMD improves recall but should surface degraded mode.
-        - Entity[Alice]: Maintains the gateway rollout checklist.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    (workspace / "docs" / "runbook.md").write_text(
-        """
-        # Gateway Runbook
+    def _factory() -> pathlib.Path:
+        return build_workspace(tmp_path)
 
-        Rotate the gateway token before enabling a new browser profile.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    return workspace
+    return _factory
 
 
-def build_rerank_workspace(tmp_path: pathlib.Path) -> pathlib.Path:
-    """Create a workspace tuned to test rerank reordering behavior."""
-    workspace = build_workspace(tmp_path)
-    (workspace / "MEMORY.md").write_text(
-        """
-        # Project Memory
-
-        - Fact: Gateway token deploy checklist lives beside the release notes.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    (workspace / "docs" / "runbook.md").write_text(
-        """
-        # Gateway Runbook
-
-        The browser profile rollout follows the gateway token deploy checklist.
-        """.strip() + "\n",
-        encoding="utf-8",
-    )
-    return workspace
+@pytest.fixture
+def hypermemory_config_writer() -> HypermemoryConfigWriter:
+    """Return the shared hypermemory config writer."""
+    return write_hypermemory_config
 
 
-class FakeEmbeddingProvider:
-    """Return a static dense embedding for all inputs."""
+@pytest.fixture
+def rerank_workspace_factory(tmp_path: pathlib.Path) -> HypermemoryWorkspaceFactory:
+    """Return a builder for rerank-focused hypermemory workspaces."""
 
-    def __init__(self, vector: list[float]) -> None:
-        self.vector = vector
-        self.calls: list[list[str]] = []
+    def _factory() -> pathlib.Path:
+        return build_rerank_workspace(tmp_path)
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        self.calls.append(list(texts))
-        return [list(self.vector) for _ in texts]
+    return _factory
 
 
-class FakeQdrantBackend:
-    """In-memory Qdrant double used for engine unit tests."""
-
-    def __init__(self) -> None:
-        self.ensure_calls: list[int] = []
-        self.upsert_calls: list[list[dict[str, Any]]] = []
-        self.delete_calls: list[list[str]] = []
-        self.dense_limits: list[int] = []
-        self.sparse_limits: list[int] = []
-        self.search_results: list[DenseSearchCandidate] = []
-        self.sparse_search_results: list[Any] = []
-        self.raise_on_search = False
-        self.raise_on_ensure_collection = False
-        self.raise_on_upsert = False
-        self.include_sparse_calls: list[bool] = []
-        self.health_payload = {"enabled": True, "healthy": True, "collection": "test"}
-        self.collection_details_payload = {
-            "config": {
-                "params": {
-                    "vectors": {"dense": {"size": 3, "distance": "Cosine"}},
-                    "sparse_vectors": {"sparse": {"index": {"on_disk": False}}},
-                }
-            }
-        }
-
-    def health(self) -> dict[str, Any]:
-        return dict(self.health_payload)
-
-    def collection_details(self) -> dict[str, Any]:
-        return dict(self.collection_details_payload)
-
-    def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
-        self.ensure_calls.append(vector_size)
-        self.include_sparse_calls.append(include_sparse)
-        if self.raise_on_ensure_collection:
-            raise RuntimeError("qdrant collection warmup timed out")
-
-    def upsert_points(self, points: list[dict[str, Any]]) -> None:
-        self.upsert_calls.append(list(points))
-        if self.raise_on_upsert:
-            raise RuntimeError("qdrant upsert failed")
-
-    def delete_points(self, point_ids: list[str]) -> None:
-        self.delete_calls.append(list(point_ids))
-
-    def search_dense(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
-    ) -> list[DenseSearchCandidate]:
-        del vector, mode, scope
-        self.dense_limits.append(limit)
-        if self.raise_on_search:
-            raise RuntimeError("dense backend unavailable")
-        return list(self.search_results)
-
-    def search_sparse(
-        self,
-        *,
-        vector: dict[str, list[int] | list[float]],
-        limit: int,
-        mode: str,
-        scope: str | None,
-    ) -> list[Any]:
-        del vector, mode, scope
-        self.sparse_limits.append(limit)
-        return list(self.sparse_search_results)
-
-    def search(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
-    ) -> list[DenseSearchCandidate]:
-        return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
-
-
-class StaticRerankProvider:
-    """Return predetermined rerank scores for each candidate set."""
-
-    def __init__(
-        self,
-        scores: Sequence[float],
-        *,
-        provider: str = "local-sentence-transformers",
-        fallback_used: bool = False,
-    ) -> None:
-        self._scores = tuple(scores)
-        self._provider = provider
-        self._fallback_used = fallback_used
-        self.calls: list[dict[str, Any]] = []
-
-    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
-        self.calls.append({"query": query, "documents": list(documents)})
-        return RerankResponse(
-            scores=self._scores,
-            provider=self._provider,
-            applied=True,
-            fallback_used=self._fallback_used,
-        )
-
-
-class FailingRerankProvider:
-    """Raise a deterministic failure for fail-open tests."""
-
-    def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
-        del query, documents
-        raise RuntimeError("rerank backend unavailable")
+__all__ = [
+    "FailingRerankProvider",
+    "FakeEmbeddingProvider",
+    "FakeQdrantBackend",
+    "HypermemoryConfigWriter",
+    "HypermemoryWorkspaceFactory",
+    "StaticRerankProvider",
+    "build_rerank_workspace",
+    "build_workspace",
+    "hypermemory_config_writer",
+    "hypermemory_workspace_factory",
+    "rerank_workspace_factory",
+    "write_hypermemory_config",
+]

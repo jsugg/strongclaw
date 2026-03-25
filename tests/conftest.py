@@ -9,17 +9,6 @@ import pytest
 from tests.fixtures.repo import REPO_ROOT
 
 TESTS_ROOT = Path(__file__).resolve().parent
-_QDRANT_MARKED_FILES = {
-    "test_engine_backends.py",
-    "test_qdrant_backend.py",
-    "test_qdrant_integration.py",
-}
-_NETWORK_MARKED_FILES = {
-    "test_observability.py",
-    "test_platform_verify.py",
-    "test_qdrant_integration.py",
-    "test_hypermemory_observability.py",
-}
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -37,10 +26,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.contract)
         if "hypermemory" in parts:
             item.add_marker(pytest.mark.hypermemory)
-        if path.name in _QDRANT_MARKED_FILES:
-            item.add_marker(pytest.mark.qdrant)
-        if path.name in _NETWORK_MARKED_FILES:
-            item.add_marker(pytest.mark.network_local)
 
 
 @pytest.fixture(scope="session")

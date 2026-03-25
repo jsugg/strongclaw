@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 import requests
 
 from clawops.hypermemory.models import QdrantConfig
 from clawops.hypermemory.qdrant_backend import QdrantBackend
+
+pytestmark = pytest.mark.qdrant
 
 
 class _FakeResponse:

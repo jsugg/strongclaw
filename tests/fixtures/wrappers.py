@@ -1,291 +1,37 @@
-"""Shared helpers for wrapper contract tests."""
+"""Shared wrapper support helpers for wrapper suite tests."""
 
 from __future__ import annotations
 
-import dataclasses
-import json
-import pathlib
-from collections.abc import Callable
-
-import requests
-from pytest import MonkeyPatch
-
-from clawops.common import write_yaml
-from clawops.op_journal import OperationJournal
-from clawops.policy_engine import PolicyEngine
-from clawops.wrappers.base import WrapperContext
-from clawops.wrappers.github import (
-    add_labels,
-    create_comment,
-    execute_github_approved,
-    merge_pull_request,
-)
-from clawops.wrappers.webhook import execute_webhook_approved, invoke_webhook
-
-type InvokeWrapper = Callable[[WrapperContext, str], dict[str, object]]
-type ExecuteWrapper = Callable[[WrapperContext, str], dict[str, object]]
-type AllowlistValue = Callable[[str], str]
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class WrapperSpec:
-    """Wrapper-specific lifecycle contract inputs."""
-
-    name: str
-    action: str
-    category: str
-    allowlist_key: str
-    allowed_input: str
-    denied_input: str
-    normalized_target: str
-    kind: str
-    payload: dict[str, object]
-    invoke: InvokeWrapper
-    execute: ExecuteWrapper
-    allowlist_value: AllowlistValue
-    env: dict[str, str] = dataclasses.field(default_factory=dict)
-
-
-class FakeResponse:
-    """Minimal response double for requests-based wrappers."""
-
-    def __init__(
-        self,
-        *,
-        ok: bool = True,
-        status_code: int = 200,
-        text: str = "ok",
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.ok = ok
-        self.status_code = status_code
-        self.text = text
-        self.headers = {} if headers is None else headers
-
-
-def _identity(value: str) -> str:
-    return value
-
-
-def _invoke_webhook(ctx: WrapperContext, url: str) -> dict[str, object]:
-    return invoke_webhook(
-        ctx=ctx,
-        url=url,
-        payload_body={"ok": True},
-        scope="test",
-        trust_zone="automation",
-    )
-
-
-def _invoke_github_comment(ctx: WrapperContext, repo: str) -> dict[str, object]:
-    return create_comment(
-        ctx=ctx,
-        repo=repo,
-        issue_number=123,
-        body="hello",
-        scope="test",
-        trust_zone="automation",
-    )
-
-
-def _invoke_github_labels(ctx: WrapperContext, repo: str) -> dict[str, object]:
-    return add_labels(
-        ctx=ctx,
-        repo=repo,
-        issue_number=123,
-        labels=["needs-review", "triaged"],
-        scope="test",
-        trust_zone="automation",
-    )
-
-
-def _invoke_github_merge(ctx: WrapperContext, repo: str) -> dict[str, object]:
-    return merge_pull_request(
-        ctx=ctx,
-        repo=repo,
-        pull_number=123,
-        merge_method="squash",
-        commit_title="Merge ready",
-        commit_message="automerge",
-        scope="test",
-        trust_zone="automation",
-    )
-
-
-def _execute_webhook(ctx: WrapperContext, op_id: str) -> dict[str, object]:
-    return execute_webhook_approved(ctx=ctx, op_id=op_id)
-
-
-def _execute_github(ctx: WrapperContext, op_id: str) -> dict[str, object]:
-    return execute_github_approved(ctx=ctx, op_id=op_id)
-
-
-SPECS = (
-    WrapperSpec(
-        name="webhook",
-        action="webhook.post",
-        category="external_write",
-        allowlist_key="webhook_url",
-        allowed_input="https://example.internal/hooks/deploy",
-        denied_input="https://evil.invalid/hooks/deploy",
-        normalized_target="https://example.internal/hooks/deploy",
-        kind="webhook_post",
-        payload={"ok": True},
-        invoke=_invoke_webhook,
-        execute=_execute_webhook,
-        allowlist_value=_identity,
-    ),
-    WrapperSpec(
-        name="github-comment",
-        action="github.comment.create",
-        category="external_write",
-        allowlist_key="github_repo",
-        allowed_input="example/repo",
-        denied_input="evil/repo",
-        normalized_target="github://example/repo/issues/123",
-        kind="github_comment",
-        payload={"body": "hello"},
-        invoke=_invoke_github_comment,
-        execute=_execute_github,
-        allowlist_value=_identity,
-        env={"GITHUB_TOKEN": "test-token"},
-    ),
-    WrapperSpec(
-        name="github-labels",
-        action="github.issue.labels.add",
-        category="external_write",
-        allowlist_key="github_repo",
-        allowed_input="example/repo",
-        denied_input="evil/repo",
-        normalized_target="github://example/repo/issues/123",
-        kind="github_issue_labels",
-        payload={"labels": ["needs-review", "triaged"]},
-        invoke=_invoke_github_labels,
-        execute=_execute_github,
-        allowlist_value=_identity,
-        env={"GITHUB_TOKEN": "test-token", "CLAWOPS_HTTP_RETRY_MODE": "safe"},
-    ),
-    WrapperSpec(
-        name="github-merge",
-        action="github.pull_request.merge",
-        category="irreversible",
-        allowlist_key="github_repo",
-        allowed_input="example/repo",
-        denied_input="evil/repo",
-        normalized_target="github://example/repo/pulls/123/merge",
-        kind="github_pull_merge",
-        payload={
-            "merge_method": "squash",
-            "commit_title": "Merge ready",
-            "commit_message": "automerge",
-        },
-        invoke=_invoke_github_merge,
-        execute=_execute_github,
-        allowlist_value=_identity,
-        env={"GITHUB_TOKEN": "test-token"},
-    ),
+from tests.utils.helpers.wrappers import (
+    SPECS,
+    AllowlistValue,
+    ExecuteWrapper,
+    FakeResponse,
+    InvokeWrapper,
+    WrapperSpec,
+    allow_decision_json,
+    build_context,
+    configure_wrapper_environment,
+    expected_failure_attempts,
+    expected_failure_retryable,
+    install_status_sequence,
+    install_success_response,
+    install_transport_error,
 )
 
-
-def build_context(
-    tmp_path: pathlib.Path,
-    spec: WrapperSpec,
-    *,
-    require_approval: bool,
-    dry_run: bool = False,
-) -> tuple[WrapperContext, OperationJournal]:
-    """Create a wrapper context and journal for a given wrapper spec."""
-    policy_path = tmp_path / f"{spec.name}-policy.yaml"
-    policy: dict[str, object] = {
-        "defaults": {"decision": "allow"},
-        "zones": {
-            "automation": {
-                "allow_actions": [spec.action],
-                "allow_categories": [spec.category],
-            }
-        },
-        "allowlists": {
-            spec.allowlist_key: [spec.allowlist_value(spec.allowed_input)],
-        },
-    }
-    if require_approval:
-        policy["approval"] = {"require_for_actions": [spec.action]}
-    write_yaml(policy_path, policy)
-
-    journal = OperationJournal(tmp_path / f"{spec.name}-journal.sqlite")
-    journal.init()
-    ctx = WrapperContext(
-        policy_engine=PolicyEngine.from_file(policy_path), journal=journal, dry_run=dry_run
-    )
-    return ctx, journal
-
-
-def configure_wrapper_environment(spec: WrapperSpec, monkeypatch: MonkeyPatch) -> None:
-    """Set per-wrapper environment variables for one test."""
-    for key, value in spec.env.items():
-        monkeypatch.setenv(key, value)
-
-
-def install_success_response(monkeypatch: MonkeyPatch, calls: list[str]) -> None:
-    """Install a one-shot successful HTTP response."""
-
-    def _request(*args: object, **kwargs: object) -> FakeResponse:
-        del args, kwargs
-        calls.append("request")
-        return FakeResponse(text="ok")
-
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
-
-
-def install_transport_error(
-    monkeypatch: MonkeyPatch,
-    message: str,
-    calls: list[str] | None = None,
-) -> None:
-    """Install a transport timeout failure."""
-
-    def _request(*args: object, **kwargs: object) -> FakeResponse:
-        del args, kwargs
-        if calls is not None:
-            calls.append("request")
-        raise requests.Timeout(message)
-
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
-
-
-def install_status_sequence(
-    monkeypatch: MonkeyPatch,
-    responses: list[FakeResponse],
-    calls: list[str],
-) -> None:
-    """Install a fixed sequence of HTTP responses."""
-
-    def _request(*args: object, **kwargs: object) -> FakeResponse:
-        del args, kwargs
-        calls.append("request")
-        return responses[len(calls) - 1]
-
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
-
-
-def allow_decision_json() -> str:
-    """Return a canonical allow decision payload."""
-    return json.dumps(
-        {
-            "decision": "allow",
-            "matched_rules": [],
-            "reasons": [],
-        },
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def expected_failure_attempts(spec: WrapperSpec) -> int:
-    """Return expected request attempts for a wrapper failure path."""
-    return 3 if spec.name == "github-labels" else 1
-
-
-def expected_failure_retryable(spec: WrapperSpec) -> bool:
-    """Return whether a wrapper failure should be tagged retryable."""
-    return spec.name == "github-labels"
+__all__ = [
+    "AllowlistValue",
+    "ExecuteWrapper",
+    "FakeResponse",
+    "InvokeWrapper",
+    "SPECS",
+    "WrapperSpec",
+    "allow_decision_json",
+    "build_context",
+    "configure_wrapper_environment",
+    "expected_failure_attempts",
+    "expected_failure_retryable",
+    "install_status_sequence",
+    "install_success_response",
+    "install_transport_error",
+]

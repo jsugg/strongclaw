@@ -5,6 +5,44 @@ from types import SimpleNamespace
 from clawops import strongclaw_bootstrap
 
 
+def test_uv_sync_managed_environment_uses_uv_default_dev_group(monkeypatch, tmp_path) -> None:
+    """Bootstrap should rely on uv's default dev group instead of `--extra dev`."""
+
+    uv_binary = tmp_path / "uv"
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        strongclaw_bootstrap,
+        "ensure_uv_installed",
+        lambda **_: uv_binary,
+    )
+
+    def fake_stream_checked(command: list[str], **kwargs: object) -> None:
+        seen["command"] = command
+        seen["timeout_seconds"] = kwargs["timeout_seconds"]
+
+    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    assert (
+        strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path) == uv_binary
+    )
+    assert seen == {
+        "command": [
+            str(uv_binary),
+            "sync",
+            "--project",
+            str(repo_root),
+            "--python",
+            "3.12",
+            "--locked",
+        ],
+        "timeout_seconds": 3600,
+    }
+
+
 def test_resolve_node_command_falls_back_to_nodejs(monkeypatch) -> None:
     """Prefer `nodejs` when `node` is unavailable."""
 

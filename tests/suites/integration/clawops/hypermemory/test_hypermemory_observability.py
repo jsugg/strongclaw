@@ -23,7 +23,7 @@ from tests.fixtures.hypermemory import (
     build_workspace,
     write_hypermemory_config,
 )
-from tests.fixtures.observability import configure_test_tracing
+from tests.fixtures.observability import RecordingExporter
 
 
 def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, FakeQdrantBackend]:
@@ -125,9 +125,8 @@ def test_hypermemory_emits_structured_logs_for_dense_search(
 
 def test_hypermemory_search_exports_trace_spans(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tracing_exporter: RecordingExporter,
 ) -> None:
-    exporter = configure_test_tracing(monkeypatch, observability)
     engine, fake_qdrant = _configure_engine(tmp_path)
     engine.reindex()
 
@@ -144,12 +143,14 @@ def test_hypermemory_search_exports_trace_spans(
     engine.search("credential rollover checklist", lane="all")
     observability.force_flush()
 
-    span_names = {span.name for span in exporter.spans}
+    span_names = {span.name for span in tracing_exporter.spans}
     assert "clawops.hypermemory.reindex" in span_names
     assert "clawops.hypermemory.vector_sync" in span_names
     assert "clawops.hypermemory.search" in span_names
     assert "clawops.hypermemory.qdrant.search.dense" in span_names
-    search_span = next(span for span in exporter.spans if span.name == "clawops.hypermemory.search")
+    search_span = next(
+        span for span in tracing_exporter.spans if span.name == "clawops.hypermemory.search"
+    )
     assert search_span.attributes["resolvedBackend"] == "qdrant_dense_hybrid"
     assert search_span.attributes["results"] >= 1
 
@@ -284,9 +285,9 @@ def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tracing_exporter: RecordingExporter,
 ) -> None:
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
-    exporter = configure_test_tracing(monkeypatch, observability)
     engine, fake_qdrant = _configure_rerank_engine(
         tmp_path,
         rerank_provider=FailingRerankProvider(),
@@ -318,5 +319,7 @@ def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
         record for record in stderr_lines if record["event"] == "clawops.hypermemory.search"
     )
     assert search_log["rerankFailOpen"] is True
-    rerank_span = next(span for span in exporter.spans if span.name == "clawops.hypermemory.rerank")
+    rerank_span = next(
+        span for span in tracing_exporter.spans if span.name == "clawops.hypermemory.rerank"
+    )
     assert rerank_span.attributes["candidateCount"] >= 1

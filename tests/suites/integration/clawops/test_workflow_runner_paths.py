@@ -1,4 +1,4 @@
-"""Unit tests for deterministic workflows."""
+"""Workflow runner path and trust-boundary coverage."""
 
 from __future__ import annotations
 
@@ -10,53 +10,6 @@ from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_yaml
 from clawops.workflow_runner import WorkflowRunner, main
 from tests.fixtures.repo import REPO_ROOT
-
-
-def test_workflow_runner_dry_run() -> None:
-    runner = WorkflowRunner(
-        {
-            "steps": [
-                {"name": "shell step", "kind": "shell", "command": "echo hello"},
-                {"name": "journal", "kind": "journal_init", "db": "ignored.sqlite"},
-            ]
-        },
-        dry_run=True,
-    )
-    results = runner.run()
-    assert all(item.ok for item in results)
-
-
-def test_workflow_runner_runs_list_commands_without_shell() -> None:
-    runner = WorkflowRunner(
-        {
-            "steps": [
-                {
-                    "name": "python",
-                    "kind": "shell",
-                    "command": ["python3", "-c", "print('ok')"],
-                    "timeout": 5,
-                }
-            ]
-        }
-    )
-    results = runner.run()
-    assert results[0].ok is True
-
-
-def test_workflow_runner_rejects_implicit_shell_for_string_commands() -> None:
-    runner = WorkflowRunner(
-        {
-            "steps": [
-                {
-                    "name": "unsafe",
-                    "kind": "shell",
-                    "command": "echo hello",
-                }
-            ]
-        }
-    )
-    with pytest.raises(ValueError, match="string commands require shell=True"):
-        runner.run()
 
 
 def test_workflow_main_allows_trusted_repo_workflows_in_dry_run() -> None:

@@ -22,6 +22,16 @@ If you plan to develop on this repo, install `uv` and use `make dev` plus
 `uv run`, and the bootstrap flow installs `uv` when the host does not
 already provide it.
 
+If you want shorter commands in an interactive shell, sync the dev environment
+once and activate `.venv` before running tools directly:
+
+```bash
+uv sync --locked
+source .venv/bin/activate
+pytest -q
+deactivate
+```
+
 ## 2. Prepare the Varlock env contract
 
 You can prepare the env contract either manually or through the guided setup

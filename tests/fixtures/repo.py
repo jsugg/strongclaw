@@ -1,8 +1,7 @@
-"""Shared repository path helpers for tests."""
+"""Stable repository-path helpers for tests."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from tests.utils.helpers.repo import REPO_ROOT, TESTS_ROOT
 
-TESTS_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = TESTS_ROOT.parent
+__all__ = ["REPO_ROOT", "TESTS_ROOT"]

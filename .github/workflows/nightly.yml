@@ -24,7 +24,7 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: PYTHONPATH=src uv run pytest -q --cov=src/clawops --cov-report=xml
       - run: PYTHONPATH=src uv run python -m compileall -q src tests
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/nightly"

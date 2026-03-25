@@ -1,41 +1,21 @@
-"""Shared observability test helpers."""
+"""Pytest fixtures for observability tests."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
-
 import pytest
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+
+from clawops import observability as clawops_observability
+from tests.utils.helpers.observability import RecordingExporter, configure_test_tracing
 
 
-class RecordingExporter(SpanExporter):
-    """Collect spans for assertions."""
-
-    def __init__(self) -> None:
-        self.spans: list[ReadableSpan] = []
-
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        self.spans.extend(spans)
-        return SpanExportResult.SUCCESS
-
-    def shutdown(self) -> None:
-        return None
+@pytest.fixture
+def tracing_exporter(monkeypatch: pytest.MonkeyPatch) -> RecordingExporter:
+    """Install an in-memory exporter for tests under the observability boundary."""
+    return configure_test_tracing(monkeypatch, clawops_observability)
 
 
-def configure_test_tracing(
-    monkeypatch: pytest.MonkeyPatch,
-    observability_module: Any,
-) -> RecordingExporter:
-    """Install an in-memory OTEL exporter for a test run."""
-    exporter = RecordingExporter()
-    observability_module.reset_for_tests()
-    monkeypatch.setenv("CLAWOPS_OTEL_ENABLED", "1")
-    monkeypatch.setattr(observability_module, "_make_span_exporter", lambda: exporter)
-    monkeypatch.setattr(
-        observability_module,
-        "_make_span_processor",
-        lambda span_exporter: SimpleSpanProcessor(span_exporter),
-    )
-    return exporter
+__all__ = [
+    "RecordingExporter",
+    "configure_test_tracing",
+    "tracing_exporter",
+]

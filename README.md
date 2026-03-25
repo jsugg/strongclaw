@@ -191,6 +191,22 @@ That syncs the `dev` extra into `.venv/` and installs hooks for:
 - actionlint for GitHub Actions
 - basic repository hygiene checks
 
+If you want shorter commands in a shell session, sync the dev environment once
+and activate it before running tools directly:
+
+```bash
+uv sync --locked
+source .venv/bin/activate
+pytest -q
+clawops --help
+deactivate
+```
+
+`uv run ...` remains the default documented path for one-off commands from the
+repo root. Activating `.venv/` is optional and is mainly useful when you want
+plain `pytest`, `clawops`, and other project commands without repeating
+`uv run`.
+
 Useful follow-up commands:
 
 ```bash
