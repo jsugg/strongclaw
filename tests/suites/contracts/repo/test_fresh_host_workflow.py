@@ -8,7 +8,7 @@ import yaml
 
 
 def _repo_root() -> pathlib.Path:
-    return pathlib.Path(__file__).resolve().parents[1]
+    return pathlib.Path(__file__).resolve().parents[4]
 
 
 def _workflow_path() -> pathlib.Path:

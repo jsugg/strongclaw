@@ -11,7 +11,7 @@ from typing import Any
 
 def _module_path() -> pathlib.Path:
     return (
-        pathlib.Path(__file__).resolve().parents[1] / ".github" / "scripts" / "fresh_host_images.py"
+        pathlib.Path(__file__).resolve().parents[4] / ".github" / "scripts" / "fresh_host_images.py"
     )
 
 

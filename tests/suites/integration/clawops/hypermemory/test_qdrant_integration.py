@@ -3,14 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import pathlib
-import shutil
-import socket
-import subprocess
-import time
-import uuid
-from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -18,95 +11,9 @@ import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.fixtures.hypermemory import QdrantRuntime, build_workspace, write_hypermemory_config
 
-pytestmark = [pytest.mark.qdrant, pytest.mark.network_local]
-
-QDRANT_URL_ENV = "TEST_QDRANT_URL"
-
-
-def _wait_for_qdrant(url: str) -> None:
-    """Wait for a Qdrant HTTP endpoint to report healthy."""
-    last_error: Exception | None = None
-    for endpoint in ("readyz", "healthz"):
-        for _ in range(30):
-            try:
-                response = requests.get(f"{url.rstrip('/')}/{endpoint}", timeout=1.0)
-                if endpoint == "readyz" and response.status_code == 404:
-                    break
-                response.raise_for_status()
-                return
-            except requests.RequestException as err:
-                last_error = err
-                time.sleep(1.0)
-        if endpoint == "healthz":
-            break
-        last_error = RuntimeError(f"{url} does not expose /readyz")
-    detail = "unknown error" if last_error is None else str(last_error)
-    raise RuntimeError(f"Qdrant did not become healthy at {url}: {detail}")
-
-
-def _reserve_local_port() -> int:
-    """Reserve an ephemeral localhost port for a temporary Qdrant container."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-@pytest.fixture(scope="session")
-def qdrant_url() -> Iterator[str]:
-    """Provide a live Qdrant URL for the integration suite."""
-    qdrant_url = os.environ.get(QDRANT_URL_ENV, "").strip()
-    if qdrant_url:
-        _wait_for_qdrant(qdrant_url)
-        yield qdrant_url
-        return
-
-    docker_bin = shutil.which("docker")
-    if docker_bin is None:
-        pytest.fail(
-            f"{QDRANT_URL_ENV} is unset and docker is unavailable; "
-            "live Qdrant integration tests require a reachable Qdrant instance"
-        )
-
-    port = _reserve_local_port()
-    container_name = f"strongclaw-qdrant-test-{uuid.uuid4().hex[:12]}"
-    original_env = os.environ.get(QDRANT_URL_ENV)
-    qdrant_url = f"http://127.0.0.1:{port}"
-    try:
-        result = subprocess.run(
-            [
-                docker_bin,
-                "run",
-                "--rm",
-                "-d",
-                "--name",
-                container_name,
-                "-p",
-                f"{port}:6333",
-                "qdrant/qdrant",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
-            pytest.fail(f"unable to start Qdrant test container: {detail}")
-        os.environ[QDRANT_URL_ENV] = qdrant_url
-        _wait_for_qdrant(qdrant_url)
-        yield qdrant_url
-    finally:
-        if original_env is None:
-            os.environ.pop(QDRANT_URL_ENV, None)
-        else:
-            os.environ[QDRANT_URL_ENV] = original_env
-        subprocess.run(
-            [docker_bin, "rm", "-f", container_name],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+pytestmark = [pytest.mark.qdrant(mode="real"), pytest.mark.network_local]
 
 
 class _DeterministicEmbeddingProvider:
@@ -164,18 +71,22 @@ def _query_points(
     return [point for point in payload if isinstance(point, dict)]
 
 
-def test_hypermemory_qdrant_reindex_search_and_prune(
-    tmp_path: pathlib.Path, qdrant_url: str
-) -> None:
-
+def _build_engine(
+    tmp_path: pathlib.Path,
+    qdrant_runtime: QdrantRuntime,
+    *,
+    active_backend: str,
+    collection_prefix: str,
+) -> tuple[HypermemoryEngine, Any, pathlib.Path, str, str]:
     workspace = build_workspace(tmp_path, include_daily_memory=False)
     config_path = workspace / "hypermemory.sqlite.yaml"
     write_hypermemory_config(workspace, config_path)
     config = load_config(config_path)
-    collection = f"hypermemory-int-{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:12]}"
+    qdrant_url = qdrant_runtime.require_live_url()
+    collection = qdrant_runtime.prepare_collection(prefix=collection_prefix)
     config = replace(
         config,
-        backend=replace(config.backend, active="qdrant_dense_hybrid", fallback="sqlite_fts"),
+        backend=replace(config.backend, active=active_backend, fallback="sqlite_fts"),
         embedding=replace(
             config.embedding,
             enabled=True,
@@ -185,8 +96,25 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
         ),
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
+    return (
+        HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider()),
+        config,
+        workspace,
+        qdrant_url,
+        collection,
+    )
 
-    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
+
+def test_hypermemory_qdrant_reindex_search_and_prune(
+    tmp_path: pathlib.Path,
+    qdrant_runtime: QdrantRuntime,
+) -> None:
+    engine, config, workspace, qdrant_url, collection = _build_engine(
+        tmp_path,
+        qdrant_runtime,
+        active_backend="qdrant_dense_hybrid",
+        collection_prefix=f"hypermemory_int_{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:8]}",
+    )
     engine.reindex()
 
     status = engine.status()
@@ -224,27 +152,16 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
 
 def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     tmp_path: pathlib.Path,
-    qdrant_url: str,
+    qdrant_runtime: QdrantRuntime,
 ) -> None:
-    workspace = build_workspace(tmp_path, include_daily_memory=False)
-    config_path = workspace / "hypermemory.sqlite.yaml"
-    write_hypermemory_config(workspace, config_path)
-    config = load_config(config_path)
-    collection = f"hypermemory-sparse-{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:12]}"
-    config = replace(
-        config,
-        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
-        embedding=replace(
-            config.embedding,
-            enabled=True,
-            provider="compatible-http",
-            model="dense-test",
-            base_url="http://127.0.0.1:9",
+    engine, config, workspace, qdrant_url, collection = _build_engine(
+        tmp_path,
+        qdrant_runtime,
+        active_backend="qdrant_sparse_dense_hybrid",
+        collection_prefix=(
+            f"hypermemory_sparse_{hashlib.sha1(tmp_path.as_posix().encode()).hexdigest()[:8]}"
         ),
-        qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
-
-    engine = HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider())
     engine.reindex()
 
     collection_response = requests.get(

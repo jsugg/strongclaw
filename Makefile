@@ -15,7 +15,7 @@ DOCTOR_ARGS ?=
 PREFERRED_PYTHON := $(shell $(PYTHON) src/clawops/platform_compat.py --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
-.PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -69,6 +69,28 @@ dev-check: precommit ## Run pre-commit, tests, and a compile smoke.
 
 test: ## Run pytest in the managed dev environment.
 	$(PYTEST) -q
+
+test-unit: ## Run the unit pytest lane.
+	$(PYTEST) -q -m unit
+
+test-integration: ## Run the integration pytest lane.
+	$(PYTEST) -q -m integration
+
+test-contracts: ## Run the contract pytest lane.
+	$(PYTEST) -q -m contract
+
+test-hypermemory: ## Run the hypermemory pytest lane.
+	$(PYTEST) -q -m hypermemory
+
+test-qdrant: ## Run the Qdrant-backed hypermemory pytest lane.
+	QDRANT_TEST_MODE=real $(PYTEST) -q -m "hypermemory and qdrant"
+
+test-all: ## Run the full pytest suite.
+	$(PYTEST) -q
+
+test-governance: ## Run testing-governance contracts and fixture analysis.
+	$(PYTEST) -q tests/suites/contracts/testing
+	$(RUN) python -m tests.utils.scripts.analyze_fixtures --json
 
 compile: ## Compile source and tests in the managed dev environment.
 	$(RUN) python -m compileall -q src tests

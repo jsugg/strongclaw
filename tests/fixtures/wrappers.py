@@ -6,7 +6,6 @@ from tests.utils.helpers.wrappers import (
     SPECS,
     AllowlistValue,
     ExecuteWrapper,
-    FakeResponse,
     InvokeWrapper,
     WrapperSpec,
     allow_decision_json,
@@ -14,6 +13,9 @@ from tests.utils.helpers.wrappers import (
     configure_wrapper_environment,
     expected_failure_attempts,
     expected_failure_retryable,
+)
+from tests.utils.helpers.wrappers_http import (
+    FakeResponse,
     install_status_sequence,
     install_success_response,
     install_transport_error,
