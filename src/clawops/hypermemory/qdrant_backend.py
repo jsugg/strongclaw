@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import os
+import time
 from collections.abc import Sequence
 from typing import Any, TypeVar
 
@@ -16,6 +18,8 @@ from clawops.hypermemory.models import (
 )
 
 _CandidateT = TypeVar("_CandidateT", DenseSearchCandidate, SparseSearchCandidate)
+_COLLECTION_RETRY_ATTEMPTS = 4
+_COLLECTION_READY_ATTEMPTS = 8
 
 
 class QdrantBackend:
@@ -35,12 +39,7 @@ class QdrantBackend:
         if not self._config.enabled:
             return {"enabled": False, "healthy": False, "reason": "disabled"}
         try:
-            response = self._session.get(
-                f"{self._config.url.rstrip('/')}/healthz",
-                headers=self._headers(),
-                timeout=self._config.timeout_ms / 1000.0,
-            )
-            response.raise_for_status()
+            probe = self._probe_endpoint()
         except requests.RequestException as err:
             return {
                 "enabled": True,
@@ -52,6 +51,7 @@ class QdrantBackend:
             "enabled": True,
             "healthy": True,
             "collection": self._config.collection,
+            "probe": probe,
             "denseVectorName": self._config.dense_vector_name,
             "sparseVectorName": self._config.sparse_vector_name,
         }
@@ -63,7 +63,7 @@ class QdrantBackend:
         response = self._session.get(
             f"{self._config.url.rstrip('/')}/collections/{self._config.collection}",
             headers=self._headers(),
-            timeout=self._config.timeout_ms / 1000.0,
+            timeout=self._management_timeout_seconds(),
         )
         response.raise_for_status()
         body = response.json()
@@ -92,15 +92,31 @@ class QdrantBackend:
                     }
                 }
             }
-        response = self._session.put(
-            f"{self._config.url.rstrip('/')}/collections/{self._config.collection}",
-            json=payload,
-            headers=self._headers(),
-            timeout=self._config.timeout_ms / 1000.0,
-        )
-        if response.status_code == 409:
-            return
-        response.raise_for_status()
+        url = f"{self._config.url.rstrip('/')}/collections/{self._config.collection}"
+        last_error: requests.RequestException | None = None
+        for attempt in range(_COLLECTION_RETRY_ATTEMPTS):
+            try:
+                response = self._session.put(
+                    url,
+                    params={"timeout": str(self._management_commit_timeout_seconds())},
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=self._management_timeout_seconds() + 1.0,
+                )
+                if response.status_code != 409:
+                    response.raise_for_status()
+                self._wait_for_collection_ready(
+                    vector_size=vector_size,
+                    include_sparse=include_sparse,
+                )
+                return
+            except requests.RequestException as err:
+                last_error = err
+                if attempt == _COLLECTION_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.25 * float(attempt + 1))
+        if last_error is not None:
+            raise last_error
 
     def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
         """Upsert dense and sparse points into the configured collection."""
@@ -192,6 +208,82 @@ class QdrantBackend:
     ) -> list[DenseSearchCandidate]:
         """Backward-compatible dense search alias."""
         return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
+
+    def _management_timeout_seconds(self) -> float:
+        """Return a startup-safe timeout for collection management calls."""
+        return max(self._config.timeout_ms / 1000.0, 10.0)
+
+    def _management_commit_timeout_seconds(self) -> int:
+        """Return the server-side commit timeout for collection management calls."""
+        return max(10, math.ceil(self._management_timeout_seconds()))
+
+    def _probe_endpoint(self) -> str:
+        """Return the best available probe endpoint for accepting traffic."""
+        for endpoint in ("readyz", "healthz"):
+            response = self._session.get(
+                f"{self._config.url.rstrip('/')}/{endpoint}",
+                headers=self._headers(),
+                timeout=self._management_timeout_seconds(),
+            )
+            if endpoint == "readyz" and response.status_code == 404:
+                continue
+            response.raise_for_status()
+            return endpoint
+        raise RuntimeError("Qdrant did not expose a supported probe endpoint")
+
+    def _wait_for_collection_ready(self, *, vector_size: int, include_sparse: bool) -> None:
+        """Wait until the collection exposes the configured vector lanes."""
+        last_error: Exception | None = None
+        for attempt in range(_COLLECTION_READY_ATTEMPTS):
+            try:
+                details = self.collection_details()
+            except requests.RequestException as err:
+                last_error = err
+            else:
+                if self._collection_is_ready(
+                    details=details,
+                    vector_size=vector_size,
+                    include_sparse=include_sparse,
+                ):
+                    return
+                last_error = RuntimeError(
+                    f"collection {self._config.collection} is missing expected vector lanes"
+                )
+            time.sleep(0.25 * float(attempt + 1))
+        detail = "unknown error" if last_error is None else str(last_error)
+        raise RuntimeError(
+            f"Qdrant collection {self._config.collection} did not become ready: {detail}"
+        )
+
+    def _collection_is_ready(
+        self,
+        *,
+        details: dict[str, Any],
+        vector_size: int,
+        include_sparse: bool,
+    ) -> bool:
+        """Return whether the live collection config matches the expected lanes."""
+        config = details.get("config")
+        if not isinstance(config, dict):
+            return False
+        params = config.get("params")
+        if not isinstance(params, dict):
+            return False
+        vectors = params.get("vectors")
+        if not isinstance(vectors, dict):
+            return False
+        dense = vectors.get(self._config.dense_vector_name)
+        if not isinstance(dense, dict):
+            return False
+        raw_size = dense.get("size")
+        if not isinstance(raw_size, int) or raw_size != vector_size:
+            return False
+        if not include_sparse:
+            return True
+        sparse_vectors = params.get("sparse_vectors")
+        if not isinstance(sparse_vectors, dict):
+            return False
+        return isinstance(sparse_vectors.get(self._config.sparse_vector_name), dict)
 
     def _headers(self) -> dict[str, str]:
         """Return request headers."""

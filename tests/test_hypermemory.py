@@ -753,6 +753,8 @@ class _FakeQdrantBackend:
         self.search_results: list[DenseSearchCandidate] = []
         self.sparse_search_results: list[Any] = []
         self.raise_on_search = False
+        self.raise_on_ensure_collection = False
+        self.raise_on_upsert = False
         self.include_sparse_calls: list[bool] = []
         self.health_payload = {"enabled": True, "healthy": True, "collection": "test"}
         self.collection_details_payload = {
@@ -773,9 +775,13 @@ class _FakeQdrantBackend:
     def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
         self.ensure_calls.append(vector_size)
         self.include_sparse_calls.append(include_sparse)
+        if self.raise_on_ensure_collection:
+            raise RuntimeError("qdrant collection warmup timed out")
 
     def upsert_points(self, points: list[dict[str, Any]]) -> None:
         self.upsert_calls.append(list(points))
+        if self.raise_on_upsert:
+            raise RuntimeError("qdrant upsert failed")
 
     def delete_points(self, point_ids: list[str]) -> None:
         self.delete_calls.append(list(point_ids))
@@ -1265,6 +1271,39 @@ def test_hypermemory_verify_fails_when_vector_sync_error_is_present(
 
     assert verification["ok"] is False
     assert "vector sync error: dense lane drift" in verification["errors"]
+
+
+def test_hypermemory_reindex_surfaces_vector_sync_errors(tmp_path: pathlib.Path) -> None:
+    workspace = _build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    _write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
+    )
+    engine = HypermemoryEngine(config)
+    engine._embedding_provider = _FakeEmbeddingProvider([1.0, 0.0, 0.0])
+    fake_qdrant = _FakeQdrantBackend()
+    fake_qdrant.raise_on_ensure_collection = True
+    engine._qdrant_backend = fake_qdrant
+
+    with pytest.raises(RuntimeError, match="qdrant collection warmup timed out"):
+        engine.reindex()
+
+    status = engine.status()
+
+    assert status["vectorItems"] == 0
+    assert status["lastVectorSyncError"] == "qdrant collection warmup timed out"
 
 
 def test_hypermemory_verify_fails_when_collection_lacks_sparse_lane(

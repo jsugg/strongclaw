@@ -2882,6 +2882,7 @@ class HypermemoryEngine:
                     "clawops.hypermemory.vector_sync.error",
                     {"vectorRows": len(vector_rows), "error": str(err)},
                 )
+                raise
 
     def _embed_texts(self, texts: Sequence[str], *, purpose: str) -> list[list[float]]:
         """Call the embedding provider while emitting structured telemetry."""

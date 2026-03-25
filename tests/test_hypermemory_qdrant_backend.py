@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import requests
+
 from clawops.hypermemory.models import QdrantConfig
 from clawops.hypermemory.qdrant_backend import QdrantBackend
 
@@ -14,7 +16,8 @@ class _FakeResponse:
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error")
 
     def json(self) -> dict[str, Any]:
         return self._payload
@@ -26,10 +29,27 @@ class _FakeSession:
         self.post_calls: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, Any]] = []
         self.conflict_on_collection = False
+        self.put_outcomes: list[_FakeResponse | Exception] = []
+        self.post_outcomes: list[_FakeResponse | Exception] = []
+        self.get_outcomes: list[_FakeResponse | Exception] = []
 
     def get(self, url: str, *, headers: dict[str, str], timeout: float) -> _FakeResponse:
         self.get_calls.append({"url": url, "headers": headers, "timeout": timeout})
-        return _FakeResponse()
+        return self._resolve_outcome(
+            self.get_outcomes,
+            default=_FakeResponse(
+                {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"dense": {"size": 3, "distance": "Cosine"}},
+                                "sparse_vectors": {"sparse": {"index": {"on_disk": False}}},
+                            }
+                        }
+                    }
+                }
+            ),
+        )
 
     def put(
         self,
@@ -51,7 +71,7 @@ class _FakeSession:
         )
         if self.conflict_on_collection and url.endswith("/collections/hypermemory-test"):
             return _FakeResponse(status_code=409)
-        return _FakeResponse()
+        return self._resolve_outcome(self.put_outcomes, default=_FakeResponse())
 
     def post(
         self,
@@ -83,7 +103,20 @@ class _FakeSession:
                     ]
                 }
             )
-        return _FakeResponse()
+        return self._resolve_outcome(self.post_outcomes, default=_FakeResponse())
+
+    def _resolve_outcome(
+        self,
+        outcomes: list[_FakeResponse | Exception],
+        *,
+        default: _FakeResponse,
+    ) -> _FakeResponse:
+        if not outcomes:
+            return default
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
 
 def test_qdrant_backend_uses_expected_rest_payloads() -> None:
@@ -135,6 +168,58 @@ def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
     backend.ensure_collection(vector_size=3)
 
     assert fake_session.put_calls[0]["url"].endswith("/collections/hypermemory-test")
+
+
+def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
+    )
+    fake_session = _FakeSession()
+    fake_session.put_outcomes = [
+        requests.ReadTimeout("timed out"),
+        _FakeResponse(),
+    ]
+    fake_session.get_outcomes = [
+        _FakeResponse(status_code=404),
+        _FakeResponse(
+            {
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {"dense": {"size": 3, "distance": "Cosine"}},
+                            "sparse_vectors": {"sparse": {"index": {"on_disk": False}}},
+                        }
+                    }
+                }
+            }
+        ),
+    ]
+    backend._session = fake_session  # type: ignore[assignment]
+
+    backend.ensure_collection(vector_size=3, include_sparse=True)
+
+    assert len(fake_session.put_calls) == 2
+    assert len(fake_session.get_calls) == 2
+    assert fake_session.put_calls[0]["params"] == {"timeout": "10"}
+
+
+def test_qdrant_backend_health_prefers_readyz_and_falls_back_to_healthz() -> None:
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
+    )
+    fake_session = _FakeSession()
+    fake_session.get_outcomes = [
+        _FakeResponse(status_code=404),
+        _FakeResponse(),
+    ]
+    backend._session = fake_session  # type: ignore[assignment]
+
+    health = backend.health()
+
+    assert health["healthy"] is True
+    assert health["probe"] == "healthz"
+    assert fake_session.get_calls[0]["url"].endswith("/readyz")
+    assert fake_session.get_calls[1]["url"].endswith("/healthz")
 
 
 def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
