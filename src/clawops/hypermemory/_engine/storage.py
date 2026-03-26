@@ -244,52 +244,10 @@ def get_fact(
     scope: str | None = None,
 ) -> SearchHit | None:
     """Return the current active value for a canonical fact slot."""
-    normalized_key = fact_key.strip()
-    if not normalized_key:
-        return None
-    owns_connection = conn is None
-    active_conn = self.connect() if conn is None else conn
-    try:
-        row = active_conn.execute(
-            """
-                SELECT
-                    search_items.id,
-                    search_items.rel_path,
-                    search_items.start_line,
-                    search_items.end_line,
-                    search_items.snippet,
-                    search_items.lane,
-                    search_items.item_type,
-                    search_items.confidence,
-                    search_items.scope,
-                    search_items.evidence_count,
-                    search_items.contradiction_count,
-                    search_items.entities_json,
-                    search_items.modified_at,
-                    search_items.importance,
-                    search_items.tier,
-                    search_items.access_count,
-                    search_items.last_access_date,
-                    search_items.injected_count,
-                    search_items.confirmed_count,
-                    search_items.bad_recall_count,
-                    search_items.fact_key,
-                    search_items.invalidated_at,
-                    search_items.supersedes
-                FROM fact_registry
-                JOIN search_items ON search_items.id = fact_registry.current_item_id
-                WHERE fact_registry.fact_key = ?
-                """,
-            (normalized_key,),
-        ).fetchone()
-        if row is None:
-            return None
-        if scope is not None and str(row["scope"]) not in {scope, "global"}:
-            return None
-        return self._row_to_search_hit(row)
-    finally:
-        if owns_connection:
-            active_conn.close()
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for get_fact")
+    return canonical_store.get_fact(fact_key, conn=conn, scope=scope)
 
 
 def list_facts(
@@ -299,83 +257,18 @@ def list_facts(
     scope: str | None = None,
 ) -> list[dict[str, Any]]:
     """List current canonical facts from the registry."""
-    with self.connect() as conn:
-        params: list[Any] = []
-        category_clause = ""
-        if category:
-            category_clause = "AND fact_registry.category = ?"
-            params.append(category)
-        rows = conn.execute(
-            f"""
-                SELECT
-                    fact_registry.fact_key,
-                    fact_registry.category,
-                    fact_registry.version_count,
-                    fact_registry.history_json,
-                    search_items.id,
-                    search_items.rel_path,
-                    search_items.start_line,
-                    search_items.end_line,
-                    search_items.snippet,
-                    search_items.scope,
-                    search_items.fact_key,
-                    search_items.supersedes
-                FROM fact_registry
-                JOIN search_items ON search_items.id = fact_registry.current_item_id
-                WHERE 1 = 1
-                  {category_clause}
-                ORDER BY fact_registry.fact_key
-                """,
-            params,
-        ).fetchall()
-        payload: list[dict[str, Any]] = []
-        for row in rows:
-            if scope is not None and str(row["scope"]) not in {scope, "global"}:
-                continue
-            payload.append(
-                {
-                    "factKey": str(row["fact_key"]),
-                    "category": str(row["category"]),
-                    "versionCount": int(row["version_count"]),
-                    "history": json.loads(str(row["history_json"])),
-                    "item": self._row_to_search_hit(row).to_dict(),
-                }
-            )
-        return payload
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for list_facts")
+    return canonical_store.list_facts(category=category, scope=scope)
 
 
 def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
     """Run simple benchmark cases against the current engine."""
-    results: list[dict[str, Any]] = []
-    passed = 0
-    for case in cases:
-        name = str(case["name"])
-        query = str(case["query"])
-        expected_paths = {str(entry) for entry in case.get("expectedPaths", [])}
-        hits = self.search(
-            query,
-            max_results=int(case.get("maxResults", self.config.default_max_results)),
-            lane=str(case.get("lane", "all")),  # type: ignore[arg-type]
-        )
-        actual_paths = {hit.path for hit in hits}
-        hit = expected_paths.issubset(actual_paths)
-        if hit:
-            passed += 1
-        results.append(
-            {
-                "name": name,
-                "query": query,
-                "expectedPaths": sorted(expected_paths),
-                "actualPaths": sorted(actual_paths),
-                "passed": hit,
-            }
-        )
-    return {
-        "provider": "strongclaw-hypermemory",
-        "cases": results,
-        "passed": passed,
-        "total": len(results),
-    }
+    canonical_store = getattr(self, "canonical_store", None)
+    if canonical_store is None:
+        raise RuntimeError("canonical_store is required for benchmark_cases")
+    return canonical_store.benchmark_cases(cases)
 
 
 def _is_noise(self, text: str) -> bool:
