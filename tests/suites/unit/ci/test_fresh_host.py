@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from clawops.strongclaw_compose import compose_project_name
 from clawops.strongclaw_runtime import resolve_repo_local_compose_state_dir
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
@@ -469,6 +470,59 @@ def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
     )
     assert captured_env["OPENCLAW_CONFIG"] == str(
         (home_dir / ".openclaw" / "openclaw.json").resolve()
+    )
+
+
+def test_verify_compose_services_running_honors_repo_local_state_override_for_variants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Variant compose probes should target the same repo-local project as ops up/down."""
+    repo_root = tmp_path / "repo"
+    compose_dir = repo_root / "platform" / "compose"
+    compose_dir.mkdir(parents=True)
+    compose_file = compose_dir / "docker-compose.browser-lab.ci-hosted-macos.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    override_state_dir = home_dir / ".openclaw" / "repo-local-compose"
+    captured_env: dict[str, str] = {}
+    payload = json.dumps(
+        [
+            {"Service": "browserlab-proxy", "State": "running"},
+            {"Service": "browserlab-playwright", "State": "running"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args
+        captured_env.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=compose_dir,
+        env={
+            "HOME": str(home_dir),
+            "PATH": "/usr/bin",
+            "STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos",
+            "STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR": str(override_state_dir),
+        },
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+
+    resolved_override = override_state_dir.resolve()
+    assert captured_env["STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR"] == str(resolved_override)
+    assert captured_env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(resolved_override)
+    assert captured_env["COMPOSE_PROJECT_NAME"] == compose_project_name(
+        compose_name=compose_file.name,
+        state_dir=resolved_override,
+        repo_local_state=True,
+        environ=captured_env,
     )
 
 

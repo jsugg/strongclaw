@@ -197,15 +197,21 @@ def _compose_probe_env(
         home_dir=home_dir,
     )
     explicit_state_dir = probe_env.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip()
+    repo_local_override = probe_env.get("STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR", "").strip()
     if explicit_state_dir:
         state_dir = Path(explicit_state_dir).expanduser().resolve()
     elif repo_local_state:
-        state_dir = resolve_repo_local_compose_state_dir(repo_root_path)
+        if repo_local_override:
+            state_dir = expand_user_path(repo_local_override, home_dir=home_dir)
+        else:
+            state_dir = resolve_repo_local_compose_state_dir(repo_root_path)
     else:
         state_dir = openclaw_state_dir / "compose"
     state_dir.mkdir(parents=True, exist_ok=True)
     probe_env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
     probe_env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
+    if repo_local_override:
+        probe_env["STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR"] = str(state_dir)
     openclaw_config = probe_env.get("OPENCLAW_CONFIG", "").strip()
     if openclaw_config:
         probe_env["OPENCLAW_CONFIG"] = str(expand_user_path(openclaw_config, home_dir=home_dir))
@@ -217,6 +223,7 @@ def _compose_probe_env(
         compose_name=compose_name,
         state_dir=state_dir,
         repo_local_state=repo_local_state,
+        environ=probe_env,
     )
     if project_name is not None:
         probe_env["COMPOSE_PROJECT_NAME"] = project_name
