@@ -199,8 +199,25 @@ def ensure_varlock_installed(expected_version: str = DEFAULT_VARLOCK_VERSION) ->
         if resolved is None:
             raise CommandError("Varlock binary disappeared after version check")
         return resolved
-    command = f'curl -sSfL https://varlock.dev/install.sh | sh -s -- --force-no-brew --version="{expected_version}"'
-    _stream_checked(["bash", "-lc", command], timeout_seconds=1800)
+
+    install_command = (
+        "set -euo pipefail; "
+        f"curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 https://varlock.dev/install.sh "
+        f'| sh -s -- --force-no-brew --version="{expected_version}"'
+    )
+    last_error: CommandError | None = None
+    for attempt in range(1, 4):
+        try:
+            _stream_checked(["bash", "-lc", install_command], timeout_seconds=1800)
+            last_error = None
+            break
+        except CommandError as err:
+            last_error = err
+            if attempt >= 3:
+                break
+            time.sleep(5 * attempt)
+    if last_error is not None:
+        raise last_error
     installed_version = current_varlock_version()
     if installed_version != expected_version:
         raise CommandError(
