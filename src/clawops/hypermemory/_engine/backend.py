@@ -16,8 +16,8 @@ from clawops.hypermemory.models import (
     SearchMode,
     SparseSearchCandidate,
 )
-from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
-from clawops.hypermemory.utils import normalized_retrieval_text, sha256
+from clawops.hypermemory.sparse import SparseEncoder
+from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log, observed_span
 
 
@@ -331,34 +331,22 @@ def _backend_uses_sparse_vectors(self) -> bool:
 
 def _vector_rows_for_documents(self, documents: Sequence[IndexedDocument]) -> list[dict[str, str]]:
     """Build deterministic retrieval rows from indexed documents."""
-    vector_rows: list[dict[str, str]] = []
-    for document in documents:
-        for item in document.items:
-            vector_rows.append(
-                {
-                    "content": normalized_retrieval_text(item.title, item.snippet),
-                }
-            )
-    return vector_rows
+    return self.backend.vector_rows_for_documents(documents)
 
 
 def _sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
     """Build the sparse encoder for the current indexed corpus."""
-    if not self._backend_uses_sparse_vectors():
-        return build_sparse_encoder(())
-    return build_sparse_encoder(
-        [str(entry["content"]) for entry in self._vector_rows_for_documents(documents)]
-    )
+    return self.backend.sparse_encoder_for_documents(documents)
 
 
 def _sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
     """Return the sparse fingerprint for *documents*."""
-    return self._sparse_encoder_for_documents(documents).fingerprint
+    return self.backend.sparse_fingerprint_for_documents(documents)
 
 
 def _current_sparse_fingerprint(self) -> str:
     """Return the sparse fingerprint for the current canonical corpus."""
-    return self._sparse_fingerprint_for_documents(list(self._iter_documents()))
+    return self.backend.sparse_fingerprint_for_documents(list(self._iter_documents()))
 
 
 def _write_sparse_state(self, conn: sqlite3.Connection, sparse_encoder: SparseEncoder) -> None:

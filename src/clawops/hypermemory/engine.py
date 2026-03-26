@@ -7,12 +7,6 @@ from collections.abc import Iterator, Sequence
 from typing import Any, Literal
 
 from clawops.common import ensure_parent
-from clawops.hypermemory._engine.backend import (
-    _current_sparse_fingerprint,
-    _sparse_encoder_for_documents,
-    _sparse_fingerprint_for_documents,
-    _vector_rows_for_documents,
-)
 from clawops.hypermemory._engine.indexing import (
     _clear_derived_rows,
     _evidence_entries,
@@ -28,7 +22,6 @@ from clawops.hypermemory._engine.indexing import reindex as _reindex
 from clawops.hypermemory._engine.query import (
     _exact_fact_lookup,
     _filter_current_fact_hits,
-    _row_to_search_hit,
     _search_invalidated_hits,
 )
 from clawops.hypermemory._engine.query import is_dirty as _is_dirty
@@ -84,6 +77,7 @@ from clawops.hypermemory.config import HypermemoryConfig
 from clawops.hypermemory.models import (
     DenseSearchCandidate,
     FusionMode,
+    IndexedDocument,
     ReflectionMode,
     ReindexSummary,
     SearchBackend,
@@ -100,6 +94,7 @@ from clawops.hypermemory.providers import (
 )
 from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
 from clawops.hypermemory.schema import ensure_schema
+from clawops.hypermemory.search_hit_mapper import row_to_search_hit
 from clawops.hypermemory.services.backend_service import BackendService
 from clawops.hypermemory.services.canonical_store_service import CanonicalStoreService
 from clawops.hypermemory.services.index_service import IndexService
@@ -247,6 +242,21 @@ class HypermemoryEngine:
             stale_point_ids=stale_point_ids,
             sparse_encoder=sparse_encoder,
         )
+
+    def _vector_rows_for_documents(
+        self,
+        documents: Sequence[IndexedDocument],
+    ) -> list[dict[str, str]]:
+        return self.backend.vector_rows_for_documents(documents)
+
+    def _sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
+        return self.backend.sparse_encoder_for_documents(documents)
+
+    def _sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
+        return self.backend.sparse_fingerprint_for_documents(documents)
+
+    def _current_sparse_fingerprint(self) -> str:
+        return self.backend.sparse_fingerprint_for_documents(list(self._iter_documents()))
 
     def connect(self) -> sqlite3.Connection:
         """Open a configured SQLite connection."""
@@ -537,7 +547,7 @@ class HypermemoryEngine:
     _apply_forget = _apply_forget
     _invalidated_line = _invalidated_line
     _synced_line_from_row = _synced_line_from_row
-    _row_to_search_hit = _row_to_search_hit
+    _row_to_search_hit = row_to_search_hit
     _rebuild_fact_registry = _rebuild_fact_registry
     _exact_fact_lookup = _exact_fact_lookup
     _filter_current_fact_hits = _filter_current_fact_hits
@@ -569,10 +579,6 @@ class HypermemoryEngine:
     _build_proposal = _build_proposal
     _format_proposal_line = _format_proposal_line
     _proposal_kind = _proposal_kind
-    _vector_rows_for_documents = _vector_rows_for_documents
-    _sparse_encoder_for_documents = _sparse_encoder_for_documents
-    _sparse_fingerprint_for_documents = _sparse_fingerprint_for_documents
-    _current_sparse_fingerprint = _current_sparse_fingerprint
     # Vector backend / sparse state helpers are implemented as delegating methods.
     _collection_has_hypermemory_vector_lanes = _collection_has_hypermemory_vector_lanes
     _hypermemory_probe_query = _hypermemory_probe_query
