@@ -25,7 +25,7 @@ from tests.utils.helpers._fresh_host.shell import (
     wait_for_docker_backend,
 )
 
-HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 180
+HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 300
 
 
 def normalize_macos_machine_name(_: FreshHostContext) -> list[str]:

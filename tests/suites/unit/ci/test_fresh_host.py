@@ -346,6 +346,52 @@ def test_verify_compose_services_running_requires_healthy_services(
         )
 
 
+def test_verify_compose_services_running_retries_until_service_health_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should tolerate transient unhealthy health checks."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            json.dumps(
+                [
+                    {"Service": "postgres", "State": "running", "Health": "unhealthy"},
+                ]
+            ),
+            json.dumps(
+                [
+                    {"Service": "postgres", "State": "running", "Health": "healthy"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("postgres",),
+        healthy_services=("postgres",),
+        timeout_seconds=10,
+    )
+
+    assert sleeps == [2.0]
+
+
 def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
