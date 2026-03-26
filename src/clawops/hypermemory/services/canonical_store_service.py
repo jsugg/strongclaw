@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast
+from collections.abc import Sequence
+from typing import Any, Literal, Protocol, cast
 
 from clawops.hypermemory._engine import storage as storage_impl
 from clawops.hypermemory._engine.query import _row_to_search_hit as row_to_search_hit_impl
@@ -28,15 +28,49 @@ from clawops.hypermemory.defaults import MEMORY_PRO_CATEGORY_MAP, WRITABLE_PREFI
 from clawops.hypermemory.governance import ensure_writable_scope, validate_scope
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import (
+    FusionMode,
     ReflectionMode,
     ReflectionSummary,
     ReindexSummary,
+    SearchBackend,
     SearchHit,
+    SearchMode,
     Tier,
 )
 from clawops.hypermemory.parser import iter_retained_notes
 from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log
+
+
+class CanonicalStoreDeps(Protocol):
+    """Engine-like dependency surface required by CanonicalStoreService.
+
+    We keep this structural and minimal to avoid import cycles while still
+    providing strong typing for the canonical store.
+    """
+
+    def connect(self) -> sqlite3.Connection: ...
+
+    def is_dirty(self) -> bool: ...
+
+    def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary: ...
+
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        min_score: float | None = None,
+        lane: SearchMode = "all",
+        scope: str | None = None,
+        auto_index: bool = True,
+        include_explain: bool = False,
+        backend: SearchBackend | None = None,
+        dense_candidate_pool: int | None = None,
+        sparse_candidate_pool: int | None = None,
+        fusion: FusionMode | None = None,
+        include_invalidated: bool = False,
+    ) -> list[SearchHit]: ...
 
 
 class CanonicalStoreService:
@@ -46,30 +80,52 @@ class CanonicalStoreService:
         self,
         *,
         config: HypermemoryConfig,
-        connect: Callable[[], sqlite3.Connection],
-        is_dirty: Callable[[], bool],
-        reindex: Callable[..., ReindexSummary],
-        search: Callable[..., list[SearchHit]],
+        deps: CanonicalStoreDeps,
     ) -> None:
         self.config: HypermemoryConfig = config
-        self._connect = connect
-        self._is_dirty = is_dirty
-        self._reindex = reindex
-        self._search = search
+        self._deps = deps
 
     # ---- engine-facing callables expected by storage_impl ----
 
     def connect(self) -> sqlite3.Connection:
-        return self._connect()
+        return self._deps.connect()
 
     def is_dirty(self) -> bool:
-        return self._is_dirty()
+        return self._deps.is_dirty()
 
     def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
-        return self._reindex(flush_metadata=flush_metadata)
+        return self._deps.reindex(flush_metadata=flush_metadata)
 
-    def search(self, query: str, **kwargs: Any) -> list[SearchHit]:
-        return self._search(query, **kwargs)
+    def search(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        min_score: float | None = None,
+        lane: SearchMode = "all",
+        scope: str | None = None,
+        auto_index: bool = True,
+        include_explain: bool = False,
+        backend: SearchBackend | None = None,
+        dense_candidate_pool: int | None = None,
+        sparse_candidate_pool: int | None = None,
+        fusion: FusionMode | None = None,
+        include_invalidated: bool = False,
+    ) -> list[SearchHit]:
+        return self._deps.search(
+            query,
+            max_results=max_results,
+            min_score=min_score,
+            lane=lane,
+            scope=scope,
+            auto_index=auto_index,
+            include_explain=include_explain,
+            backend=backend,
+            dense_candidate_pool=dense_candidate_pool,
+            sparse_candidate_pool=sparse_candidate_pool,
+            fusion=fusion,
+            include_invalidated=include_invalidated,
+        )
 
     # ---- public API surface delegated from HypermemoryEngine ----
 

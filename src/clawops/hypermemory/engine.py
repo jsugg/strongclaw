@@ -148,10 +148,7 @@ class HypermemoryEngine:
         )
         self.canonical_store = CanonicalStoreService(
             config=self.config,
-            connect=self.connect,
-            is_dirty=self.is_dirty,
-            reindex=self.reindex,
-            search=self.search,
+            deps=self,
         )
 
     # ---- phase-1 composition: internal helper compatibility layer ----
