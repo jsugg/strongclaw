@@ -9,9 +9,9 @@ import pytest
 
 from clawops.common import write_yaml
 from clawops.workflow_runner import WorkflowRunner
-from tests.fixtures.cli import write_fake_acpx, write_status_script
-from tests.fixtures.context import build_context_project
-from tests.fixtures.journal import create_journal
+from tests.utils.helpers.cli import write_fake_acpx, write_status_script
+from tests.utils.helpers.context import build_context_project
+from tests.utils.helpers.journal import create_journal
 
 
 def test_workflow_runner_supports_workspace_and_delivery_descriptors(

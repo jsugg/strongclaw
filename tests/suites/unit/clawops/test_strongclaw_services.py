@@ -9,7 +9,7 @@ import pytest
 from clawops import strongclaw_services
 from clawops.common import load_text
 from clawops.strongclaw_runtime import ExecResult
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def _result(*, stdout: str = "", stderr: str = "", returncode: int = 0) -> ExecResult:

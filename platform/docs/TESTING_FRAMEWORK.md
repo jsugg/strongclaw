@@ -17,15 +17,17 @@ Structural markers are assigned from the suite path layout in `tests/conftest.py
 
 ## Fixture and Helper Split
 
-Use `tests/fixtures/` for pytest activation surfaces.
-Use `tests/utils/helpers/` for builders, lifecycle helpers, AST tooling, and runtime support.
+Use `tests/fixtures/` for pytest fixture plugins only.
+Use `tests/utils/helpers/` for builders, lifecycle helpers, AST tooling, runtime support, and any non-fixture API.
 
 Keep root `tests/conftest.py` lean:
 - structural marker assignment
 - framework CLI options
-- core bootstrap fixtures only
+- shared fixture plugin registration
 
-Suite-local `conftest.py` files remain the place where domain fixtures are activated.
+Root `tests/conftest.py` registers the shared fixture plugins once via `pytest_plugins`.
+Tests consume fixtures by name through pytest injection and should not import from `tests.fixtures`.
+Tests that need reusable builders, fakes, or types should import them from `tests.utils.helpers`.
 
 ## DualMode Service Resolution
 

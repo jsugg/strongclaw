@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_hypermemory_store_update_and_reflect(tmp_path: pathlib.Path) -> None:

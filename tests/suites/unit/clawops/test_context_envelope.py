@@ -14,7 +14,7 @@ from clawops.context_envelope import (
 )
 from clawops.context_service import service_from_config
 from clawops.orchestration import ProjectDescriptor, WorkspaceDescriptor
-from tests.fixtures.context import build_context_repo
+from tests.utils.helpers.context import build_context_repo
 
 
 def _build_service(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:

@@ -6,11 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures.repo import REPO_ROOT
 from tests.utils.helpers.env import register_env_addoption
 from tests.utils.helpers.mode import register_mock_addoption
+from tests.utils.helpers.repo import REPO_ROOT
 
-pytest_plugins = ("tests.fixtures.test_context",)
+pytest_plugins = (
+    "tests.fixtures.cli",
+    "tests.fixtures.context",
+    "tests.fixtures.hypermemory",
+    "tests.fixtures.journal",
+    "tests.fixtures.network",
+    "tests.fixtures.observability",
+    "tests.fixtures.policy",
+    "tests.fixtures.test_context",
+)
 
 TESTS_ROOT = Path(__file__).resolve().parent
 

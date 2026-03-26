@@ -9,10 +9,6 @@ import pytest
 
 from tests.utils.helpers.cli import (
     PathPrepender,
-    require_system_executable,
-    symlink_executable,
-    write_fake_acpx,
-    write_status_script,
 )
 
 
@@ -37,11 +33,6 @@ def prepend_path(monkeypatch: pytest.MonkeyPatch) -> PathPrepender:
 
 
 __all__ = [
-    "PathPrepender",
     "cli_bin_dir",
     "prepend_path",
-    "require_system_executable",
-    "symlink_executable",
-    "write_fake_acpx",
-    "write_status_script",
 ]

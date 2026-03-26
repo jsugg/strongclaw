@@ -8,8 +8,9 @@ import pytest
 
 from clawops.common import load_yaml, write_text, write_yaml
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
-from tests.fixtures.network import Endpoint, NetworkRuntime
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.network import Endpoint
+from tests.utils.helpers.network_runtime import NetworkRuntime
+from tests.utils.helpers.repo import REPO_ROOT
 
 pytestmark = pytest.mark.network_local
 

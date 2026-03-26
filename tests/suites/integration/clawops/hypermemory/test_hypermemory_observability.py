@@ -15,7 +15,7 @@ from clawops.hypermemory import (
     SparseSearchCandidate,
     load_config,
 )
-from tests.fixtures.hypermemory import (
+from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
     FakeEmbeddingProvider,
     FakeQdrantBackend,
@@ -23,7 +23,7 @@ from tests.fixtures.hypermemory import (
     build_workspace,
     write_hypermemory_config,
 )
-from tests.fixtures.observability import RecordingExporter
+from tests.utils.helpers.observability import RecordingExporter
 
 
 def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, FakeQdrantBackend]:

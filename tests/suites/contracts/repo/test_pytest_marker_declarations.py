@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def _module_marker_names(path: Path) -> set[str]:

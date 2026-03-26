@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 _FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "test_context.py"
 

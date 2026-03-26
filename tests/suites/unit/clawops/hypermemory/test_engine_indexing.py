@@ -6,7 +6,7 @@ import pathlib
 import textwrap
 
 from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_load_shipped_hypermemory_config() -> None:

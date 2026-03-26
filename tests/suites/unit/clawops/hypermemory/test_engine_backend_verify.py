@@ -13,7 +13,7 @@ from clawops.hypermemory import (
     SparseSearchCandidate,
     load_config,
 )
-from tests.fixtures.hypermemory import (
+from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
     FakeEmbeddingProvider,
     FakeQdrantBackend,

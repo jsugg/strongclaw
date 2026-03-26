@@ -9,7 +9,7 @@ import pytest
 
 from clawops.memory_tools import main as memory_main
 from clawops.process_runner import CommandResult
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_memory_migrate_hypermemory_to_pro_writes_import_and_report(

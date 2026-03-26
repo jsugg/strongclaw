@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_hypermemory_export_memory_pro_defaults_to_durable_surfaces(tmp_path: pathlib.Path) -> None:

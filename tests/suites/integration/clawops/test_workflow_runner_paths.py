@@ -9,7 +9,7 @@ import pytest
 from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_yaml
 from clawops.workflow_runner import WorkflowRunner, main
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_workflow_main_allows_trusted_repo_workflows_in_dry_run() -> None:

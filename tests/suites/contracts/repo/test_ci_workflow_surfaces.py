@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def _workflow_text() -> str:

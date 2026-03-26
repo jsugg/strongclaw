@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def _write_executable(path: Path, body: str) -> None:
