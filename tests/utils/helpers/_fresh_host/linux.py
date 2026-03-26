@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tests.utils.helpers._fresh_host.models import FreshHostContext
 from tests.utils.helpers._fresh_host.shell import (
+    compose_file_for_component,
     ensure_dir,
     ensure_private_dir,
     phase_env,
@@ -13,6 +14,7 @@ from tests.utils.helpers._fresh_host.shell import (
     run_command,
     system_clawops_command,
     venv_clawops_command,
+    verify_compose_services_running,
     verify_file_exists,
     wait_for_docker_backend,
 )
@@ -82,9 +84,19 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local sidecars."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    compose_file = compose_file_for_component(context, "sidecars")
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context, "ops", "--repo-root", ".", "sidecars", "up", "--repo-local-state"
+    )
+    verify_command = venv_clawops_command(
+        context,
+        "verify-platform",
+        "--repo-root",
+        ".",
+        "sidecars",
+        "--compose-file",
+        str(compose_file),
     )
     down_command = venv_clawops_command(
         context,
@@ -96,6 +108,7 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
         "--repo-local-state",
     )
     run_command(up_command, cwd=repo_root, env=env)
+    run_command(verify_command, cwd=repo_root, env=env)
     run_command(down_command, cwd=repo_root, env=env)
     return down_command
 
@@ -104,6 +117,7 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local browser-lab."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    compose_file = compose_file_for_component(context, "browser-lab")
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context,
@@ -124,5 +138,11 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
         "--repo-local-state",
     )
     run_command(up_command, cwd=repo_root, env=env)
+    verify_compose_services_running(
+        compose_file,
+        cwd=repo_root / "platform" / "compose",
+        env=env,
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command

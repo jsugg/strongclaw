@@ -285,11 +285,69 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
     assert attempts["count"] == 3
 
 
-def test_exercise_linux_sidecars_waits_for_docker_backend(
+def test_verify_compose_services_running_accepts_json_lines_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Linux sidecar exercises should wait for Docker backend readiness first."""
+    """Compose runtime verification should accept JSON-lines output from Docker."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+
+    payload = "\n".join(
+        [
+            json.dumps({"Service": "browserlab-proxy", "State": "running"}),
+            json.dumps({"Service": "browserlab-playwright", "State": "running"}),
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+
+def test_verify_compose_services_running_requires_healthy_services(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should reject unhealthy services."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payload = json.dumps(
+        [
+            {"Service": "postgres", "State": "running", "Health": "unhealthy"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    with pytest.raises(fresh_host.FreshHostError, match="health 'unhealthy'"):
+        fresh_host_shell.verify_compose_services_running(
+            compose_file,
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin"},
+            expected_services=("postgres",),
+            healthy_services=("postgres",),
+        )
+
+
+def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux sidecar exercises should wait for Docker and verify runtime before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -320,6 +378,92 @@ def test_exercise_linux_sidecars_waits_for_docker_backend(
 
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
+    assert "verify-platform --repo-root . sidecars --compose-file" in calls[2]
+    assert calls[3].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux browser-lab exercises should prove runtime state before teardown."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "wait_for_docker_backend",
+        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+    )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "run_command",
+        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+    )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "verify_compose_services_running",
+        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+    )
+
+    fresh_host_linux.exercise_linux_browser_lab(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("browser-lab up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.browser-lab.yaml"
+    assert calls[3].endswith("browser-lab down --repo-local-state")
+
+
+def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hosted macOS sidecar exercises should verify runtime before teardown."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+    )
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "run_command",
+        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+    )
+
+    fresh_host_macos.exercise_macos_sidecars(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert "verify-platform --repo-root . sidecars --compose-file" in calls[2]
+    assert calls[3].endswith("sidecars down --repo-local-state")
 
 
 def test_write_summary_includes_child_reports(

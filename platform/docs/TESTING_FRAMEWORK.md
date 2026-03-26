@@ -2,10 +2,11 @@
 
 ## Lane Model
 
-Strongclaw uses three primary pytest lanes:
+Strongclaw uses four primary pytest lanes:
 - `unit`: isolated behavior and small-surface regression checks
 - `integration`: cross-module or service-shaped behavior
 - `contracts`: repository policies, docs parity, and CI/test-governance rules
+- `e2e`: black-box CLI and workflow-shaped orchestration coverage
 
 Capability markers are additive and remain module-local:
 - `hypermemory`
@@ -40,6 +41,7 @@ Current service support:
 Examples:
 - `uv run pytest -q -m unit`
 - `uv run pytest -q -m "hypermemory and qdrant" --mock qdrant`
+- `uv run pytest -q -m e2e`
 - `QDRANT_TEST_MODE=real uv run pytest -q -m "hypermemory and qdrant"`
 
 ## Adopted Patterns

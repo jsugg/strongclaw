@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
 import sys
 import time
+from collections.abc import Collection
 from pathlib import Path
+from typing import Literal
 
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import context_path, log, repo_root
@@ -50,6 +53,18 @@ def phase_env(context: FreshHostContext) -> dict[str, str]:
 def repo_paths(context: FreshHostContext) -> tuple[Path, Path]:
     """Return the repo root and app home paths."""
     return repo_root(context.repo_root), context_path(context.app_home)
+
+
+def compose_file_for_component(
+    context: FreshHostContext, component: Literal["sidecars", "browser-lab"]
+) -> Path:
+    """Return the compose file used by one repo-local fresh-host exercise."""
+    needle = "browser-lab" if component == "browser-lab" else "aux-stack"
+    for raw_path in context.compose_files:
+        compose_path = context_path(raw_path)
+        if needle in compose_path.name:
+            return compose_path
+    raise FreshHostError(f"Missing compose file for fresh-host component '{component}'.")
 
 
 def system_clawops_command(*arguments: str) -> list[str]:
@@ -108,6 +123,97 @@ def verify_file_exists(path: Path) -> None:
     """Raise when the requested file is missing."""
     if not path.is_file():
         raise FreshHostError(f"Expected file is missing: {path}")
+
+
+def _coerce_compose_ps_entries(stdout: str) -> list[dict[str, object]]:
+    """Parse ``docker compose ps --format json`` output."""
+    text = stdout.strip()
+    if not text:
+        raise FreshHostError("docker compose ps returned no service data.")
+
+    def _coerce_entry(payload: object) -> dict[str, object]:
+        if not isinstance(payload, dict):
+            raise FreshHostError("docker compose ps returned a non-object entry.")
+        return {str(key): value for key, value in payload.items()}
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        entries: list[dict[str, object]] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed_line = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise FreshHostError("docker compose ps returned invalid JSON.") from exc
+            entries.append(_coerce_entry(parsed_line))
+        return entries
+
+    if isinstance(payload, list):
+        return [_coerce_entry(entry) for entry in payload]
+    return [_coerce_entry(payload)]
+
+
+def _string_field(entry: dict[str, object], *names: str) -> str | None:
+    """Return the first matching string field from one compose entry."""
+    for name in names:
+        value = entry.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def verify_compose_services_running(
+    compose_file: Path,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    expected_services: tuple[str, ...],
+    healthy_services: Collection[str] = (),
+    timeout_seconds: int = 120,
+) -> None:
+    """Assert that the expected compose services are running."""
+    completed = subprocess.run(
+        ["docker", "compose", "-f", str(compose_file), "ps", "--format", "json"],
+        cwd=cwd,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "docker compose ps failed"
+        raise FreshHostError(detail)
+
+    services: dict[str, dict[str, object]] = {}
+    for entry in _coerce_compose_ps_entries(completed.stdout):
+        service_name = _string_field(entry, "Service", "service")
+        if service_name is not None:
+            services[service_name] = entry
+
+    missing_services = sorted(
+        service_name for service_name in expected_services if service_name not in services
+    )
+    if missing_services:
+        raise FreshHostError(
+            "docker compose ps is missing expected services: " + ", ".join(missing_services)
+        )
+
+    for service_name in expected_services:
+        state = (_string_field(services[service_name], "State", "state") or "").lower()
+        if state != "running":
+            raise FreshHostError(
+                f"docker compose ps reports service '{service_name}' in state '{state or 'unknown'}'."
+            )
+        if service_name in healthy_services:
+            health = (_string_field(services[service_name], "Health", "health") or "").lower()
+            if health != "healthy":
+                raise FreshHostError(
+                    f"docker compose ps reports service '{service_name}' health '{health or 'unknown'}'."
+                )
 
 
 def wait_for_docker_backend(

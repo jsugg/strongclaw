@@ -13,6 +13,7 @@ from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 
 _EXPECTED_MARKERS = {
     "contract",
+    "e2e",
     "hypermemory",
     "integration",
     "network_local",
