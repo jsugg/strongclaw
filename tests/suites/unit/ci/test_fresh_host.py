@@ -340,7 +340,49 @@ def test_verify_compose_services_running_requires_healthy_services(
             env={"PATH": "/usr/bin"},
             expected_services=("postgres",),
             healthy_services=("postgres",),
+            timeout_seconds=0,
         )
+
+
+def test_verify_compose_services_running_retries_until_services_are_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should tolerate short startup races."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            json.dumps([{"Service": "browserlab-proxy", "State": "running"}]),
+            json.dumps(
+                [
+                    {"Service": "browserlab-proxy", "State": "running"},
+                    {"Service": "browserlab-playwright", "State": "running"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+    assert sleeps == [2.0]
 
 
 def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(

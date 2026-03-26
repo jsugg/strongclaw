@@ -140,6 +140,7 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
             cwd=repo_root / "platform" / "compose",
             env=env,
             expected_services=("browserlab-proxy", "browserlab-playwright"),
+            timeout_seconds=20,
         )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command

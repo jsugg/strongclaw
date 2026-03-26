@@ -241,8 +241,9 @@ def test_fresh_host_cli_linux_browser_lab_reports_runtime_failure(tmp_path: Path
     assert [phase["name"] for phase in report["phases"]] == ["exercise-browser-lab"]
     assert [phase["status"] for phase in report["phases"]] == ["failure"]
     assert "missing expected services: browserlab-playwright" in report["failure_reason"]
-    assert log_path.read_text(encoding="utf-8").splitlines() == [
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert log_lines[:2] == [
         "docker:info",
         "python:-m clawops ops --repo-root . browser-lab up --repo-local-state",
-        f"docker:compose -f {compose_file} ps --format json",
     ]
+    assert log_lines[2:] == [f"docker:compose -f {compose_file} ps --format json"] * 11
