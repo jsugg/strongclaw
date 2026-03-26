@@ -10,6 +10,7 @@ from tests.utils.helpers._fresh_host.linux import run_clawops_bootstrap
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.shell import (
     best_effort,
+    compose_file_for_component,
     context_path,
     ensure_dir,
     ensure_private_dir,
@@ -18,9 +19,13 @@ from tests.utils.helpers._fresh_host.shell import (
     run_command,
     system_clawops_command,
     venv_clawops_command,
+    verify_compose_services_running,
     verify_file_exists,
+    verify_sidecar_services_running,
     wait_for_docker_backend,
 )
+
+HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 300
 
 
 def normalize_macos_machine_name(_: FreshHostContext) -> list[str]:
@@ -104,6 +109,9 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
     """Run one repo-local up/down cycle for a component."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    compose_file = compose_file_for_component(
+        context, "browser-lab" if component == "browser-lab" else "sidecars"
+    )
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
         context, "ops", "--repo-root", ".", component, "up", "--repo-local-state"
@@ -118,6 +126,25 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
         "--repo-local-state",
     )
     run_command(up_command, cwd=repo_root, env=env)
+    if component == "sidecars":
+        verify_sidecar_services_running(
+            compose_file,
+            cwd=repo_root / "platform" / "compose",
+            env=env,
+            timeout_seconds=HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS,
+            repo_root_path=repo_root,
+            repo_local_state=True,
+        )
+    else:
+        verify_compose_services_running(
+            compose_file,
+            cwd=repo_root / "platform" / "compose",
+            env=env,
+            expected_services=("browserlab-proxy", "browserlab-playwright"),
+            timeout_seconds=20,
+            repo_root_path=repo_root,
+            repo_local_state=True,
+        )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command
 

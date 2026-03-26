@@ -57,6 +57,7 @@ def _compose_env(
         compose_name=compose_name,
         state_dir=state_dir,
         repo_local_state=repo_local_state,
+        environ=env,
     )
     if project_name is not None:
         env["COMPOSE_PROJECT_NAME"] = project_name

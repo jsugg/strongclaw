@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+from collections.abc import Mapping
 from typing import Final
 
 from clawops.strongclaw_runtime import CommandError
@@ -13,9 +14,10 @@ COMPOSE_VARIANT_ENV_VAR: Final[str] = "STRONGCLAW_COMPOSE_VARIANT"
 SUPPORTED_COMPOSE_VARIANTS: Final[frozenset[str]] = frozenset({"ci-hosted-macos"})
 
 
-def active_compose_variant() -> str | None:
+def active_compose_variant(*, environ: Mapping[str, str] | None = None) -> str | None:
     """Return the requested compose variant when one is configured."""
-    raw_value = os.environ.get(COMPOSE_VARIANT_ENV_VAR, "").strip()
+    env = os.environ if environ is None else environ
+    raw_value = env.get(COMPOSE_VARIANT_ENV_VAR, "").strip()
     if not raw_value:
         return None
     if raw_value not in SUPPORTED_COMPOSE_VARIANTS:
@@ -44,9 +46,10 @@ def compose_project_name(
     compose_name: str,
     state_dir: pathlib.Path,
     repo_local_state: bool,
+    environ: Mapping[str, str] | None = None,
 ) -> str | None:
     """Return a deterministic project name when a compose variant is active."""
-    if active_compose_variant() is None:
+    if active_compose_variant(environ=environ) is None:
         return None
     compose_scope = "browser" if "browser-lab" in compose_name else "sidecars"
     state_scope = "repo" if repo_local_state else "host"

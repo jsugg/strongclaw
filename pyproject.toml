@@ -129,6 +129,7 @@ markers = [
   "unit: isolated unit tests",
   "integration: cross-module and service-shaped tests",
   "contract: repository and artifact contract checks",
+  "e2e: black-box end-to-end orchestration tests",
   "hypermemory: hypermemory-related coverage",
   "qdrant: tests requiring or exercising qdrant behavior",
   "network_local: tests that open local sockets or local HTTP servers",

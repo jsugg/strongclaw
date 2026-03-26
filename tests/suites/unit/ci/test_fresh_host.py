@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from clawops.strongclaw_compose import compose_project_name
+from clawops.strongclaw_runtime import resolve_repo_local_compose_state_dir
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import linux as fresh_host_linux
@@ -285,11 +287,296 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
     assert attempts["count"] == 3
 
 
-def test_exercise_linux_sidecars_waits_for_docker_backend(
+def test_verify_compose_services_running_accepts_json_lines_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Linux sidecar exercises should wait for Docker backend readiness first."""
+    """Compose runtime verification should accept JSON-lines output from Docker."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+
+    payload = "\n".join(
+        [
+            json.dumps({"Service": "browserlab-proxy", "State": "running"}),
+            json.dumps({"Service": "browserlab-playwright", "State": "running"}),
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+
+def test_verify_compose_services_running_requires_healthy_services(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should reject unhealthy services."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payload = json.dumps(
+        [
+            {"Service": "postgres", "State": "running", "Health": "unhealthy"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    with pytest.raises(fresh_host.FreshHostError, match="health 'unhealthy'"):
+        fresh_host_shell.verify_compose_services_running(
+            compose_file,
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin"},
+            expected_services=("postgres",),
+            healthy_services=("postgres",),
+            timeout_seconds=0,
+        )
+
+
+def test_verify_compose_services_running_retries_until_service_health_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should tolerate transient unhealthy health checks."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            json.dumps(
+                [
+                    {"Service": "postgres", "State": "running", "Health": "unhealthy"},
+                ]
+            ),
+            json.dumps(
+                [
+                    {"Service": "postgres", "State": "running", "Health": "healthy"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("postgres",),
+        healthy_services=("postgres",),
+        timeout_seconds=10,
+    )
+
+    assert sleeps == [2.0]
+
+
+def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should retry through transient empty ps output."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            "",
+            json.dumps(
+                [
+                    {"Service": "browserlab-proxy", "State": "running"},
+                    {"Service": "browserlab-playwright", "State": "running"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+    assert sleeps == [2.0]
+
+
+def test_verify_compose_services_running_retries_until_services_are_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should tolerate short startup races."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            json.dumps([{"Service": "browserlab-proxy", "State": "running"}]),
+            json.dumps(
+                [
+                    {"Service": "browserlab-proxy", "State": "running"},
+                    {"Service": "browserlab-playwright", "State": "running"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+    assert sleeps == [2.0]
+
+
+def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime probes should inherit state/config paths from the scenario home."""
+    repo_root = tmp_path / "repo"
+    compose_dir = repo_root / "platform" / "compose"
+    compose_dir.mkdir(parents=True)
+    compose_file = compose_dir / "docker-compose.browser-lab.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    captured_env: dict[str, str] = {}
+    payload = json.dumps(
+        [
+            {"Service": "browserlab-proxy", "State": "running"},
+            {"Service": "browserlab-playwright", "State": "running"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args
+        captured_env.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=compose_dir,
+        env={"HOME": str(home_dir), "PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+
+    assert captured_env["OPENCLAW_STATE_DIR"] == str((home_dir / ".openclaw").resolve())
+    assert captured_env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(
+        resolve_repo_local_compose_state_dir(repo_root)
+    )
+    assert captured_env["OPENCLAW_CONFIG"] == str(
+        (home_dir / ".openclaw" / "openclaw.json").resolve()
+    )
+
+
+def test_verify_compose_services_running_honors_repo_local_state_override_for_variants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Variant compose probes should target the same repo-local project as ops up/down."""
+    repo_root = tmp_path / "repo"
+    compose_dir = repo_root / "platform" / "compose"
+    compose_dir.mkdir(parents=True)
+    compose_file = compose_dir / "docker-compose.browser-lab.ci-hosted-macos.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    override_state_dir = home_dir / ".openclaw" / "repo-local-compose"
+    captured_env: dict[str, str] = {}
+    payload = json.dumps(
+        [
+            {"Service": "browserlab-proxy", "State": "running"},
+            {"Service": "browserlab-playwright", "State": "running"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args
+        captured_env.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=compose_dir,
+        env={
+            "HOME": str(home_dir),
+            "PATH": "/usr/bin",
+            "STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos",
+            "STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR": str(override_state_dir),
+        },
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+
+    resolved_override = override_state_dir.resolve()
+    assert captured_env["STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR"] == str(resolved_override)
+    assert captured_env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(resolved_override)
+    assert captured_env["COMPOSE_PROJECT_NAME"] == compose_project_name(
+        compose_name=compose_file.name,
+        state_dir=resolved_override,
+        repo_local_state=True,
+        environ=captured_env,
+    )
+
+
+def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux sidecar exercises should wait for Docker and verify runtime before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -315,11 +602,118 @@ def test_exercise_linux_sidecars_waits_for_docker_backend(
         "run_command",
         lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "verify_sidecar_services_running",
+        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+    )
 
     fresh_host_linux.exercise_linux_sidecars(context)
 
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.aux-stack.yaml"
+    assert calls[3].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux browser-lab exercises should prove runtime state before teardown."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "wait_for_docker_backend",
+        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+    )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "run_command",
+        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+    )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "verify_compose_services_running",
+        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+    )
+
+    fresh_host_linux.exercise_linux_browser_lab(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("browser-lab up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.browser-lab.yaml"
+    assert calls[3].endswith("browser-lab down --repo-local-state")
+
+
+def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hosted macOS sidecar exercises should verify runtime before teardown."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+    verify_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+    )
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "run_command",
+        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+    )
+
+    def fake_verify_sidecars(compose_file: Path, **kwargs: object) -> None:
+        verify_kwargs.update(kwargs)
+        calls.append(f"verify:{Path(compose_file).name}")
+
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        fake_verify_sidecars,
+    )
+
+    fresh_host_macos.exercise_macos_sidecars(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
+    assert calls[3].endswith("sidecars down --repo-local-state")
+    assert (
+        verify_kwargs["timeout_seconds"]
+        == fresh_host_macos.HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS
+    )
+    assert verify_kwargs["repo_local_state"] is True
 
 
 def test_write_summary_includes_child_reports(

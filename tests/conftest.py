@@ -34,6 +34,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.integration)
         if "contracts" in parts:
             item.add_marker(pytest.mark.contract)
+        if "e2e" in parts:
+            item.add_marker(pytest.mark.e2e)
         if "hypermemory" in parts:
             item.add_marker(pytest.mark.hypermemory)
 
