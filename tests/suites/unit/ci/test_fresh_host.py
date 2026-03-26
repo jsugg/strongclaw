@@ -634,6 +634,7 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         github_env_file=github_env,
     )
     calls: list[str] = []
+    verify_kwargs: dict[str, object] = {}
 
     monkeypatch.setattr(
         fresh_host_macos,
@@ -645,10 +646,15 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         "run_command",
         lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
+
+    def fake_verify_sidecars(compose_file: Path, **kwargs: object) -> None:
+        verify_kwargs.update(kwargs)
+        calls.append(f"verify:{Path(compose_file).name}")
+
     monkeypatch.setattr(
         fresh_host_macos,
         "verify_sidecar_services_running",
-        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+        fake_verify_sidecars,
     )
 
     fresh_host_macos.exercise_macos_sidecars(context)
@@ -657,6 +663,11 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     assert calls[1].endswith("sidecars up --repo-local-state")
     assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
     assert calls[3].endswith("sidecars down --repo-local-state")
+    assert (
+        verify_kwargs["timeout_seconds"]
+        == fresh_host_macos.HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS
+    )
+    assert verify_kwargs["repo_local_state"] is True
 
 
 def test_write_summary_includes_child_reports(

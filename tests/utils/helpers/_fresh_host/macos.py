@@ -25,6 +25,8 @@ from tests.utils.helpers._fresh_host.shell import (
     wait_for_docker_backend,
 )
 
+HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 180
+
 
 def normalize_macos_machine_name(_: FreshHostContext) -> list[str]:
     """Normalize the hosted macOS machine name."""
@@ -129,6 +131,7 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
             compose_file,
             cwd=repo_root / "platform" / "compose",
             env=env,
+            timeout_seconds=HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS,
             repo_root_path=repo_root,
             repo_local_state=True,
         )
