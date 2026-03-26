@@ -144,6 +144,8 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
         env=env,
         expected_services=("browserlab-proxy", "browserlab-playwright"),
         timeout_seconds=20,
+        repo_root_path=repo_root,
+        repo_local_state=True,
     )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command

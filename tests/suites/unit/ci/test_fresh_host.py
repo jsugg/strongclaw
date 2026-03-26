@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from clawops.strongclaw_runtime import resolve_repo_local_compose_state_dir
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import linux as fresh_host_linux
@@ -383,6 +384,51 @@ def test_verify_compose_services_running_retries_until_services_are_ready(
     )
 
     assert sleeps == [2.0]
+
+
+def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime probes should inherit state/config paths from the scenario home."""
+    repo_root = tmp_path / "repo"
+    compose_dir = repo_root / "platform" / "compose"
+    compose_dir.mkdir(parents=True)
+    compose_file = compose_dir / "docker-compose.browser-lab.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    captured_env: dict[str, str] = {}
+    payload = json.dumps(
+        [
+            {"Service": "browserlab-proxy", "State": "running"},
+            {"Service": "browserlab-playwright", "State": "running"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args
+        captured_env.update(kwargs["env"])
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=compose_dir,
+        env={"HOME": str(home_dir), "PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+
+    assert captured_env["OPENCLAW_STATE_DIR"] == str((home_dir / ".openclaw").resolve())
+    assert captured_env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(
+        resolve_repo_local_compose_state_dir(repo_root)
+    )
+    assert captured_env["OPENCLAW_CONFIG"] == str(
+        (home_dir / ".openclaw" / "openclaw.json").resolve()
+    )
 
 
 def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(

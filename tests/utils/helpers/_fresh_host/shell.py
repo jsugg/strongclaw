@@ -12,6 +12,14 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Literal
 
+from clawops.strongclaw_compose import compose_project_name
+from clawops.strongclaw_runtime import (
+    expand_user_path,
+    load_env_assignments,
+    resolve_openclaw_config_path,
+    resolve_repo_local_compose_state_dir,
+    varlock_local_env_file,
+)
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import context_path, log, repo_root
 
@@ -165,6 +173,48 @@ def _string_field(entry: dict[str, object], *names: str) -> str | None:
     return None
 
 
+def _compose_probe_env(
+    base_env: dict[str, str],
+    *,
+    repo_root_path: Path,
+    compose_name: str,
+    repo_local_state: bool,
+) -> dict[str, str]:
+    """Build the compose env used by the runtime probe."""
+    probe_env = dict(base_env)
+    home_dir = Path(probe_env.get("HOME", Path.home().as_posix())).expanduser().resolve()
+    local_env = load_env_assignments(varlock_local_env_file(repo_root_path))
+    openclaw_state_dir = expand_user_path(
+        local_env.get("OPENCLAW_STATE_DIR", "~/.openclaw"),
+        home_dir=home_dir,
+    )
+    explicit_state_dir = probe_env.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip()
+    if explicit_state_dir:
+        state_dir = Path(explicit_state_dir).expanduser().resolve()
+    elif repo_local_state:
+        state_dir = resolve_repo_local_compose_state_dir(repo_root_path)
+    else:
+        state_dir = openclaw_state_dir / "compose"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    probe_env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
+    probe_env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
+    openclaw_config = probe_env.get("OPENCLAW_CONFIG", "").strip()
+    if openclaw_config:
+        probe_env["OPENCLAW_CONFIG"] = str(expand_user_path(openclaw_config, home_dir=home_dir))
+    else:
+        probe_env["OPENCLAW_CONFIG"] = str(
+            resolve_openclaw_config_path(repo_root_path, home_dir=home_dir)
+        )
+    project_name = compose_project_name(
+        compose_name=compose_name,
+        state_dir=state_dir,
+        repo_local_state=repo_local_state,
+    )
+    if project_name is not None:
+        probe_env["COMPOSE_PROJECT_NAME"] = project_name
+    return probe_env
+
+
 def verify_compose_services_running(
     compose_file: Path,
     *,
@@ -173,16 +223,28 @@ def verify_compose_services_running(
     expected_services: tuple[str, ...],
     healthy_services: Collection[str] = (),
     timeout_seconds: int = 120,
+    repo_root_path: Path | None = None,
+    repo_local_state: bool = False,
 ) -> None:
     """Assert that the expected compose services become running within the timeout window."""
     deadline = time.monotonic() + timeout_seconds
     last_error: FreshHostError | None = None
+    probe_env = (
+        _compose_probe_env(
+            env,
+            repo_root_path=repo_root_path,
+            compose_name=compose_file.name,
+            repo_local_state=repo_local_state,
+        )
+        if repo_root_path is not None
+        else env
+    )
 
     while True:
         completed = subprocess.run(
             ["docker", "compose", "-f", str(compose_file), "ps", "--format", "json"],
             cwd=cwd,
-            env=env,
+            env=probe_env,
             check=False,
             capture_output=True,
             text=True,
