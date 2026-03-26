@@ -345,6 +345,47 @@ def test_verify_compose_services_running_requires_healthy_services(
         )
 
 
+def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose runtime verification should retry through transient empty ps output."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payloads = iter(
+        (
+            "",
+            json.dumps(
+                [
+                    {"Service": "browserlab-proxy", "State": "running"},
+                    {"Service": "browserlab-playwright", "State": "running"},
+                ]
+            ),
+        )
+    )
+    sleeps: list[float] = []
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": next(payloads), "stderr": ""},
+        )()
+
+    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+    )
+
+    assert sleeps == [2.0]
+
+
 def test_verify_compose_services_running_retries_until_services_are_ready(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -461,12 +502,17 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
         "run_command",
         lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
+    monkeypatch.setattr(
+        fresh_host_linux,
+        "verify_sidecar_services_running",
+        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+    )
 
     fresh_host_linux.exercise_linux_sidecars(context)
 
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
-    assert "verify-platform --repo-root . sidecars --compose-file" in calls[2]
+    assert calls[2] == "verify:docker-compose.aux-stack.yaml"
     assert calls[3].endswith("sidecars down --repo-local-state")
 
 
@@ -545,12 +591,17 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         "run_command",
         lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
+    monkeypatch.setattr(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+    )
 
     fresh_host_macos.exercise_macos_sidecars(context)
 
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
-    assert "verify-platform --repo-root . sidecars --compose-file" in calls[2]
+    assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
     assert calls[3].endswith("sidecars down --repo-local-state")
 
 

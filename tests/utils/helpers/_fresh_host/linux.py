@@ -16,6 +16,7 @@ from tests.utils.helpers._fresh_host.shell import (
     venv_clawops_command,
     verify_compose_services_running,
     verify_file_exists,
+    verify_sidecar_services_running,
     wait_for_docker_backend,
 )
 from tests.utils.helpers._fresh_host.storage import context_path
@@ -89,15 +90,6 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     up_command = venv_clawops_command(
         context, "ops", "--repo-root", ".", "sidecars", "up", "--repo-local-state"
     )
-    verify_command = venv_clawops_command(
-        context,
-        "verify-platform",
-        "--repo-root",
-        ".",
-        "sidecars",
-        "--compose-file",
-        str(compose_file),
-    )
     down_command = venv_clawops_command(
         context,
         "ops",
@@ -108,7 +100,13 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
         "--repo-local-state",
     )
     run_command(up_command, cwd=repo_root, env=env)
-    run_command(verify_command, cwd=repo_root, env=env)
+    verify_sidecar_services_running(
+        compose_file,
+        cwd=repo_root / "platform" / "compose",
+        env=env,
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command
 

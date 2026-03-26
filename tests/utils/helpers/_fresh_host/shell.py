@@ -23,6 +23,14 @@ from clawops.strongclaw_runtime import (
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import context_path, log, repo_root
 
+SIDECAR_EXPECTED_SERVICES: tuple[str, ...] = (
+    "postgres",
+    "litellm",
+    "otel-collector",
+    "qdrant",
+)
+SIDECAR_HEALTHY_SERVICES: tuple[str, ...] = ("postgres", "litellm", "qdrant")
+
 
 def phase_env(context: FreshHostContext) -> dict[str, str]:
     """Build the execution environment for one scenario phase."""
@@ -251,40 +259,50 @@ def verify_compose_services_running(
             timeout=timeout_seconds,
         )
         if completed.returncode == 0:
-            services: dict[str, dict[str, object]] = {}
-            for entry in _coerce_compose_ps_entries(completed.stdout):
-                service_name = _string_field(entry, "Service", "service")
-                if service_name is not None:
-                    services[service_name] = entry
+            try:
+                entries = _coerce_compose_ps_entries(completed.stdout)
+            except FreshHostError as exc:
+                last_error = exc
+            else:
+                services: dict[str, dict[str, object]] = {}
+                for entry in entries:
+                    service_name = _string_field(entry, "Service", "service")
+                    if service_name is not None:
+                        services[service_name] = entry
 
-            missing_services = sorted(
-                service_name for service_name in expected_services if service_name not in services
-            )
-            if not missing_services:
-                for service_name in expected_services:
-                    state = (_string_field(services[service_name], "State", "state") or "").lower()
-                    if state != "running":
-                        last_error = FreshHostError(
-                            "docker compose ps reports service "
-                            f"'{service_name}' in state '{state or 'unknown'}'."
-                        )
-                        break
-                    if service_name in healthy_services:
-                        health = (
-                            _string_field(services[service_name], "Health", "health") or ""
+                missing_services = sorted(
+                    service_name
+                    for service_name in expected_services
+                    if service_name not in services
+                )
+                if not missing_services:
+                    for service_name in expected_services:
+                        state = (
+                            _string_field(services[service_name], "State", "state") or ""
                         ).lower()
-                        if health != "healthy":
+                        if state != "running":
                             last_error = FreshHostError(
                                 "docker compose ps reports service "
-                                f"'{service_name}' health '{health or 'unknown'}'."
+                                f"'{service_name}' in state '{state or 'unknown'}'."
                             )
                             break
+                        if service_name in healthy_services:
+                            health = (
+                                _string_field(services[service_name], "Health", "health") or ""
+                            ).lower()
+                            if health != "healthy":
+                                last_error = FreshHostError(
+                                    "docker compose ps reports service "
+                                    f"'{service_name}' health '{health or 'unknown'}'."
+                                )
+                                break
+                    else:
+                        return
                 else:
-                    return
-            else:
-                last_error = FreshHostError(
-                    "docker compose ps is missing expected services: " + ", ".join(missing_services)
-                )
+                    last_error = FreshHostError(
+                        "docker compose ps is missing expected services: "
+                        + ", ".join(missing_services)
+                    )
         else:
             detail = (
                 completed.stderr.strip() or completed.stdout.strip() or "docker compose ps failed"
@@ -298,6 +316,28 @@ def verify_compose_services_running(
     if last_error is not None:
         raise last_error
     raise FreshHostError("Timed out waiting for docker compose services to start.")
+
+
+def verify_sidecar_services_running(
+    compose_file: Path,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_seconds: int = 90,
+    repo_root_path: Path | None = None,
+    repo_local_state: bool = False,
+) -> None:
+    """Assert that the repo-local sidecar stack reaches a healthy running state."""
+    verify_compose_services_running(
+        compose_file,
+        cwd=cwd,
+        env=env,
+        expected_services=SIDECAR_EXPECTED_SERVICES,
+        healthy_services=SIDECAR_HEALTHY_SERVICES,
+        timeout_seconds=timeout_seconds,
+        repo_root_path=repo_root_path,
+        repo_local_state=repo_local_state,
+    )
 
 
 def wait_for_docker_backend(
