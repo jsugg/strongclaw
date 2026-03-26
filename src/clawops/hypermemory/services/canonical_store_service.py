@@ -16,7 +16,6 @@ from collections.abc import Sequence
 from typing import Any, Literal, Protocol, cast
 
 from clawops.hypermemory._engine import storage as storage_impl
-from clawops.hypermemory._engine.query import _row_to_search_hit as row_to_search_hit_impl
 from clawops.hypermemory.capture import (
     CaptureCandidate,
     extract_candidates_llm,
@@ -38,6 +37,7 @@ from clawops.hypermemory.models import (
     Tier,
 )
 from clawops.hypermemory.parser import iter_retained_notes
+from clawops.hypermemory.search_hit_mapper import row_to_search_hit as row_to_search_hit_impl
 from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log
 

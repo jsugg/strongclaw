@@ -16,6 +16,7 @@ from typing import Any
 
 from clawops.hypermemory.models import (
     DenseSearchCandidate,
+    IndexedDocument,
     SearchBackend,
     SearchMode,
     SparseSearchCandidate,
@@ -23,8 +24,8 @@ from clawops.hypermemory.models import (
 from clawops.hypermemory.providers import EmbeddingProvider
 from clawops.hypermemory.qdrant_backend import VectorBackend
 from clawops.hypermemory.services.index_service import IndexService
-from clawops.hypermemory.sparse import SparseEncoder
-from clawops.hypermemory.utils import sha256
+from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
+from clawops.hypermemory.utils import normalized_retrieval_text, sha256
 from clawops.observability import emit_structured_log, observed_span
 
 
@@ -76,6 +77,32 @@ class BackendService:
             },
         }
         return sha256(json.dumps(payload, sort_keys=True))
+
+    def vector_rows_for_documents(
+        self, documents: Sequence[IndexedDocument]
+    ) -> list[dict[str, str]]:
+        """Build deterministic retrieval rows from indexed documents."""
+        vector_rows: list[dict[str, str]] = []
+        for document in documents:
+            for item in document.items:
+                vector_rows.append(
+                    {
+                        "content": normalized_retrieval_text(item.title, item.snippet),
+                    }
+                )
+        return vector_rows
+
+    def sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
+        """Build the sparse encoder for the current indexed corpus."""
+        if not self.backend_uses_sparse_vectors():
+            return build_sparse_encoder(())
+        return build_sparse_encoder(
+            [str(entry["content"]) for entry in self.vector_rows_for_documents(documents)]
+        )
+
+    def sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
+        """Return the sparse fingerprint for *documents*."""
+        return self.sparse_encoder_for_documents(documents).fingerprint
 
     def embedding_batches(
         self, vector_rows: list[dict[str, Any]]
