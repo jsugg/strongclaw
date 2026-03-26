@@ -21,8 +21,5 @@ def journal_factory(tmp_path: pathlib.Path) -> JournalFactory:
 
 
 __all__ = [
-    "JournalFactory",
-    "OperationJournal",
-    "create_journal",
     "journal_factory",
 ]

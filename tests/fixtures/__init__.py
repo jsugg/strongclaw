@@ -1,1 +1,1 @@
-"""Shared non-core test fixtures and support helpers."""
+"""Repository-wide pytest fixture plugins."""

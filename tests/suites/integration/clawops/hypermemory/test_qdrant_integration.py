@@ -11,7 +11,8 @@ import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.fixtures.hypermemory import QdrantRuntime, build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.qdrant_runtime import QdrantRuntime
 
 pytestmark = [pytest.mark.qdrant(mode="real"), pytest.mark.network_local]
 

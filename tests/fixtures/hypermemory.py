@@ -7,12 +7,8 @@ import pathlib
 import pytest
 
 from tests.utils.helpers.hypermemory import (
-    FailingRerankProvider,
-    FakeEmbeddingProvider,
-    FakeQdrantBackend,
     HypermemoryConfigWriter,
     HypermemoryWorkspaceFactory,
-    StaticRerankProvider,
     build_rerank_workspace,
     build_workspace,
     write_hypermemory_config,
@@ -61,20 +57,9 @@ def qdrant_runtime(test_context: TestContext, qdrant_mode: ServiceMode) -> Qdran
 
 
 __all__ = [
-    "FailingRerankProvider",
-    "FakeEmbeddingProvider",
-    "FakeQdrantBackend",
-    "HypermemoryConfigWriter",
-    "HypermemoryWorkspaceFactory",
-    "QdrantRuntime",
-    "ServiceMode",
-    "StaticRerankProvider",
-    "build_rerank_workspace",
-    "build_workspace",
     "hypermemory_config_writer",
     "hypermemory_workspace_factory",
     "qdrant_mode",
     "qdrant_runtime",
     "rerank_workspace_factory",
-    "write_hypermemory_config",
 ]

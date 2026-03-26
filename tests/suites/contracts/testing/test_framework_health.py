@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tomllib
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 
 _EXPECTED_MARKERS = {
@@ -39,6 +39,27 @@ def test_all_fixture_modules_have_docstrings() -> None:
         assert ast.get_docstring(
             tree
         ), f"{path.relative_to(REPO_ROOT)} is missing a module docstring"
+
+
+def test_tests_do_not_import_fixture_modules() -> None:
+    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
+        if "fixtures" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.startswith("tests.fixtures"):
+                    raise AssertionError(
+                        f"{path.relative_to(REPO_ROOT)} imports {node.module}; "
+                        "import helpers from tests.utils.helpers or use fixture injection."
+                    )
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("tests.fixtures"):
+                        raise AssertionError(
+                            f"{path.relative_to(REPO_ROOT)} imports {alias.name}; "
+                            "import helpers from tests.utils.helpers or use fixture injection."
+                        )
 
 
 def test_fixture_analysis_runs_successfully() -> None:

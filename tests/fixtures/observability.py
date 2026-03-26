@@ -15,7 +15,5 @@ def tracing_exporter(monkeypatch: pytest.MonkeyPatch) -> RecordingExporter:
 
 
 __all__ = [
-    "RecordingExporter",
-    "configure_test_tracing",
     "tracing_exporter",
 ]

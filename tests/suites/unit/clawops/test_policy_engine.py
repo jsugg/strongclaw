@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from clawops.policy_engine import PolicyEngine
-from tests.fixtures.policy import PolicyFactory
+from tests.utils.helpers.policy import PolicyFactory
 
 
 def test_policy_denies_non_allowlisted_target(policy_factory: PolicyFactory) -> None:

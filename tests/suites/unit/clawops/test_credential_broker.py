@@ -6,7 +6,7 @@ import os
 import pathlib
 
 from clawops.credential_broker import CredentialBroker
-from tests.fixtures.cli import PathPrepender, write_status_script
+from tests.utils.helpers.cli import PathPrepender, write_status_script
 
 
 def test_subscription_readiness_is_machine_readable_and_sanitizes_env(

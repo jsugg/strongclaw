@@ -12,12 +12,14 @@ from pytest import MonkeyPatch
 from clawops.wrappers.base import HttpTimeouts, JsonHttpClient, RetryPolicy
 from clawops.wrappers.github import add_labels
 from clawops.wrappers.webhook import invoke_webhook
-from tests.fixtures.wrappers import (
+from tests.utils.helpers.wrappers import (
     SPECS,
-    FakeResponse,
     WrapperSpec,
     build_context,
     configure_wrapper_environment,
+)
+from tests.utils.helpers.wrappers_http import (
+    FakeResponse,
     install_status_sequence,
     install_success_response,
     install_transport_error,

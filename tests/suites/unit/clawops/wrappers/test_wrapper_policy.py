@@ -9,13 +9,13 @@ import pytest
 from clawops.common import write_yaml
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
-from tests.fixtures.wrappers import (
+from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
     build_context,
     configure_wrapper_environment,
-    install_success_response,
 )
+from tests.utils.helpers.wrappers_http import install_success_response
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])

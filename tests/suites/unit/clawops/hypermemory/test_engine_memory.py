@@ -6,7 +6,7 @@ import pathlib
 from dataclasses import replace
 
 from clawops.hypermemory import HypermemoryEngine, load_config
-from tests.fixtures.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_hypermemory_get_missing_file_is_empty(tmp_path: pathlib.Path) -> None:

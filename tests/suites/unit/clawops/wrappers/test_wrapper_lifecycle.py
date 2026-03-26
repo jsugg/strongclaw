@@ -6,7 +6,7 @@ import pathlib
 
 import pytest
 
-from tests.fixtures.wrappers import (
+from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
     allow_decision_json,
@@ -14,9 +14,8 @@ from tests.fixtures.wrappers import (
     configure_wrapper_environment,
     expected_failure_attempts,
     expected_failure_retryable,
-    install_success_response,
-    install_transport_error,
 )
+from tests.utils.helpers.wrappers_http import install_success_response, install_transport_error
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])

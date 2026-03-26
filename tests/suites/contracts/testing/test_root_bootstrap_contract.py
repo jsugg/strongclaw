@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.fixtures.repo import REPO_ROOT
+from tests.utils.helpers.repo import REPO_ROOT
 
 _CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 
@@ -20,18 +20,18 @@ def test_root_conftest_only_assigns_structural_markers() -> None:
         assert f"pytest.mark.{marker}" not in source
 
 
-def test_root_conftest_avoids_fixture_imports_except_repo() -> None:
+def test_root_conftest_avoids_fixture_imports() -> None:
     tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom) or node.module is None:
             continue
-        if node.module.startswith("tests.fixtures") and node.module != "tests.fixtures.repo":
+        if node.module.startswith("tests.fixtures"):
             raise AssertionError(
-                f"Root conftest imports {node.module}; fixture activation belongs in suites."
+                f"Root conftest imports {node.module}; use pytest_plugins instead."
             )
 
 
-def test_root_conftest_only_bootstraps_core_fixture_plugin() -> None:
+def test_root_conftest_registers_shared_fixture_plugins() -> None:
     tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"))
     plugin_values: tuple[str, ...] | None = None
     for node in tree.body:
@@ -50,4 +50,13 @@ def test_root_conftest_only_bootstraps_core_fixture_plugin() -> None:
         )
         break
 
-    assert plugin_values == ("tests.fixtures.test_context",)
+    assert plugin_values == (
+        "tests.fixtures.cli",
+        "tests.fixtures.context",
+        "tests.fixtures.hypermemory",
+        "tests.fixtures.journal",
+        "tests.fixtures.network",
+        "tests.fixtures.observability",
+        "tests.fixtures.policy",
+        "tests.fixtures.test_context",
+    )

@@ -7,7 +7,7 @@ import pathlib
 
 from clawops.approvals import main
 from clawops.op_journal import OperationJournal
-from tests.fixtures.journal import JournalFactory
+from tests.utils.helpers.journal import JournalFactory
 
 
 def _seed_pending_operation(journal_factory: JournalFactory) -> tuple[OperationJournal, str]:
