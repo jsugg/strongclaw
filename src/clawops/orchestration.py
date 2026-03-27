@@ -10,6 +10,13 @@ from typing import Final, Literal, cast
 
 from clawops.common import canonical_json, sha256_hex
 from clawops.process_runner import run_command
+from clawops.typed_values import (
+    as_bool,
+    as_mapping,
+    as_mapping_list,
+    as_string_list,
+    empty_object_dict,
+)
 
 ORCHESTRATION_SCHEMA_VERSION: Final[int] = 1
 CONTEXT_ENVELOPE_SCHEMA_VERSION: Final[int] = 1
@@ -114,7 +121,7 @@ class ProjectDescriptor:
     project_id: str
     root: pathlib.Path
     trusted_roots: tuple[pathlib.Path, ...]
-    metadata: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    metadata: Mapping[str, object] = dataclasses.field(default_factory=empty_object_dict)
 
     @classmethod
     def resolve(
@@ -137,11 +144,14 @@ class ProjectDescriptor:
             else _stable_descriptor_id(resolved_root.name, resolved_root.as_posix())
         )
         resolved_trusted_roots = _dedupe_paths((resolved_root, *trusted_roots))
+        project_metadata = empty_object_dict()
+        if metadata is not None:
+            project_metadata.update(metadata)
         return cls(
             project_id=descriptor_id,
             root=resolved_root,
             trusted_roots=resolved_trusted_roots,
-            metadata=dict(metadata or {}),
+            metadata=project_metadata,
         )
 
     def contains(self, path: pathlib.Path) -> bool:
@@ -164,7 +174,7 @@ class WorkspaceDescriptor:
     working_directory: pathlib.Path
     trusted_root: pathlib.Path
     branch: str | None = None
-    metadata: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    metadata: Mapping[str, object] = dataclasses.field(default_factory=empty_object_dict)
 
     @classmethod
     def resolve(
@@ -198,7 +208,9 @@ class WorkspaceDescriptor:
         trusted_root = _within_any_root(resolved_path, project.trusted_roots)
 
         resolved_branch = branch
-        workspace_metadata: dict[str, object] = dict(metadata or {})
+        workspace_metadata = empty_object_dict()
+        if metadata is not None:
+            workspace_metadata.update(metadata)
         if kind in {"git_worktree", "git_clone"}:
             actual_root = _git_stdout(working_directory, "rev-parse", "--show-toplevel")
             if actual_root is None:
@@ -215,7 +227,7 @@ class WorkspaceDescriptor:
             _validate_token("workspace_id", workspace_id)
             if workspace_id
             else _stable_descriptor_id(
-                cast(str, kind),
+                kind,
                 f"{resolved_path.as_posix()}:{resolved_branch or 'no-branch'}",
             )
         )
@@ -239,7 +251,7 @@ class DeliveryTargetDescriptor:
     target_id: str
     kind: DeliveryTargetKind
     locator: str
-    metadata: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    metadata: Mapping[str, object] = dataclasses.field(default_factory=empty_object_dict)
 
     @classmethod
     def resolve(
@@ -268,12 +280,15 @@ class DeliveryTargetDescriptor:
             if target_id
             else _stable_descriptor_id(kind, locator)
         )
+        target_metadata = empty_object_dict()
+        if metadata is not None:
+            target_metadata.update(metadata)
         return cls(
             project_id=project.project_id,
             target_id=descriptor_id,
             kind=cast(DeliveryTargetKind, kind),
             locator=locator,
-            metadata=dict(metadata or {}),
+            metadata=target_metadata,
         )
 
 
@@ -434,14 +449,11 @@ def _parse_expected_artifacts(
     """Parse a task's expected artifact list."""
     if value is None:
         return ()
-    if not isinstance(value, list):
-        raise TypeError("task.expected_artifacts must be a list")
+    artifact_items = as_mapping_list(value, path="task.expected_artifacts")
     artifacts: list[ExpectedArtifact] = []
-    for index, item in enumerate(value, start=1):
-        if not isinstance(item, dict):
-            raise TypeError(f"task.expected_artifacts[{index}] must be a mapping")
-        name = item.get("name")
-        role = item.get("role")
+    for index, item_mapping in enumerate(artifact_items, start=1):
+        name = item_mapping.get("name")
+        role = item_mapping.get("role")
         if not isinstance(name, str) or not name:
             raise TypeError(f"task.expected_artifacts[{index}].name must be a non-empty string")
         if not isinstance(role, str) or role not in ROLE_NAMES:
@@ -450,11 +462,14 @@ def _parse_expected_artifacts(
                 f"task.expected_artifacts[{index}].role must be one of: {allowed_roles}"
             )
         artifact_path = _resolve_path(
-            base_dir, item.get("path"), field_name=f"task.expected_artifacts[{index}].path"
+            base_dir,
+            item_mapping.get("path"),
+            field_name=f"task.expected_artifacts[{index}].path",
         )
-        required = item.get("required", True)
-        if not isinstance(required, bool):
-            raise TypeError(f"task.expected_artifacts[{index}].required must be a boolean")
+        required = as_bool(
+            item_mapping.get("required", True),
+            path=f"task.expected_artifacts[{index}].required",
+        )
         artifacts.append(
             ExpectedArtifact(name=name, role=role, path=artifact_path, required=required)
         )
@@ -469,26 +484,26 @@ def _parse_context_request(
     """Parse an optional task context request."""
     if value is None:
         return None
-    if not isinstance(value, dict):
-        raise TypeError("task.context must be a mapping")
-    config_path = _resolve_path(base_dir, value.get("config"), field_name="task.context.config")
-    query = value.get("query")
+    context_mapping = as_mapping(value, path="task.context")
+    config_path = _resolve_path(
+        base_dir, context_mapping.get("config"), field_name="task.context.config"
+    )
+    query = context_mapping.get("query")
     if not isinstance(query, str) or not query.strip():
         raise TypeError("task.context.query must be a non-empty string")
-    limit = value.get("limit", 8)
-    ttl_seconds = value.get("ttl_seconds", 900)
+    limit = context_mapping.get("limit", 8)
+    ttl_seconds = context_mapping.get("ttl_seconds", 900)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise ValueError("task.context.limit must be a positive integer")
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
         raise ValueError("task.context.ttl_seconds must be a positive integer")
-    prior_artifacts_raw = value.get("prior_artifacts", [])
-    if not isinstance(prior_artifacts_raw, list) or not all(
-        isinstance(item, str) for item in prior_artifacts_raw
-    ):
-        raise TypeError("task.context.prior_artifacts must be a list of strings")
+    prior_artifact_values = as_string_list(
+        context_mapping.get("prior_artifacts", []),
+        path="task.context.prior_artifacts",
+    )
     prior_artifacts = tuple(
         _resolve_path(base_dir, item, field_name="task.context.prior_artifacts")
-        for item in prior_artifacts_raw
+        for item in prior_artifact_values
     )
     return ContextRequest(
         config_path=config_path,
@@ -505,62 +520,62 @@ def resolve_orchestration_task(
     base_dir: pathlib.Path,
 ) -> OrchestrationTask:
     """Resolve a workflow task mapping into a typed orchestration contract."""
-    if not isinstance(task, dict):
-        raise TypeError("task must be a mapping")
-    project_payload = task.get("project")
-    if not isinstance(project_payload, dict):
-        raise TypeError("task.project must be a mapping")
+    task_mapping = as_mapping(task, path="task")
+    project_payload = as_mapping(task_mapping.get("project"), path="task.project")
     project_root = _resolve_path(
         base_dir, project_payload.get("root"), field_name="task.project.root"
     )
-    trusted_roots_raw = project_payload.get("trusted_roots", [])
-    if not isinstance(trusted_roots_raw, list) or not all(
-        isinstance(item, str) for item in trusted_roots_raw
-    ):
-        raise TypeError("task.project.trusted_roots must be a list of strings")
+    trusted_root_values = as_string_list(
+        project_payload.get("trusted_roots", []),
+        path="task.project.trusted_roots",
+    )
     trusted_roots = tuple(
         _resolve_path(base_dir, item, field_name="task.project.trusted_roots")
-        for item in trusted_roots_raw
+        for item in trusted_root_values
+    )
+    project_id_value = project_payload.get("id")
+    project_id = project_id_value if isinstance(project_id_value, str) else None
+    project_metadata_value = project_payload.get("metadata")
+    project_metadata = (
+        as_mapping(project_metadata_value, path="task.project.metadata")
+        if project_metadata_value is not None
+        else None
     )
     project = ProjectDescriptor.resolve(
         project_root,
-        project_id=project_payload.get("id"),
+        project_id=project_id,
         trusted_roots=trusted_roots,
-        metadata=(
-            project_payload.get("metadata")
-            if isinstance(project_payload.get("metadata"), dict)
-            else None
-        ),
+        metadata=project_metadata,
     )
 
-    workspace_payload = task.get("workspace")
-    if not isinstance(workspace_payload, dict):
-        raise TypeError("task.workspace must be a mapping")
+    workspace_payload = as_mapping(task_mapping.get("workspace"), path="task.workspace")
     workspace_path = _resolve_path(
         base_dir, workspace_payload.get("path"), field_name="task.workspace.path"
+    )
+    workspace_id_value = workspace_payload.get("id")
+    workspace_id = workspace_id_value if isinstance(workspace_id_value, str) else None
+    branch_value = workspace_payload.get("branch")
+    branch = branch_value if isinstance(branch_value, str) else None
+    workspace_metadata_value = workspace_payload.get("metadata")
+    workspace_metadata = (
+        as_mapping(workspace_metadata_value, path="task.workspace.metadata")
+        if workspace_metadata_value is not None
+        else None
     )
     workspace = WorkspaceDescriptor.resolve(
         project,
         kind=str(workspace_payload.get("kind")),
         path=workspace_path,
-        workspace_id=workspace_payload.get("id"),
-        branch=(
-            workspace_payload.get("branch")
-            if isinstance(workspace_payload.get("branch"), str)
-            else None
-        ),
-        metadata=(
-            workspace_payload.get("metadata")
-            if isinstance(workspace_payload.get("metadata"), dict)
-            else None
-        ),
+        workspace_id=workspace_id,
+        branch=branch,
+        metadata=workspace_metadata,
     )
 
-    lane = task.get("lane", "default")
-    role = task.get("role")
-    backend = task.get("backend")
-    prompt = task.get("prompt")
-    operation_kind = task.get("operation_kind", "worker_dispatch")
+    lane = task_mapping.get("lane", "default")
+    role = task_mapping.get("role")
+    backend = task_mapping.get("backend")
+    prompt = task_mapping.get("prompt")
+    operation_kind = task_mapping.get("operation_kind", "worker_dispatch")
     if not isinstance(lane, str):
         raise TypeError("task.lane must be a string")
     if not isinstance(role, str) or role not in ROLE_NAMES:
@@ -573,12 +588,12 @@ def resolve_orchestration_task(
     if not isinstance(operation_kind, str) or not operation_kind:
         raise TypeError("task.operation_kind must be a non-empty string")
 
-    required_auth_mode = task.get("required_auth_mode", "subscription")
+    required_auth_mode = task_mapping.get("required_auth_mode", "subscription")
     if not isinstance(required_auth_mode, str) or required_auth_mode not in AUTH_MODES:
         allowed_modes = ", ".join(sorted(AUTH_MODES))
         raise ValueError(f"task.required_auth_mode must be one of: {allowed_modes}")
-    timeout_seconds = task.get("timeout_seconds", 1800)
-    retry_budget = task.get("retry_budget", 0)
+    timeout_seconds = task_mapping.get("timeout_seconds", 1800)
+    retry_budget = task_mapping.get("retry_budget", 0)
     if (
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, int)
@@ -588,51 +603,58 @@ def resolve_orchestration_task(
     if isinstance(retry_budget, bool) or not isinstance(retry_budget, int) or retry_budget < 0:
         raise ValueError("task.retry_budget must be a non-negative integer")
 
-    allowed_capabilities_raw = task.get("allowed_capabilities", [])
-    if not isinstance(allowed_capabilities_raw, list) or not all(
-        isinstance(item, str) for item in allowed_capabilities_raw
-    ):
-        raise TypeError("task.allowed_capabilities must be a list of strings")
+    allowed_capabilities = as_string_list(
+        task_mapping.get("allowed_capabilities", []),
+        path="task.allowed_capabilities",
+    )
 
-    delivery_target_payload = task.get("delivery_target")
+    delivery_target_payload = task_mapping.get("delivery_target")
     delivery_target: DeliveryTargetDescriptor | None = None
     if delivery_target_payload is not None:
-        if not isinstance(delivery_target_payload, dict):
-            raise TypeError("task.delivery_target must be a mapping")
-        locator = delivery_target_payload.get("locator", delivery_target_payload.get("path"))
+        delivery_target_mapping = as_mapping(
+            delivery_target_payload,
+            path="task.delivery_target",
+        )
+        locator = delivery_target_mapping.get("locator", delivery_target_mapping.get("path"))
         if not isinstance(locator, str):
             raise TypeError("task.delivery_target.locator must be a string")
+        delivery_target_id_value = delivery_target_mapping.get("id")
+        delivery_target_id = (
+            delivery_target_id_value if isinstance(delivery_target_id_value, str) else None
+        )
+        delivery_target_metadata_value = delivery_target_mapping.get("metadata")
+        delivery_target_metadata = (
+            as_mapping(delivery_target_metadata_value, path="task.delivery_target.metadata")
+            if delivery_target_metadata_value is not None
+            else None
+        )
         delivery_target = DeliveryTargetDescriptor.resolve(
             project,
-            kind=str(delivery_target_payload.get("kind")),
+            kind=str(delivery_target_mapping.get("kind")),
             locator=locator,
-            target_id=delivery_target_payload.get("id"),
-            metadata=(
-                delivery_target_payload.get("metadata")
-                if isinstance(delivery_target_payload.get("metadata"), dict)
-                else None
-            ),
+            target_id=delivery_target_id,
+            metadata=delivery_target_metadata,
         )
 
+    backend_profile_value = task_mapping.get("backend_profile")
+    backend_profile = backend_profile_value if isinstance(backend_profile_value, str) else None
     return OrchestrationTask(
         project=project,
         workspace=workspace,
         lane=_validate_token("task.lane", lane),
         role=role,
         backend=backend,
-        backend_profile=(
-            task.get("backend_profile") if isinstance(task.get("backend_profile"), str) else None
-        ),
+        backend_profile=backend_profile,
         prompt=prompt,
         operation_kind=_validate_token("task.operation_kind", operation_kind),
-        allowed_capabilities=tuple(allowed_capabilities_raw),
+        allowed_capabilities=allowed_capabilities,
         required_auth_mode=cast(AuthMode, required_auth_mode),
-        approval_required=bool(task.get("approval_required", False)),
+        approval_required=bool(task_mapping.get("approval_required", False)),
         timeout_seconds=timeout_seconds,
         retry_budget=retry_budget,
-        context_request=_parse_context_request(task.get("context"), base_dir=base_dir),
+        context_request=_parse_context_request(task_mapping.get("context"), base_dir=base_dir),
         expected_artifacts=_parse_expected_artifacts(
-            task.get("expected_artifacts"), base_dir=base_dir
+            task_mapping.get("expected_artifacts"), base_dir=base_dir
         ),
         delivery_target=delivery_target,
     )

@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import cast
+from typing import Protocol, cast
 
-from clawops.hypermemory.canonical_store_helpers import normalize_tier
-from clawops.hypermemory.models import Lane, SearchHit
+from clawops.hypermemory.models import Lane, SearchHit, Tier
 
 
-def row_to_search_hit(row: sqlite3.Row) -> SearchHit:
+class _TierNormalizer(Protocol):
+    def normalize_tier(self, value: str) -> Tier: ...
+
+
+def row_to_search_hit(self: _TierNormalizer, row: sqlite3.Row) -> SearchHit:
     """Convert a SQLite row into a :class:`~clawops.hypermemory.models.SearchHit`.
 
     Args:
@@ -56,7 +59,7 @@ def row_to_search_hit(row: sqlite3.Row) -> SearchHit:
             else float(row["importance"])
         ),
         tier=(
-            normalize_tier(str(row["tier"]))
+            self.normalize_tier(str(row["tier"]))
             if "tier" in row_keys and row["tier"] is not None
             else "working"
         ),

@@ -11,6 +11,11 @@ from clawops.platform_compat import DEFAULT_ACPX_VERSION, HostPlatform, build_co
 PINNED_ACPX_VERSION: Final[str] = DEFAULT_ACPX_VERSION
 
 
+def _empty_sanitized_env_by_mode() -> dict[AuthMode, tuple[str, ...]]:
+    """Return an empty sanitized environment mapping."""
+    return {}
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class BackendDefinition:
     """Resolved execution backend contract."""
@@ -22,7 +27,9 @@ class BackendDefinition:
     readiness_commands: tuple[tuple[str, ...], ...] = ()
     api_env_vars: tuple[str, ...] = ()
     cloud_env_vars: tuple[str, ...] = ()
-    sanitized_env_by_mode: dict[AuthMode, tuple[str, ...]] = dataclasses.field(default_factory=dict)
+    sanitized_env_by_mode: dict[AuthMode, tuple[str, ...]] = dataclasses.field(
+        default_factory=_empty_sanitized_env_by_mode
+    )
     compatibility_version: str | None = None
 
     def supports_auth_mode(self, auth_mode: str) -> bool:

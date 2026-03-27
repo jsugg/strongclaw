@@ -6,7 +6,7 @@ import argparse
 import dataclasses
 import json
 import pathlib
-from typing import Any
+from typing import Any, cast
 
 from clawops.common import load_json, write_json
 from clawops.op_journal import OperationJournal
@@ -19,7 +19,7 @@ def _load_payload_file(path: pathlib.Path | None) -> dict[str, Any] | None:
     payload = load_json(path)
     if not isinstance(payload, dict):
         raise TypeError("review payload file must decode to a JSON object")
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def _print_or_write(payload: object, *, output: pathlib.Path | None = None) -> None:

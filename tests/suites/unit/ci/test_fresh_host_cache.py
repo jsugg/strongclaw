@@ -21,17 +21,25 @@ def test_warm_packages_uses_bootstrap_installers(
     home_dir = tmp_path / "home"
     seen_calls: list[tuple[str, Path, Path | None]] = []
 
+    def _uv_sync_managed_environment(
+        resolved_repo_root: Path,
+        *,
+        home_dir: Path | None = None,
+    ) -> None:
+        seen_calls.append(("uv", resolved_repo_root, home_dir))
+
+    def _install_memory_plugin_asset(resolved_repo_root: Path) -> None:
+        seen_calls.append(("npm", resolved_repo_root, None))
+
     test_context.patch.patch_object(
         fresh_host_cache_script,
         "uv_sync_managed_environment",
-        new=lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
-            ("uv", resolved_repo_root, home_dir)
-        ),
+        new=_uv_sync_managed_environment,
     )
     test_context.patch.patch_object(
         fresh_host_cache_script,
         "install_memory_plugin_asset",
-        new=lambda resolved_repo_root: seen_calls.append(("npm", resolved_repo_root, None)),
+        new=_install_memory_plugin_asset,
     )
 
     fresh_host_cache_script.warm_packages(repo_root, home_dir=home_dir)
@@ -48,12 +56,17 @@ def test_main_runs_package_warming(test_context: TestContext, tmp_path: Path) ->
     repo_root = tmp_path / "repo"
     home_dir = tmp_path / "home"
 
+    def _warm_packages(
+        resolved_repo_root: Path,
+        *,
+        home_dir: Path | None = None,
+    ) -> None:
+        seen_calls.append((resolved_repo_root, home_dir))
+
     test_context.patch.patch_object(
         fresh_host_cache_script,
         "warm_packages",
-        new=lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
-            (resolved_repo_root, home_dir)
-        ),
+        new=_warm_packages,
     )
 
     exit_code = fresh_host_cache_script.main(

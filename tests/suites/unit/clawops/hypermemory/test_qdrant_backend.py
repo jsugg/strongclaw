@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import requests
@@ -126,9 +126,9 @@ class _FakeSession:
 def test_qdrant_backend_uses_expected_rest_payloads() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
 
     backend.ensure_collection(vector_size=3, include_sparse=True)
     backend.upsert_points(
@@ -187,9 +187,9 @@ def test_qdrant_backend_uses_expected_rest_payloads() -> None:
 def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
     fake_session.conflict_on_collection = True
 
     backend.ensure_collection(vector_size=3)
@@ -200,9 +200,9 @@ def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
 def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
     fake_session.put_outcomes = [
         requests.ReadTimeout("timed out"),
         _FakeResponse(),
@@ -233,9 +233,9 @@ def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
 def test_qdrant_backend_health_prefers_readyz_and_falls_back_to_healthz() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
     fake_session.get_outcomes = [
         _FakeResponse(status_code=404),
         _FakeResponse(),
@@ -252,9 +252,9 @@ def test_qdrant_backend_health_prefers_readyz_and_falls_back_to_healthz() -> Non
 def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
 
     hits = backend.search_sparse(
         vector={"indices": [1, 4], "values": [0.9, 0.4]},
@@ -275,9 +275,9 @@ def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
 def test_qdrant_backend_retries_point_upserts_after_transient_server_errors() -> None:
     fake_session = _FakeSession()
     backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
-        session=fake_session,
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
     )
+    cast(Any, backend)._session = fake_session
     fake_session.put_outcomes = [
         _FakeResponse(status_code=500),
         _FakeResponse(),

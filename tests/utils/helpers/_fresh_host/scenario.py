@@ -122,11 +122,15 @@ def run_scenario(context_file: Path) -> FreshHostReport:
     write_report(report, report_file)
     for phase_name in scenario_phase_names(context):
         log(f"Starting phase={phase_name}.")
+
+        def _run_phase(*, selected_phase_name: str = phase_name) -> list[str] | None:
+            return run_named_phase(context, selected_phase_name)
+
         record_phase(
             report=report,
             report_path=report_file,
             phase_name=phase_name,
-            action=lambda phase_name=phase_name: run_named_phase(context, phase_name),
+            action=_run_phase,
         )
     report.status = "success"
     write_report(report, report_file)

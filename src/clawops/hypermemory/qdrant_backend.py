@@ -6,7 +6,7 @@ import math
 import os
 import time
 from collections.abc import Mapping, Sequence
-from typing import Protocol, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 import requests
 
@@ -32,11 +32,11 @@ class VectorBackend(Protocol):
     while keeping the runtime implementation pluggable.
     """
 
-    def health(self) -> dict[str, object]:
+    def health(self) -> dict[str, Any]:
         """Return a lightweight backend health payload."""
         ...
 
-    def collection_details(self) -> dict[str, object]:
+    def collection_details(self) -> dict[str, Any]:
         """Return live collection details when available."""
         ...
 
@@ -78,16 +78,16 @@ class VectorBackend(Protocol):
 class QdrantBackend:
     """Small REST client for the local Qdrant sidecar."""
 
-    def __init__(self, config: QdrantConfig, *, session: _HttpSession | None = None) -> None:
+    def __init__(self, config: QdrantConfig) -> None:
         self._config = config
-        self._session = session if session is not None else requests.Session()
+        self._session = requests.Session()
 
     @property
     def enabled(self) -> bool:
         """Return whether the backend is enabled in config."""
         return self._config.enabled
 
-    def health(self) -> dict[str, object]:
+    def health(self) -> dict[str, Any]:
         """Return a lightweight health payload."""
         if not self._config.enabled:
             return {"enabled": False, "healthy": False, "reason": "disabled"}
@@ -109,7 +109,7 @@ class QdrantBackend:
             "sparseVectorName": self._config.sparse_vector_name,
         }
 
-    def collection_details(self) -> dict[str, object]:
+    def collection_details(self) -> dict[str, Any]:
         """Return the live collection details when available."""
         if not self._config.enabled:
             return {}
@@ -119,12 +119,11 @@ class QdrantBackend:
             timeout=self._management_timeout_seconds(),
         )
         response.raise_for_status()
-        body = response.json()
-        if not isinstance(body, Mapping):
+        body = _mapping_or_none(response.json())
+        if body is None:
             return {}
-        body_mapping = cast(Mapping[str, object], body)
-        result = body_mapping.get("result")
-        return dict(cast(Mapping[str, object], result)) if isinstance(result, Mapping) else {}
+        result = _mapping_value(body, "result")
+        return {} if result is None else result
 
     def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
         """Create the collection when it does not exist."""
@@ -132,7 +131,7 @@ class QdrantBackend:
             return
         if vector_size <= 0:
             raise ValueError("vector_size must be positive")
-        payload: dict[str, object] = {
+        payload: dict[str, Any] = {
             "vectors": {
                 self._config.dense_vector_name: {
                     "size": vector_size,
@@ -326,7 +325,7 @@ class QdrantBackend:
     def _collection_is_ready(
         self,
         *,
-        details: Mapping[str, object],
+        details: dict[str, Any],
         vector_size: int,
         include_sparse: bool,
     ) -> bool:
@@ -372,9 +371,9 @@ class QdrantBackend:
         limit: int,
         mode: SearchMode,
         scope: str | None,
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         filter_payload = _build_filter(mode=mode, scope=scope)
-        payload: dict[str, object] = {
+        payload: dict[str, Any] = {
             "query": query,
             "using": using,
             "limit": limit,
@@ -387,21 +386,18 @@ class QdrantBackend:
 
     def _parse_candidates(
         self,
-        payload: object,
+        payload: dict[str, Any],
         *,
         candidate_type: type[_CandidateT],
     ) -> list[_CandidateT]:
-        if not isinstance(payload, Mapping):
-            return []
-        payload_mapping = cast(Mapping[str, object], payload)
-        results = payload_mapping.get("result")
-        if isinstance(results, Mapping):
-            result_mapping = cast(Mapping[str, object], results)
+        results: object = payload.get("result")
+        result_mapping = _mapping_or_none(results)
+        if result_mapping is not None:
             results = result_mapping.get("points")
         if not isinstance(results, list):
             return []
         hits: list[_CandidateT] = []
-        for raw_hit in cast(list[object], results):
+        for raw_hit in cast(Sequence[object], results):
             hit = _mapping_or_none(raw_hit)
             if hit is None:
                 continue
@@ -427,9 +423,9 @@ class QdrantBackend:
         return hits
 
 
-def _build_filter(*, mode: SearchMode, scope: str | None) -> dict[str, object] | None:
+def _build_filter(*, mode: SearchMode, scope: str | None) -> dict[str, Any] | None:
     """Build a Qdrant filter payload."""
-    conditions: list[dict[str, object]] = []
+    conditions: list[dict[str, Any]] = []
     if mode != "all":
         conditions.append({"key": "lane", "match": {"value": mode}})
     if scope:
@@ -457,53 +453,13 @@ def _resolve_api_key(*, api_key_env: str | None, api_key: str | None) -> str | N
     return None
 
 
-class _HttpResponse(Protocol):
-    """Minimal HTTP response contract used by the Qdrant client."""
-
-    status_code: int
-
-    def raise_for_status(self) -> None:
-        """Raise when the response status is not successful."""
-        ...
-
-    def json(self) -> object:
-        """Return the decoded JSON response body."""
-        ...
-
-
-class _HttpSession(Protocol):
-    """Minimal HTTP session contract used by the Qdrant client."""
-
-    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> _HttpResponse: ...
-
-    def put(
-        self,
-        url: str,
-        *,
-        json: dict[str, object],
-        headers: dict[str, str],
-        timeout: float,
-        params: Mapping[str, str] | None = None,
-    ) -> _HttpResponse: ...
-
-    def post(
-        self,
-        url: str,
-        *,
-        json: dict[str, object],
-        headers: dict[str, str],
-        timeout: float,
-        params: Mapping[str, str] | None = None,
-    ) -> _HttpResponse: ...
-
-
-def _mapping_or_none(value: object) -> Mapping[str, object] | None:
-    """Return a typed mapping when *value* is mapping-shaped."""
+def _mapping_or_none(value: object) -> dict[str, Any] | None:
+    """Return a string-keyed mapping copy when *value* is mapping-like."""
     if not isinstance(value, Mapping):
         return None
-    return cast(Mapping[str, object], value)
+    return {str(key): item for key, item in cast(Mapping[object, object], value).items()}
 
 
-def _mapping_value(mapping: Mapping[str, object], key: str) -> Mapping[str, object] | None:
-    """Return one nested mapping value when available."""
+def _mapping_value(mapping: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    """Return a nested mapping value by key when present."""
     return _mapping_or_none(mapping.get(key))

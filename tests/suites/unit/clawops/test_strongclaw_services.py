@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+from typing import Any, Protocol, cast
 
 import pytest
 
@@ -11,6 +12,14 @@ from clawops.common import load_text
 from clawops.strongclaw_runtime import ExecResult
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
+
+
+class _WaitForLaunchdService(Protocol):
+    def __call__(self, label: str, *, persistent: bool, timeout_seconds: int) -> None: ...
+
+
+class _LaunchdTimeoutSeconds(Protocol):
+    def __call__(self, env_var: str, default: int) -> int: ...
 
 
 def _result(*, stdout: str = "", stderr: str = "", returncode: int = 0) -> ExecResult:
@@ -33,19 +42,34 @@ def test_wait_for_launchd_service_accepts_running_gateway(test_context: TestCont
         ]
     )
 
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _run_command(*args: object, **kwargs: object) -> ExecResult:
+        del args, kwargs
+        return next(responses)
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "run_command",
-        new=lambda *args, **kwargs: next(responses),
+        new=_run_command,
     )
-    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=_sleep)
 
-    strongclaw_services._wait_for_launchd_service(
+    wait_for_launchd_service = cast(
+        _WaitForLaunchdService,
+        cast(Any, strongclaw_services)._wait_for_launchd_service,
+    )
+    assert callable(wait_for_launchd_service)
+    wait_for_launchd_service(
         strongclaw_services.LAUNCHD_GATEWAY_LABEL,
         persistent=True,
         timeout_seconds=2,
@@ -63,19 +87,34 @@ def test_wait_for_launchd_service_accepts_sidecars_after_zero_exit(
         ]
     )
 
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _run_command(*args: object, **kwargs: object) -> ExecResult:
+        del args, kwargs
+        return next(responses)
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "run_command",
-        new=lambda *args, **kwargs: next(responses),
+        new=_run_command,
     )
-    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=_sleep)
 
-    strongclaw_services._wait_for_launchd_service(
+    wait_for_launchd_service = cast(
+        _WaitForLaunchdService,
+        cast(Any, strongclaw_services)._wait_for_launchd_service,
+    )
+    assert callable(wait_for_launchd_service)
+    wait_for_launchd_service(
         strongclaw_services.LAUNCHD_SIDECARS_LABEL,
         persistent=False,
         timeout_seconds=2,
@@ -86,20 +125,36 @@ def test_wait_for_launchd_service_raises_on_failed_exit(
     test_context: TestContext,
 ) -> None:
     """One-shot launchd services should surface non-zero exit codes."""
+
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _run_command(*args: object, **kwargs: object) -> ExecResult:
+        del args, kwargs
+        return _result(stdout="state = exited\nlast exit code = 78\n")
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "run_command",
-        new=lambda *args, **kwargs: _result(stdout="state = exited\nlast exit code = 78\n"),
+        new=_run_command,
     )
-    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=_sleep)
 
     with pytest.raises(RuntimeError, match="exited with code 78"):
-        strongclaw_services._wait_for_launchd_service(
+        wait_for_launchd_service = cast(
+            _WaitForLaunchdService,
+            cast(Any, strongclaw_services)._wait_for_launchd_service,
+        )
+        assert callable(wait_for_launchd_service)
+        wait_for_launchd_service(
             strongclaw_services.LAUNCHD_SIDECARS_LABEL,
             persistent=False,
             timeout_seconds=2,
@@ -118,19 +173,34 @@ def test_wait_for_launchd_service_retries_transient_launchctl_print_failures(
         ]
     )
 
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _run_command(*args: object, **kwargs: object) -> ExecResult:
+        del args, kwargs
+        return next(responses)
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "run_command",
-        new=lambda *args, **kwargs: next(responses),
+        new=_run_command,
     )
-    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=_sleep)
 
-    strongclaw_services._wait_for_launchd_service(
+    wait_for_launchd_service = cast(
+        _WaitForLaunchdService,
+        cast(Any, strongclaw_services)._wait_for_launchd_service,
+    )
+    assert callable(wait_for_launchd_service)
+    wait_for_launchd_service(
         strongclaw_services.LAUNCHD_SIDECARS_LABEL,
         persistent=False,
         timeout_seconds=3,
@@ -198,7 +268,7 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
     """Launchd sidecars should be retried once after a transient non-zero exit."""
     output_dir = tmp_path / "LaunchAgents"
     output_dir.mkdir(parents=True)
-    payload = {
+    payload: dict[str, object] = {
         "ok": True,
         "serviceManager": "launchd",
         "outputDir": str(output_dir),
@@ -208,20 +278,33 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
     calls: list[tuple[str, str]] = []
     wait_attempts = {"sidecars": 0}
 
+    def _render_service_files(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return payload
+
+    def _ensure_docker_backend_ready() -> None:
+        return None
+
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _sleep(_seconds: float) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "render_service_files",
-        new=lambda *args, **kwargs: payload,
+        new=_render_service_files,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "ensure_docker_backend_ready",
-        new=lambda: None,
+        new=_ensure_docker_backend_ready,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
 
     def fake_activate(domain: str, label: str, _plist: pathlib.Path) -> None:
@@ -245,7 +328,7 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
         "_wait_for_launchd_service",
         new=fake_wait,
     )
-    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=_sleep)
 
     activated = strongclaw_services.activate_services(tmp_path, service_manager="launchd")
 
@@ -266,7 +349,7 @@ def test_activate_services_uses_launchd_timeout_overrides(
     """Launchd activation should honor explicit timeout overrides."""
     output_dir = tmp_path / "LaunchAgents"
     output_dir.mkdir(parents=True)
-    payload = {
+    payload: dict[str, object] = {
         "ok": True,
         "serviceManager": "launchd",
         "outputDir": str(output_dir),
@@ -275,25 +358,42 @@ def test_activate_services_uses_launchd_timeout_overrides(
     }
     waits: list[tuple[str, bool, int]] = []
 
+    def _render_service_files(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return payload
+
+    def _ensure_docker_backend_ready() -> None:
+        return None
+
+    def _launchd_domain() -> str:
+        return "gui/501"
+
+    def _activate_launchd_service(
+        _domain: str,
+        _label: str,
+        _plist: pathlib.Path,
+    ) -> None:
+        return None
+
     test_context.patch.patch_object(
         strongclaw_services,
         "render_service_files",
-        new=lambda *args, **kwargs: payload,
+        new=_render_service_files,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "ensure_docker_backend_ready",
-        new=lambda: None,
+        new=_ensure_docker_backend_ready,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "_launchd_domain",
-        new=lambda: "gui/501",
+        new=_launchd_domain,
     )
     test_context.patch.patch_object(
         strongclaw_services,
         "_activate_launchd_service",
-        new=lambda _domain, _label, _plist: None,
+        new=_activate_launchd_service,
     )
 
     def fake_wait(label: str, *, persistent: bool, timeout_seconds: int) -> None:
@@ -324,4 +424,9 @@ def test_launchd_timeout_override_rejects_invalid_values(test_context: TestConte
     """Launchd timeout overrides must be positive integers."""
     test_context.env.set("TEST_TIMEOUT", "invalid")
     with pytest.raises(RuntimeError, match="must be a positive integer"):
-        strongclaw_services._launchd_timeout_seconds("TEST_TIMEOUT", 30)
+        launchd_timeout_seconds = cast(
+            _LaunchdTimeoutSeconds,
+            cast(Any, strongclaw_services)._launchd_timeout_seconds,
+        )
+        assert callable(launchd_timeout_seconds)
+        launchd_timeout_seconds("TEST_TIMEOUT", 30)

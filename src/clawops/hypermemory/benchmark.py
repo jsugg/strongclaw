@@ -3,50 +3,44 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import cast
 
 from clawops.common import load_yaml
 from clawops.hypermemory.contracts import BenchmarkCase
 from clawops.hypermemory.models import SearchMode
+from clawops.typed_values import as_mapping
 
 
 def load_benchmark_cases(path: pathlib.Path) -> list[BenchmarkCase]:
     """Load benchmark cases from a YAML fixture file."""
-    raw = load_yaml(path)
-    if not isinstance(raw, Mapping):
-        raise TypeError("benchmark fixture root must be a mapping")
-    root = cast(Mapping[str, object], raw)
-    cases = root.get("cases")
+    raw = as_mapping(load_yaml(path), path=str(path))
+    cases = raw.get("cases")
     if not isinstance(cases, list):
         raise TypeError("benchmark fixture must contain a cases list")
-    normalized_cases: list[BenchmarkCase] = []
-    for index, case in enumerate(cast(list[object], cases)):
-        normalized_cases.append(_normalize_case(index, case))
-    return normalized_cases
+    return [
+        _normalize_case(index, case) for index, case in enumerate(cast(Sequence[object], cases))
+    ]
 
 
 def _normalize_case(index: int, raw: object) -> BenchmarkCase:
     """Normalize a single benchmark case."""
-    if not isinstance(raw, Mapping):
-        raise TypeError(f"cases[{index}] must be a mapping")
-    case_mapping = cast(Mapping[str, object], raw)
+    case_mapping = as_mapping(raw, path=f"cases[{index}]")
     name = _require_string(case_mapping.get("name"), f"cases[{index}].name")
     query = _require_string(case_mapping.get("query"), f"cases[{index}].query")
     expected_paths = _string_list(
-        case_mapping.get("expectedPaths"), f"cases[{index}].expectedPaths"
+        case_mapping.get("expectedPaths"),
+        f"cases[{index}].expectedPaths",
     )
     lane_value = case_mapping.get("lane", "all")
-    if not isinstance(lane_value, str):
-        raise TypeError(f"cases[{index}].lane must be all, memory, or corpus")
-    lane = lane_value.strip()
+    lane = cast(SearchMode, lane_value)
     if lane not in {"all", "memory", "corpus"}:
         raise ValueError(f"cases[{index}].lane must be all, memory, or corpus")
     case: BenchmarkCase = {
         "name": name,
         "query": query,
         "expectedPaths": expected_paths,
-        "lane": cast(SearchMode, lane),
+        "lane": lane,
     }
     max_results = case_mapping.get("maxResults")
     if max_results is not None:

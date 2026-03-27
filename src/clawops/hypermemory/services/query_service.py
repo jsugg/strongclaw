@@ -477,5 +477,9 @@ class QueryService:
     def _normalize_tier(self, value: str) -> Tier:
         return normalize_tier(value)
 
+    def normalize_tier(self, value: str) -> Tier:
+        """Expose tier normalization for shared row-mapping helpers."""
+        return self._normalize_tier(value)
+
     def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
-        return row_to_search_hit(row)
+        return row_to_search_hit(self, row)

@@ -68,7 +68,7 @@ def test_execute_approved_rejects_manual_rows_without_execution_contract(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
-    ctx, journal = build_context(tmp_path, spec, require_approval=False)
+    _ctx, journal = build_context(tmp_path, spec, require_approval=False)
     configure_wrapper_environment(spec, test_context)
     op = journal.begin(
         scope="test",

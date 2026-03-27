@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -18,10 +20,13 @@ def test_uv_sync_managed_environment_uses_uv_default_dev_group(
     uv_binary = tmp_path / "uv"
     seen: dict[str, object] = {}
 
+    def _ensure_uv_installed(**_: object) -> pathlib.Path:
+        return uv_binary
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        new=lambda **_: uv_binary,
+        new=_ensure_uv_installed,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
@@ -64,10 +69,13 @@ def test_uv_sync_managed_environment_retries_transient_failure(
     seen_commands: list[list[str]] = []
     seen_sleeps: list[int] = []
 
+    def _ensure_uv_installed(**_: object) -> pathlib.Path:
+        return uv_binary
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        new=lambda **_: uv_binary,
+        new=_ensure_uv_installed,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
@@ -122,10 +130,13 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(
     seen_sleeps: list[int] = []
     call_count = 0
 
+    def _ensure_uv_installed(**_: object) -> pathlib.Path:
+        return uv_binary
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        new=lambda **_: uv_binary,
+        new=_ensure_uv_installed,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
@@ -162,13 +173,21 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(
 def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) -> None:
     """Prefer `nodejs` when `node` is unavailable."""
 
+    def _command_exists(command_name: str) -> bool:
+        return command_name == "nodejs"
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "command_exists",
-        new=lambda command_name: command_name == "nodejs",
+        new=_command_exists,
     )
 
-    assert strongclaw_bootstrap._resolve_node_command() == "nodejs"
+    resolve_node_command = cast(
+        Callable[[], str | None],
+        cast(Any, strongclaw_bootstrap)._resolve_node_command,
+    )
+    assert callable(resolve_node_command)
+    assert resolve_node_command() == "nodejs"
 
 
 def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext) -> None:
@@ -180,14 +199,22 @@ def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext)
         seen_commands.append(command)
         return SimpleNamespace(ok=True)
 
+    def _resolve_node_command() -> str:
+        return "nodejs"
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "_resolve_node_command",
-        new=lambda: "nodejs",
+        new=_resolve_node_command,
     )
     test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
 
-    assert strongclaw_bootstrap._node_satisfies_minimum() is True
+    node_satisfies_minimum = cast(
+        Callable[[], bool],
+        cast(Any, strongclaw_bootstrap)._node_satisfies_minimum,
+    )
+    assert callable(node_satisfies_minimum)
+    assert node_satisfies_minimum() is True
     assert seen_commands == [
         [
             "nodejs",
@@ -210,30 +237,46 @@ def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(
     qmd_dist_entry.parent.mkdir(parents=True, exist_ok=True)
     qmd_dist_entry.write_text("console.log('ok');\n", encoding="utf-8")
 
+    def _resolve_node_command() -> str:
+        return "nodejs"
+
+    def _command_exists(command_name: str) -> bool:
+        return command_name == "npm"
+
+    def _stream_checked(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    def _strongclaw_qmd_install_dir(**_: object) -> pathlib.Path:
+        return qmd_install_prefix
+
+    def _run_command(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        return SimpleNamespace(ok=True)
+
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "_resolve_node_command",
-        new=lambda: "nodejs",
+        new=_resolve_node_command,
     )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "command_exists",
-        new=lambda command_name: command_name == "npm",
+        new=_command_exists,
     )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "_stream_checked",
-        new=lambda *args, **kwargs: None,
+        new=_stream_checked,
     )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "strongclaw_qmd_install_dir",
-        new=lambda **_: qmd_install_prefix,
+        new=_strongclaw_qmd_install_dir,
     )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "run_command",
-        new=lambda *args, **kwargs: SimpleNamespace(ok=True),
+        new=_run_command,
     )
 
     wrapper_path = strongclaw_bootstrap.install_qmd_asset(home_dir=tmp_path)

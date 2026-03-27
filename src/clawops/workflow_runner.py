@@ -7,7 +7,7 @@ import dataclasses
 import pathlib
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import cast
 
 from clawops.acp_runner import SessionSpec, run_session
 from clawops.app_paths import scoped_state_dir
@@ -23,6 +23,15 @@ from clawops.orchestration import (
 )
 from clawops.policy_engine import PolicyEngine
 from clawops.process_runner import run_command
+from clawops.typed_values import (
+    as_bool,
+    as_int,
+    as_mapping,
+    as_mapping_list,
+    as_string,
+    as_string_list,
+    empty_object_dict,
+)
 
 
 @dataclasses.dataclass(slots=True)
@@ -32,7 +41,7 @@ class StepResult:
     name: str
     ok: bool
     message: str
-    details: dict[str, object] = dataclasses.field(default_factory=dict)
+    details: dict[str, object] = dataclasses.field(default_factory=empty_object_dict)
 
 
 def _coerce_path(value: object, *, field_name: str) -> pathlib.Path:
@@ -45,7 +54,7 @@ def _coerce_path(value: object, *, field_name: str) -> pathlib.Path:
 
 
 def _resolve_base_dir(
-    workflow: Mapping[str, Any],
+    workflow: Mapping[str, object],
     *,
     workflow_path: pathlib.Path | None,
     cli_base_dir: pathlib.Path | None,
@@ -109,16 +118,14 @@ def _validate_optional_positive_int(name: str, value: object) -> None:
         raise ValueError(f"{name} must be positive")
 
 
-def _validate_workflow(workflow: object) -> dict[str, Any]:
+def _validate_workflow(workflow: object) -> dict[str, object]:
     """Validate the loaded workflow document."""
-    if not isinstance(workflow, dict):
-        raise TypeError("workflow must be a mapping")
-    base_dir = workflow.get("base_dir")
+    workflow_mapping = dict(as_mapping(workflow, path="workflow"))
+    base_dir = workflow_mapping.get("base_dir")
     if base_dir is not None and not isinstance(base_dir, str):
         raise TypeError("workflow.base_dir must be a string")
-    steps = workflow.get("steps", [])
-    if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
-        raise TypeError("workflow.steps must be a list of mappings")
+    raw_steps = workflow_mapping.get("steps", [])
+    steps = as_mapping_list(raw_steps, path="workflow.steps")
     for index, step in enumerate(steps, start=1):
         name = step.get("name")
         kind = step.get("kind")
@@ -135,8 +142,8 @@ def _validate_workflow(workflow: object) -> dict[str, Any]:
             command = step.get("command")
             if isinstance(command, str):
                 pass
-            elif isinstance(command, list) and all(isinstance(item, str) for item in command):
-                pass
+            elif isinstance(command, list):
+                as_string_list(cast(object, command), path=f"{prefix}.command")
             else:
                 raise TypeError(f"{prefix}.command must be a string or list of strings")
             shell = step.get("shell")
@@ -147,8 +154,7 @@ def _validate_workflow(workflow: object) -> dict[str, Any]:
         if kind == "policy_check":
             if not isinstance(step.get("policy"), str):
                 raise TypeError(f"{prefix}.policy must be a string")
-            if not isinstance(step.get("payload"), dict):
-                raise TypeError(f"{prefix}.payload must be a mapping")
+            as_mapping(step.get("payload"), path=f"{prefix}.payload")
             continue
         if kind == "journal_init":
             if not isinstance(step.get("db"), str):
@@ -165,8 +171,7 @@ def _validate_workflow(workflow: object) -> dict[str, Any]:
                 raise TypeError(f"{prefix}.envelope must be a boolean")
             continue
         if kind == "worker_dispatch":
-            if not isinstance(step.get("task"), dict):
-                raise TypeError(f"{prefix}.task must be a mapping")
+            as_mapping(step.get("task"), path=f"{prefix}.task")
             continue
         if kind == "worker_poll":
             if step.get("dispatch_step") is None and step.get("summary") is None:
@@ -183,18 +188,14 @@ def _validate_workflow(workflow: object) -> dict[str, Any]:
                 raise TypeError(f"{prefix} must define op_id or from_step")
             continue
         if kind == "workspace_prepare":
-            if not isinstance(step.get("project"), dict):
-                raise TypeError(f"{prefix}.project must be a mapping")
-            if not isinstance(step.get("workspace"), dict):
-                raise TypeError(f"{prefix}.workspace must be a mapping")
+            as_mapping(step.get("project"), path=f"{prefix}.project")
+            as_mapping(step.get("workspace"), path=f"{prefix}.workspace")
             continue
         if kind == "delivery_prepare":
-            if not isinstance(step.get("project"), dict):
-                raise TypeError(f"{prefix}.project must be a mapping")
-            if not isinstance(step.get("delivery_target"), dict):
-                raise TypeError(f"{prefix}.delivery_target must be a mapping")
+            as_mapping(step.get("project"), path=f"{prefix}.project")
+            as_mapping(step.get("delivery_target"), path=f"{prefix}.delivery_target")
             continue
-    return workflow
+    return workflow_mapping
 
 
 def _resolve_workflow_path(path: pathlib.Path, *, allow_untrusted: bool) -> pathlib.Path:
@@ -220,7 +221,7 @@ class WorkflowRunner:
 
     def __init__(
         self,
-        workflow: dict[str, Any],
+        workflow: dict[str, object],
         *,
         dry_run: bool = False,
         base_dir: pathlib.Path | None = None,
@@ -240,26 +241,29 @@ class WorkflowRunner:
             return path.resolve()
         return (self.base_dir / path).resolve()
 
-    def _resolve_project(self, step: Mapping[str, Any]) -> ProjectDescriptor:
+    def _resolve_project(self, step: Mapping[str, object]) -> ProjectDescriptor:
         """Resolve a project descriptor from one workflow step."""
-        payload = step.get("project")
-        assert isinstance(payload, dict)
+        payload = as_mapping(step.get("project"), path="project")
         root = self._resolve_step_path(payload.get("root"), field_name="project.root")
-        trusted_roots_raw = payload.get("trusted_roots", [])
-        if not isinstance(trusted_roots_raw, list) or not all(
-            isinstance(item, str) for item in trusted_roots_raw
-        ):
-            raise TypeError("project.trusted_roots must be a list of strings")
+        trusted_root_values = as_string_list(
+            payload.get("trusted_roots", []),
+            path="project.trusted_roots",
+        )
         trusted_roots = tuple(
             self._resolve_step_path(item, field_name="project.trusted_roots")
-            for item in trusted_roots_raw
+            for item in trusted_root_values
         )
-        metadata = payload.get("metadata")
-        if metadata is not None and not isinstance(metadata, dict):
-            raise TypeError("project.metadata must be a mapping")
+        project_id_value = payload.get("id")
+        project_id = project_id_value if isinstance(project_id_value, str) else None
+        metadata_value = payload.get("metadata")
+        metadata = (
+            as_mapping(metadata_value, path="project.metadata")
+            if metadata_value is not None
+            else None
+        )
         return ProjectDescriptor.resolve(
             root,
-            project_id=payload.get("id") if isinstance(payload.get("id"), str) else None,
+            project_id=project_id,
             trusted_roots=trusted_roots,
             metadata=metadata,
         )
@@ -268,19 +272,26 @@ class WorkflowRunner:
         self,
         *,
         project: ProjectDescriptor,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, object],
     ) -> WorkspaceDescriptor:
         """Resolve a workspace descriptor from one workflow step."""
         path = self._resolve_step_path(payload.get("path"), field_name="workspace.path")
-        metadata = payload.get("metadata")
-        if metadata is not None and not isinstance(metadata, dict):
-            raise TypeError("workspace.metadata must be a mapping")
+        workspace_id_value = payload.get("id")
+        workspace_id = workspace_id_value if isinstance(workspace_id_value, str) else None
+        branch_value = payload.get("branch")
+        branch = branch_value if isinstance(branch_value, str) else None
+        metadata_value = payload.get("metadata")
+        metadata = (
+            as_mapping(metadata_value, path="workspace.metadata")
+            if metadata_value is not None
+            else None
+        )
         return WorkspaceDescriptor.resolve(
             project,
             kind=str(payload.get("kind")),
             path=path,
-            workspace_id=payload.get("id") if isinstance(payload.get("id"), str) else None,
-            branch=payload.get("branch") if isinstance(payload.get("branch"), str) else None,
+            workspace_id=workspace_id,
+            branch=branch,
             metadata=metadata,
         )
 
@@ -293,11 +304,11 @@ class WorkflowRunner:
         details: dict[str, object] | None = None,
     ) -> StepResult:
         """Persist per-step state and return the public result."""
-        payload = {} if details is None else details
+        payload = empty_object_dict() if details is None else details
         self.step_state[step_name] = payload
         return StepResult(step_name, ok, message, payload)
 
-    def _shell_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _shell_step(self, step: Mapping[str, object]) -> StepResult:
         """Execute one shell workflow step."""
         if self.dry_run:
             return self._store_step_result(
@@ -305,9 +316,16 @@ class WorkflowRunner:
                 ok=True,
                 message=f"dry-run shell: {step['command']}",
             )
-        timeout = int(step.get("timeout", 30))
-        shell = bool(step.get("shell", False))
-        proc = run_command(step["command"], timeout_seconds=timeout, shell=shell)
+        timeout = as_int(step.get("timeout", 30), path="shell.timeout")
+        shell = as_bool(step.get("shell", False), path="shell.shell")
+        command_value = step["command"]
+        if isinstance(command_value, str):
+            command: str | list[str] = command_value
+        elif isinstance(command_value, list):
+            command = list(as_string_list(cast(object, command_value), path="shell.command"))
+        else:
+            raise TypeError("shell.command must be a string or list of strings")
+        proc = run_command(command, timeout_seconds=timeout, shell=shell)
         if proc.timed_out:
             return self._store_step_result(
                 step_name=str(step["name"]),
@@ -326,11 +344,11 @@ class WorkflowRunner:
             message=f"exit={proc.returncode}",
         )
 
-    def _policy_check_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _policy_check_step(self, step: Mapping[str, object]) -> StepResult:
         """Execute one policy check workflow step."""
         policy_path = self._resolve_step_path(step["policy"], field_name="policy_check.policy")
         engine = PolicyEngine.from_file(policy_path)
-        decision = engine.evaluate(step["payload"])
+        decision = engine.evaluate(as_mapping(step["payload"], path="policy_check.payload"))
         ok = decision.decision in {"allow", "require_approval"}
         return self._store_step_result(
             step_name=str(step["name"]),
@@ -339,7 +357,7 @@ class WorkflowRunner:
             details={"decision": decision.decision},
         )
 
-    def _journal_init_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _journal_init_step(self, step: Mapping[str, object]) -> StepResult:
         """Initialize one operation journal."""
         db_path = self._resolve_step_path(step["db"], field_name="journal_init.db")
         if not self.dry_run:
@@ -352,7 +370,7 @@ class WorkflowRunner:
             details={"db_path": str(db_path)},
         )
 
-    def _context_pack_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _context_pack_step(self, step: Mapping[str, object]) -> StepResult:
         """Build one context pack or context envelope."""
         if self.dry_run:
             return self._store_step_result(
@@ -382,9 +400,12 @@ class WorkflowRunner:
                 backend=str(step.get("backend", "codex")),
             )
             envelope = builder.build(
-                query=str(step["query"]),
-                limit=int(step.get("limit", 8)),
-                ttl_seconds=int(step.get("ttl_seconds", 900)),
+                query=as_string(step["query"], path="context_pack.query"),
+                limit=as_int(step.get("limit", 8), path="context_pack.limit"),
+                ttl_seconds=as_int(
+                    step.get("ttl_seconds", 900),
+                    path="context_pack.ttl_seconds",
+                ),
                 output_dir=output_dir,
             )
             validate_context_envelope(envelope, service=service, workspace=workspace)
@@ -403,7 +424,10 @@ class WorkflowRunner:
             if step.get("output") is None
             else self._resolve_step_path(step["output"], field_name="context_pack.output")
         )
-        output = service.pack(str(step["query"]), limit=int(step.get("limit", 8)))
+        output = service.pack(
+            as_string(step["query"], path="context_pack.query"),
+            limit=as_int(step.get("limit", 8), path="context_pack.limit"),
+        )
         write_text(output_path, output)
         return self._store_step_result(
             step_name=str(step["name"]),
@@ -412,10 +436,13 @@ class WorkflowRunner:
             details={"output_path": str(output_path)},
         )
 
-    def _workspace_prepare_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _workspace_prepare_step(self, step: Mapping[str, object]) -> StepResult:
         """Resolve and persist one workspace descriptor."""
         project = self._resolve_project(step)
-        workspace = self._resolve_workspace(project=project, payload=step["workspace"])
+        workspace = self._resolve_workspace(
+            project=project,
+            payload=as_mapping(step["workspace"], path="workspace"),
+        )
         artifact_path = (
             scoped_state_dir(workspace.working_directory, category="workspace-descriptors")
             / f"{_safe_step_slug(str(step['name']))}.json"
@@ -438,20 +465,27 @@ class WorkflowRunner:
             details={"descriptor_path": str(artifact_path), **descriptor},
         )
 
-    def _delivery_prepare_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _delivery_prepare_step(self, step: Mapping[str, object]) -> StepResult:
         """Resolve and persist one delivery target descriptor."""
         project = self._resolve_project(step)
-        payload = step["delivery_target"]
-        assert isinstance(payload, dict)
+        payload = as_mapping(step["delivery_target"], path="delivery_target")
         locator = payload.get("locator", payload.get("path"))
         if not isinstance(locator, str):
             raise TypeError("delivery_target.locator must be a string")
+        target_id_value = payload.get("id")
+        target_id = target_id_value if isinstance(target_id_value, str) else None
+        metadata_value = payload.get("metadata")
+        metadata = (
+            as_mapping(metadata_value, path="delivery_target.metadata")
+            if metadata_value is not None
+            else None
+        )
         target = DeliveryTargetDescriptor.resolve(
             project,
             kind=str(payload.get("kind")),
             locator=locator,
-            target_id=payload.get("id") if isinstance(payload.get("id"), str) else None,
-            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+            target_id=target_id,
+            metadata=metadata,
         )
         artifact_path = (
             scoped_state_dir(project.root, category="delivery-targets")
@@ -480,7 +514,7 @@ class WorkflowRunner:
             },
         )
 
-    def _worker_dispatch_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _worker_dispatch_step(self, step: Mapping[str, object]) -> StepResult:
         """Run one ACP-backed worker dispatch step."""
         task = resolve_orchestration_task(step["task"], base_dir=self.base_dir)
         details: dict[str, object] = {
@@ -566,7 +600,7 @@ class WorkflowRunner:
                 op.op_id,
                 approved_by=approved_by,
                 note=(
-                    step.get("approval_note")
+                    cast(str | None, step.get("approval_note"))
                     if isinstance(step.get("approval_note"), str)
                     else None
                 ),
@@ -629,7 +663,7 @@ class WorkflowRunner:
             details=details,
         )
 
-    def _worker_poll_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _worker_poll_step(self, step: Mapping[str, object]) -> StepResult:
         """Poll one prior worker dispatch."""
         if self.dry_run:
             return self._store_step_result(
@@ -659,14 +693,14 @@ class WorkflowRunner:
             details={"summary_path": str(summary_path), "status": status},
         )
 
-    def _artifact_gate_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _artifact_gate_step(self, step: Mapping[str, object]) -> StepResult:
         """Validate required artifacts before promotion."""
         artifacts: list[tuple[pathlib.Path, bool]] = []
         if step.get("artifacts") is not None:
             raw_artifacts = step["artifacts"]
             if not isinstance(raw_artifacts, list):
                 raise TypeError("artifact_gate.artifacts must be a list")
-            for index, item in enumerate(raw_artifacts, start=1):
+            for index, item in enumerate(cast(list[object], raw_artifacts), start=1):
                 if isinstance(item, str):
                     artifacts.append(
                         (
@@ -677,15 +711,15 @@ class WorkflowRunner:
                         )
                     )
                     continue
-                if not isinstance(item, dict):
-                    raise TypeError("artifact_gate.artifacts items must be strings or mappings")
+                item_mapping = as_mapping(item, path=f"artifact_gate.artifacts[{index}]")
                 path = self._resolve_step_path(
-                    item.get("path"),
+                    item_mapping.get("path"),
                     field_name=f"artifact_gate.artifacts[{index}].path",
                 )
-                required = item.get("required", True)
-                if not isinstance(required, bool):
-                    raise TypeError(f"artifact_gate.artifacts[{index}].required must be a boolean")
+                required = as_bool(
+                    item_mapping.get("required", True),
+                    path=f"artifact_gate.artifacts[{index}].required",
+                )
                 artifacts.append((path, required))
         else:
             from_step = str(step["from_step"])
@@ -693,12 +727,15 @@ class WorkflowRunner:
             previous_artifacts = previous.get("expected_artifacts", [])
             if not isinstance(previous_artifacts, list):
                 raise TypeError("referenced step expected_artifacts must be a list")
-            for item in previous_artifacts:
-                if not isinstance(item, dict):
-                    continue
-                path_value = item.get("path")
-                required = item.get("required", True)
-                if isinstance(path_value, str) and isinstance(required, bool):
+            for item in cast(list[object], previous_artifacts):
+                item_mapping = as_mapping(
+                    item,
+                    path="artifact_gate.from_step.expected_artifacts",
+                )
+                path_value = item_mapping.get("path")
+                required_value = item_mapping.get("required", True)
+                required = required_value if isinstance(required_value, bool) else True
+                if isinstance(path_value, str):
                     artifacts.append((pathlib.Path(path_value), required))
         missing = [str(path) for path, required in artifacts if required and not path.exists()]
         ok = not missing
@@ -710,7 +747,7 @@ class WorkflowRunner:
             details={"missing": missing, "artifacts": [str(path) for path, _ in artifacts]},
         )
 
-    def _approval_gate_step(self, step: Mapping[str, Any]) -> StepResult:
+    def _approval_gate_step(self, step: Mapping[str, object]) -> StepResult:
         """Require or apply an approval decision in the journal."""
         db_path = self._resolve_step_path(step["db"], field_name="approval_gate.db")
         if self.dry_run:
@@ -731,10 +768,12 @@ class WorkflowRunner:
         op = journal.get(op_id)
         approved_by = step.get("approved_by")
         if op.status == "pending_approval" and isinstance(approved_by, str) and approved_by.strip():
+            note_value = step.get("note")
+            note = note_value if isinstance(note_value, str) else None
             op = journal.approve(
                 op_id,
                 approved_by=approved_by,
-                note=step.get("note") if isinstance(step.get("note"), str) else None,
+                note=note,
             )
         expected_status = str(step.get("expected_status", "approved"))
         ok = op.status == expected_status
@@ -760,7 +799,8 @@ class WorkflowRunner:
             "artifact_gate": self._artifact_gate_step,
             "approval_gate": self._approval_gate_step,
         }
-        for step in self.workflow.get("steps", []):
+        steps = as_mapping_list(self.workflow.get("steps", []), path="workflow.steps")
+        for step in steps:
             kind = str(step["kind"])
             handler = handlers.get(kind)
             if handler is None:

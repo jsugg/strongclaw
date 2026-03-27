@@ -16,6 +16,7 @@ import requests
 
 from clawops.common import ResultSummary
 from clawops.process_runner import CommandResult, run_command
+from clawops.typed_values import ObjectMapping, as_mapping_list
 
 ACTION_USE_RE = re.compile(
     r"^(?P<prefix>\s*-\s+uses:\s+)(?P<action>[^@\s]+)@(?P<ref>[^\s#]+)(?P<suffix>\s*(?:#.*)?)$"
@@ -229,6 +230,11 @@ def _apply_line_updates(
     path.write_text("".join(lines), encoding="utf-8")
 
 
+def _updated_entries(payload: dict[str, object], *, path: str) -> list[ObjectMapping]:
+    """Return the typed update entries from a refresh payload."""
+    return list(as_mapping_list(payload.get("updated"), path=f"{path}.updated"))
+
+
 def refresh_workflow_action_pins(
     repo_root: pathlib.Path,
     *,
@@ -404,22 +410,25 @@ def propose_refresh(
 ) -> dict[str, object]:
     """Refresh pinned inputs, run quality gates, and optionally open a PR."""
     resolved_root = _resolve_repo_root(repo_root)
+    empty_refresh_payload: dict[str, object] = {"updated": []}
     if dry_run:
         action_payload = (
             refresh_workflow_action_pins(resolved_root, apply=False)
             if refresh_actions
-            else {"updated": []}
+            else empty_refresh_payload
         )
         compose_payload = (
             refresh_compose_image_digests(resolved_root, apply=False)
             if refresh_compose_digests_enabled
-            else {"updated": []}
+            else empty_refresh_payload
         )
+        action_updates = _updated_entries(action_payload, path="workflow_action_refresh")
+        compose_updates = _updated_entries(compose_payload, path="compose_image_refresh")
         return {
             "ok": True,
             "dryRun": True,
-            "workflowActions": action_payload["updated"],
-            "composeImages": compose_payload["updated"],
+            "workflowActions": action_updates,
+            "composeImages": compose_updates,
             "refreshCommands": list(refresh_commands),
         }
 
@@ -430,13 +439,15 @@ def propose_refresh(
     action_payload = (
         refresh_workflow_action_pins(resolved_root, apply=True)
         if refresh_actions
-        else {"updated": []}
+        else empty_refresh_payload
     )
     compose_payload = (
         refresh_compose_image_digests(resolved_root, apply=True)
         if refresh_compose_digests_enabled
-        else {"updated": []}
+        else empty_refresh_payload
     )
+    action_updates = _updated_entries(action_payload, path="workflow_action_refresh")
+    compose_updates = _updated_entries(compose_payload, path="compose_image_refresh")
     for command in refresh_commands:
         _run_refresh_command(resolved_root, command)
 
@@ -457,8 +468,8 @@ def propose_refresh(
             "baseBranch": base_branch,
             "noChanges": True,
             "sbomPath": sbom_path,
-            "workflowActions": action_payload["updated"],
-            "composeImages": compose_payload["updated"],
+            "workflowActions": action_updates,
+            "composeImages": compose_updates,
         }
 
     commit_result = _git(resolved_root, "commit", "-m", commit_message)
@@ -498,8 +509,8 @@ def propose_refresh(
         "baseBranch": base_branch,
         "changedFiles": changed_files,
         "sbomPath": sbom_path,
-        "workflowActions": action_payload["updated"],
-        "composeImages": compose_payload["updated"],
+        "workflowActions": action_updates,
+        "composeImages": compose_updates,
         **pr_payload,
     }
 

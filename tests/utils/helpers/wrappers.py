@@ -26,6 +26,11 @@ type ExecuteWrapper = Callable[[WrapperContext, str], dict[str, object]]
 type AllowlistValue = Callable[[str], str]
 
 
+def _empty_env() -> dict[str, str]:
+    """Return an empty wrapper environment override mapping."""
+    return {}
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class WrapperSpec:
     """Wrapper-specific lifecycle contract inputs."""
@@ -42,7 +47,7 @@ class WrapperSpec:
     invoke: InvokeWrapper
     execute: ExecuteWrapper
     allowlist_value: AllowlistValue
-    env: dict[str, str] = dataclasses.field(default_factory=dict)
+    env: dict[str, str] = dataclasses.field(default_factory=_empty_env)
 
 
 def _identity(value: str) -> str:

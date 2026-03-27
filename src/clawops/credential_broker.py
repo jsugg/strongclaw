@@ -39,6 +39,18 @@ BOOTSTRAP_TEXT_TOKENS: Final[tuple[str, ...]] = (
 EXPIRED_TEXT_TOKENS: Final[tuple[str, ...]] = ("expired", "token expired", "session expired")
 
 
+def _empty_metadata() -> dict[str, object]:
+    """Return an empty metadata payload with a concrete type."""
+    return {}
+
+
+def _mapping_to_object_dict(value: object) -> dict[str, object]:
+    """Return a string-keyed mapping copy when *value* is mapping-like."""
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in cast(Mapping[object, object], value).items()}
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class CredentialStatus:
     """Machine-readable credential readiness result."""
@@ -50,7 +62,7 @@ class CredentialStatus:
     message: str
     removed_env_keys: tuple[str, ...]
     readiness_command: tuple[str, ...] | None = None
-    metadata: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    metadata: Mapping[str, object] = dataclasses.field(default_factory=_empty_metadata)
 
     @property
     def ready(self) -> bool:
@@ -96,8 +108,9 @@ def _classify_text_status(text: str) -> CredentialState:
 
 def _classify_json_status(payload: object) -> CredentialState:
     """Classify a structured readiness response conservatively."""
-    if isinstance(payload, dict):
-        lowered = {str(key).casefold(): value for key, value in payload.items()}
+    payload_mapping = _mapping_to_object_dict(payload)
+    if payload_mapping:
+        lowered = {key.casefold(): value for key, value in payload_mapping.items()}
         for key in ("authenticated", "ready", "loggedin", "signedin"):
             value = lowered.get(key)
             if isinstance(value, bool):
@@ -135,7 +148,7 @@ def _probe_command(command: tuple[str, ...]) -> tuple[CredentialState, str, Mapp
     )
     if result.returncode not in {0, None} and state == "ready":
         state = "misconfigured"
-    metadata = parsed if isinstance(parsed, dict) else {}
+    metadata = _mapping_to_object_dict(parsed)
     return state, combined_output or "status command returned no output", metadata
 
 

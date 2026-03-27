@@ -14,6 +14,7 @@ from clawops.orchestration import (
     ProjectDescriptor,
     WorkspaceDescriptor,
 )
+from clawops.typed_values import as_mapping, as_mapping_list, as_string_list
 
 
 class ContextEnvelopeValidationError(ValueError):
@@ -94,51 +95,73 @@ class ContextEnvelopeManifest:
     @classmethod
     def from_mapping(cls, payload: object) -> "ContextEnvelopeManifest":
         """Load a manifest from a JSON mapping."""
-        if not isinstance(payload, dict):
-            raise TypeError("context envelope manifest must be a mapping")
+        payload_mapping = as_mapping(payload, path="context_envelope_manifest")
+
+        def _required_int(name: str) -> int:
+            raw_value = payload_mapping.get(name)
+            if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+                raise TypeError(f"{name} must be an integer")
+            return raw_value
+
+        def _required_str(name: str) -> str:
+            raw_value = payload_mapping.get(name)
+            if not isinstance(raw_value, str):
+                raise TypeError(f"{name} must be a string")
+            return raw_value
 
         def _artifact_list(name: str) -> tuple[ArtifactHash, ...]:
-            raw_value = payload.get(name, [])
-            if not isinstance(raw_value, list):
-                raise TypeError(f"{name} must be a list")
+            artifact_items = as_mapping_list(payload_mapping.get(name, []), path=name)
             artifacts: list[ArtifactHash] = []
-            for item in raw_value:
-                if not isinstance(item, dict):
-                    raise TypeError(f"{name} items must be mappings")
+            for item in artifact_items:
+                path_value = item.get("path")
+                sha_value = item.get("sha256")
+                size_bytes_value = item.get("size_bytes")
+                if not isinstance(path_value, str):
+                    raise TypeError(f"{name}.path must be a string")
+                if not isinstance(sha_value, str):
+                    raise TypeError(f"{name}.sha256 must be a string")
+                if isinstance(size_bytes_value, bool) or not isinstance(size_bytes_value, int):
+                    raise TypeError(f"{name}.size_bytes must be an integer")
                 artifacts.append(
                     ArtifactHash(
-                        path=str(item["path"]),
-                        sha256=str(item["sha256"]),
-                        size_bytes=int(item["size_bytes"]),
+                        path=path_value,
+                        sha256=sha_value,
+                        size_bytes=size_bytes_value,
                     )
                 )
             return tuple(artifacts)
 
+        prior_pack_ref_value = payload_mapping.get("prior_pack_ref")
+        if prior_pack_ref_value in {None, ""}:
+            prior_pack_ref: str | None = None
+        elif isinstance(prior_pack_ref_value, str):
+            prior_pack_ref = prior_pack_ref_value
+        else:
+            raise TypeError("prior_pack_ref must be a string")
+
         return cls(
-            schema_version=int(payload["schema_version"]),
-            pack_version=int(payload["pack_version"]),
-            project_id=str(payload["project_id"]),
-            workspace_id=str(payload["workspace_id"]),
-            lane=str(payload["lane"]),
-            role=str(payload["role"]),
-            backend=str(payload["backend"]),
-            query=str(payload["query"]),
-            created_at=str(payload["created_at"]),
-            producer=str(payload["producer"]),
-            index_snapshot_id=str(payload["index_snapshot_id"]),
-            source_state_hash=str(payload["source_state_hash"]),
-            body_sha256=str(payload["body_sha256"]),
+            schema_version=_required_int("schema_version"),
+            pack_version=_required_int("pack_version"),
+            project_id=_required_str("project_id"),
+            workspace_id=_required_str("workspace_id"),
+            lane=_required_str("lane"),
+            role=_required_str("role"),
+            backend=_required_str("backend"),
+            query=_required_str("query"),
+            created_at=_required_str("created_at"),
+            producer=_required_str("producer"),
+            index_snapshot_id=_required_str("index_snapshot_id"),
+            source_state_hash=_required_str("source_state_hash"),
+            body_sha256=_required_str("body_sha256"),
             artifact_hashes=_artifact_list("artifact_hashes"),
-            included_paths=tuple(str(item) for item in payload.get("included_paths", [])),
-            scm_delta_kind=str(payload["scm_delta_kind"]),
-            scm_delta_hash=str(payload["scm_delta_hash"]),
-            ttl_seconds=int(payload["ttl_seconds"]),
-            cache_key=str(payload["cache_key"]),
-            prior_pack_ref=(
-                None
-                if payload.get("prior_pack_ref") in {None, ""}
-                else str(payload["prior_pack_ref"])
+            included_paths=as_string_list(
+                payload_mapping.get("included_paths", []), path="included_paths"
             ),
+            scm_delta_kind=_required_str("scm_delta_kind"),
+            scm_delta_hash=_required_str("scm_delta_hash"),
+            ttl_seconds=_required_int("ttl_seconds"),
+            cache_key=_required_str("cache_key"),
+            prior_pack_ref=prior_pack_ref,
             upstream_artifact_hashes=_artifact_list("upstream_artifact_hashes"),
         )
 
@@ -256,21 +279,6 @@ def _snapshot_diff(
         if path in previous_map and current_map[path] != previous_map[path]
     )
     return {"added_paths": added, "removed_paths": removed, "changed_paths": changed}
-
-
-def _load_previous_manifest(
-    state_root: pathlib.Path, cache_key: str
-) -> tuple[pathlib.Path, ContextEnvelopeManifest] | None:
-    """Load the newest manifest for one cache key, if present."""
-    cache_dir = state_root / cache_key
-    if not cache_dir.exists():
-        return None
-    candidates = sorted(cache_dir.glob("*/context.manifest.json"))
-    if not candidates:
-        return None
-    latest = candidates[-1]
-    payload = load_json(latest)
-    return latest, ContextEnvelopeManifest.from_mapping(payload)
 
 
 def _load_latest_manifest(

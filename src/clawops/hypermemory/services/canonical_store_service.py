@@ -849,6 +849,10 @@ class CanonicalStoreService:
     def _normalize_tier(self, value: str | Tier | None) -> Tier:
         return normalize_tier(value)
 
+    def normalize_tier(self, value: str) -> Tier:
+        """Expose tier normalization for shared row-mapping helpers."""
+        return self._normalize_tier(value)
+
     def _infer_fact_key(
         self,
         *,
@@ -1032,7 +1036,7 @@ class CanonicalStoreService:
         return f"{match.group('prefix')}{updated}"
 
     def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
-        return row_to_search_hit_impl(row)
+        return row_to_search_hit_impl(self, row)
 
     def _is_semantically_duplicate(
         self,

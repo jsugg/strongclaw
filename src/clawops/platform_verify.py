@@ -14,11 +14,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
-from typing import Any, Final, cast
+from typing import Final, cast
 
 from clawops.allowlist_sync import load_source, render_fragment
 from clawops.common import dump_json, load_text, load_yaml
 from clawops.process_runner import run_command
+from clawops.typed_values import as_mapping
 
 DEFAULT_REPO_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
 
@@ -76,31 +77,31 @@ def _fail(name: str, message: str) -> Check:
     return Check(name=name, ok=False, message=message)
 
 
-def _load_mapping_yaml(path: pathlib.Path) -> dict[str, Any]:
+def _load_mapping_yaml(path: pathlib.Path) -> dict[str, object]:
     """Load a YAML file and require a mapping root."""
     value = load_yaml(path)
-    if not isinstance(value, dict):
-        raise TypeError(f"expected mapping in {path}")
-    return value
+    return dict(as_mapping(value, path=str(path)))
 
 
-def _load_mapping_json(path: pathlib.Path) -> dict[str, Any]:
+def _load_mapping_json(path: pathlib.Path) -> dict[str, object]:
     """Load a JSON overlay and require a mapping root."""
     value = json.loads(load_text(path))
-    if not isinstance(value, dict):
-        raise TypeError(f"expected mapping in {path}")
-    return value
+    return dict(as_mapping(value, path=str(path)))
 
 
-def _service_definition(compose: Mapping[str, Any], service_name: str) -> Mapping[str, Any] | None:
+def _service_definition(
+    compose: Mapping[str, object],
+    service_name: str,
+) -> Mapping[str, object] | None:
     """Return a compose service definition when present."""
     services = compose.get("services")
     if not isinstance(services, Mapping):
         return None
-    service = services.get(service_name)
+    services_mapping = cast(Mapping[str, object], services)
+    service = services_mapping.get(service_name)
     if not isinstance(service, Mapping):
         return None
-    return service
+    return cast(Mapping[str, object], service)
 
 
 def _parse_port_mapping(raw_value: object) -> PublishedPort | None:
@@ -119,12 +120,14 @@ def _parse_port_mapping(raw_value: object) -> PublishedPort | None:
     return PublishedPort(host=host, host_port=host_port, container_port=container_port)
 
 
-def _find_published_port(service: Mapping[str, Any], container_port: int) -> PublishedPort | None:
+def _find_published_port(
+    service: Mapping[str, object], container_port: int
+) -> PublishedPort | None:
     """Find the published host port for a service container port."""
     ports = service.get("ports")
     if not isinstance(ports, list):
         return None
-    for raw_value in ports:
+    for raw_value in cast(list[object], ports):
         published = _parse_port_mapping(raw_value)
         if published is not None and published.container_port == container_port:
             return published
@@ -137,7 +140,7 @@ def _is_loopback_host(host: str) -> bool:
 
 
 def _check_required_service(
-    compose: Mapping[str, Any],
+    compose: Mapping[str, object],
     *,
     service_name: str,
     container_port: int,
@@ -213,16 +216,6 @@ def _check_http_endpoint(name: str, url: str, *, require_body: bool = False) -> 
 
     detail = "unknown HTTP probe failure" if last_error is None else str(last_error)
     return _fail(name, f"http reachability failed for {url}: {detail}")
-
-
-def _check_loopback_probe(script_path: pathlib.Path, ports: Sequence[int]) -> Check:
-    """Run the existing loopback probe script on the published ports."""
-    command = [str(script_path), *[str(port) for port in ports]]
-    result = run_command(command, timeout_seconds=15)
-    if result.ok:
-        return _ok("loopback-probe", "runtime listeners remain loopback-only")
-    detail = result.stderr.strip() or result.stdout.strip() or "loopback probe failed"
-    return _fail("loopback-probe", detail)
 
 
 def _listener_addresses(port: int) -> list[str]:
@@ -378,15 +371,19 @@ def verify_observability(
             name="observability",
             checks=[_fail("plugins", f"missing plugins block in {overlay_path}")],
         )
+    diagnostics_mapping = cast(Mapping[str, object], diagnostics)
+    logging_mapping = cast(Mapping[str, object], logging)
+    plugins_mapping = cast(Mapping[str, object], plugins)
 
-    otel = diagnostics.get("otel")
+    otel = diagnostics_mapping.get("otel")
     if not isinstance(otel, Mapping):
         return VerificationReport(
             name="observability",
             checks=[_fail("otel", f"missing diagnostics.otel block in {overlay_path}")],
         )
+    otel_mapping = cast(Mapping[str, object], otel)
 
-    endpoint = otel.get("endpoint")
+    endpoint = otel_mapping.get("endpoint")
     if not isinstance(endpoint, str):
         return VerificationReport(
             name="observability",
@@ -398,41 +395,43 @@ def verify_observability(
 
     checks.append(
         _ok("diagnostics-enabled", "diagnostics overlay enabled")
-        if diagnostics.get("enabled") is True
+        if diagnostics_mapping.get("enabled") is True
         else _fail("diagnostics-enabled", "diagnostics.enabled must be true")
     )
     checks.append(
         _ok("otel-enabled", "OTel plugin enabled")
-        if otel.get("enabled") is True
+        if otel_mapping.get("enabled") is True
         else _fail("otel-enabled", "diagnostics.otel.enabled must be true")
     )
     checks.append(
         _ok("otel-protocol", "OTLP protocol uses http/protobuf")
-        if otel.get("protocol") == "http/protobuf"
+        if otel_mapping.get("protocol") == "http/protobuf"
         else _fail("otel-protocol", "diagnostics.otel.protocol must be http/protobuf")
     )
     checks.append(
         _ok("otel-signals", "metrics and traces enabled")
-        if otel.get("metrics") is True and otel.get("traces") is True
+        if otel_mapping.get("metrics") is True and otel_mapping.get("traces") is True
         else _fail("otel-signals", "diagnostics.otel.metrics and traces must both be true")
     )
     checks.append(
         _ok("logging-redaction", "logging redaction remains enabled")
-        if logging.get("redactSensitive") == "tools"
-        and isinstance(logging.get("redactPatterns"), list)
+        if logging_mapping.get("redactSensitive") == "tools"
+        and isinstance(logging_mapping.get("redactPatterns"), list)
         else _fail("logging-redaction", "logging redaction contract is incomplete")
     )
-    allow_plugins = plugins.get("allow")
-    plugin_entries = plugins.get("entries")
+    allow_plugins = plugins_mapping.get("allow")
+    plugin_entries = plugins_mapping.get("entries")
     diagnostics_entry = (
-        plugin_entries.get("diagnostics-otel") if isinstance(plugin_entries, Mapping) else None
+        cast(Mapping[str, object], plugin_entries).get("diagnostics-otel")
+        if isinstance(plugin_entries, Mapping)
+        else None
     )
     checks.append(
         _ok("diagnostics-plugin", "diagnostics-otel plugin remains enabled")
         if isinstance(allow_plugins, list)
         and "diagnostics-otel" in allow_plugins
         and isinstance(diagnostics_entry, Mapping)
-        and diagnostics_entry.get("enabled") is True
+        and cast(Mapping[str, object], diagnostics_entry).get("enabled") is True
         else _fail(
             "diagnostics-plugin", "diagnostics-otel plugin must stay allowlisted and enabled"
         )
@@ -505,10 +504,11 @@ def verify_channels(
             name="channels",
             checks=[_fail("channels", f"missing channels block in {overlay_path}")],
         )
+    channels_mapping = cast(Mapping[str, object], channels)
 
-    telegram = channels.get("telegram")
-    whatsapp = channels.get("whatsapp")
-    defaults = channels.get("defaults")
+    telegram = channels_mapping.get("telegram")
+    whatsapp = channels_mapping.get("whatsapp")
+    defaults = channels_mapping.get("defaults")
     checks: list[Check] = []
     if not isinstance(telegram, Mapping):
         checks.append(_fail("telegram", "missing channels.telegram block"))
@@ -519,9 +519,9 @@ def verify_channels(
     if checks:
         return VerificationReport(name="channels", checks=checks)
 
-    telegram_mapping = cast(Mapping[str, Any], telegram)
-    whatsapp_mapping = cast(Mapping[str, Any], whatsapp)
-    defaults_mapping = cast(Mapping[str, Any], defaults)
+    telegram_mapping = cast(Mapping[str, object], telegram)
+    whatsapp_mapping = cast(Mapping[str, object], whatsapp)
+    defaults_mapping = cast(Mapping[str, object], defaults)
     checks.extend(
         [
             (

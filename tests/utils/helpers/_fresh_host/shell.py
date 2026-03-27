@@ -10,7 +10,7 @@ import sys
 import time
 from collections.abc import Collection
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from clawops.strongclaw_compose import compose_project_name
 from clawops.strongclaw_runtime import (
@@ -150,7 +150,7 @@ def _coerce_compose_ps_entries(stdout: str) -> list[dict[str, object]]:
     def _coerce_entry(payload: object) -> dict[str, object]:
         if not isinstance(payload, dict):
             raise FreshHostError("docker compose ps returned a non-object entry.")
-        return {str(key): value for key, value in payload.items()}
+        return {str(key): value for key, value in cast(dict[object, object], payload).items()}
 
     try:
         payload = json.loads(text)
@@ -168,7 +168,7 @@ def _coerce_compose_ps_entries(stdout: str) -> list[dict[str, object]]:
         return entries
 
     if isinstance(payload, list):
-        return [_coerce_entry(entry) for entry in payload]
+        return [_coerce_entry(entry) for entry in cast(list[object], payload)]
     return [_coerce_entry(payload)]
 
 
@@ -320,8 +320,8 @@ def verify_compose_services_running(
             break
         time.sleep(2.0)
 
-    if last_error is not None:
-        raise last_error
+    assert last_error is not None
+    raise last_error
     raise FreshHostError("Timed out waiting for docker compose services to start.")
 
 

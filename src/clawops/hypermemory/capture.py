@@ -6,12 +6,13 @@ import dataclasses
 import json
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Literal, cast
+from collections.abc import Iterable, Sequence
+from typing import Any, Literal, cast
 
 import requests
 
 from clawops.hypermemory.models import EntryType
+from clawops.typed_values import as_mapping, as_mapping_list
 
 CaptureSource = Literal["regex", "llm"]
 MessageLike = tuple[int, str, str]
@@ -195,7 +196,7 @@ def _call_capture_llm(
     model: str,
     api_key: str,
     timeout_ms: int,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """Invoke the capture endpoint for one message batch."""
     prompt = _capture_prompt(batch)
     response = session.post(
@@ -219,14 +220,8 @@ def _call_capture_llm(
     )
     response.raise_for_status()
     body = response.json()
-    if not isinstance(body, Mapping):
-        raise TypeError("capture response must be a JSON object")
-    body_mapping = cast(Mapping[str, object], body)
-    raw_content = _extract_response_content(body_mapping)
-    payload = json.loads(_extract_json_object(raw_content))
-    if not isinstance(payload, Mapping):
-        raise TypeError("capture response payload must be a JSON object")
-    return dict(cast(Mapping[str, object], payload))
+    raw_content = _extract_response_content(body)
+    return cast(dict[str, Any], json.loads(_extract_json_object(raw_content)))
 
 
 def _capture_prompt(batch: Sequence[MessageLike]) -> str:
@@ -265,31 +260,29 @@ def _capture_headers(*, api_key: str) -> dict[str, str]:
     return headers
 
 
-def _extract_response_content(body: Mapping[str, object]) -> str:
+def _extract_response_content(body: dict[str, Any]) -> str:
     """Extract response text from an OpenAI-compatible JSON body."""
     choices = body.get("choices")
     if isinstance(choices, list) and choices:
-        choice_items = cast(list[object], choices)
-        first_choice = choice_items[0]
-        if isinstance(first_choice, Mapping):
-            choice_mapping = cast(Mapping[str, object], first_choice)
-            message = choice_mapping.get("message")
-        else:
-            message = None
-        if isinstance(message, Mapping):
-            message_mapping = cast(Mapping[str, object], message)
+        message = as_mapping(
+            cast(object, choices[0]),
+            path="capture_response.choices[0]",
+        ).get("message")
+        if isinstance(message, dict):
+            message_mapping = cast(dict[str, object], message)
             content = message_mapping.get("content")
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                chunks: list[str] = []
-                for raw_item in cast(list[object], content):
-                    if not isinstance(raw_item, Mapping):
-                        continue
-                    item = cast(Mapping[str, object], raw_item)
-                    if item.get("type") not in {None, "text"}:
-                        continue
-                    chunks.append(str(item.get("text", "")))
+                chunks = [
+                    str(item_mapping.get("text", ""))
+                    for item_mapping in (
+                        cast(dict[str, object], item)
+                        for item in cast(list[object], content)
+                        if isinstance(item, dict)
+                    )
+                    if item_mapping.get("type") in {None, "text"}
+                ]
                 if chunks:
                     return "".join(chunks)
     output_text = body.get("output_text")
@@ -314,52 +307,43 @@ def _extract_json_object(raw_content: str) -> str:
 
 
 def _parse_llm_candidates(
-    payload: Mapping[str, object],
+    payload: dict[str, Any],
     *,
     batch: Sequence[MessageLike],
 ) -> list[CaptureCandidate]:
     """Normalize LLM payload candidates into typed dataclasses."""
-    raw_candidates = payload.get("candidates")
-    if not isinstance(raw_candidates, list):
-        return []
+    raw_candidates = as_mapping_list(
+        payload.get("candidates", []), path="capture_response.candidates"
+    )
     turns_by_id = {turn_index: (role, text) for turn_index, role, text in batch}
     fallback_turn = batch[-1]
     candidates: list[CaptureCandidate] = []
-    for raw_candidate in cast(list[object], raw_candidates):
-        if not isinstance(raw_candidate, Mapping):
-            continue
-        candidate_mapping = cast(Mapping[str, object], raw_candidate)
-        kind = str(candidate_mapping.get("kind", "")).strip().lower()
-        text = str(candidate_mapping.get("text", "")).strip()
+    for raw_candidate in raw_candidates:
+        kind = str(raw_candidate.get("kind", "")).strip().lower()
+        text = str(raw_candidate.get("text", "")).strip()
         if kind not in _CAPTURE_KIND_SET or not text:
             continue
-        confidence = candidate_mapping.get("confidence")
+        confidence = raw_candidate.get("confidence")
         normalized_confidence = None
         if isinstance(confidence, (int, float)):
             normalized_confidence = max(0.0, min(float(confidence), 1.0))
-        source_turn = candidate_mapping.get(
-            "source_turn",
-            candidate_mapping.get("sourceTurn"),
-        )
+        source_turn = raw_candidate.get("source_turn", raw_candidate.get("sourceTurn"))
         if not isinstance(source_turn, int) or source_turn not in turns_by_id:
             source_turn = fallback_turn[0]
-        source_role = candidate_mapping.get(
-            "source_role",
-            candidate_mapping.get("sourceRole"),
-        )
+        source_role = raw_candidate.get("source_role", raw_candidate.get("sourceRole"))
         if not isinstance(source_role, str) or not source_role.strip():
             source_role = turns_by_id.get(source_turn, (fallback_turn[1],))[0]
         candidates.append(
             CaptureCandidate(
                 kind=cast(EntryType, kind),
                 text=text,
-                entity=_optional_string(candidate_mapping.get("entity")),
+                entity=_optional_string(raw_candidate.get("entity")),
                 confidence=normalized_confidence,
                 source="llm",
                 source_turn=source_turn,
                 source_role=source_role,
                 fact_key=_optional_string(
-                    candidate_mapping.get("fact_key", candidate_mapping.get("factKey"))
+                    raw_candidate.get("fact_key", raw_candidate.get("factKey"))
                 )
                 or _infer_fact_key(text),
             )

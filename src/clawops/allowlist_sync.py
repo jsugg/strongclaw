@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from clawops.common import dump_json, load_json, load_yaml, write_text
+from clawops.typed_values import as_mapping
 
 TG_ID_RE = re.compile(r"^(?:tg:|telegram:)?(\d+)$")
 E164_RE = re.compile(r"^\+\d{8,15}$")
@@ -33,11 +34,8 @@ def normalize_whatsapp(value: str) -> str:
 def load_source(path: pathlib.Path) -> dict[str, Any]:
     """Load a structured source file."""
     if path.suffix.lower() == ".json":
-        return load_json(path)
-    data = load_yaml(path)
-    if not isinstance(data, dict):
-        raise TypeError(f"expected mapping in {path}")
-    return data
+        return dict(as_mapping(load_json(path), path=str(path)))
+    return dict(as_mapping(load_yaml(path), path=str(path)))
 
 
 def render_fragment(source: dict[str, Any]) -> dict[str, Any]:

@@ -8,6 +8,8 @@ from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from tests.plugins.infrastructure.profiles import resolve_profile
 from tests.plugins.infrastructure.types import IsolationMode, ProfileOverrideValue, ProfileValue
 
@@ -113,9 +115,8 @@ class EnvironmentManager:
             raise RuntimeError("EnvironmentManager.snapshot() must run before mutations.")
 
 
-def register_env_addoption(parser: object) -> None:
+def register_env_addoption(parser: pytest.Parser) -> None:
     """Register the ``--test-context`` environment isolation option."""
-    assert hasattr(parser, "addoption")
     parser.addoption(
         "--test-context",
         choices=["isolated", "shared"],

@@ -8,6 +8,7 @@ import pytest
 
 from clawops.common import write_yaml
 from clawops.policy_engine import PolicyEngine
+from clawops.typed_values import as_mapping
 from clawops.wrappers.base import WrapperContext
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
@@ -81,7 +82,8 @@ def test_wrapper_replays_stored_decision_when_policy_changes(
 
     assert first["status"] == "succeeded"
     assert replayed["status"] == "succeeded"
-    assert replayed["decision"]["decision"] == "allow"
+    replayed_decision = as_mapping(replayed["decision"], path="replayed.decision")
+    assert replayed_decision["decision"] == "allow"
     assert replayed["decision"] == first["decision"]
     assert calls == ["request"]
 

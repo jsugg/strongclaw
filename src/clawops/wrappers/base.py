@@ -19,6 +19,12 @@ from clawops.common import canonical_json
 from clawops.observability import emit_structured_log, observed_span
 from clawops.op_journal import Operation, OperationJournal
 from clawops.policy_engine import TERMINAL_DENY, TERMINAL_REQUIRE_APPROVAL, Decision, PolicyEngine
+from clawops.typed_values import as_string_list
+
+
+def _empty_retryable_status_codes() -> frozenset[int]:
+    """Return a typed empty retryable-status set."""
+    return frozenset()
 
 
 @dataclasses.dataclass(slots=True)
@@ -121,7 +127,9 @@ class RetryPolicy:
 
     name: str
     max_attempts: int = 1
-    retryable_status_codes: frozenset[int] = dataclasses.field(default_factory=frozenset)
+    retryable_status_codes: frozenset[int] = dataclasses.field(
+        default_factory=_empty_retryable_status_codes
+    )
     base_delay_seconds: float = 0.25
     jitter_seconds: float = 0.1
 
@@ -362,15 +370,16 @@ def execution_contract_from_operation(op: Operation) -> ExecutionContract | None
         payload = json.loads(op.execution_contract_json)
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict):
+    if not isinstance(payload, Mapping):
         return None
-    version = payload.get("version")
-    scope = payload.get("scope")
-    kind = payload.get("kind")
-    trust_zone = payload.get("trust_zone")
-    normalized_target = payload.get("normalized_target")
-    inputs_hash = payload.get("inputs_hash")
-    policy_decision = payload.get("policy_decision")
+    payload_mapping = cast(Mapping[str, object], payload)
+    version = payload_mapping.get("version")
+    scope = payload_mapping.get("scope")
+    kind = payload_mapping.get("kind")
+    trust_zone = payload_mapping.get("trust_zone")
+    normalized_target = payload_mapping.get("normalized_target")
+    inputs_hash = payload_mapping.get("inputs_hash")
+    policy_decision = payload_mapping.get("policy_decision")
     if (
         not isinstance(version, int)
         or not isinstance(scope, str)
@@ -403,26 +412,32 @@ def decision_from_operation(op: Operation) -> Decision | None:
             payload = json.loads(op.policy_decision_json)
         except json.JSONDecodeError:
             payload = None
-        if isinstance(payload, dict):
-            decision = payload.get("decision")
-            reasons = payload.get("reasons")
-            matched_rules = payload.get("matched_rules")
-            review_mode = payload.get("review_mode")
-            review_target = payload.get("review_target")
-            review_reason = payload.get("review_reason")
-            review_policy_id = payload.get("review_policy_id")
-            delegate_to = payload.get("delegate_to")
+        if isinstance(payload, Mapping):
+            payload_mapping = cast(Mapping[str, object], payload)
+            decision = payload_mapping.get("decision")
+            reasons = payload_mapping.get("reasons")
+            matched_rules = payload_mapping.get("matched_rules")
+            review_mode = payload_mapping.get("review_mode")
+            review_target = payload_mapping.get("review_target")
+            review_reason = payload_mapping.get("review_reason")
+            review_policy_id = payload_mapping.get("review_policy_id")
+            delegate_to = payload_mapping.get("delegate_to")
             if (
                 isinstance(decision, str)
                 and isinstance(reasons, list)
-                and all(isinstance(item, str) for item in reasons)
                 and isinstance(matched_rules, list)
-                and all(isinstance(item, str) for item in matched_rules)
             ):
                 return Decision(
                     decision=decision,
-                    reasons=list(reasons),
-                    matched_rules=list(matched_rules),
+                    reasons=list(
+                        as_string_list(cast(object, reasons), path="policy_decision.reasons")
+                    ),
+                    matched_rules=list(
+                        as_string_list(
+                            cast(object, matched_rules),
+                            path="policy_decision.matched_rules",
+                        )
+                    ),
                     review_mode=review_mode if isinstance(review_mode, str) else None,
                     review_target=review_target if isinstance(review_target, str) else None,
                     review_reason=review_reason if isinstance(review_reason, str) else None,

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
 import sqlite3
-from pathlib import Path
 
 from clawops.hypermemory.schema import SCHEMA_VERSION, ensure_schema, schema_definition
 
@@ -16,7 +16,7 @@ def test_hypermemory_schema_resource_is_versioned() -> None:
     assert "DROP TABLE IF EXISTS search_items" in definition.drop_statements
 
 
-def test_hypermemory_schema_bootstraps_empty_database(tmp_path: Path) -> None:
+def test_hypermemory_schema_bootstraps_empty_database(tmp_path: pathlib.Path) -> None:
     conn = sqlite3.connect(tmp_path / "hypermemory.sqlite")
 
     ensure_schema(conn)
@@ -33,7 +33,7 @@ def test_hypermemory_schema_bootstraps_empty_database(tmp_path: Path) -> None:
     assert version == (SCHEMA_VERSION,)
 
 
-def test_hypermemory_schema_rebuilds_when_version_drifts(tmp_path: Path) -> None:
+def test_hypermemory_schema_rebuilds_when_version_drifts(tmp_path: pathlib.Path) -> None:
     conn = sqlite3.connect(tmp_path / "hypermemory.sqlite")
     ensure_schema(conn)
     conn.execute(

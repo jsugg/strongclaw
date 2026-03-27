@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from typing import Protocol, cast
+from typing import Any
 
 import pytest
-import requests
 
 from clawops.hypermemory.models import (
     CompatibleHttpRerankConfig,
@@ -24,26 +23,26 @@ from clawops.hypermemory.providers import (
 
 
 class _FakeResponse:
-    def __init__(self, payload: object) -> None:
+    def __init__(self, payload: Any) -> None:
         self._payload = payload
 
     def raise_for_status(self) -> None:
         return None
 
-    def json(self) -> object:
+    def json(self) -> Any:
         return self._payload
 
 
 class _FakeSession:
-    def __init__(self, payload: object) -> None:
-        self.calls: list[dict[str, object]] = []
+    def __init__(self, payload: Any) -> None:
+        self.calls: list[dict[str, Any]] = []
         self._payload = payload
 
     def post(
         self,
         url: str,
         *,
-        json: dict[str, object],
+        json: dict[str, Any],
         headers: dict[str, str],
         timeout: float,
     ) -> _FakeResponse:
@@ -58,11 +57,9 @@ class _FakeSession:
         return _FakeResponse(self._payload)
 
 
-class _ImportModule(Protocol):
-    def __call__(self, name: str, package: str | None = None) -> object: ...
-
-
-def test_compatible_http_embedding_provider_normalizes_vectors() -> None:
+def test_compatible_http_embedding_provider_normalizes_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = EmbeddingConfig(
         enabled=True,
         provider="compatible-http",
@@ -79,19 +76,25 @@ def test_compatible_http_embedding_provider_normalizes_vectors() -> None:
             ]
         }
     )
-    provider = CompatibleHttpEmbeddingProvider(config, session=fake_session)
+
+    def _fake_session_factory() -> _FakeSession:
+        return fake_session
+
+    monkeypatch.setattr("requests.Session", _fake_session_factory)
+    provider = CompatibleHttpEmbeddingProvider(config)
 
     vectors = provider.embed_texts(["first", "second"])
-    request_payload = cast(dict[str, object], fake_session.calls[0]["json"])
 
     assert fake_session.calls
     assert fake_session.calls[0]["url"] == "http://127.0.0.1:4000/v1/embeddings"
-    assert request_payload["model"] == "dense-test"
+    assert fake_session.calls[0]["json"]["model"] == "dense-test"
     assert vectors[0] == [0.6, 0.8]
     assert vectors[1] == [5.0 / 13.0, 12.0 / 13.0]
 
 
-def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order() -> None:
+def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = CompatibleHttpRerankConfig(
         model="rerank-test",
         base_url="http://127.0.0.1:8081",
@@ -106,7 +109,12 @@ def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order
             ]
         }
     )
-    provider = CompatibleHttpRerankProvider(config, session=fake_session)
+
+    def _fake_session_factory() -> _FakeSession:
+        return fake_session
+
+    monkeypatch.setattr("requests.Session", _fake_session_factory)
+    provider = CompatibleHttpRerankProvider(config)
 
     scores = provider.score_documents("gateway token", ["alpha", "beta"])
 
@@ -128,7 +136,9 @@ def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order
     ]
 
 
-def test_compatible_http_rerank_provider_accepts_tei_style_payload() -> None:
+def test_compatible_http_rerank_provider_accepts_tei_style_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = CompatibleHttpRerankConfig(base_url="http://127.0.0.1:8081/rerank")
     fake_session = _FakeSession(
         [
@@ -136,7 +146,12 @@ def test_compatible_http_rerank_provider_accepts_tei_style_payload() -> None:
             {"index": 1, "score": 0.51},
         ]
     )
-    provider = CompatibleHttpRerankProvider(config, session=fake_session)
+
+    def _fake_session_factory() -> _FakeSession:
+        return fake_session
+
+    monkeypatch.setattr("requests.Session", _fake_session_factory)
+    provider = CompatibleHttpRerankProvider(config)
 
     scores = provider.score_documents("gateway token", ["alpha", "beta"])
 
@@ -147,8 +162,8 @@ def test_compatible_http_rerank_provider_accepts_tei_style_payload() -> None:
 def test_local_sentence_transformers_rerank_provider_auto_selects_cuda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
-    original_import_module = cast(_ImportModule, importlib.import_module)
+    captured: dict[str, Any] = {}
+    original_import_module = importlib.import_module
 
     class _FakeCrossEncoder:
         def __init__(self, model: str, *, max_length: int, device: str) -> None:
@@ -168,7 +183,7 @@ def test_local_sentence_transformers_rerank_provider_auto_selects_cuda(
             captured["show_progress_bar"] = show_progress_bar
             return [2.0, -1.0]
 
-    def _fake_import(name: str, package: str | None = None) -> object:
+    def _fake_import_module(name: str) -> Any:
         if name == "sentence_transformers":
             return SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
         if name == "torch":
@@ -176,9 +191,9 @@ def test_local_sentence_transformers_rerank_provider_auto_selects_cuda(
                 cuda=SimpleNamespace(is_available=lambda: True),
                 backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: False)),
             )
-        return original_import_module(name, package)
+        return original_import_module(name)
 
-    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
 
     provider = LocalSentenceTransformersRerankProvider(
         LocalSentenceTransformersRerankConfig(
@@ -202,8 +217,8 @@ def test_local_sentence_transformers_rerank_provider_auto_selects_cuda(
 def test_local_sentence_transformers_rerank_provider_respects_explicit_device(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: dict[str, object] = {}
-    original_import_module = cast(_ImportModule, importlib.import_module)
+    captured: dict[str, Any] = {}
+    original_import_module = importlib.import_module
 
     class _FakeCrossEncoder:
         def __init__(self, model: str, *, max_length: int, device: str) -> None:
@@ -223,12 +238,12 @@ def test_local_sentence_transformers_rerank_provider_respects_explicit_device(
             captured["show_progress_bar"] = show_progress_bar
             return [1.5]
 
-    def _fake_import(name: str, package: str | None = None) -> object:
+    def _fake_import_module(name: str) -> Any:
         if name == "sentence_transformers":
             return SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
-        return original_import_module(name, package)
+        return original_import_module(name)
 
-    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
 
     provider = LocalSentenceTransformersRerankProvider(
         LocalSentenceTransformersRerankConfig(
@@ -249,14 +264,14 @@ def test_local_sentence_transformers_rerank_provider_respects_explicit_device(
 def test_local_sentence_transformers_rerank_provider_falls_back_to_cpu_after_auto_device_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    devices: list[str] = []
-    original_import_module = cast(_ImportModule, importlib.import_module)
+    captured: dict[str, Any] = {"devices": []}
+    original_import_module = importlib.import_module
 
     class _FakeCrossEncoder:
         def __init__(self, model: str, *, max_length: int, device: str) -> None:
             del model, max_length
             self._device = device
-            devices.append(device)
+            captured["devices"].append(device)
 
         def predict(
             self,
@@ -270,7 +285,7 @@ def test_local_sentence_transformers_rerank_provider_falls_back_to_cpu_after_aut
                 raise RuntimeError("accelerator out of memory")
             return [0.9]
 
-    def _fake_import(name: str, package: str | None = None) -> object:
+    def _fake_import_module(name: str) -> Any:
         if name == "sentence_transformers":
             return SimpleNamespace(CrossEncoder=_FakeCrossEncoder)
         if name == "torch":
@@ -283,9 +298,9 @@ def test_local_sentence_transformers_rerank_provider_falls_back_to_cpu_after_aut
                     )
                 ),
             )
-        return original_import_module(name, package)
+        return original_import_module(name)
 
-    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
     monkeypatch.setattr("platform.system", lambda: "Darwin")
     monkeypatch.setattr("platform.machine", lambda: "arm64")
 
@@ -300,7 +315,7 @@ def test_local_sentence_transformers_rerank_provider_falls_back_to_cpu_after_aut
     scores = provider.score_documents("gateway token", ["alpha"])
 
     assert scores == [0.9]
-    assert devices == ["mps", "cpu"]
+    assert captured["devices"] == ["mps", "cpu"]
     assert provider.resolved_device() == "cpu"
 
 
@@ -315,14 +330,18 @@ def test_rerank_provider_falls_back_to_compatible_http_when_local_is_unavailable
             ]
         }
     )
-    monkeypatch.setattr(requests, "Session", lambda: cast(requests.Session, fake_session))
 
-    original_import_module = cast(_ImportModule, importlib.import_module)
+    def _fake_session_factory() -> _FakeSession:
+        return fake_session
 
-    def _fake_import(name: str, package: str | None = None) -> object:
+    monkeypatch.setattr("requests.Session", _fake_session_factory)
+
+    original_import_module = importlib.import_module
+
+    def _fake_import(name: str) -> Any:
         if name == "sentence_transformers":
             raise ImportError("missing optional dependency")
-        return original_import_module(name, package)
+        return original_import_module(name)
 
     monkeypatch.setattr(importlib, "import_module", _fake_import)
 
@@ -350,12 +369,12 @@ def test_rerank_provider_falls_back_to_compatible_http_when_local_is_unavailable
 def test_rerank_provider_raises_when_no_backend_is_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_import_module = cast(_ImportModule, importlib.import_module)
+    original_import_module = importlib.import_module
 
-    def _fake_import(name: str, package: str | None = None) -> object:
+    def _fake_import(name: str) -> Any:
         if name == "sentence_transformers":
             raise ImportError("missing optional dependency")
-        return original_import_module(name, package)
+        return original_import_module(name)
 
     monkeypatch.setattr(importlib, "import_module", _fake_import)
 

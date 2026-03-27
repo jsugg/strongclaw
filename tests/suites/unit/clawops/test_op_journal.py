@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from typing import Any, Callable, cast
 
 from pytest import MonkeyPatch
 
@@ -261,7 +262,10 @@ def test_connect_retries_transient_open_error(
     db = tmp_path / "journal.sqlite"
     journal = OperationJournal(db)
     attempts = {"count": 0}
-    original = journal._ensure_schema
+    original = cast(
+        Callable[[sqlite3.Connection], None],
+        cast(Any, journal)._ensure_schema,
+    )
 
     def flaky_ensure_schema(conn: sqlite3.Connection) -> None:
         attempts["count"] += 1

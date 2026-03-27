@@ -10,12 +10,13 @@ import re
 import shutil
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from clawops.app_paths import scoped_state_dir
 from clawops.common import ResultSummary, load_json, write_json
 from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
 from clawops.process_runner import run_command
+from clawops.typed_values import as_mapping, as_mapping_list
 
 MIGRATION_REPORT_VERSION: Final[int] = 1
 DEFAULT_QUERY_COUNT: Final[int] = 5
@@ -33,9 +34,9 @@ class CandidateMemory:
     category: str | None
     score: int
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """Return a stable JSON-safe payload."""
-        payload: dict[str, Any] = {
+        payload: dict[str, object] = {
             "id": self.identifier,
             "text": self.text,
             "score": self.score,
@@ -73,22 +74,24 @@ def _default_import_report_output(snapshot_path: pathlib.Path, scope: str) -> pa
     return snapshot_path.parent / f"import-report-{_scope_slug(scope)}.json"
 
 
-def _category_counts(memories: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+def _category_counts(memories: Sequence[Mapping[str, object]]) -> dict[str, int]:
     """Return per-category counts for exported memories."""
     counts = Counter(str(memory.get("category", "unknown")) for memory in memories)
     return dict(sorted(counts.items()))
 
 
-def _source_path_counts(memories: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+def _source_path_counts(memories: Sequence[Mapping[str, object]]) -> dict[str, int]:
     """Return per-source counts for exported memories."""
     counts: Counter[str] = Counter()
     for memory in memories:
-        metadata = memory.get("metadata")
-        if not isinstance(metadata, dict):
+        metadata_value = memory.get("metadata")
+        if not isinstance(metadata_value, Mapping):
             continue
-        hypermemory = metadata.get("hypermemory")
-        if not isinstance(hypermemory, dict):
+        metadata = cast(Mapping[str, object], metadata_value)
+        hypermemory_value = metadata.get("hypermemory")
+        if not isinstance(hypermemory_value, Mapping):
             continue
+        hypermemory = cast(Mapping[str, object], hypermemory_value)
         source_path = hypermemory.get("sourcePath")
         if isinstance(source_path, str) and source_path:
             counts[source_path] += 1
@@ -97,15 +100,17 @@ def _source_path_counts(memories: Sequence[Mapping[str, Any]]) -> dict[str, int]
 
 def _build_migration_summary(
     *,
-    export_payload: Mapping[str, Any],
+    export_payload: Mapping[str, object],
     import_output: pathlib.Path,
     report_output: pathlib.Path,
     dry_run: bool,
 ) -> dict[str, Any]:
     """Build a machine-readable migration summary."""
-    memories_value = export_payload.get("memories")
-    memories = memories_value if isinstance(memories_value, list) else []
-    scope = str(export_payload.get("scope", ""))
+    memories = as_mapping_list(export_payload.get("memories", []), path="export_payload.memories")
+    scope_value = export_payload.get("scope")
+    scope = scope_value if isinstance(scope_value, str) else ""
+    include_daily_value = export_payload.get("includeDaily")
+    provider_value = export_payload.get("provider")
     next_command = (
         f"openclaw memory-pro import {import_output.as_posix()} --scope {scope}"
         if not dry_run
@@ -115,8 +120,8 @@ def _build_migration_summary(
         "ok": True,
         "version": MIGRATION_REPORT_VERSION,
         "scope": scope,
-        "includeDaily": bool(export_payload.get("includeDaily")),
-        "provider": str(export_payload.get("provider", "strongclaw-hypermemory")),
+        "includeDaily": bool(include_daily_value),
+        "provider": provider_value if isinstance(provider_value, str) else "strongclaw-hypermemory",
         "memoryCount": len(memories),
         "categoryCounts": _category_counts(memories),
         "sourcePathCounts": _source_path_counts(memories),
@@ -166,9 +171,7 @@ def import_pro_snapshot(
     openclaw_bin: str,
 ) -> dict[str, Any]:
     """Import a migration snapshot into a live memory-pro plugin via the OpenClaw CLI."""
-    payload = load_json(input_path)
-    if not isinstance(payload, dict):
-        raise ValueError("memory-pro import snapshot must be a JSON object")
+    payload = as_mapping(load_json(input_path), path="memory_pro_snapshot")
     scope_value = payload.get("scope")
     resolved_scope = scope or (str(scope_value) if isinstance(scope_value, str) else "")
     if not resolved_scope:
@@ -220,17 +223,16 @@ def import_pro_snapshot(
 
 
 def _default_queries(
-    export_payload: Mapping[str, Any], *, limit: int = DEFAULT_QUERY_COUNT
+    export_payload: Mapping[str, object], *, limit: int = DEFAULT_QUERY_COUNT
 ) -> list[str]:
     """Derive deterministic verification queries from the exported payload."""
     queries: list[str] = []
     seen: set[str] = set()
-    memories_value = export_payload.get("memories")
-    memories = memories_value if isinstance(memories_value, list) else []
+    memories = as_mapping_list(export_payload.get("memories", []), path="export_payload.memories")
     for memory in memories:
-        if not isinstance(memory, dict):
-            continue
-        text = str(memory.get("text", "")).strip()
+        text_value = memory.get("text")
+        text = text_value if isinstance(text_value, str) else str(text_value or "")
+        text = text.strip()
         if not text:
             continue
         candidate = text.splitlines()[0].strip()
@@ -273,29 +275,37 @@ def _tokenize_query(query: str) -> list[str]:
 
 
 def _search_import_snapshot(
-    export_payload: Mapping[str, Any], *, query: str, limit: int
+    export_payload: Mapping[str, object], *, query: str, limit: int
 ) -> list[CandidateMemory]:
     """Search the exported import payload as a parity proxy."""
     tokens = _tokenize_query(query)
     query_casefold = query.casefold()
-    memories_value = export_payload.get("memories")
-    memories = memories_value if isinstance(memories_value, list) else []
+    memories = as_mapping_list(export_payload.get("memories", []), path="export_payload.memories")
     candidates: list[CandidateMemory] = []
     for memory in memories:
-        if not isinstance(memory, dict):
-            continue
-        text = str(memory.get("text", ""))
+        text_value = memory.get("text")
+        text = text_value if isinstance(text_value, str) else str(text_value or "")
         haystack = text.casefold()
         token_hits = sum(1 for token in tokens if token and token in haystack)
         phrase_hit = int(bool(query_casefold and query_casefold in haystack))
         score = phrase_hit * 10 + token_hits
         if score <= 0:
             continue
-        metadata = memory.get("metadata")
-        hypermemory = metadata.get("hypermemory") if isinstance(metadata, dict) else None
+        metadata_value = memory.get("metadata")
+        metadata = (
+            cast(Mapping[str, object], metadata_value)
+            if isinstance(metadata_value, Mapping)
+            else None
+        )
+        hypermemory_value = metadata.get("hypermemory") if metadata is not None else None
+        hypermemory = (
+            cast(Mapping[str, object], hypermemory_value)
+            if isinstance(hypermemory_value, Mapping)
+            else None
+        )
         source_path = (
             str(hypermemory.get("sourcePath"))
-            if isinstance(hypermemory, dict) and isinstance(hypermemory.get("sourcePath"), str)
+            if hypermemory is not None and isinstance(hypermemory.get("sourcePath"), str)
             else None
         )
         candidates.append(
@@ -313,26 +323,47 @@ def _search_import_snapshot(
     return candidates[:limit]
 
 
-def _extract_openclaw_items(payload: Any) -> list[dict[str, Any]]:
+def _extract_openclaw_items(payload: object) -> list[Mapping[str, object]]:
     """Normalize diverse OpenClaw JSON payloads into a result list."""
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
+        return [
+            cast(Mapping[str, object], item)
+            for item in cast(list[object], payload)
+            if isinstance(item, Mapping)
+        ]
+    if not isinstance(payload, Mapping):
         return []
+    payload_mapping = cast(Mapping[str, object], payload)
     for key in ("items", "results", "memories", "data"):
-        value = payload.get(key)
+        value = payload_mapping.get(key)
         if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
+            return [
+                cast(Mapping[str, object], item)
+                for item in cast(list[object], value)
+                if isinstance(item, Mapping)
+            ]
     return []
 
 
-def _candidate_from_openclaw_item(item: dict[str, Any], *, fallback_score: int) -> CandidateMemory:
+def _candidate_from_openclaw_item(
+    item: Mapping[str, object],
+    *,
+    fallback_score: int,
+) -> CandidateMemory:
     """Normalize one `openclaw memory-pro search` item."""
-    metadata = item.get("metadata")
-    hypermemory = metadata.get("hypermemory") if isinstance(metadata, dict) else None
+    metadata_value = item.get("metadata")
+    metadata = (
+        cast(Mapping[str, object], metadata_value) if isinstance(metadata_value, Mapping) else None
+    )
+    hypermemory_value = metadata.get("hypermemory") if metadata is not None else None
+    hypermemory = (
+        cast(Mapping[str, object], hypermemory_value)
+        if isinstance(hypermemory_value, Mapping)
+        else None
+    )
     source_path = (
         str(hypermemory.get("sourcePath"))
-        if isinstance(hypermemory, dict) and isinstance(hypermemory.get("sourcePath"), str)
+        if hypermemory is not None and isinstance(hypermemory.get("sourcePath"), str)
         else None
     )
     text_value = item.get("text")
@@ -419,15 +450,17 @@ def verify_pro_parity(
 ) -> dict[str, Any]:
     """Compare hypermemory durable results with migrated memory-pro candidates."""
     engine = HypermemoryEngine(load_config(config_path))
-    export_payload = (
+    export_payload_raw = (
         load_json(import_snapshot)
         if import_snapshot is not None
         else engine.export_memory_pro_import(scope=scope, include_daily=include_daily)
     )
-    if not isinstance(export_payload, dict):
-        raise ValueError("memory-pro import snapshot must be a JSON object")
-    resolved_scope = str(
-        export_payload.get("scope") or scope or engine.config.governance.default_scope
+    export_payload = as_mapping(export_payload_raw, path="export_payload")
+    scope_value = export_payload.get("scope")
+    resolved_scope = (
+        scope_value
+        if isinstance(scope_value, str) and scope_value
+        else (scope or engine.config.governance.default_scope)
     )
     selected_queries = queries or _default_queries(export_payload)
     report_output = report or _default_report_output(engine, resolved_scope, "parity-report")

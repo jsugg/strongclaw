@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from tests.utils.helpers.mode import register_mock_addoption, resolve_service_mode
 
 
+def _empty_options() -> dict[str, object]:
+    """Return a typed empty options mapping."""
+    return {}
+
+
 @dataclass(slots=True)
 class _DummyConfig:
-    options: dict[str, object] = field(default_factory=dict)
+    options: dict[str, object] = field(default_factory=_empty_options)
 
     def getoption(self, name: str, default: object = None) -> object:
         return self.options.get(name, default)
@@ -54,14 +59,17 @@ def _request(
 
 
 def test_resolve_defaults_to_mock() -> None:
-    assert resolve_service_mode(_request(), "qdrant") == "mock"
+    assert resolve_service_mode(cast(pytest.FixtureRequest, _request()), "qdrant") == "mock"
 
 
 def test_resolve_cli_overrides_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "real")
-    request = _request(
-        mock_services=["qdrant"],
-        marker=pytest.mark.qdrant(mode="real").mark,
+    request = cast(
+        pytest.FixtureRequest,
+        _request(
+            mock_services=["qdrant"],
+            marker=pytest.mark.qdrant(mode="real").mark,
+        ),
     )
 
     assert resolve_service_mode(request, "qdrant") == "mock"
@@ -69,26 +77,28 @@ def test_resolve_cli_overrides_all(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_resolve_env_overrides_marker_and_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "real")
-    request = _request(marker=pytest.mark.qdrant(mode="mock").mark)
+    request = cast(pytest.FixtureRequest, _request(marker=pytest.mark.qdrant(mode="mock").mark))
 
     assert resolve_service_mode(request, "qdrant") == "real"
 
 
 def test_resolve_marker_overrides_default() -> None:
-    request = _request(marker=pytest.mark.qdrant(mode="real").mark)
+    request = cast(pytest.FixtureRequest, _request(marker=pytest.mark.qdrant(mode="real").mark))
 
     assert resolve_service_mode(request, "qdrant") == "real"
 
 
 def test_resolve_ignores_invalid_env_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "invalid")
-    request = _request(marker=pytest.mark.qdrant(mode="real").mark)
+    request = cast(pytest.FixtureRequest, _request(marker=pytest.mark.qdrant(mode="real").mark))
 
     assert resolve_service_mode(request, "qdrant") == "real"
 
 
 def test_resolve_custom_marker_name() -> None:
-    request = _request(marker=pytest.mark.network_local(mode="real").mark)
+    request = cast(
+        pytest.FixtureRequest, _request(marker=pytest.mark.network_local(mode="real").mark)
+    )
 
     assert resolve_service_mode(request, "service", marker_name="network_local") == "real"
 
@@ -96,7 +106,7 @@ def test_resolve_custom_marker_name() -> None:
 def test_pytest_addoption_registers_mock_flag() -> None:
     parser = _ParserRecorder()
 
-    register_mock_addoption(parser)  # type: ignore[arg-type]
+    register_mock_addoption(cast(pytest.Parser, parser))
 
     args, kwargs = parser.calls[0]
     assert args == ("--mock",)

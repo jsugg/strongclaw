@@ -31,15 +31,34 @@ def test_memory_config_set_profile_installs_assets_and_renders(
     output_path = tmp_path / "openclaw.json"
     installed_calls: list[str] = []
 
+    def _install_profile_assets(
+        repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path | None,
+    ) -> list[str]:
+        del repo_root, home_dir
+        installed_calls.append(profile)
+        return ["qmd"]
+
+    def _render_openclaw_profile(
+        *,
+        profile_name: str,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"profile": profile_name}
+
     monkeypatch.setattr(
         config_cli,
         "install_profile_assets",
-        lambda repo_root, *, profile, home_dir: installed_calls.append(profile) or ["qmd"],
+        _install_profile_assets,
     )
     monkeypatch.setattr(
         config_cli,
         "render_openclaw_profile",
-        lambda *, profile_name, repo_root, home_dir: {"profile": profile_name},
+        _render_openclaw_profile,
     )
 
     exit_code = config_cli.main(
@@ -68,10 +87,20 @@ def test_memory_config_set_profile_skip_assets_only_renders(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     output_path = tmp_path / "openclaw.json"
+
+    def _render_openclaw_profile(
+        *,
+        profile_name: str,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"profile": profile_name}
+
     monkeypatch.setattr(
         config_cli,
         "render_openclaw_profile",
-        lambda *, profile_name, repo_root, home_dir: {"profile": profile_name},
+        _render_openclaw_profile,
     )
 
     exit_code = config_cli.main(

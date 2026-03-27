@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from clawops.common import canonical_json, sha256_hex, utc_now_ms, write_json
+from clawops.typed_values import as_mapping
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=DELETE;
@@ -147,9 +148,7 @@ def _load_json_mapping(raw_value: str | None) -> dict[str, Any]:
     if raw_value is None or not raw_value.strip():
         return {}
     payload = json.loads(raw_value)
-    if not isinstance(payload, dict):
-        raise TypeError("stored review payload must be a JSON object")
-    return payload
+    return dict(as_mapping(payload, path="review payload"))
 
 
 def _merge_review_payload(
@@ -910,7 +909,12 @@ class OperationJournal:
 def _load_payload(payload_file: pathlib.Path | None) -> dict[str, Any]:
     if payload_file is None:
         return {}
-    return json.loads(payload_file.read_text(encoding="utf-8"))
+    return dict(
+        as_mapping(
+            json.loads(payload_file.read_text(encoding="utf-8")),
+            path=str(payload_file),
+        )
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
