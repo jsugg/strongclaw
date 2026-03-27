@@ -7,7 +7,8 @@ import textwrap
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from clawops.hypermemory import DenseSearchCandidate, RerankResponse
+from clawops.hypermemory import DenseSearchCandidate, RerankResponse, SparseSearchCandidate
+from clawops.hypermemory.models import RerankProviderKind, SearchMode
 
 type HypermemoryWorkspaceFactory = Callable[[], pathlib.Path]
 type HypermemoryConfigWriter = Callable[[pathlib.Path, pathlib.Path], None]
@@ -103,7 +104,7 @@ class FakeEmbeddingProvider:
         self.vector = vector
         self.calls: list[list[str]] = []
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         self.calls.append(list(texts))
         return [list(self.vector) for _ in texts]
 
@@ -118,7 +119,7 @@ class FakeQdrantBackend:
         self.dense_limits: list[int] = []
         self.sparse_limits: list[int] = []
         self.search_results: list[DenseSearchCandidate] = []
-        self.sparse_search_results: list[Any] = []
+        self.sparse_search_results: list[SparseSearchCandidate] = []
         self.raise_on_search = False
         self.raise_on_ensure_collection = False
         self.raise_on_upsert = False
@@ -145,16 +146,16 @@ class FakeQdrantBackend:
         if self.raise_on_ensure_collection:
             raise RuntimeError("qdrant collection warmup timed out")
 
-    def upsert_points(self, points: list[dict[str, Any]]) -> None:
+    def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
         self.upsert_calls.append(list(points))
         if self.raise_on_upsert:
             raise RuntimeError("qdrant upsert failed")
 
-    def delete_points(self, point_ids: list[str]) -> None:
+    def delete_points(self, point_ids: Sequence[str]) -> None:
         self.delete_calls.append(list(point_ids))
 
     def search_dense(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
+        self, *, vector: Sequence[float], limit: int, mode: SearchMode, scope: str | None
     ) -> list[DenseSearchCandidate]:
         del vector, mode, scope
         self.dense_limits.append(limit)
@@ -167,15 +168,15 @@ class FakeQdrantBackend:
         *,
         vector: dict[str, list[int] | list[float]],
         limit: int,
-        mode: str,
+        mode: SearchMode,
         scope: str | None,
-    ) -> list[Any]:
+    ) -> list[SparseSearchCandidate]:
         del vector, mode, scope
         self.sparse_limits.append(limit)
         return list(self.sparse_search_results)
 
     def search(
-        self, *, vector: list[float], limit: int, mode: str, scope: str | None
+        self, *, vector: Sequence[float], limit: int, mode: SearchMode, scope: str | None
     ) -> list[DenseSearchCandidate]:
         return self.search_dense(vector=vector, limit=limit, mode=mode, scope=scope)
 
@@ -187,12 +188,12 @@ class StaticRerankProvider:
         self,
         scores: Sequence[float],
         *,
-        provider: str = "local-sentence-transformers",
+        provider: RerankProviderKind = "local-sentence-transformers",
         fallback_used: bool = False,
     ) -> None:
-        self._scores = tuple(scores)
-        self._provider = provider
-        self._fallback_used = fallback_used
+        self._scores: tuple[float, ...] = tuple(scores)
+        self._provider: RerankProviderKind = provider
+        self._fallback_used: bool = fallback_used
         self.calls: list[dict[str, Any]] = []
 
     def score(self, query: str, documents: Sequence[str]) -> RerankResponse:

@@ -98,11 +98,13 @@ def http_server(body: bytes) -> Iterator[Endpoint]:
         response_body = body
 
     server = socketserver.TCPServer(("127.0.0.1", 0), Handler)
-    host, port = server.server_address
+    address = server.server_address
+    host = str(address[0])
+    port = int(address[1])
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield str(host), int(port)
+        yield host, port
     finally:
         server.shutdown()
         server.server_close()
