@@ -14,7 +14,7 @@ from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_c
 
 def test_memory_migrate_hypermemory_to_pro_writes_import_and_report(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
@@ -51,7 +51,7 @@ def test_memory_migrate_hypermemory_to_pro_writes_import_and_report(
 
 def test_memory_verify_pro_parity_uses_import_snapshot(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"

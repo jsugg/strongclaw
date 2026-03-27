@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from clawops.skill_scanner import main, scan
 
 
@@ -25,7 +27,7 @@ def test_skill_scanner_finds_child_process(tmp_path: pathlib.Path) -> None:
 
 def test_legacy_skill_scan_writes_manifest_and_quarantines(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     skill_root = _build_skill(tmp_path)
     quarantine_root = tmp_path / "platform" / "skills" / "quarantine"
@@ -52,7 +54,7 @@ def test_legacy_skill_scan_writes_manifest_and_quarantines(
 
 def test_skill_promote_and_demote_update_stage_history(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     skill_root = _build_skill(tmp_path)
     skills_root = tmp_path / "platform" / "skills"

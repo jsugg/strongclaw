@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,7 @@ from tests.plugins.infrastructure.context import TestContext
 
 def test_uv_sync_managed_environment_uses_uv_default_dev_group(
     test_context: TestContext,
-    tmp_path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Bootstrap should rely on uv's default dev group instead of `--extra dev`."""
 
@@ -55,7 +56,7 @@ def test_uv_sync_managed_environment_uses_uv_default_dev_group(
 
 def test_uv_sync_managed_environment_retries_transient_failure(
     test_context: TestContext,
-    tmp_path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Bootstrap should retry uv sync after a transient command failure."""
 
@@ -113,7 +114,7 @@ def test_uv_sync_managed_environment_retries_transient_failure(
 
 def test_uv_sync_managed_environment_raises_after_retry_budget(
     test_context: TestContext,
-    tmp_path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Bootstrap should surface the last uv sync failure after exhausting retries."""
 
@@ -198,7 +199,7 @@ def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext)
 
 def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(
     test_context: TestContext,
-    tmp_path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """The generated QMD wrapper should invoke the resolved Node.js command."""
 

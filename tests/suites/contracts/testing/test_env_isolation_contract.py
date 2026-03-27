@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from tests.plugins.infrastructure import TestContext
 from tests.utils.helpers.env import FRAMEWORK_ENV_VARS, EnvironmentManager
 
 
-def test_isolated_mode_restores_full_environment(monkeypatch) -> None:
+def test_isolated_mode_restores_full_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BASELINE_ONLY", "before")
     manager = EnvironmentManager(mode="isolated")
     manager.snapshot()
@@ -22,7 +24,7 @@ def test_isolated_mode_restores_full_environment(monkeypatch) -> None:
     assert "EXTRA_ONLY" not in os.environ
 
 
-def test_shared_mode_restores_only_injected_vars(monkeypatch) -> None:
+def test_shared_mode_restores_only_injected_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BASELINE_ONLY", "before")
     manager = EnvironmentManager(mode="shared")
     manager.snapshot()
@@ -45,7 +47,7 @@ def test_framework_vars_are_injected_during_test() -> None:
     manager.restore()
 
 
-def test_framework_vars_are_removed_after_test(monkeypatch) -> None:
+def test_framework_vars_are_removed_after_test(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in FRAMEWORK_ENV_VARS:
         monkeypatch.delenv(key, raising=False)
     manager = EnvironmentManager(mode="isolated")

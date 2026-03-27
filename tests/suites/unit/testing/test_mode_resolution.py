@@ -57,7 +57,7 @@ def test_resolve_defaults_to_mock() -> None:
     assert resolve_service_mode(_request(), "qdrant") == "mock"
 
 
-def test_resolve_cli_overrides_all(monkeypatch) -> None:
+def test_resolve_cli_overrides_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "real")
     request = _request(
         mock_services=["qdrant"],
@@ -67,7 +67,7 @@ def test_resolve_cli_overrides_all(monkeypatch) -> None:
     assert resolve_service_mode(request, "qdrant") == "mock"
 
 
-def test_resolve_env_overrides_marker_and_default(monkeypatch) -> None:
+def test_resolve_env_overrides_marker_and_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "real")
     request = _request(marker=pytest.mark.qdrant(mode="mock").mark)
 
@@ -80,7 +80,7 @@ def test_resolve_marker_overrides_default() -> None:
     assert resolve_service_mode(request, "qdrant") == "real"
 
 
-def test_resolve_ignores_invalid_env_mode(monkeypatch) -> None:
+def test_resolve_ignores_invalid_env_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QDRANT_TEST_MODE", "invalid")
     request = _request(marker=pytest.mark.qdrant(mode="real").mark)
 

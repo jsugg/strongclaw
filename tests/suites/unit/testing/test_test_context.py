@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from tests.utils.helpers.test_context import TestContext
 
 
@@ -44,7 +46,7 @@ def test_context_generates_unique_resource_prefix() -> None:
     assert TestContext().resource_prefix != TestContext().resource_prefix
 
 
-def test_context_worker_id_defaults_to_main(monkeypatch) -> None:
+def test_context_worker_id_defaults_to_main(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     assert TestContext().worker_id == "main"
 
@@ -174,7 +176,7 @@ def test_register_cleanup_standalone_action() -> None:
     assert calls == ["cleanup"]
 
 
-def test_overwrite_resource_logs_warning(caplog) -> None:
+def test_overwrite_resource_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
     ctx = TestContext()
     caplog.set_level(logging.WARNING)
 

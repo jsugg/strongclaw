@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pathlib
+
 from clawops.strongclaw_runtime import write_env_assignments
 
 
-def test_write_env_assignments_uses_owner_only_permissions(tmp_path) -> None:
+def test_write_env_assignments_uses_owner_only_permissions(tmp_path: pathlib.Path) -> None:
     """Env files written by StrongClaw should stay private to the current user."""
 
     env_file = tmp_path / ".env.local"

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from clawops import setup_cli
 
 
 def test_setup_cli_auto_skips_bootstrap_when_state_exists(
-    monkeypatch: object, tmp_path: pathlib.Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
 ) -> None:
     calls: list[str] = []
 
@@ -59,7 +62,9 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
 
 
 def test_doctor_cli_reports_failures_without_raising(
-    monkeypatch: object, tmp_path: pathlib.Path, capsys: object
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         setup_cli,
