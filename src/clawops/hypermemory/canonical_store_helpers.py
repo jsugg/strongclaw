@@ -129,7 +129,7 @@ def load_entities_json(raw_value: object) -> list[str]:
         return []
     if not isinstance(payload, list):
         return []
-    return [str(item) for item in payload if isinstance(item, str)]
+    return [item for item in cast(list[object], payload) if isinstance(item, str)]
 
 
 def load_evidence_json(raw_value: object) -> list[dict[str, object]]:
@@ -143,11 +143,12 @@ def load_evidence_json(raw_value: object) -> list[dict[str, object]]:
     if not isinstance(payload, list):
         return []
     evidence_entries: list[dict[str, object]] = []
-    for raw_entry in payload:
+    for raw_entry in cast(list[object], payload):
         if not isinstance(raw_entry, dict):
             continue
         try:
-            evidence_entries.append(EvidenceEntry.from_dict(raw_entry).to_dict())
+            entry_mapping = cast(dict[str, object], raw_entry)
+            evidence_entries.append(EvidenceEntry.from_dict(entry_mapping).to_dict())
         except ValueError:
             continue
     return evidence_entries

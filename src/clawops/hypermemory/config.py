@@ -82,7 +82,7 @@ def _as_mapping(name: str, value: object) -> Mapping[str, object]:
     """Validate a mapping-shaped configuration section."""
     if not isinstance(value, Mapping):
         raise TypeError(f"{name} must be a mapping")
-    return value
+    return cast(Mapping[str, object], value)
 
 
 def _resolve_env_reference(value: object) -> object:
@@ -189,11 +189,14 @@ def _as_string_list(name: str, value: object, *, default: Sequence[str]) -> tupl
     """Validate a list of non-empty strings."""
     if value is None:
         return tuple(default)
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item.strip() for item in value
-    ):
+    if not isinstance(value, list):
         raise TypeError(f"{name} must be a list of non-empty strings")
-    return tuple(item.strip() for item in value)
+    normalized: list[str] = []
+    for item in cast(list[object], value):
+        if not isinstance(item, str) or not item.strip():
+            raise TypeError(f"{name} must be a list of non-empty strings")
+        normalized.append(item.strip())
+    return tuple(normalized)
 
 
 def _resolve_path(base_dir: pathlib.Path, raw_path: str) -> pathlib.Path:
@@ -395,12 +398,12 @@ def _load_backend(root: Mapping[str, object]) -> BackendConfig:
         active=_as_search_backend(
             "backend.active",
             backend.get("active"),
-            default=cast(SearchBackend, DEFAULT_SEARCH_BACKEND),
+            default=DEFAULT_SEARCH_BACKEND,
         ),
         fallback=_as_search_backend(
             "backend.fallback",
             backend.get("fallback"),
-            default=cast(SearchBackend, DEFAULT_FALLBACK_BACKEND),
+            default=DEFAULT_FALLBACK_BACKEND,
         ),
     )
 
@@ -417,7 +420,7 @@ def _load_embedding(root: Mapping[str, object]) -> EmbeddingConfig:
         provider=_as_embedding_provider(
             "embedding.provider",
             embedding.get("provider"),
-            default=cast(EmbeddingProviderKind, DEFAULT_EMBEDDING_PROVIDER),
+            default=DEFAULT_EMBEDDING_PROVIDER,
         ),
         model=_as_blankable_string(
             "embedding.model",
@@ -896,8 +899,8 @@ def _load_noise(root: Mapping[str, object]) -> NoiseConfig:
 def _load_admission(root: Mapping[str, object]) -> AdmissionConfig:
     """Load optional capture admission controls."""
     admission = _as_mapping("admission", root.get("admission") or {})
-    priors_value = admission.get("type_priors") or {}
-    priors_mapping = _as_mapping("admission.type_priors", priors_value)
+    priors_value = admission.get("type_priors")
+    priors_mapping = _as_mapping("admission.type_priors", priors_value or {})
     priors = {
         key: _as_probability(
             f"admission.type_priors.{key}",
@@ -908,22 +911,22 @@ def _load_admission(root: Mapping[str, object]) -> AdmissionConfig:
             (
                 "fact",
                 priors_mapping.get("fact"),
-                cast(float, ADMISSION_TYPE_PRIORS_DEFAULTS["fact"]),
+                ADMISSION_TYPE_PRIORS_DEFAULTS["fact"],
             ),
             (
                 "entity",
                 priors_mapping.get("entity"),
-                cast(float, ADMISSION_TYPE_PRIORS_DEFAULTS["entity"]),
+                ADMISSION_TYPE_PRIORS_DEFAULTS["entity"],
             ),
             (
                 "opinion",
                 priors_mapping.get("opinion"),
-                cast(float, ADMISSION_TYPE_PRIORS_DEFAULTS["opinion"]),
+                ADMISSION_TYPE_PRIORS_DEFAULTS["opinion"],
             ),
             (
                 "reflection",
                 priors_mapping.get("reflection"),
-                cast(float, ADMISSION_TYPE_PRIORS_DEFAULTS["reflection"]),
+                ADMISSION_TYPE_PRIORS_DEFAULTS["reflection"],
             ),
         )
     }
@@ -1046,7 +1049,7 @@ def load_config(path: pathlib.Path) -> HypermemoryConfig:
     if corpus_paths_raw is not None:
         if not isinstance(corpus_paths_raw, list):
             raise TypeError("corpus.paths must be a list of mappings")
-        for index, raw_entry in enumerate(corpus_paths_raw):
+        for index, raw_entry in enumerate(cast(list[object], corpus_paths_raw)):
             entry = _as_mapping(f"corpus.paths[{index}]", raw_entry)
             name = _as_string(f"corpus.paths[{index}].name", entry.get("name"))
             path_value = _as_string(f"corpus.paths[{index}].path", entry.get("path"))

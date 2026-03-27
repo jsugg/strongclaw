@@ -6,8 +6,6 @@ import pathlib
 import textwrap
 from dataclasses import replace
 
-import pytest
-
 from clawops.hypermemory import HypermemoryEngine, load_config
 from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
@@ -109,7 +107,8 @@ def test_hypermemory_rerank_changes_planner_order_before_diversity(
 
     assert hits
     assert hits[0].path != baseline_hits[0].path
-    assert hits[0].to_dict()["explain"]["rerankScore"] == pytest.approx(1.0)
+    rerank_score = float(hits[0].to_dict()["explain"]["rerankScore"])
+    assert abs(rerank_score - 1.0) < 1e-9
     assert rerank_provider.calls
 
 
@@ -153,7 +152,8 @@ def test_hypermemory_rerank_fail_open_preserves_provisional_order(
     )
 
     assert [hit.path for hit in hits] == [hit.path for hit in baseline_hits]
-    assert hits[0].to_dict()["explain"]["rerankScore"] == pytest.approx(0.0)
+    rerank_score = float(hits[0].to_dict()["explain"]["rerankScore"])
+    assert abs(rerank_score - 0.0) < 1e-9
 
 
 def test_hypermemory_status_reports_missing_optional_corpus_paths(tmp_path: pathlib.Path) -> None:

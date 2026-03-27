@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import cast
 
 import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, SearchBackend, load_config
+from clawops.hypermemory.config import HypermemoryConfig
 from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 from tests.utils.helpers.qdrant_runtime import QdrantRuntime
 
@@ -52,7 +53,7 @@ def _query_points(
     collection: str,
     query: list[float] | dict[str, list[int] | list[float]],
     using: str = "dense",
-) -> list[dict[str, Any]]:
+) -> list[Mapping[str, object]]:
     response = requests.post(
         f"{base_url.rstrip('/')}/collections/{collection}/points/query",
         json={
@@ -65,12 +66,29 @@ def _query_points(
         timeout=5.0,
     )
     response.raise_for_status()
-    payload = response.json().get("result")
-    if isinstance(payload, dict):
-        payload = payload.get("points")
+    body = response.json()
+    if not isinstance(body, Mapping):
+        return []
+    body_mapping = cast(Mapping[str, object], body)
+    payload = body_mapping.get("result")
+    if isinstance(payload, Mapping):
+        payload = cast(Mapping[str, object], payload).get("points")
     if not isinstance(payload, list):
         return []
-    return [point for point in payload if isinstance(point, dict)]
+    return [
+        cast(Mapping[str, object], point)
+        for point in cast(list[object], payload)
+        if isinstance(point, Mapping)
+    ]
+
+
+def _point_rel_path(point: Mapping[str, object]) -> str | None:
+    """Return the indexed relative path from one Qdrant point payload."""
+    payload = point.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    rel_path = cast(Mapping[str, object], payload).get("rel_path")
+    return rel_path if isinstance(rel_path, str) else None
 
 
 def _build_engine(
@@ -79,7 +97,7 @@ def _build_engine(
     *,
     active_backend: SearchBackend,
     collection_prefix: str,
-) -> tuple[HypermemoryEngine, Any, pathlib.Path, str, str]:
+) -> tuple[HypermemoryEngine, HypermemoryConfig, pathlib.Path, str, str]:
     workspace = build_workspace(tmp_path, include_daily_memory=False)
     config_path = workspace / "hypermemory.sqlite.yaml"
     write_hypermemory_config(workspace, config_path)
@@ -134,9 +152,7 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
         query=[1.0, 0.0, 0.0],
         using=config.qdrant.dense_vector_name,
     )
-    assert any(
-        point.get("payload", {}).get("rel_path") == "docs/runbook.md" for point in points_before
-    )
+    assert any(_point_rel_path(point) == "docs/runbook.md" for point in points_before)
 
     (workspace / "docs" / "runbook.md").unlink()
     engine.reindex()
@@ -147,16 +163,14 @@ def test_hypermemory_qdrant_reindex_search_and_prune(
         query=[1.0, 0.0, 0.0],
         using=config.qdrant.dense_vector_name,
     )
-    assert all(
-        point.get("payload", {}).get("rel_path") != "docs/runbook.md" for point in points_after
-    )
+    assert all(_point_rel_path(point) != "docs/runbook.md" for point in points_after)
 
 
 def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     tmp_path: pathlib.Path,
     qdrant_runtime: QdrantRuntime,
 ) -> None:
-    engine, config, workspace, qdrant_url, collection = _build_engine(
+    engine, config, _workspace, qdrant_url, collection = _build_engine(
         tmp_path,
         qdrant_runtime,
         active_backend="qdrant_sparse_dense_hybrid",
@@ -171,9 +185,23 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
         timeout=5.0,
     )
     collection_response.raise_for_status()
-    params = collection_response.json()["result"]["config"]["params"]
-    assert config.qdrant.dense_vector_name in params["vectors"]
-    assert config.qdrant.sparse_vector_name in params["sparse_vectors"]
+    collection_body = collection_response.json()
+    if not isinstance(collection_body, Mapping):
+        raise TypeError("collection response must be a mapping")
+    collection_mapping = cast(Mapping[str, object], collection_body)
+    result = collection_mapping.get("result")
+    if not isinstance(result, Mapping):
+        raise TypeError("collection response must include a result mapping")
+    config_payload = cast(Mapping[str, object], result).get("config")
+    if not isinstance(config_payload, Mapping):
+        raise TypeError("collection response must include a config mapping")
+    params = cast(Mapping[str, object], config_payload).get("params")
+    if not isinstance(params, Mapping):
+        raise TypeError("collection response must include params")
+    vectors = cast(Mapping[str, object], params["vectors"])
+    sparse_vectors = cast(Mapping[str, object], params["sparse_vectors"])
+    assert config.qdrant.dense_vector_name in vectors
+    assert config.qdrant.sparse_vector_name in sparse_vectors
 
     with engine.connect() as conn:
         encoder = engine.index.load_sparse_encoder(conn, enabled=True)
@@ -187,7 +215,7 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
         query=encoder.encode_query("gateway token").to_qdrant(),
         using=config.qdrant.sparse_vector_name,
     )
-    assert any(hit.get("payload", {}).get("rel_path") == "docs/runbook.md" for hit in sparse_hits)
+    assert any(_point_rel_path(hit) == "docs/runbook.md" for hit in sparse_hits)
 
     hits = engine.search("gateway token", lane="all", auto_index=False)
     assert hits
@@ -195,5 +223,7 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     assert hits[0].backend == "qdrant_sparse_dense_hybrid"
 
     verification = engine.verify()
+    sparse_lane = verification["laneChecks"].get("sparse")
     assert verification["ok"] is True
-    assert verification["laneChecks"]["sparse"]["hits"] >= 1
+    assert sparse_lane is not None
+    assert sparse_lane["hits"] >= 1

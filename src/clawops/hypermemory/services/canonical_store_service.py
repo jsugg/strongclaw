@@ -44,6 +44,7 @@ from clawops.hypermemory.capture import (
 )
 from clawops.hypermemory.config import HypermemoryConfig, resolve_under_workspace
 from clawops.hypermemory.contracts import (
+    BenchmarkCase,
     BenchmarkCaseResult,
     BenchmarkResult,
     FlushMetadataResult,
@@ -266,18 +267,18 @@ class CanonicalStoreService:
                 )
             return payload
 
-    def benchmark_cases(self, cases: list[dict[str, Any]]) -> BenchmarkResult:
+    def benchmark_cases(self, cases: list[BenchmarkCase]) -> BenchmarkResult:
         """Run simple benchmark cases against the current engine."""
         results: list[BenchmarkCaseResult] = []
         passed = 0
         for case in cases:
-            name = str(case["name"])
-            query = str(case["query"])
-            expected_paths = {str(entry) for entry in case.get("expectedPaths", [])}
+            name = case["name"]
+            query = case["query"]
+            expected_paths = set(case.get("expectedPaths", []))
             hits = self.search(
                 query,
-                max_results=int(case.get("maxResults", self.config.default_max_results)),
-                lane=str(case.get("lane", "all")),  # type: ignore[arg-type]
+                max_results=case.get("maxResults", self.config.default_max_results),
+                lane=case.get("lane", "all"),
             )
             actual_paths = {hit.path for hit in hits}
             hit = expected_paths.issubset(actual_paths)
@@ -1031,7 +1032,7 @@ class CanonicalStoreService:
         return f"{match.group('prefix')}{updated}"
 
     def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
-        return row_to_search_hit_impl(self, row)
+        return row_to_search_hit_impl(row)
 
     def _is_semantically_duplicate(
         self,

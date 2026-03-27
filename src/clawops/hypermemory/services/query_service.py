@@ -26,11 +26,11 @@ from clawops.hypermemory.models import (
 )
 from clawops.hypermemory.qdrant_backend import VectorBackend
 from clawops.hypermemory.retrieval import (
-    _adaptive_pool_size,
-    _count_active_items,
-    _count_items,
-    _estimate_query_specificity,
-    _invalidated_ratio,
+    adaptive_pool_size,
+    count_active_items,
+    count_items,
+    estimate_query_specificity,
+    invalidated_ratio,
     search_index,
 )
 from clawops.hypermemory.schema import SCHEMA_VERSION
@@ -237,26 +237,26 @@ class QueryService:
                         if exact_hit is not None:
                             return [exact_hit]
                     if self._config.retrieval.adaptive_pool:
-                        query_specificity = _estimate_query_specificity(query)
-                        total_items = _count_items(conn)
-                        active_items = _count_active_items(conn)
-                        invalidated_ratio = _invalidated_ratio(conn)
+                        query_specificity = estimate_query_specificity(query)
+                        total_items = count_items(conn)
+                        active_items = count_active_items(conn)
+                        invalidated_ratio_value = invalidated_ratio(conn)
                         hybrid_config = replace(
                             hybrid_config,
-                            dense_candidate_pool=_adaptive_pool_size(
+                            dense_candidate_pool=adaptive_pool_size(
                                 base_pool=hybrid_config.dense_candidate_pool,
                                 total_items=total_items,
                                 active_items=active_items,
-                                invalidated_ratio=invalidated_ratio,
+                                invalidated_ratio=invalidated_ratio_value,
                                 query_specificity=query_specificity,
                                 has_scope_filter=scope is not None,
                                 max_multiplier=self._config.retrieval.adaptive_pool_max_multiplier,
                             ),
-                            sparse_candidate_pool=_adaptive_pool_size(
+                            sparse_candidate_pool=adaptive_pool_size(
                                 base_pool=hybrid_config.sparse_candidate_pool,
                                 total_items=total_items,
                                 active_items=active_items,
-                                invalidated_ratio=invalidated_ratio,
+                                invalidated_ratio=invalidated_ratio_value,
                                 query_specificity=query_specificity,
                                 has_scope_filter=scope is not None,
                                 max_multiplier=self._config.retrieval.adaptive_pool_max_multiplier,
@@ -478,4 +478,4 @@ class QueryService:
         return normalize_tier(value)
 
     def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
-        return row_to_search_hit(self, row)
+        return row_to_search_hit(row)

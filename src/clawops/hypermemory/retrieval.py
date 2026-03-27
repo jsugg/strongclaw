@@ -68,12 +68,12 @@ def search_index(
 
     lexical_pool = max(hybrid.sparse_candidate_pool, 1)
     if retrieval.adaptive_pool:
-        lexical_pool = _adaptive_pool_size(
+        lexical_pool = adaptive_pool_size(
             base_pool=lexical_pool,
-            total_items=_count_items(conn),
-            active_items=_count_active_items(conn),
-            invalidated_ratio=_invalidated_ratio(conn),
-            query_specificity=_estimate_query_specificity(query),
+            total_items=count_items(conn),
+            active_items=count_active_items(conn),
+            invalidated_ratio=invalidated_ratio(conn),
+            query_specificity=estimate_query_specificity(query),
             has_scope_filter=scope is not None,
             max_multiplier=max(retrieval.adaptive_pool_max_multiplier, 1),
         )
@@ -808,7 +808,7 @@ def _age_days(modified_at: str) -> float:
     return max((datetime.now(tz=UTC) - timestamp).total_seconds() / 86400.0, 0.0)
 
 
-def _adaptive_pool_size(
+def adaptive_pool_size(
     *,
     base_pool: int,
     total_items: int,
@@ -830,7 +830,7 @@ def _adaptive_pool_size(
     return min(max(adapted, base_pool), base_pool * max(max_multiplier, 1))
 
 
-def _estimate_query_specificity(query: str) -> float:
+def estimate_query_specificity(query: str) -> float:
     """Estimate how specific a query is in the closed interval [0.0, 1.0]."""
     terms = normalize_text_tokens(query)
     if not terms:
@@ -841,24 +841,24 @@ def _estimate_query_specificity(query: str) -> float:
     return (0.5 * term_count_factor) + (0.5 * length_factor)
 
 
-def _count_items(conn: sqlite3.Connection) -> int:
+def count_items(conn: sqlite3.Connection) -> int:
     """Return the number of indexed items."""
     row = conn.execute("SELECT COUNT(*) FROM search_items").fetchone()
     return 0 if row is None else int(row[0])
 
 
-def _count_active_items(conn: sqlite3.Connection) -> int:
+def count_active_items(conn: sqlite3.Connection) -> int:
     """Return the number of active, non-invalidated items."""
     row = conn.execute("SELECT COUNT(*) FROM search_items WHERE invalidated_at IS NULL").fetchone()
     return 0 if row is None else int(row[0])
 
 
-def _invalidated_ratio(conn: sqlite3.Connection) -> float:
+def invalidated_ratio(conn: sqlite3.Connection) -> float:
     """Return the invalidated share of the indexed store."""
-    total = _count_items(conn)
+    total = count_items(conn)
     if total <= 0:
         return 0.0
-    active = _count_active_items(conn)
+    active = count_active_items(conn)
     invalidated = max(total - active, 0)
     return invalidated / total
 

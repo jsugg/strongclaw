@@ -29,7 +29,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
-def _iter_declared_profiles(node: pytest.Node) -> tuple[str, ...]:
+def _iter_declared_profiles(node: pytest.Item) -> tuple[str, ...]:
     declared: list[str] = []
     for marker in node.iter_markers("test_profile"):
         for value in marker.args:

@@ -163,14 +163,14 @@ class VerifyResult(TypedDict):
     errors: list[str]
 
 
-class BenchmarkCase(TypedDict, total=False):
+class BenchmarkCase(TypedDict):
     """One benchmark case for the engine benchmark runner."""
 
     name: str
     query: str
     expectedPaths: list[str]
-    maxResults: int
-    lane: SearchMode
+    maxResults: NotRequired[int]
+    lane: NotRequired[SearchMode]
 
 
 class BenchmarkCaseResult(TypedDict):
