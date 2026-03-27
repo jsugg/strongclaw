@@ -8,10 +8,11 @@ import pytest
 
 from clawops.acpx_adapter import AcpxAdapter, AcpxInvocation, parse_acpx_output
 from clawops.process_runner import CommandResult
+from tests.plugins.infrastructure.context import TestContext
 
 
 def test_acpx_adapter_run_includes_permissions_output_and_model(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     tmp_path: pathlib.Path,
 ) -> None:
     invocation = AcpxInvocation(
@@ -43,7 +44,7 @@ def test_acpx_adapter_run_includes_permissions_output_and_model(
             duration_ms=11,
         )
 
-    monkeypatch.setattr("clawops.acpx_adapter.run_command", fake_run_command)
+    test_context.patch.patch("clawops.acpx_adapter.run_command", new=fake_run_command)
 
     result = AcpxAdapter().run(invocation, env={"PATH": "/tmp/bin"})
 

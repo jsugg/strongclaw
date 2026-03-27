@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import shutil
 
@@ -11,6 +10,7 @@ import pytest
 
 from clawops.devflow import main
 from clawops.workspace_bootstrap import resolve_bootstrap_profile
+from tests.utils.helpers.cli import PathPrepender
 from tests.utils.helpers.devflow import (
     FIXTURE_REPOS_ROOT,
     init_git_repo,
@@ -28,7 +28,7 @@ from tests.utils.helpers.devflow import (
 )
 def test_devflow_qualifies_sample_repositories(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    prepend_path: PathPrepender,
     capsys: pytest.CaptureFixture[str],
     fixture_name: str,
     expected_profile: str,
@@ -38,7 +38,7 @@ def test_devflow_qualifies_sample_repositories(
     init_git_repo(repo_root)
     bin_dir = tmp_path / "bin"
     install_fake_devflow_backends(bin_dir)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    prepend_path(bin_dir)
 
     assert resolve_bootstrap_profile(repo_root).profile_id == expected_profile
 

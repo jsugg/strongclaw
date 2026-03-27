@@ -266,7 +266,28 @@ class IndexingService:
 
     def iter_documents(self) -> tuple[IndexedDocument, ...]:
         """Return the current canonical document set."""
-        return tuple(self._iter_documents())
+        unique_documents: list[IndexedDocument] = []
+        suppressed_duplicates: dict[str, list[str]] = {}
+        source_by_path: dict[str, str] = {}
+        for document in self._iter_documents():
+            if document.rel_path in source_by_path:
+                suppressed_duplicates.setdefault(
+                    document.rel_path, [source_by_path[document.rel_path]]
+                ).append(document.source_name)
+                continue
+            source_by_path[document.rel_path] = document.source_name
+            unique_documents.append(document)
+        if suppressed_duplicates:
+            duplicate_paths = sorted(suppressed_duplicates)
+            emit_structured_log(
+                "clawops.hypermemory.index.duplicate_documents",
+                {
+                    "duplicates": len(suppressed_duplicates),
+                    "duplicatePaths": ",".join(duplicate_paths[:10]),
+                    "duplicatePathOverflow": max(len(duplicate_paths) - 10, 0),
+                },
+            )
+        return tuple(unique_documents)
 
     def missing_corpus_paths(self) -> list[CorpusPathStatus]:
         """Report configured corpus paths that are not currently available."""

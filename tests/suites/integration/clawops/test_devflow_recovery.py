@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 
 import pytest
 
 from clawops.devflow import main
+from tests.utils.helpers.cli import PathPrepender
 from tests.utils.helpers.devflow import (
     init_git_repo,
     install_fake_devflow_backends,
@@ -18,7 +18,7 @@ from tests.utils.helpers.devflow import (
 
 def test_devflow_recovery_audit_and_resume(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    prepend_path: PathPrepender,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -27,7 +27,7 @@ def test_devflow_recovery_audit_and_resume(
     init_git_repo(repo_root)
     bin_dir = tmp_path / "bin"
     install_fake_devflow_backends(bin_dir)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    prepend_path(bin_dir)
 
     exit_code = main(["run", "--repo-root", str(repo_root), "--goal", "recovery smoke"])
     payload = json.loads(capsys.readouterr().out)

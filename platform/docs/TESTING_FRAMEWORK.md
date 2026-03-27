@@ -41,6 +41,9 @@ managed env injection, patch teardown, and named runtime profiles.
 aggregate their leaf fixture modules.
 Tests consume fixtures by name through pytest injection and should not import from `tests.fixtures`.
 Tests that need reusable builders, fakes, or types should import them from `tests.utils.helpers`.
+Environment mutation and patching should flow through the infrastructure runtime, for example
+`prepend_path`, `TestContext.env`, and `TestContext.patch`, instead of direct `monkeypatch`
+usage in ordinary suite code.
 
 ## DualMode Service Resolution
 
