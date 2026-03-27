@@ -29,6 +29,10 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
       - run: uv sync --locked
       - name: Run repository quality gate
         run: uv run python -m clawops supply-chain --repo-root . quality-gate
@@ -43,9 +47,10 @@ jobs:
           coverage = float(ET.parse("coverage.xml").getroot().attrib["line-rate"]) * 100
           Path(summary_path).open("a", encoding="utf-8").write(f"Coverage: {coverage:.2f}%\n")
           PY
-      - uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
-        with:
-          config: security/semgrep/semgrep.yml
+      - name: Install Semgrep CLI
+        run: python3 -m pip install --disable-pip-version-check "semgrep==1.156.0"
+      - name: Run Semgrep
+        run: semgrep scan --config security/semgrep/semgrep.yml --error .
       - name: Install gitleaks CLI
         env:
           GITLEAKS_VERSION: "8.28.0"

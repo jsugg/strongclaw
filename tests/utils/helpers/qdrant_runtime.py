@@ -18,6 +18,8 @@ from tests.utils.helpers.hypermemory import FakeQdrantBackend
 from tests.utils.helpers.mode import ServiceMode
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
+QDRANT_IMAGE_ENV = "TEST_QDRANT_IMAGE"
+DEFAULT_QDRANT_IMAGE = "ghcr.io/qdrant/qdrant/qdrant:v1.15.5@sha256:21934642fbdc0010b3df46ab214a755fda7a4631a58beec89b050baca4c78311"
 
 type CleanupFn = Callable[[], None]
 
@@ -48,6 +50,32 @@ def _reserve_local_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _resolve_qdrant_image() -> str:
+    """Return the configured Qdrant image, defaulting to the repo-pinned digest."""
+    configured_image = os.environ.get(QDRANT_IMAGE_ENV, "").strip()
+    return configured_image or DEFAULT_QDRANT_IMAGE
+
+
+def _is_registry_access_failure(detail: str) -> bool:
+    """Return whether docker failed because the image registry could not be reached or used."""
+    normalized_detail = detail.lower()
+    return any(
+        marker in normalized_detail
+        for marker in (
+            "auth.docker.io",
+            "toomanyrequests",
+            "too many failed login attempts",
+            "incorrect username or password",
+            "requested access to the resource is denied",
+        )
+    )
+
+
+def _summarize_docker_error(detail: str) -> str:
+    """Return a concise single-line summary for docker command failures."""
+    return detail.splitlines()[0].strip() or "docker run failed"
 
 
 class QdrantRuntime:
@@ -121,6 +149,7 @@ class QdrantRuntime:
 
         port = _reserve_local_port()
         container_name = f"strongclaw-qdrant-{self.collection_name}"[:63]
+        qdrant_image = _resolve_qdrant_image()
         result = subprocess.run(
             [
                 docker_bin,
@@ -131,7 +160,7 @@ class QdrantRuntime:
                 container_name,
                 "-p",
                 f"{port}:6333",
-                "qdrant/qdrant",
+                qdrant_image,
             ],
             check=False,
             capture_output=True,
@@ -139,6 +168,11 @@ class QdrantRuntime:
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
+            if _is_registry_access_failure(detail):
+                pytest.skip(
+                    f"unable to pull Qdrant test image {qdrant_image}: "
+                    f"{_summarize_docker_error(detail)}"
+                )
             pytest.fail(f"unable to start Qdrant test container: {detail}")
 
         def _cleanup_container() -> None:

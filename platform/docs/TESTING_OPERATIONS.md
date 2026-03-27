@@ -16,6 +16,8 @@
 - Force Qdrant mock mode: `uv run pytest -q -m "hypermemory and qdrant" --mock qdrant`
 - Force Qdrant real mode: `QDRANT_TEST_MODE=real uv run pytest -q -m "hypermemory and qdrant"`
 - Provide an existing real endpoint: `TEST_QDRANT_URL=http://127.0.0.1:6333 uv run pytest -q -m "hypermemory and qdrant"`
+- Override the managed Qdrant image: `TEST_QDRANT_IMAGE=ghcr.io/example/qdrant:test uv run pytest -q -m "hypermemory and qdrant"`
+  The default managed image is the repo-pinned official Qdrant GHCR mirror.
 
 ## Governance Checks
 

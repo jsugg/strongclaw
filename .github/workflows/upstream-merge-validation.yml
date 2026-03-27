@@ -22,6 +22,10 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
       - run: uv sync --locked
       - run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/upstream"

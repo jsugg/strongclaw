@@ -2,13 +2,83 @@
 
 from __future__ import annotations
 
+import os
+import re
+from pathlib import Path
+from typing import Iterator, cast
+
+import yaml
+
 from tests.utils.helpers.repo import REPO_ROOT
+
+_PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
+    r"(?P<prefix>(?:^|[\s;])python3?\s+)?(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
+)
 
 
 def _workflow_text(workflow_name: str) -> str:
     """Return the requested workflow text."""
     workflow_path = REPO_ROOT / ".github" / "workflows" / workflow_name
     return workflow_path.read_text(encoding="utf-8")
+
+
+def _as_str_object_dict(value: object) -> dict[str, object] | None:
+    """Return a string-keyed dictionary when the runtime value matches."""
+    if not isinstance(value, dict):
+        return None
+
+    validated: dict[str, object] = {}
+    raw_value = cast(dict[object, object], value)
+    for key, entry in raw_value.items():
+        if not isinstance(key, str):
+            return None
+        validated[key] = entry
+    return validated
+
+
+def _iter_workflow_python_script_invocations() -> Iterator[tuple[str, str, Path, bool]]:
+    """Yield workflow shell invocations for repo-local Python helper scripts."""
+    workflows_root = REPO_ROOT / ".github" / "workflows"
+
+    for workflow_path in sorted(workflows_root.glob("*.yml")):
+        loaded_workflow: object = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        workflow = _as_str_object_dict(loaded_workflow)
+        if workflow is None:
+            continue
+
+        jobs = _as_str_object_dict(workflow.get("jobs"))
+        if jobs is None:
+            continue
+
+        for job_value in jobs.values():
+            job = _as_str_object_dict(job_value)
+            if job is None:
+                continue
+
+            steps = job.get("steps")
+            if not isinstance(steps, list):
+                continue
+            typed_steps = cast(list[object], steps)
+
+            for step_value in typed_steps:
+                step = _as_str_object_dict(step_value)
+                if step is None:
+                    continue
+                run = step.get("run")
+                step_name = str(step.get("name", "<unnamed>"))
+                if not isinstance(run, str):
+                    continue
+
+                for line in run.splitlines():
+                    stripped_line = line.strip()
+                    if not stripped_line or stripped_line.startswith("#"):
+                        continue
+
+                    for match in _PYTHON_SCRIPT_INVOCATION_PATTERN.finditer(stripped_line):
+                        script_token = match.group("script")
+                        script_path = REPO_ROOT / script_token.removeprefix("./")
+                        uses_python = match.group("prefix") is not None
+                        yield workflow_path.name, step_name, script_path, uses_python
 
 
 def test_fresh_host_acceptance_workflow_routes_to_reusable_core() -> None:
@@ -101,6 +171,20 @@ def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
     assert "actions/cache/save" in text
     assert "Warm Linux Fresh Host Package Cache" in text
     assert "Warm macOS Fresh Host Caches" in text
+
+
+def test_workflow_python_script_invocations_are_executable_safe() -> None:
+    """Workflow shell steps must not directly invoke non-executable Python helpers."""
+    for (
+        workflow_name,
+        step_name,
+        script_path,
+        uses_python,
+    ) in _iter_workflow_python_script_invocations():
+        assert uses_python or os.access(script_path, os.X_OK), (
+            f"{workflow_name}:{step_name} directly invokes {script_path} without a Python interpreter, "
+            "but the script is not executable"
+        )
 
 
 def test_nightly_workflow_warms_caches_before_running_fresh_host_core() -> None:

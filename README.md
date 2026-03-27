@@ -230,6 +230,11 @@ compile smoke. That keeps the two targets distinct: `make precommit` is the
 repository normalization and hook gate, while `make dev-check` is the deeper
 development verification pass.
 
+`make shellcheck` and `make precommit` expect a local `shellcheck` binary on
+`PATH` now that the repo hook uses the system binary instead of a Docker-backed
+wrapper. `brew install shellcheck` and `sudo apt-get install shellcheck` both
+work.
+
 ## Devflow
 
 The repository now exposes a production devflow surface for multi-stage
