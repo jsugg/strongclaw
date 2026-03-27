@@ -1199,7 +1199,7 @@ class CodebaseContextService:
                     degraded_graph=False,
                     degraded_hybrid=degraded_hybrid,
                 )
-            if self.scale == "large" and not self.config.graph.allow_degraded_fallback:
+            if self.scale == "large":
                 raise RuntimeError("large codebase context requires a healthy neo4j graph backend")
             emit_structured_log(
                 "clawops.context.codebase.graph.degraded",
@@ -2229,6 +2229,19 @@ class CodebaseContextService:
             return ""
         return result.stdout.strip()
 
+    def git_diff_paths(self) -> tuple[str, ...]:
+        """Return the repo-relative paths touched by the current git diff."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(self.repo), "diff", "--name-only", "--no-ext-diff"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return ()
+        return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
     def pack(self, query: str, *, limit: int = 8) -> str:
         """Create a stable markdown context pack."""
         hits = self.query(query, limit=limit)
@@ -2249,6 +2262,9 @@ class CodebaseContextService:
         diff = self.git_diff()
         if diff:
             lines.append("## Active diff")
+            diff_paths = self.git_diff_paths()
+            if diff_paths:
+                lines.append(f"- affected_files: {', '.join(diff_paths)}")
             lines.append("```diff")
             lines.append(diff[:8000])
             lines.append("```")

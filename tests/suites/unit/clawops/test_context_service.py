@@ -353,3 +353,31 @@ def test_medium_scale_pack_emits_provider_metadata_and_dependency_expansion(
     assert "## Top retrieved chunks" in pack
     assert "## Dependency expansion" in pack
     assert "support.py" in pack
+
+
+def test_pack_lists_affected_files_when_git_diff_is_present(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "def run_review():\n    return 'ok'\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+
+    service = service_from_config(config_path, repo, scale="small")
+    service.index()
+    monkeypatch.setattr(
+        service,
+        "git_diff",
+        lambda: "diff --git a/app.py b/app.py\n@@ -1 +1 @@\n-return 'old'\n+return 'ok'",
+    )
+    monkeypatch.setattr(service, "git_diff_paths", lambda: ("app.py", "docs/note.md"))
+
+    pack = service.pack("run_review", limit=1)
+
+    assert "## Active diff" in pack
+    assert "- affected_files: app.py, docs/note.md" in pack
