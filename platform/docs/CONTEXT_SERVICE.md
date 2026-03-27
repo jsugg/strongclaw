@@ -2,7 +2,7 @@
 
 This repo exposes codebase context under the generic `clawops context` namespace.
 The first explicit provider is `codebase`, which keeps the SQLite lexical baseline
-and adds scale-aware chunk and graph state.
+and adds scale-aware chunk, hybrid, and graph state.
 
 ## What it does
 
@@ -10,6 +10,8 @@ and adds scale-aware chunk and graph state.
 - builds chunk records for medium and large retrieval
 - extracts a lightweight symbol map
 - supports lexical search
+- syncs dense and sparse chunk vectors into a dedicated Qdrant collection when the hybrid lane is configured and healthy
+- reranks the fused candidate pool for medium and large retrieval when rerank providers are configured
 - expands dependency context from import edges
 - builds stable markdown context packs with provider and scale metadata
 - keeps markdown memory and docs as source-of-truth
@@ -18,7 +20,7 @@ and adds scale-aware chunk and graph state.
 
 ## Why not vector-only
 
-The service is intentionally auditable and deterministic. QMD and context-engine plugins are additive, not replacements for disciplined source material.
+The service is intentionally auditable and deterministic. Hybrid retrieval augments lexical search; it does not replace disciplined source material.
 
 ## CLI surface
 
@@ -75,6 +77,44 @@ The shipped codebase config supports:
 - `graph.database`
 - `graph.depth`
 - `graph.limit`
+- `embedding.enabled`
+- `embedding.provider`
+- `embedding.model`
+- `embedding.base_url`
+- `embedding.api_key_env`
+- `embedding.api_key`
+- `embedding.dimensions`
+- `embedding.batch_size`
+- `embedding.timeout_ms`
+- `rerank.enabled`
+- `rerank.provider`
+- `rerank.fallback_provider`
+- `rerank.fail_open`
+- `rerank.normalize_scores`
+- `rerank.local.model`
+- `rerank.local.batch_size`
+- `rerank.local.max_length`
+- `rerank.local.device`
+- `rerank.compatible_http.model`
+- `rerank.compatible_http.base_url`
+- `rerank.compatible_http.api_key_env`
+- `rerank.compatible_http.api_key`
+- `rerank.compatible_http.timeout_ms`
+- `hybrid.dense_candidate_pool`
+- `hybrid.sparse_candidate_pool`
+- `hybrid.vector_weight`
+- `hybrid.text_weight`
+- `hybrid.fusion`
+- `hybrid.rrf_k`
+- `hybrid.rerank_candidate_pool`
+- `qdrant.enabled`
+- `qdrant.url`
+- `qdrant.collection`
+- `qdrant.dense_vector_name`
+- `qdrant.sparse_vector_name`
+- `qdrant.timeout_ms`
+- `qdrant.api_key_env`
+- `qdrant.api_key`
 
 Path filters are applied to repo-relative POSIX paths before indexing.
 
@@ -96,11 +136,18 @@ Reindexing is authoritative for the configured file universe:
 Scale behavior is explicit per invocation:
 
 - `small` keeps the file-level lexical path and avoids graph expansion
-- `medium` uses chunk retrieval and graph expansion, preferring Neo4j and degrading to SQLite edges when allowed
-- `large` keeps graph expansion enabled and expects the graph backend to stay healthy
+- `medium` uses chunk retrieval, hybrid lexical+dense+sparse fusion when the shared embedding and Qdrant sidecars are healthy, and graph expansion that prefers Neo4j with SQLite fallback when allowed
+- `large` keeps hybrid and graph expansion enabled and expects the graph backend to stay healthy
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
 contract now carries those keys directly, and the compose stack derives the
 container's `NEO4J_AUTH` value from the same pair so fresh-host bring-up and
 graph-backed retrieval stay aligned.
+
+The shipped hybrid lane reuses the same LiteLLM/Qdrant operator contract that backs hypermemory:
+
+- `HYPERMEMORY_EMBEDDING_MODEL`
+- `HYPERMEMORY_EMBEDDING_BASE_URL`
+- `HYPERMEMORY_QDRANT_URL`
+- optional rerank fallback keys `HYPERMEMORY_RERANK_BASE_URL`, `HYPERMEMORY_RERANK_MODEL`, and `HYPERMEMORY_RERANK_API_KEY`

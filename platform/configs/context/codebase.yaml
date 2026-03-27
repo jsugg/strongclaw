@@ -13,6 +13,49 @@ graph:
   depth: 1
   limit: 12
 
+embedding:
+  enabled: true
+  provider: compatible-http
+  model: os.environ/HYPERMEMORY_EMBEDDING_MODEL
+  base_url: os.environ/HYPERMEMORY_EMBEDDING_BASE_URL
+  api_key_env: LITELLM_MASTER_KEY
+  batch_size: 32
+  timeout_ms: 15000
+
+rerank:
+  enabled: true
+  provider: local-sentence-transformers
+  fallback_provider: compatible-http
+  fail_open: true
+  normalize_scores: true
+  local:
+    model: BAAI/bge-reranker-v2-m3
+    batch_size: 8
+    max_length: 2048
+    device: auto
+  compatible_http:
+    model: os.environ/HYPERMEMORY_RERANK_MODEL
+    base_url: os.environ/HYPERMEMORY_RERANK_BASE_URL
+    api_key_env: HYPERMEMORY_RERANK_API_KEY
+    timeout_ms: 15000
+
+hybrid:
+  dense_candidate_pool: 24
+  sparse_candidate_pool: 24
+  vector_weight: 0.65
+  text_weight: 0.35
+  fusion: rrf
+  rrf_k: 60
+  rerank_candidate_pool: 16
+
+qdrant:
+  enabled: true
+  url: os.environ/HYPERMEMORY_QDRANT_URL
+  collection: strongclaw-codebase-context
+  dense_vector_name: dense
+  sparse_vector_name: sparse
+  timeout_ms: 3000
+
 paths:
   include:
     - "**/*.md"
