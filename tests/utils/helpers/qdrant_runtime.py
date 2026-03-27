@@ -141,14 +141,17 @@ class QdrantRuntime:
             detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
             pytest.fail(f"unable to start Qdrant test container: {detail}")
 
-        self._register_cleanup(
-            f"qdrant:container:{container_name}",
-            lambda: subprocess.run(
+        def _cleanup_container() -> None:
+            subprocess.run(
                 [docker_bin, "rm", "-f", container_name],
                 check=False,
                 capture_output=True,
                 text=True,
-            ),
+            )
+
+        self._register_cleanup(
+            f"qdrant:container:{container_name}",
+            _cleanup_container,
         )
         self._live_url = f"http://127.0.0.1:{port}"
         _wait_for_qdrant(self._live_url)

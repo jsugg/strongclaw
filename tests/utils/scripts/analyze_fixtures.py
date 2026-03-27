@@ -26,7 +26,7 @@ def _repo_root() -> Path:
 
 
 def _fixture_source_files(repo_root: Path) -> list[Path]:
-    fixture_files = sorted((repo_root / "tests" / "fixtures").glob("*.py"))
+    fixture_files = sorted((repo_root / "tests" / "fixtures").rglob("*.py"))
     conftest_files = sorted((repo_root / "tests" / "suites").glob("**/conftest.py"))
     return [*fixture_files, *conftest_files]
 

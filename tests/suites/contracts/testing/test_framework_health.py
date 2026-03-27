@@ -14,6 +14,7 @@ from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 _EXPECTED_MARKERS = {
     "contract",
     "e2e",
+    "framework",
     "hypermemory",
     "integration",
     "network_local",
@@ -34,7 +35,7 @@ def test_no_helper_module_exceeds_250_lines() -> None:
 
 
 def test_all_fixture_modules_have_docstrings() -> None:
-    for path in sorted((REPO_ROOT / "tests" / "fixtures").glob("*.py")):
+    for path in sorted((REPO_ROOT / "tests" / "fixtures").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
         assert ast.get_docstring(
             tree

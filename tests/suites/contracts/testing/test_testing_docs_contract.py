@@ -22,5 +22,5 @@ def test_docs_mention_lane_model() -> None:
         encoding="utf-8"
     )
 
-    for lane in ("unit", "integration", "contracts"):
+    for lane in ("unit", "integration", "contracts", "framework"):
         assert lane in framework_doc

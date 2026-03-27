@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import ClassVar, Protocol, runtime_checkable
 
 from tests.utils.helpers.identity import get_worker_id, make_resource_prefix, make_test_id
 
@@ -14,31 +15,80 @@ _logger = logging.getLogger(__name__)
 type CleanupFn = Callable[[], None]
 
 
-@dataclasses.dataclass(slots=True)
+@runtime_checkable
+class SupportsClose(Protocol):
+    """Resource that exposes a ``close`` teardown method."""
+
+    def close(self) -> None: ...
+
+
+@runtime_checkable
+class SupportsCleanup(Protocol):
+    """Resource that exposes a ``cleanup`` teardown method."""
+
+    def cleanup(self) -> None: ...
+
+
+@runtime_checkable
+class SupportsDelete(Protocol):
+    """Resource that exposes a ``delete`` teardown method."""
+
+    def delete(self) -> None: ...
+
+
+def _object_store() -> dict[str, object]:
+    """Create a typed object store for dataclass defaults."""
+    return {}
+
+
+def _resource_meta_store() -> dict[str, ResourceRecord]:
+    """Create a typed resource metadata store for dataclass defaults."""
+    return {}
+
+
+def _cleanup_entries() -> list[tuple[str, CleanupFn]]:
+    """Create a typed cleanup stack for dataclass defaults."""
+    return []
+
+
+def _auto_cleanup_fn(resource: object) -> CleanupFn | None:
+    """Resolve the preferred zero-argument cleanup function for one resource."""
+    if isinstance(resource, SupportsClose):
+        return resource.close
+    if isinstance(resource, SupportsCleanup):
+        return resource.cleanup
+    if isinstance(resource, SupportsDelete):
+        return resource.delete
+    return None
+
+
+@dataclass(slots=True)
 class ResourceRecord:
     """Audit metadata for a registered resource."""
 
     name: str
-    created_at: float = dataclasses.field(default_factory=time.time)
+    created_at: float = field(default_factory=time.time)
     expect_cleanup: bool = False
     cleanup_fn: CleanupFn | None = None
     cleaned: bool = False
 
 
-@dataclasses.dataclass(slots=True)
+@dataclass(slots=True)
 class TestContext:
     """Per-test isolation contract with tracked resources and cleanup."""
 
-    tid: str = dataclasses.field(default_factory=make_test_id)
-    resource_prefix: str = dataclasses.field(default_factory=make_resource_prefix)
-    worker_id: str = dataclasses.field(default_factory=get_worker_id)
+    __test__: ClassVar[bool] = False
+
+    tid: str = field(default_factory=make_test_id)
+    resource_prefix: str = field(default_factory=make_resource_prefix)
+    worker_id: str = field(default_factory=get_worker_id)
     nodeid: str = ""
     test_name: str = ""
-    start_time: float = dataclasses.field(default_factory=time.time)
-    resources: dict[str, object] = dataclasses.field(default_factory=dict)
-    notes: dict[str, object] = dataclasses.field(default_factory=dict)
-    _resource_meta: dict[str, ResourceRecord] = dataclasses.field(default_factory=dict)
-    _cleanup_stack: list[tuple[str, CleanupFn]] = dataclasses.field(default_factory=list)
+    start_time: float = field(default_factory=time.time)
+    resources: dict[str, object] = field(default_factory=_object_store)
+    notes: dict[str, object] = field(default_factory=_object_store)
+    _resource_meta: dict[str, ResourceRecord] = field(default_factory=_resource_meta_store)
+    _cleanup_stack: list[tuple[str, CleanupFn]] = field(default_factory=_cleanup_entries)
     _cleaned: bool = False
 
     def register_resource(
@@ -55,11 +105,7 @@ class TestContext:
 
         cleanup_fn = cleanup
         if cleanup_fn is None and expect_cleanup:
-            for method_name in ("close", "cleanup", "delete"):
-                method = getattr(resource, method_name, None)
-                if callable(method):
-                    cleanup_fn = method
-                    break
+            cleanup_fn = _auto_cleanup_fn(resource)
 
         self.resources[name] = resource
         self._resource_meta[name] = ResourceRecord(
@@ -103,6 +149,3 @@ class TestContext:
             for meta in self._resource_meta.values()
             if meta.expect_cleanup and not meta.cleaned
         ]
-
-
-TestContext.__test__ = False

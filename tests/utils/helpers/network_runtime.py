@@ -39,11 +39,14 @@ class NetworkRuntime:
         if self._context is None:
             return self._exit_stack.enter_context(manager)
 
+        def _cleanup() -> None:
+            manager.__exit__(None, None, None)
+
         endpoint = manager.__enter__()
         self._context.register_resource(
             resource_name,
             endpoint,
-            cleanup=lambda: manager.__exit__(None, None, None),
+            cleanup=_cleanup,
         )
         return endpoint
 

@@ -10,16 +10,7 @@ from tests.utils.helpers.env import register_env_addoption
 from tests.utils.helpers.mode import register_mock_addoption
 from tests.utils.helpers.repo import REPO_ROOT
 
-pytest_plugins = (
-    "tests.fixtures.cli",
-    "tests.fixtures.context",
-    "tests.fixtures.hypermemory",
-    "tests.fixtures.journal",
-    "tests.fixtures.network",
-    "tests.fixtures.observability",
-    "tests.fixtures.policy",
-    "tests.fixtures.test_context",
-)
+pytest_plugins = ("tests.fixtures",)
 
 TESTS_ROOT = Path(__file__).resolve().parent
 
@@ -45,6 +36,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.contract)
         if "e2e" in parts:
             item.add_marker(pytest.mark.e2e)
+        if "framework" in parts:
+            item.add_marker(pytest.mark.framework)
         if "hypermemory" in parts:
             item.add_marker(pytest.mark.hypermemory)
 

@@ -124,12 +124,13 @@ reportUnsupportedDunderAll = "none"
 testpaths = ["tests/suites"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not framework'"
 markers = [
   "unit: isolated unit tests",
   "integration: cross-module and service-shaped tests",
   "contract: repository and artifact contract checks",
   "e2e: black-box end-to-end orchestration tests",
+  "framework: explicit validation of the pytest framework itself",
   "hypermemory: hypermemory-related coverage",
   "qdrant: tests requiring or exercising qdrant behavior",
   "network_local: tests that open local sockets or local HTTP servers",
