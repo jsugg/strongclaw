@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 from clawops.devflow_state import begin_run, get_run
@@ -91,15 +92,15 @@ def test_workflow_runner_executes_devflow_stage_steps(
                 },
             },
             {
+                "name": "artifact-gate",
+                "kind": "artifact_gate",
+                "from_step": "dispatch",
+            },
+            {
                 "name": "mutation-gate",
                 "kind": "git_mutation_gate",
                 "workspace": str(repo_root),
                 "from_step": "snapshot",
-            },
-            {
-                "name": "artifact-gate",
-                "kind": "artifact_gate",
-                "from_step": "dispatch",
             },
             {
                 "name": "manifest",
@@ -122,7 +123,10 @@ def test_workflow_runner_executes_devflow_stage_steps(
 
     results = WorkflowRunner(workflow, base_dir=repo_root).run()
     view = get_run(journal_db, run_id="df_runner")
+    manifest = json.loads((run_root / "artifacts" / "manifest.json").read_text(encoding="utf-8"))
 
     assert [result.ok for result in results] == [True, True, True, True, True, True]
     assert view.stages[0].status == "running"
     assert (run_root / "artifacts" / "manifest.json").exists()
+    assert results[3].message == "artifacts ready"
+    assert manifest["stages"][0]["status"] == "validated"

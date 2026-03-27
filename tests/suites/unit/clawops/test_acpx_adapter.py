@@ -12,8 +12,8 @@ from tests.plugins.infrastructure.context import TestContext
 
 
 def test_acpx_adapter_run_includes_permissions_output_and_model(
-    test_context: TestContext,
     tmp_path: pathlib.Path,
+    test_context: TestContext,
 ) -> None:
     invocation = AcpxInvocation(
         agent_name="codex",

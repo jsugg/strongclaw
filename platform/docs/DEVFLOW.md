@@ -70,6 +70,12 @@ Each run materializes under:
   logs/devflow.log.jsonl
 ```
 
+## Artifact Enforcement
+
+- each stage validates its role-declared required artifacts before the stage can promote
+- the compiled stage workflow runs `artifact_gate` immediately after worker dispatch
+- `artifacts/manifest.json` still records the stage result for audit, including `validated` and `missing_artifacts`
+
 ## Recovery
 
 - `status --stuck-only` lists stale non-terminal runs from the shared journal.

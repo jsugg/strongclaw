@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import sqlite3
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -347,29 +348,58 @@ class IndexingService:
                 )
 
     def _iter_corpus_documents(self) -> Iterator[IndexedDocument]:
+        seen_rel_paths: dict[str, str] = {}
+
+        def _build_corpus_document(
+            path: pathlib.Path,
+            *,
+            rel_path: str,
+            source_name: str,
+        ) -> IndexedDocument | None:
+            kept_source = seen_rel_paths.get(rel_path)
+            if kept_source is not None:
+                emit_structured_log(
+                    "clawops.hypermemory.corpus.duplicate_document",
+                    {
+                        "relPath": rel_path,
+                        "keptSource": kept_source,
+                        "skippedSource": source_name,
+                    },
+                )
+                return None
+            seen_rel_paths[rel_path] = source_name
+            return build_document(
+                workspace_root=self._config.workspace_root,
+                path=path,
+                lane="corpus",
+                source_name=source_name,
+                default_scope=self._config.governance.default_scope,
+            )
+
         for source in self._config.corpus_paths:
             if not source.path.exists():
                 continue
             if source.path.is_file():
-                if matches_glob(source.path.name, source.pattern):
-                    yield build_document(
-                        workspace_root=self._config.workspace_root,
-                        path=source.path,
-                        lane="corpus",
+                rel_path = resolve_under_workspace(self._config.workspace_root, source.path)
+                if matches_glob(rel_path, source.pattern):
+                    document = _build_corpus_document(
+                        source.path,
+                        rel_path=rel_path,
                         source_name=source.name,
-                        default_scope=self._config.governance.default_scope,
                     )
+                    if document is not None:
+                        yield document
                 continue
             for path in sorted(source.path.rglob("*.md")):
                 rel_path = resolve_under_workspace(self._config.workspace_root, path)
                 if matches_glob(rel_path, source.pattern):
-                    yield build_document(
-                        workspace_root=self._config.workspace_root,
+                    document = _build_corpus_document(
                         path=path,
-                        lane="corpus",
+                        rel_path=rel_path,
                         source_name=source.name,
-                        default_scope=self._config.governance.default_scope,
                     )
+                    if document is not None:
+                        yield document
 
     def _clear_derived_rows(self, conn: sqlite3.Connection) -> None:
         """Clear the rebuildable tables before a full reindex."""

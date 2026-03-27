@@ -77,6 +77,15 @@ Hypermemory intentionally soft-fails when configured Markdown paths are missing 
 
 That split keeps the runtime robust while preserving an explicit operator check.
 
+## Corpus glob behavior
+
+Corpus path patterns use repo-style, path-segment-aware matching:
+
+- `*.md` matches only Markdown files at the source root
+- `**/*.md` matches Markdown files recursively below the source root
+- overlapping corpus sources are deduplicated by workspace-relative path
+- the first configured source wins, so narrower sources keep precedence over broader fallback roots
+
 ## OpenClaw compatibility
 
 The opt-in plugin at [platform/plugins/strongclaw-hypermemory](../plugins/strongclaw-hypermemory) preserves the stable OpenClaw memory tool names:

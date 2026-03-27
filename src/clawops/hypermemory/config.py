@@ -6,6 +6,7 @@ import fnmatch
 import os
 import pathlib
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 from typing import Any, cast
 
 from clawops.common import load_yaml
@@ -215,28 +216,42 @@ def resolve_under_workspace(workspace_root: pathlib.Path, path: pathlib.Path) ->
         raise ValueError(f"{path} must stay within {workspace_root}") from err
 
 
-def matches_glob(path_text: str, pattern: str) -> bool:
-    """Match a relative path against a repo-style glob."""
-    normalized_pattern = pattern.strip()
-    if not normalized_pattern:
-        return False
-    path = pathlib.PurePosixPath(path_text)
-    return _match_path_parts(path.parts, tuple(normalized_pattern.split("/")))
+def _repo_path_parts(value: str) -> tuple[str, ...]:
+    """Return normalized repo-style path segments."""
+    return tuple(part for part in pathlib.PurePosixPath(value).parts if part != ".")
 
 
-def _match_path_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
-    """Return True when *path_parts* matches *pattern_parts* segment-by-segment."""
+@lru_cache(maxsize=8192)
+def _matches_repo_glob_parts(
+    path_parts: tuple[str, ...],
+    pattern_parts: tuple[str, ...],
+) -> bool:
+    """Match one normalized repo path against one normalized glob pattern."""
     if not pattern_parts:
         return not path_parts
-    current = pattern_parts[0]
-    if current == "**":
+    head = pattern_parts[0]
+    tail = pattern_parts[1:]
+    if head == "**":
+        if not tail:
+            return True
         return any(
-            _match_path_parts(path_parts[index:], pattern_parts[1:])
+            _matches_repo_glob_parts(path_parts[index:], tail)
             for index in range(len(path_parts) + 1)
         )
-    if not path_parts or not fnmatch.fnmatchcase(path_parts[0], current):
+    if not path_parts:
         return False
-    return _match_path_parts(path_parts[1:], pattern_parts[1:])
+    return fnmatch.fnmatchcase(path_parts[0], head) and _matches_repo_glob_parts(
+        path_parts[1:],
+        tail,
+    )
+
+
+def matches_glob(path_text: str, pattern: str) -> bool:
+    """Match a relative path against a repo-style glob."""
+    return _matches_repo_glob_parts(
+        _repo_path_parts(path_text),
+        _repo_path_parts(pattern),
+    )
 
 
 def default_config_path() -> pathlib.Path:

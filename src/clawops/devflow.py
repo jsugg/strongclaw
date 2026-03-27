@@ -142,6 +142,15 @@ def _task_expected_artifacts(
     ]
 
 
+def _artifact_gate_step(stage: DevflowStagePlan) -> dict[str, object]:
+    """Return one workflow artifact-gate step."""
+    return {
+        "name": f"{stage.name}-artifact-gate",
+        "kind": "artifact_gate",
+        "from_step": f"{stage.name}-worker-dispatch",
+    }
+
+
 def _artifact_manifest_step(
     stage: DevflowStagePlan, run_root: pathlib.Path, run_id: str
 ) -> dict[str, object]:
@@ -224,13 +233,7 @@ def _compile_stage_workflow(
     if stage.approval_required and approved_by is not None:
         worker_dispatch["approved_by"] = approved_by
     steps.append(worker_dispatch)
-    steps.append(
-        {
-            "name": f"{stage.name}-artifact-gate",
-            "kind": "artifact_gate",
-            "from_step": f"{stage.name}-worker-dispatch",
-        }
-    )
+    steps.append(_artifact_gate_step(stage))
     if stage.workspace_mode in {"verify_only", "read_only"}:
         steps.append(
             {

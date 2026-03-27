@@ -35,6 +35,8 @@ Add a new test in the suite that matches its behavior:
 Add a new fixture when pytest injection is the public entrypoint.
 Add a new helper when the logic should be reusable outside fixture setup.
 Import reusable support code from `tests.utils.helpers`, not from `tests.fixtures`.
+Use `prepend_path` or `test_context.env.prepend_path(...)` for PATH mutation.
+Use `test_context.patch.patch(...)` or `patch_object(...)` for managed patch teardown.
 
 Capability markers stay module-local.
 Structural markers come from the suite path layout and should not be added manually.
