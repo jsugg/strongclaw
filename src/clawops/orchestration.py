@@ -41,6 +41,12 @@ AUTH_MODES: Final[frozenset[str]] = frozenset({"subscription", "api", "cloud-pro
 ROLE_NAMES: Final[frozenset[str]] = frozenset(
     {"lead", "architect", "developer", "reviewer", "sdet", "qa", "release"}
 )
+TASK_PERMISSION_MODES: Final[frozenset[str]] = frozenset(
+    {"approve-all", "approve-reads", "deny-all"}
+)
+TASK_WORKSPACE_MODES: Final[frozenset[str]] = frozenset(
+    {"mutable_primary", "mutable_test", "verify_only", "read_only"}
+)
 
 
 class DescriptorError(ValueError):
@@ -363,6 +369,8 @@ class OrchestrationTask:
     role: str
     backend: str
     backend_profile: str | None
+    permissions_mode: str | None
+    workspace_mode: str | None
     prompt: str
     operation_kind: str
     allowed_capabilities: tuple[str, ...]
@@ -370,6 +378,7 @@ class OrchestrationTask:
     approval_required: bool
     timeout_seconds: int
     retry_budget: int
+    artifact_contract_id: str | None = None
     context_request: ContextRequest | None = None
     expected_artifacts: tuple[ExpectedArtifact, ...] = ()
     delivery_target: DeliveryTargetDescriptor | None = None
@@ -407,6 +416,8 @@ class OrchestrationTask:
             "role": self.role,
             "backend": self.backend,
             "backend_profile": self.backend_profile,
+            "permissions_mode": self.permissions_mode,
+            "workspace_mode": self.workspace_mode,
             "prompt_sha256": sha256_hex(self.prompt),
             "operation_kind": self.operation_kind,
             "allowed_capabilities": list(self.allowed_capabilities),
@@ -414,6 +425,7 @@ class OrchestrationTask:
             "approval_required": self.approval_required,
             "timeout_seconds": self.timeout_seconds,
             "retry_budget": self.retry_budget,
+            "artifact_contract_id": self.artifact_contract_id,
             "expected_artifacts": [
                 {
                     "name": artifact.name,
@@ -638,6 +650,20 @@ def resolve_orchestration_task(
 
     backend_profile_value = task_mapping.get("backend_profile")
     backend_profile = backend_profile_value if isinstance(backend_profile_value, str) else None
+    permissions_mode_value = task_mapping.get("permissions_mode")
+    permissions_mode = permissions_mode_value if isinstance(permissions_mode_value, str) else None
+    if permissions_mode is not None and permissions_mode not in TASK_PERMISSION_MODES:
+        allowed_permissions = ", ".join(sorted(TASK_PERMISSION_MODES))
+        raise ValueError(f"task.permissions_mode must be one of: {allowed_permissions}")
+    workspace_mode_value = task_mapping.get("workspace_mode")
+    workspace_mode = workspace_mode_value if isinstance(workspace_mode_value, str) else None
+    if workspace_mode is not None and workspace_mode not in TASK_WORKSPACE_MODES:
+        allowed_workspace_modes = ", ".join(sorted(TASK_WORKSPACE_MODES))
+        raise ValueError(f"task.workspace_mode must be one of: {allowed_workspace_modes}")
+    artifact_contract_id_value = task_mapping.get("artifact_contract_id")
+    artifact_contract_id = (
+        artifact_contract_id_value if isinstance(artifact_contract_id_value, str) else None
+    )
     return OrchestrationTask(
         project=project,
         workspace=workspace,
@@ -645,6 +671,8 @@ def resolve_orchestration_task(
         role=role,
         backend=backend,
         backend_profile=backend_profile,
+        permissions_mode=permissions_mode,
+        workspace_mode=workspace_mode,
         prompt=prompt,
         operation_kind=_validate_token("task.operation_kind", operation_kind),
         allowed_capabilities=allowed_capabilities,
@@ -652,6 +680,7 @@ def resolve_orchestration_task(
         approval_required=bool(task_mapping.get("approval_required", False)),
         timeout_seconds=timeout_seconds,
         retry_budget=retry_budget,
+        artifact_contract_id=artifact_contract_id,
         context_request=_parse_context_request(task_mapping.get("context"), base_dir=base_dir),
         expected_artifacts=_parse_expected_artifacts(
             task_mapping.get("expected_artifacts"), base_dir=base_dir

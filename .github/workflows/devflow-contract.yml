@@ -1,0 +1,31 @@
+name: devflow-contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/devflow-contract.yml"
+      - "platform/configs/devflow/**"
+      - "platform/docs/DEVFLOW.md"
+      - "platform/workers/acpx/**"
+      - "src/clawops/devflow.py"
+      - "src/clawops/devflow_*.py"
+      - "src/clawops/git_gates.py"
+      - "src/clawops/workspace_bootstrap.py"
+      - "src/clawops/workflow_runner.py"
+      - "src/clawops/op_journal.py"
+      - "src/clawops/orchestration.py"
+      - "tests/suites/**/test_devflow*.py"
+      - "tests/suites/**/test_workflow_runner_devflow.py"
+      - "tests/suites/**/test_workflow_runner_resume.py"
+  workflow_dispatch:
+
+jobs:
+  devflow-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run python -m compileall -q src tests
+      - run: uv run --locked pytest -q -m devflow
+      - run: uv run clawops devflow plan --repo-root . --goal "contract smoke"

@@ -110,3 +110,11 @@ def test_nightly_workflow_warms_caches_before_running_fresh_host_core() -> None:
     assert "uses: ./.github/workflows/fresh-host-cache-warm.yml" in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
     assert "needs: warm-fresh-host-caches" in text
+
+
+def test_devflow_contract_workflow_surfaces_public_devflow_lane() -> None:
+    text = _workflow_text("devflow-contract.yml")
+
+    assert "uv sync --locked" in text
+    assert "uv run python -m compileall -q src tests" in text
+    assert 'uv run clawops devflow plan --repo-root . --goal "contract smoke"' in text
