@@ -12,7 +12,12 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Final
 
-from clawops.acpx_adapter import AcpxAdapter, AcpxInvocation
+from clawops.acpx_adapter import (
+    AcpxAdapter,
+    AcpxInvocation,
+    AcpxPermissionMode,
+    RequestedOutputFormat,
+)
 from clawops.app_paths import scoped_state_dir
 from clawops.backend_registry import BackendDefinition, resolve_backend
 from clawops.common import dump_json, sha256_hex, write_json, write_text
@@ -51,7 +56,9 @@ class SessionSpec:
     ttl_seconds: int
     required_auth_mode: AuthMode | None = None
     backend_profile: str | None = None
-    permissions_mode: str | None = None
+    permissions_mode: AcpxPermissionMode | None = None
+    output_format: RequestedOutputFormat = "text"
+    config_path: pathlib.Path | None = None
     journal_db: pathlib.Path | None = None
     branch: str | None = None
     session_type: str | None = None
@@ -124,6 +131,11 @@ class SessionSummary:
     state_dir: pathlib.Path
     journal_db: pathlib.Path
     command: Sequence[str]
+    requested_permissions_mode: AcpxPermissionMode | None
+    applied_permissions_mode: AcpxPermissionMode | None
+    requested_output_format: RequestedOutputFormat
+    backend_profile: str | None
+    acpx_command: Sequence[str]
     started_at: str
     finished_at: str
     duration_ms: int
@@ -164,6 +176,11 @@ class SessionSummary:
             "state_dir": str(self.state_dir),
             "journal_db": str(self.journal_db),
             "command": list(self.command),
+            "requested_permissions_mode": self.requested_permissions_mode,
+            "applied_permissions_mode": self.applied_permissions_mode,
+            "requested_output_format": self.requested_output_format,
+            "backend_profile": self.backend_profile,
+            "acpx_command": list(self.acpx_command),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "duration_ms": self.duration_ms,
@@ -216,6 +233,14 @@ def _build_invocation(
         prompt=spec.prompt,
         cwd=spec.workspace.working_directory,
         timeout_seconds=spec.timeout_seconds,
+        permissions_mode=(
+            definition.default_permission_mode
+            if spec.permissions_mode is None
+            else spec.permissions_mode
+        ),
+        output_format=spec.output_format,
+        backend_profile=spec.backend_profile,
+        config_path=spec.config_path,
     )
 
 
@@ -249,6 +274,21 @@ def _preflight_errors(
         errors.append(
             f"backend {definition.name} does not support auth mode {credential_status.auth_mode}"
         )
+    if spec.permissions_mode is not None and not definition.supports_permission_mode(
+        spec.permissions_mode
+    ):
+        errors.append(
+            f"backend {definition.name} does not support permissions mode {spec.permissions_mode}"
+        )
+    if not definition.supports_output_format(spec.output_format):
+        errors.append(
+            f"backend {definition.name} does not support output format {spec.output_format}"
+        )
+    if spec.config_path is not None:
+        if not spec.config_path.exists():
+            errors.append(f"config path does not exist: {spec.config_path}")
+        elif not spec.config_path.is_file():
+            errors.append(f"config path must be a file: {spec.config_path}")
     if not credential_status.ready:
         errors.append(credential_status.message)
     return errors
@@ -292,6 +332,7 @@ def _base_summary(
     *,
     definition: BackendDefinition,
     credential_status: CredentialStatus,
+    invocation: AcpxInvocation | None,
 ) -> tuple[datetime, SessionSummary]:
     """Create the initial session summary before execution."""
     started = _utc_now()
@@ -309,7 +350,7 @@ def _base_summary(
     summary_path = session_dir / "summary.json"
     audit_path = session_dir / "audit.json"
     structured_output_path = session_dir / "structured-output.json"
-    invocation = _build_invocation(definition, spec)
+    command = [] if invocation is None else invocation.command
     summary = SessionSummary(
         ok=False,
         status="pending",
@@ -334,7 +375,12 @@ def _base_summary(
         working_directory=spec.workspace.working_directory,
         state_dir=spec.state_dir,
         journal_db=spec.effective_journal_db,
-        command=invocation.command,
+        command=command,
+        requested_permissions_mode=spec.permissions_mode,
+        applied_permissions_mode=None if invocation is None else invocation.permissions_mode,
+        requested_output_format=spec.output_format,
+        backend_profile=spec.backend_profile,
+        acpx_command=command,
         started_at=_timestamp_text(started),
         finished_at=_timestamp_text(started),
         duration_ms=0,
@@ -356,10 +402,17 @@ def run_session(spec: SessionSpec) -> SessionSummary:
     )
     broker = CredentialBroker()
     credential_status = broker.evaluate(spec.backend, required_auth_mode=required_auth_mode)
-    _started, base_summary = _base_summary(
+    errors = _preflight_errors(
         spec,
         definition=definition,
         credential_status=credential_status,
+    )
+    invocation = None if errors else _build_invocation(definition, spec)
+    _, base_summary = _base_summary(
+        spec,
+        definition=definition,
+        credential_status=credential_status,
+        invocation=invocation,
     )
     audit_payload: dict[str, object] = {
         "backend": spec.backend,
@@ -372,14 +425,14 @@ def run_session(spec: SessionSpec) -> SessionSummary:
         "readiness_message": credential_status.message,
         "removed_env_keys": list(credential_status.removed_env_keys),
         "journal_db": str(spec.effective_journal_db),
-        "permissions_mode": spec.permissions_mode,
+        "requested_permissions_mode": base_summary.requested_permissions_mode,
+        "applied_permissions_mode": base_summary.applied_permissions_mode,
+        "requested_output_format": base_summary.requested_output_format,
+        "backend_profile": base_summary.backend_profile,
+        "acpx_command": list(base_summary.acpx_command),
+        "config_path": None if spec.config_path is None else str(spec.config_path),
     }
 
-    errors = _preflight_errors(
-        spec,
-        definition=definition,
-        credential_status=credential_status,
-    )
     if errors:
         failed = dataclasses.replace(
             base_summary,
@@ -415,12 +468,15 @@ def run_session(spec: SessionSpec) -> SessionSummary:
                 ttl_seconds=spec.ttl_seconds,
                 metadata={
                     "backend_profile": spec.backend_profile,
+                    "permissions_mode": base_summary.applied_permissions_mode,
+                    "output_format": base_summary.requested_output_format,
                     "workspace_kind": spec.workspace.kind,
                 },
             )
             lease_id = lease.lease_id
             audit_payload["lease_id"] = lease_id
-            invocation = _build_invocation(definition, spec)
+            if invocation is None:
+                invocation = _build_invocation(definition, spec)
             adapter_result = AcpxAdapter().run(
                 invocation,
                 env=credential_status.sanitized_env(),
@@ -544,7 +600,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--journal-db", type=pathlib.Path, default=None)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument("--ttl-seconds", type=int, default=3600)
-    parser.add_argument("--permissions-mode")
+    parser.add_argument(
+        "--permissions-mode",
+        choices=("approve-all", "approve-reads", "deny-all"),
+        default=None,
+    )
+    parser.add_argument("--output-format", choices=("text", "json", "ndjson"), default="text")
+    parser.add_argument("--config-path", type=pathlib.Path, default=None)
     return parser.parse_args(argv)
 
 
@@ -579,6 +641,7 @@ def _resolve_session_spec(args: argparse.Namespace) -> SessionSpec:
     required_auth_mode = args.auth_mode
     if required_auth_mode is not None:
         required_auth_mode = required_auth_mode.strip()
+    config_path = None if args.config_path is None else args.config_path.expanduser().resolve()
     return SessionSpec(
         backend=args.backend,
         prompt=args.prompt,
@@ -593,6 +656,8 @@ def _resolve_session_spec(args: argparse.Namespace) -> SessionSpec:
         required_auth_mode=required_auth_mode,
         backend_profile=args.backend_profile,
         permissions_mode=args.permissions_mode,
+        output_format=args.output_format,
+        config_path=config_path,
         journal_db=None if args.journal_db is None else args.journal_db.expanduser().resolve(),
         branch=args.branch,
         session_type=args.session_type,

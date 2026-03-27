@@ -22,6 +22,12 @@ cp platform/workers/acpx/project-config.example.json ~/Projects/strongclaw/repo/
 ## Smoke test
 
 ```bash
-acpx codex exec 'Summarize this repository'
-acpx claude exec 'Review auth boundaries'
+acpx --approve-reads --format text codex exec 'Summarize this repository'
+acpx --approve-all --format json --json-strict claude exec 'Review auth boundaries'
+acpx --approve-all --format json --json-strict --model claude-sonnet-4-5 claude exec 'Review auth boundaries'
 ```
+
+`acpx` resolves config from `~/.acpx/config.json` and `<cwd>/.acpxrc.json`. Strongclaw's adapter
+now passes permission mode, output mode, and backend profile explicitly on the command line so
+session summaries record the effective execution contract instead of inheriting implicit local
+defaults.
