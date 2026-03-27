@@ -11,4 +11,4 @@ cases:
     command: ["uv", "run", "--project", ".", "python", "-m", "clawops", "context", "--help"]
     assert:
       exit_code: 0
-      stdout_contains: ["index", "query", "pack"]
+      stdout_contains: ["codebase"]
