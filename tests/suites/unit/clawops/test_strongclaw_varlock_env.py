@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
-
 from clawops.strongclaw_runtime import (
     load_env_assignments,
     varlock_env_template_file,
     varlock_local_env_file,
 )
 from clawops.strongclaw_varlock_env import configure_varlock_env
+from tests.plugins.infrastructure.context import TestContext
 
 
 def _no_op_model_validation(
@@ -43,7 +42,7 @@ def _varlock_validation_success(
 
 def test_ensure_required_defaults_generates_neo4j_credentials(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     secrets = iter(
         (
@@ -53,21 +52,21 @@ def test_ensure_required_defaults_generates_neo4j_credentials(
             "neo4j-password-secret",
         )
     )
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.strongclaw_varlock_env.generate_secret_value",
-        lambda: next(secrets),
+        new=lambda: next(secrets),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.strongclaw_varlock_env._ensure_hypermemory_embedding_model",
-        _no_op_model_validation,
+        new=_no_op_model_validation,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.strongclaw_varlock_env._validate_secret_backend_configuration",
-        _no_op_secret_backend_validation,
+        new=_no_op_secret_backend_validation,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.strongclaw_varlock_env._validate_with_varlock",
-        _varlock_validation_success,
+        new=_varlock_validation_success,
     )
 
     template_path = varlock_env_template_file(tmp_path)
