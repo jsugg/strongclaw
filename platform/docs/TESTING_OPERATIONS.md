@@ -6,7 +6,7 @@
 - Unit lane: `uv run pytest -q -m unit`
 - Integration lane: `uv run pytest -q -m integration`
 - Contract lane: `uv run pytest -q -m contract`
-- Framework lane: `uv run pytest -q -m framework tests/suites/contracts/testing/framework`
+- Framework lane only: `uv run pytest -q -m framework tests/suites/contracts/testing/framework`
 - E2E lane: `uv run pytest -q -m e2e`
 - Hypermemory lane: `uv run pytest -q -m hypermemory`
 - Qdrant lane: `uv run pytest -q -m "hypermemory and qdrant"`
@@ -38,3 +38,5 @@ Import reusable support code from `tests.utils.helpers`, not from `tests.fixture
 
 Capability markers stay module-local.
 Structural markers come from the suite path layout and should not be added manually.
+Use `prepend_path`, `TestContext.env`, and `TestContext.patch` for environment and patch
+management instead of direct `monkeypatch` calls in ordinary suite code.

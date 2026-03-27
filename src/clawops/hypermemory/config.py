@@ -217,9 +217,26 @@ def resolve_under_workspace(workspace_root: pathlib.Path, path: pathlib.Path) ->
 
 def matches_glob(path_text: str, pattern: str) -> bool:
     """Match a relative path against a repo-style glob."""
-    return fnmatch.fnmatch(path_text, pattern) or (
-        pattern.startswith("**/") and fnmatch.fnmatch(path_text, pattern[3:])
-    )
+    normalized_pattern = pattern.strip()
+    if not normalized_pattern:
+        return False
+    path = pathlib.PurePosixPath(path_text)
+    return _match_path_parts(path.parts, tuple(normalized_pattern.split("/")))
+
+
+def _match_path_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
+    """Return True when *path_parts* matches *pattern_parts* segment-by-segment."""
+    if not pattern_parts:
+        return not path_parts
+    current = pattern_parts[0]
+    if current == "**":
+        return any(
+            _match_path_parts(path_parts[index:], pattern_parts[1:])
+            for index in range(len(path_parts) + 1)
+        )
+    if not path_parts or not fnmatch.fnmatchcase(path_parts[0], current):
+        return False
+    return _match_path_parts(path_parts[1:], pattern_parts[1:])
 
 
 def default_config_path() -> pathlib.Path:

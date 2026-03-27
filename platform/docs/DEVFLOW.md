@@ -76,3 +76,4 @@ Each run materializes under:
 - `resume` restarts from the first incomplete stage only.
 - `audit` bundles run state, stage events, artifact manifest data, and summary payloads.
 - verification roles run in isolated workspaces and fail when they mutate tracked files.
+- required stage artifacts are enforced before a stage is promoted; missing required outputs fail the stage and are also recorded in `artifacts/manifest.json`.

@@ -9,9 +9,9 @@ Strongclaw uses four primary default pytest lanes:
 - `e2e`: black-box CLI and workflow-shaped orchestration coverage
 
 The repository also maintains an explicit `framework` lane for pytest-framework self-checks.
-Framework tests live under `tests/suites/contracts/testing/framework/` and are excluded from
-default runs via the project pytest configuration. Run them explicitly when changing pytest
-bootstrap, plugin registration, or framework governance behavior.
+Framework tests live under `tests/suites/contracts/testing/framework/` and are included in the
+default full-suite run. Run them directly when changing pytest bootstrap, plugin registration, or
+framework governance behavior and you want fast feedback on that slice.
 
 Capability markers are additive and remain module-local:
 - `hypermemory`
@@ -41,6 +41,9 @@ managed env injection, patch teardown, and named runtime profiles.
 aggregate their leaf fixture modules.
 Tests consume fixtures by name through pytest injection and should not import from `tests.fixtures`.
 Tests that need reusable builders, fakes, or types should import them from `tests.utils.helpers`.
+Environment mutation and patching should flow through the infrastructure runtime, for example
+`prepend_path`, `TestContext.env`, and `TestContext.patch`, instead of direct `monkeypatch`
+usage in ordinary suite code.
 
 ## DualMode Service Resolution
 
@@ -95,8 +98,8 @@ Add a contract test when a rule must stay true even if the implementation change
 
 Pytest-framework registration and bootstrap topology lives under
 `tests/suites/contracts/testing/framework/`. Use that lane for assertions about recursive plugin
-registration, explicit framework-only behavior, and other tests that should not run in the default
-suite.
+registration, explicit framework-only behavior, and other tests that also run as part of the
+default suite.
 
 Current governance covers:
 - root bootstrap shape

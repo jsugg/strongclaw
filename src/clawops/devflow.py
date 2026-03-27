@@ -224,6 +224,13 @@ def _compile_stage_workflow(
     if stage.approval_required and approved_by is not None:
         worker_dispatch["approved_by"] = approved_by
     steps.append(worker_dispatch)
+    steps.append(
+        {
+            "name": f"{stage.name}-artifact-gate",
+            "kind": "artifact_gate",
+            "from_step": f"{stage.name}-worker-dispatch",
+        }
+    )
     if stage.workspace_mode in {"verify_only", "read_only"}:
         steps.append(
             {

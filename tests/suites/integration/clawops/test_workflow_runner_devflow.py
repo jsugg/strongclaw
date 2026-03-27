@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
-
-import pytest
 
 from clawops.devflow_state import begin_run, get_run
 from clawops.workflow_runner import WorkflowRunner
+from tests.utils.helpers.cli import PathPrepender
 from tests.utils.helpers.devflow import (
     init_git_repo,
     install_fake_devflow_backends,
@@ -18,7 +16,7 @@ from tests.utils.helpers.devflow import (
 
 def test_workflow_runner_executes_devflow_stage_steps(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    prepend_path: PathPrepender,
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -26,7 +24,7 @@ def test_workflow_runner_executes_devflow_stage_steps(
     init_git_repo(repo_root)
     bin_dir = tmp_path / "bin"
     install_fake_devflow_backends(bin_dir)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    prepend_path(bin_dir)
 
     journal_db = repo_root / ".clawops" / "op_journal.sqlite"
     begin_run(
@@ -45,6 +43,7 @@ def test_workflow_runner_executes_devflow_stage_steps(
     )
     run_root = repo_root / ".clawops" / "devflow" / "df_runner"
     (run_root / "artifacts" / "architect").mkdir(parents=True, exist_ok=True)
+    (run_root / "artifacts" / "architect" / "design.md").write_text("design\n", encoding="utf-8")
 
     workflow: dict[str, object] = {
         "base_dir": str(repo_root),
@@ -98,6 +97,11 @@ def test_workflow_runner_executes_devflow_stage_steps(
                 "from_step": "snapshot",
             },
             {
+                "name": "artifact-gate",
+                "kind": "artifact_gate",
+                "from_step": "dispatch",
+            },
+            {
                 "name": "manifest",
                 "kind": "artifact_manifest",
                 "run_root": str(run_root),
@@ -119,6 +123,6 @@ def test_workflow_runner_executes_devflow_stage_steps(
     results = WorkflowRunner(workflow, base_dir=repo_root).run()
     view = get_run(journal_db, run_id="df_runner")
 
-    assert [result.ok for result in results] == [True, True, True, True, True]
+    assert [result.ok for result in results] == [True, True, True, True, True, True]
     assert view.stages[0].status == "running"
     assert (run_root / "artifacts" / "manifest.json").exists()

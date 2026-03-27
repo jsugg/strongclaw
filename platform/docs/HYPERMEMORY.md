@@ -239,6 +239,12 @@ openclaw memory-pro import /tmp/strongclaw-memory-pro-project.json --scope proje
 - sparse fingerprint state
 - missing corpus paths
 
+Corpus path globs are segment-aware:
+
+- `*.md` matches only markdown files at the configured corpus root
+- `**/*.md` matches markdown files recursively below the configured corpus root
+- if two configured corpus sources resolve to the same repo-relative document, the first configured source wins and later duplicates are skipped during indexing
+
 When `CLAWOPS_STRUCTURED_LOGS=1` is set, hypermemory emits compact JSON lines
 for embedding calls, Qdrant search, lexical planning, fusion, rerank, rerank
 errors, fallback activation, and vector sync. When OTLP tracing is enabled
