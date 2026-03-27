@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests.utils.helpers._fresh_host.shell import compose_probe_env, phase_env
 from tests.utils.helpers._fresh_host.storage import load_context
 from tests.utils.helpers._hosted_docker.shell import run_command, sysctl_int
 
@@ -19,7 +20,7 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
     diagnostics_dir = Path(context.diagnostics_dir).resolve()
     diagnostics_dir.mkdir(parents=True, exist_ok=True)
     repo_root = Path(context.repo_root).resolve()
-    env = dict(os.environ)
+    env = phase_env(context)
     commands = {
         diagnostics_dir / "runtime-status.txt": ["colima", "status"],
         diagnostics_dir / "runtime-list.txt": ["colima", "list"],
@@ -45,11 +46,20 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
             "--no-color",
         ]
     for output_path, command in commands.items():
+        command_env = (
+            compose_probe_env(
+                context,
+                compose_file=Path(command[3]),
+                repo_local_state=True,
+            )
+            if len(command) >= 4 and command[:3] == ["docker", "compose", "-f"]
+            else env
+        )
         try:
             completed = run_command(
                 command,
                 cwd=repo_root,
-                env=env,
+                env=command_env,
                 timeout_seconds=120,
                 capture_output=True,
             )

@@ -6,6 +6,7 @@ import pathlib
 from collections.abc import Callable
 from typing import Any, cast
 
+from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 
 _compose_probe_env = cast(
@@ -35,3 +36,33 @@ def test_compose_probe_env_inherits_repo_local_varlock_assignments(tmp_path: pat
 
     assert env["NEO4J_PASSWORD"] == "probe-secret"
     assert env["NEO4J_USERNAME"] == "neo4j"
+
+
+def test_compose_probe_env_helper_uses_context_repo_local_state(tmp_path: pathlib.Path) -> None:
+    """Context-aware compose probes should preserve the repo-local compose project wiring."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    compose_file = (
+        workspace / "platform" / "compose" / "docker-compose.aux-stack.ci-hosted-macos.yaml"
+    )
+    compose_file.parent.mkdir(parents=True, exist_ok=True)
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+
+    env = fresh_host_shell.compose_probe_env(
+        context,
+        compose_file=compose_file,
+        repo_local_state=True,
+    )
+
+    assert env["STRONGCLAW_COMPOSE_STATE_DIR"].endswith("/.openclaw/repo-local-compose")
+    assert "COMPOSE_PROJECT_NAME" in env
