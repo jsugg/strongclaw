@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fnmatch
+import functools
+import importlib
 import json
 import os
 import pathlib
@@ -13,9 +15,13 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import requests
+
+if TYPE_CHECKING:
+    from tree_sitter import Language as TreeSitterLanguage
+    from tree_sitter import Node as TreeSitterNode
 
 from clawops.common import canonical_json, expand, load_yaml, sha256_hex, utc_now_ms, write_text
 from clawops.context.codebase.benchmark import (
@@ -73,7 +79,7 @@ DEFAULT_TEXT_EXTENSIONS = {
     ".h",
     ".hpp",
 }
-CHUNKER_VERSION = 1
+CHUNKER_VERSION = 2
 DEFAULT_CODEBASE_QDRANT_COLLECTION = "strongclaw-codebase-context"
 
 SYMBOL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
@@ -93,6 +99,13 @@ SYMBOL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "go": [
         re.compile(r"^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE),
         re.compile(r"^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b", re.MULTILINE),
+    ],
+    "rust": [
+        re.compile(r"^\s*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:<|\()", re.MULTILINE),
+        re.compile(
+            r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+            re.MULTILINE,
+        ),
     ],
 }
 IMPORT_PATTERNS: dict[str, list[re.Pattern[str]]] = {
@@ -116,6 +129,16 @@ type SymlinkPolicy = Literal["follow", "in_repo_only", "never"]
 type GraphBackendName = Literal["sqlite", "neo4j"]
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _SyntaxDefinition:
+    """One syntax-aware definition range extracted from tree-sitter."""
+
+    start_line: int
+    end_line: int
+    symbol: str | None
+    kind: str
+
+
 def _matches_path_pattern(path_text: str, pattern: str) -> bool:
     """Return True when a repo-relative path matches a configured glob."""
     return fnmatch.fnmatch(path_text, pattern) or (
@@ -133,22 +156,258 @@ def detect_language(path: pathlib.Path) -> str:
         ".js": "javascript",
         ".jsx": "javascript",
         ".go": "go",
+        ".rs": "rust",
     }.get(ext, "text")
 
 
-def extract_symbols(path: pathlib.Path, text: str) -> list[str]:
-    """Extract a small symbol list with regex heuristics."""
-    language = detect_language(path)
-    patterns = SYMBOL_PATTERNS.get(language, [])
-    symbols: list[str] = []
-    for pattern in patterns:
-        symbols.extend(pattern.findall(text))
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for item in symbols:
-        if item in seen:
+@functools.lru_cache(maxsize=16)
+def _tree_sitter_language(path: str, language: str) -> TreeSitterLanguage | None:
+    """Return the cached tree-sitter grammar for one repo-relative path."""
+    try:
+        from tree_sitter import Language as tree_sitter_language
+    except ImportError:
+        return None
+    suffix = pathlib.PurePosixPath(path).suffix.lower()
+    module_name: str | None = None
+    factory_name = "language"
+    if language == "python":
+        module_name = "tree_sitter_python"
+    elif language == "typescript":
+        module_name = "tree_sitter_typescript"
+        factory_name = "language_tsx" if suffix == ".tsx" else "language_typescript"
+    elif language == "javascript":
+        module_name = "tree_sitter_javascript"
+    elif language == "go":
+        module_name = "tree_sitter_go"
+    elif language == "rust":
+        module_name = "tree_sitter_rust"
+    if module_name is None:
+        return None
+    try:
+        grammar_module = importlib.import_module(module_name)
+    except ImportError:
+        return None
+    factory = getattr(grammar_module, factory_name, None)
+    if not callable(factory):
+        return None
+    return tree_sitter_language(factory())
+
+
+def _iter_tree_sitter_nodes(root: TreeSitterNode) -> Iterable[TreeSitterNode]:
+    """Yield a depth-first traversal of one tree-sitter subtree."""
+    stack: list[TreeSitterNode] = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        children = list(node.children)
+        stack.extend(reversed(children))
+
+
+def _node_text(source: bytes, node: TreeSitterNode | None) -> str | None:
+    """Return decoded node text when a field node exists."""
+    if node is None:
+        return None
+    text = source[node.start_byte : node.end_byte].decode("utf-8").strip()
+    return text or None
+
+
+def _definition_from_node(
+    node: TreeSitterNode,
+    *,
+    symbol: str | None,
+    kind: str,
+) -> _SyntaxDefinition:
+    """Normalize one definition node into a chunk boundary."""
+    return _SyntaxDefinition(
+        start_line=node.start_point[0] + 1,
+        end_line=node.end_point[0] + 1,
+        symbol=symbol,
+        kind=kind,
+    )
+
+
+def _python_syntax_definition(node: TreeSitterNode, source: bytes) -> _SyntaxDefinition | None:
+    """Return one Python definition range when the node represents a symbol."""
+    if node.type == "decorated_definition":
+        decorated = next(
+            (
+                child
+                for child in node.children
+                if child.type in {"class_definition", "function_definition"}
+            ),
+            None,
+        )
+        if decorated is None:
+            return None
+        kind = "class" if decorated.type == "class_definition" else "function"
+        return _definition_from_node(
+            node,
+            symbol=_node_text(source, decorated.child_by_field_name("name")),
+            kind=kind,
+        )
+    if node.type not in {"class_definition", "function_definition"}:
+        return None
+    parent = node.parent
+    if parent is not None and parent.type == "decorated_definition":
+        return None
+    kind = "class" if node.type == "class_definition" else "function"
+    return _definition_from_node(
+        node, symbol=_node_text(source, node.child_by_field_name("name")), kind=kind
+    )
+
+
+def _js_like_syntax_definition(node: TreeSitterNode, source: bytes) -> _SyntaxDefinition | None:
+    """Return one JavaScript or TypeScript definition range when available."""
+    if node.type in {
+        "class_declaration",
+        "enum_declaration",
+        "interface_declaration",
+        "type_alias_declaration",
+    }:
+        return _definition_from_node(
+            node,
+            symbol=_node_text(source, node.child_by_field_name("name")),
+            kind="class",
+        )
+    if node.type in {"function_declaration", "generator_function_declaration", "method_definition"}:
+        return _definition_from_node(
+            node,
+            symbol=_node_text(source, node.child_by_field_name("name")),
+            kind="function",
+        )
+    if node.type != "variable_declarator":
+        return None
+    value_node = node.child_by_field_name("value")
+    if value_node is None or value_node.type not in {
+        "arrow_function",
+        "class",
+        "function_expression",
+    }:
+        return None
+    range_node = node.parent if node.parent is not None else node
+    if range_node.type not in {"lexical_declaration", "variable_declaration"}:
+        range_node = node
+    if range_node.parent is not None and range_node.parent.type == "export_statement":
+        range_node = range_node.parent
+    kind = "class" if value_node.type == "class" else "function"
+    return _definition_from_node(
+        range_node,
+        symbol=_node_text(source, node.child_by_field_name("name")),
+        kind=kind,
+    )
+
+
+def _go_syntax_definition(node: TreeSitterNode, source: bytes) -> _SyntaxDefinition | None:
+    """Return one Go definition range when available."""
+    if node.type in {"function_declaration", "method_declaration"}:
+        return _definition_from_node(
+            node,
+            symbol=_node_text(source, node.child_by_field_name("name")),
+            kind="function",
+        )
+    if node.type != "type_spec":
+        return None
+    range_node = (
+        node.parent if node.parent is not None and node.parent.type == "type_declaration" else node
+    )
+    return _definition_from_node(
+        range_node,
+        symbol=_node_text(source, node.child_by_field_name("name")),
+        kind="class",
+    )
+
+
+def _rust_syntax_definition(node: TreeSitterNode, source: bytes) -> _SyntaxDefinition | None:
+    """Return one Rust definition range when available."""
+    kind_by_type = {
+        "enum_item": "class",
+        "function_item": "function",
+        "impl_item": "class",
+        "mod_item": "module",
+        "struct_item": "class",
+        "trait_item": "class",
+    }
+    kind = kind_by_type.get(node.type)
+    if kind is None:
+        return None
+    return _definition_from_node(
+        node,
+        symbol=_node_text(source, node.child_by_field_name("name")),
+        kind=kind,
+    )
+
+
+def _tree_sitter_definitions(
+    path: str, text: str, *, language: str
+) -> tuple[_SyntaxDefinition, ...]:
+    """Return stable definition ranges for one file when tree-sitter is available."""
+    grammar = _tree_sitter_language(path, language)
+    if grammar is None:
+        return ()
+    try:
+        from tree_sitter import Parser as tree_sitter_parser
+    except ImportError:
+        return ()
+    source = text.encode("utf-8")
+    parser = tree_sitter_parser(grammar)
+    tree = parser.parse(source)
+    root = tree.root_node
+    definitions: list[_SyntaxDefinition] = []
+    for node in _iter_tree_sitter_nodes(root):
+        definition: _SyntaxDefinition | None = None
+        if language == "python":
+            definition = _python_syntax_definition(node, source)
+        elif language in {"javascript", "typescript"}:
+            definition = _js_like_syntax_definition(node, source)
+        elif language == "go":
+            definition = _go_syntax_definition(node, source)
+        elif language == "rust":
+            definition = _rust_syntax_definition(node, source)
+        if definition is not None:
+            definitions.append(definition)
+    if not definitions:
+        return ()
+    definitions.sort(
+        key=lambda item: (item.start_line, -(item.end_line - item.start_line), item.symbol or "")
+    )
+    filtered: list[_SyntaxDefinition] = []
+    for definition in definitions:
+        if (
+            filtered
+            and definition.start_line >= filtered[-1].start_line
+            and definition.end_line <= filtered[-1].end_line
+        ):
             continue
-        seen.add(item)
+        if filtered and definition == filtered[-1]:
+            continue
+        filtered.append(definition)
+    return tuple(filtered)
+
+
+def extract_symbols(path: pathlib.Path, text: str) -> list[str]:
+    """Extract a small symbol list with tree-sitter-first chunk boundaries."""
+    language = detect_language(path)
+    tree_sitter_definitions = _tree_sitter_definitions(path.as_posix(), text, language=language)
+    if tree_sitter_definitions:
+        extracted_symbols: list[str] = []
+        extracted_seen: set[str] = set()
+        for definition in tree_sitter_definitions:
+            if definition.symbol is None or definition.symbol in extracted_seen:
+                continue
+            extracted_seen.add(definition.symbol)
+            extracted_symbols.append(definition.symbol)
+        if extracted_symbols:
+            return extracted_symbols[:64]
+    patterns = SYMBOL_PATTERNS.get(language, [])
+    regex_symbols: list[str] = []
+    for pattern in patterns:
+        regex_symbols.extend(pattern.findall(text))
+    deduped: list[str] = []
+    seen_regex: set[str] = set()
+    for item in regex_symbols:
+        if item in seen_regex:
+            continue
+        seen_regex.add(item)
         deduped.append(item)
     return deduped[:64]
 
@@ -156,6 +415,19 @@ def extract_symbols(path: pathlib.Path, text: str) -> list[str]:
 def _line_number_for_offset(text: str, offset: int) -> int:
     """Return the 1-based line number for *offset* inside *text*."""
     return text.count("\n", 0, offset) + 1
+
+
+def _trim_chunk_window(start_line: int, lines: Sequence[str]) -> tuple[int, tuple[str, ...]] | None:
+    """Trim blank edges from one line window while preserving line offsets."""
+    start_offset = 0
+    end_offset = len(lines)
+    while start_offset < end_offset and not lines[start_offset].strip():
+        start_offset += 1
+    while end_offset > start_offset and not lines[end_offset - 1].strip():
+        end_offset -= 1
+    if start_offset >= end_offset:
+        return None
+    return start_line + start_offset, tuple(lines[start_offset:end_offset])
 
 
 def _split_text_block(
@@ -224,6 +496,61 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
             lines=("",),
         )
 
+    syntax_definitions = _tree_sitter_definitions(path, text, language=language)
+    if syntax_definitions:
+        syntax_chunk_records: list[ChunkRecord] = []
+        cursor_line = 1
+        for definition in syntax_definitions:
+            if definition.start_line > cursor_line:
+                gap = _trim_chunk_window(
+                    cursor_line,
+                    lines[cursor_line - 1 : definition.start_line - 1],
+                )
+                if gap is not None:
+                    gap_start, gap_lines = gap
+                    syntax_chunk_records.extend(
+                        _split_text_block(
+                            path=path,
+                            language=language,
+                            symbol=None,
+                            kind="text" if language == "text" else "module",
+                            start_line=gap_start,
+                            lines=gap_lines,
+                        )
+                    )
+            definition_window = _trim_chunk_window(
+                definition.start_line,
+                lines[definition.start_line - 1 : definition.end_line],
+            )
+            if definition_window is not None:
+                window_start, window_lines = definition_window
+                syntax_chunk_records.extend(
+                    _split_text_block(
+                        path=path,
+                        language=language,
+                        symbol=definition.symbol,
+                        kind=definition.kind,
+                        start_line=window_start,
+                        lines=window_lines,
+                    )
+                )
+            cursor_line = definition.end_line + 1
+        if cursor_line <= len(lines):
+            trailing = _trim_chunk_window(cursor_line, lines[cursor_line - 1 :])
+            if trailing is not None:
+                trailing_start, trailing_lines = trailing
+                syntax_chunk_records.extend(
+                    _split_text_block(
+                        path=path,
+                        language=language,
+                        symbol=None,
+                        kind="text" if language == "text" else "module",
+                        start_line=trailing_start,
+                        lines=trailing_lines,
+                    )
+                )
+        return syntax_chunk_records
+
     patterns = SYMBOL_PATTERNS.get(language, [])
     symbol_matches: list[tuple[int, str, str]] = []
     for pattern in patterns:
@@ -235,7 +562,7 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
     symbol_matches.sort(key=lambda item: item[0])
 
     if not symbol_matches:
-        chunk_records: list[ChunkRecord] = []
+        text_chunk_records: list[ChunkRecord] = []
         block_start = 1
         block_lines: list[str] = []
         for line_number, line in enumerate(lines, start=1):
@@ -243,7 +570,7 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
                 block_lines.append(line)
                 continue
             if block_lines:
-                chunk_records.extend(
+                text_chunk_records.extend(
                     _split_text_block(
                         path=path,
                         language=language,
@@ -256,7 +583,7 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
                 block_lines = []
             block_start = line_number + 1
         if block_lines:
-            chunk_records.extend(
+            text_chunk_records.extend(
                 _split_text_block(
                     path=path,
                     language=language,
@@ -266,14 +593,14 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
                     lines=tuple(block_lines),
                 )
             )
-        return chunk_records
+        return text_chunk_records
 
-    chunk_records = []
+    chunk_records: list[ChunkRecord] = []
     for index, (start_line, symbol, kind) in enumerate(symbol_matches):
         next_start = (
             symbol_matches[index + 1][0] if index + 1 < len(symbol_matches) else len(lines) + 1
         )
-        window = lines[start_line - 1 : next_start - 1]
+        symbol_window = lines[start_line - 1 : next_start - 1]
         chunk_records.extend(
             _split_text_block(
                 path=path,
@@ -281,7 +608,7 @@ def build_chunks(path: str, text: str, *, language: str) -> list["ChunkRecord"]:
                 symbol=symbol,
                 kind=kind,
                 start_line=start_line,
-                lines=tuple(window),
+                lines=tuple(symbol_window),
             )
         )
     return chunk_records

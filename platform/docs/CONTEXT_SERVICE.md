@@ -7,7 +7,7 @@ and adds scale-aware chunk, hybrid, and graph state.
 ## What it does
 
 - indexes repo files
-- builds chunk records for medium and large retrieval
+- builds tree-sitter-first chunk records for supported code languages and falls back to the heuristic chunker when grammars are unavailable
 - extracts a lightweight symbol map
 - supports lexical search
 - updates lexical, chunk, and graph state inline during reindexing
@@ -138,7 +138,7 @@ Reindexing is authoritative for the configured file universe:
 Scale behavior is explicit per invocation:
 
 - `small` keeps the file-level lexical path and avoids graph expansion
-- `medium` uses chunk retrieval, hybrid lexical+dense+sparse fusion when the shared embedding and Qdrant sidecars are healthy, and graph expansion that prefers Neo4j with SQLite fallback when allowed
+- `medium` uses syntax-aware chunk retrieval, hybrid lexical+dense+sparse fusion when the shared embedding and Qdrant sidecars are healthy, and graph expansion that prefers Neo4j with SQLite fallback when allowed
 - `large` keeps hybrid and graph expansion enabled and fails closed when Neo4j is unhealthy
 
 Hybrid runtime artifacts are intentionally deferred for medium and large reindexing:
