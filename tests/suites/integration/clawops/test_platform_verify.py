@@ -252,8 +252,14 @@ def test_repo_aux_stack_neo4j_auth_uses_shared_varlock_credentials() -> None:
         "${NEO4J_USERNAME:-neo4j}/"
         "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}"
     )
+    expected_image = (
+        "neo4j:5.26.23-community@"
+        "sha256:40bf5ae9282213087e4d6036aab3ec443fe9c974d3dd4f14a11892c63157238f"
+    )
 
     for compose_path in compose_paths:
         compose = load_yaml(compose_path)
         neo4j_env = compose["services"]["neo4j"]["environment"]
+        neo4j_image = compose["services"]["neo4j"]["image"]
+        assert neo4j_image == expected_image
         assert neo4j_env["NEO4J_AUTH"] == expected_auth
