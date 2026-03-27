@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from time import perf_counter
+from typing import cast
 
 from clawops.hypermemory.contracts import VerificationDeps, VerifyLaneChecks, VerifyResult
 from clawops.hypermemory.models import HypermemoryConfig, RerankResponse
@@ -262,15 +263,15 @@ class VerificationService:
         self, collection_details: dict[str, object]
     ) -> bool:
         """Return whether the live Qdrant collection exposes both named vector lanes."""
-        config = collection_details.get("config")
-        if not isinstance(config, dict):
+        config = _mapping_value(collection_details, "config")
+        if config is None:
             return False
-        params = config.get("params")
-        if not isinstance(params, dict):
+        params = _mapping_value(config, "params")
+        if params is None:
             return False
-        vectors = params.get("vectors")
-        sparse_vectors = params.get("sparse_vectors")
-        if not isinstance(vectors, dict) or not isinstance(sparse_vectors, dict):
+        vectors = _mapping_value(params, "vectors")
+        sparse_vectors = _mapping_value(params, "sparse_vectors")
+        if vectors is None or sparse_vectors is None:
             return False
         return (
             self._config.qdrant.dense_vector_name in vectors
@@ -292,3 +293,11 @@ class VerificationService:
         if not text:
             return None
         return " ".join(text.split()[:8])
+
+
+def _mapping_value(mapping: Mapping[str, object], key: str) -> Mapping[str, object] | None:
+    """Return a nested mapping value when present."""
+    value = mapping.get(key)
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[str, object], value)

@@ -7,7 +7,7 @@ import math
 import os
 import platform
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 
 import requests
 
@@ -48,6 +48,33 @@ class _RerankBackend(Protocol):
         ...
 
 
+class _HttpResponse(Protocol):
+    """Minimal HTTP response contract used by provider adapters."""
+
+    def raise_for_status(self) -> None:
+        """Raise when the response status is not successful."""
+        ...
+
+    def json(self) -> object:
+        """Return the decoded JSON response body."""
+        ...
+
+
+class _HttpSession(Protocol):
+    """Minimal HTTP session contract used by provider adapters."""
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: dict[str, object],
+        headers: dict[str, str],
+        timeout: float,
+    ) -> _HttpResponse:
+        """Submit one POST request."""
+        ...
+
+
 class DisabledEmbeddingProvider:
     """Provider used when dense retrieval is disabled."""
 
@@ -59,9 +86,9 @@ class DisabledEmbeddingProvider:
 class CompatibleHttpEmbeddingProvider:
     """Embedding provider for compatible HTTP endpoints."""
 
-    def __init__(self, config: EmbeddingConfig) -> None:
+    def __init__(self, config: EmbeddingConfig, *, session: _HttpSession | None = None) -> None:
         self._config = config
-        self._session = requests.Session()
+        self._session = session if session is not None else requests.Session()
 
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed *texts* through the configured HTTP endpoint."""
@@ -73,7 +100,7 @@ class CompatibleHttpEmbeddingProvider:
             raise ValueError("embedding.base_url is required when embeddings are enabled")
         if not self._config.model:
             raise ValueError("embedding.model is required when embeddings are enabled")
-        payload = {"input": list(texts), "model": self._config.model}
+        payload: dict[str, object] = {"input": list(texts), "model": self._config.model}
         response = self._session.post(
             f"{self._config.base_url.rstrip('/')}/embeddings",
             json=payload,
@@ -81,19 +108,32 @@ class CompatibleHttpEmbeddingProvider:
             timeout=self._config.timeout_ms / 1000.0,
         )
         response.raise_for_status()
-        body = response.json()
-        raw_data = body.get("data")
+        raw_body = response.json()
+        if not isinstance(raw_body, Mapping):
+            raise TypeError("embedding response must be a mapping")
+        body_mapping = cast(Mapping[str, object], raw_body)
+        raw_data = body_mapping.get("data")
         if not isinstance(raw_data, list):
             raise ValueError("embedding response is missing a data list")
-        ordered = sorted(raw_data, key=lambda item: int(item.get("index", 0)))
+        ordered = sorted(
+            (
+                _as_mapping(item, name=f"embedding response item {index}")
+                for index, item in enumerate(cast(list[object], raw_data))
+            ),
+            key=lambda item: _as_int(item.get("index"), name="embedding response index", default=0),
+        )
         vectors: list[list[float]] = []
         for index, item in enumerate(ordered):
-            if not isinstance(item, dict):
-                raise TypeError(f"embedding response item {index} must be a mapping")
             raw_vector = item.get("embedding")
             if not isinstance(raw_vector, list) or not raw_vector:
                 raise TypeError(f"embedding response item {index} is missing an embedding vector")
-            vector = [float(value) for value in raw_vector]
+            vector: list[float] = []
+            for raw_value in cast(list[object], raw_vector):
+                if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+                    raise TypeError(
+                        f"embedding response item {index} must contain only numeric values"
+                    )
+                vector.append(float(raw_value))
             if self._config.dimensions is not None and len(vector) != self._config.dimensions:
                 raise ValueError(
                     f"embedding vector dimension {len(vector)} does not match configured "
@@ -251,9 +291,14 @@ class CompatibleHttpRerankProvider:
 
     kind: RerankProviderKind = "compatible-http"
 
-    def __init__(self, config: CompatibleHttpRerankConfig) -> None:
+    def __init__(
+        self,
+        config: CompatibleHttpRerankConfig,
+        *,
+        session: _HttpSession | None = None,
+    ) -> None:
         self._config = config
-        self._session = requests.Session()
+        self._session = session if session is not None else requests.Session()
 
     def score_documents(self, query: str, documents: Sequence[str]) -> list[float]:
         """Score *documents* through the configured compatible HTTP endpoint."""
@@ -416,8 +461,6 @@ def _parse_compatible_http_scores(
     items = _response_items(body)
     scores_by_index: dict[int, float] = {}
     for offset, item in enumerate(items):
-        if not isinstance(item, Mapping):
-            raise TypeError(f"rerank response item {offset} must be a mapping")
         raw_index = item.get("index")
         if isinstance(raw_index, bool) or not isinstance(raw_index, int):
             raise TypeError(f"rerank response item {offset} is missing an integer index")
@@ -432,15 +475,22 @@ def _parse_compatible_http_scores(
     return [scores_by_index[index] for index in range(expected_count)]
 
 
-def _response_items(body: object) -> list[object]:
+def _response_items(body: object) -> list[Mapping[str, object]]:
     """Return the list-like rerank result payload from *body*."""
     if isinstance(body, list):
-        return list(body)
+        return [
+            _as_mapping(item, name=f"rerank response item {index}")
+            for index, item in enumerate(cast(list[object], body))
+        ]
     if isinstance(body, Mapping):
+        body_mapping = cast(Mapping[str, object], body)
         for key in ("results", "data"):
-            candidate = body.get(key)
+            candidate = body_mapping.get(key)
             if isinstance(candidate, list):
-                return list(candidate)
+                return [
+                    _as_mapping(item, name=f"rerank response item {index}")
+                    for index, item in enumerate(cast(list[object], candidate))
+                ]
     raise TypeError("rerank response is missing a results list")
 
 
@@ -451,12 +501,13 @@ def _coerce_score_sequence(
     source: str,
 ) -> list[float]:
     """Normalize one score payload into a list of floats."""
-    if hasattr(raw_scores, "tolist"):
-        raw_scores = cast(Any, raw_scores).tolist()
+    tolist = getattr(raw_scores, "tolist", None)
+    if callable(tolist):
+        raw_scores = tolist()
     if isinstance(raw_scores, (str, bytes)) or not isinstance(raw_scores, Sequence):
         raise TypeError(f"{source} must be a sequence of numeric scores")
     scores: list[float] = []
-    for index, value in enumerate(raw_scores):
+    for index, value in enumerate(cast(Sequence[object], raw_scores)):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(f"{source} item {index} must be numeric")
         scores.append(float(value))
@@ -491,3 +542,19 @@ def _normalize_vector(vector: Sequence[float]) -> list[float]:
     if norm <= 0.0:
         raise ValueError("embedding vector norm must be positive")
     return [value / norm for value in vector]
+
+
+def _as_mapping(value: object, *, name: str) -> Mapping[str, object]:
+    """Validate and cast a JSON-like mapping."""
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{name} must be a mapping")
+    return cast(Mapping[str, object], value)
+
+
+def _as_int(value: object, *, name: str, default: int | None = None) -> int:
+    """Validate an integer-like JSON value."""
+    if value is None and default is not None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    return value

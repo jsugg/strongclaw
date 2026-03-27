@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import cast
 
 import pytest
 import requests
@@ -14,23 +15,23 @@ pytestmark = pytest.mark.qdrant
 
 
 class _FakeResponse:
-    def __init__(self, payload: dict[str, Any] | None = None, *, status_code: int = 200) -> None:
-        self._payload = payload or {}
+    def __init__(self, payload: object | None = None, *, status_code: int = 200) -> None:
+        self._payload: object = {} if payload is None else payload
         self.status_code = status_code
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise requests.HTTPError(f"{self.status_code} error")
 
-    def json(self) -> dict[str, Any]:
+    def json(self) -> object:
         return self._payload
 
 
 class _FakeSession:
     def __init__(self) -> None:
-        self.put_calls: list[dict[str, Any]] = []
-        self.post_calls: list[dict[str, Any]] = []
-        self.get_calls: list[dict[str, Any]] = []
+        self.put_calls: list[dict[str, object]] = []
+        self.post_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
         self.conflict_on_collection = False
         self.put_outcomes: list[_FakeResponse | Exception] = []
         self.post_outcomes: list[_FakeResponse | Exception] = []
@@ -58,10 +59,10 @@ class _FakeSession:
         self,
         url: str,
         *,
-        json: dict[str, Any],
+        json: Mapping[str, object],
         headers: dict[str, str],
         timeout: float,
-        params: dict[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> _FakeResponse:
         self.put_calls.append(
             {
@@ -80,10 +81,10 @@ class _FakeSession:
         self,
         url: str,
         *,
-        json: dict[str, Any],
+        json: Mapping[str, object],
         headers: dict[str, str],
         timeout: float,
-        params: dict[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> _FakeResponse:
         self.post_calls.append(
             {
@@ -123,11 +124,11 @@ class _FakeSession:
 
 
 def test_qdrant_backend_uses_expected_rest_payloads() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
-    backend._session = fake_session  # type: ignore[assignment]
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
 
     backend.ensure_collection(vector_size=3, include_sparse=True)
     backend.upsert_points(
@@ -156,39 +157,52 @@ def test_qdrant_backend_uses_expected_rest_payloads() -> None:
     hits = backend.search_dense(
         vector=[1.0, 0.0, 0.0], limit=5, mode="memory", scope="project:strongclaw"
     )
+    create_payload = cast(dict[str, object], fake_session.put_calls[0]["json"])
+    upsert_payload = cast(dict[str, object], fake_session.put_calls[1]["json"])
+    search_payload = cast(dict[str, object], fake_session.post_calls[-1]["json"])
+    vectors = cast(dict[str, object], create_payload["vectors"])
+    dense_vector = cast(dict[str, object], vectors["dense"])
+    sparse_vectors = cast(dict[str, object], create_payload["sparse_vectors"])
+    sparse_lane = cast(dict[str, object], sparse_vectors["sparse"])
+    sparse_index = cast(dict[str, object], sparse_lane["index"])
+    points = cast(list[object], upsert_payload["points"])
+    first_point = cast(dict[str, object], points[0])
+    point_vectors = cast(dict[str, object], first_point["vector"])
+    search_filter = cast(dict[str, object], search_payload["filter"])
+    must_filters = cast(list[object], search_filter["must"])
+    first_filter = cast(dict[str, object], must_filters[0])
 
-    assert fake_session.put_calls[0]["url"].endswith("/collections/hypermemory-test")
-    assert fake_session.put_calls[0]["json"]["vectors"]["dense"]["size"] == 3
-    assert (
-        fake_session.put_calls[0]["json"]["sparse_vectors"]["sparse"]["index"]["on_disk"] is False
-    )
-    assert fake_session.put_calls[1]["json"]["points"][0]["vector"]["dense"] == [1.0, 0.0, 0.0]
-    assert fake_session.put_calls[1]["json"]["points"][0]["vector"]["sparse"]["indices"] == [0, 3]
-    assert fake_session.post_calls[-1]["url"].endswith("/points/query")
-    assert fake_session.post_calls[-1]["json"]["using"] == "dense"
-    assert fake_session.post_calls[-1]["json"]["filter"]["must"][0]["key"] == "lane"
+    assert cast(str, fake_session.put_calls[0]["url"]).endswith("/collections/hypermemory-test")
+    assert dense_vector["size"] == 3
+    assert sparse_index["on_disk"] is False
+    assert point_vectors["dense"] == [1.0, 0.0, 0.0]
+    assert cast(dict[str, object], point_vectors["sparse"])["indices"] == [0, 3]
+    assert cast(str, fake_session.post_calls[-1]["url"]).endswith("/points/query")
+    assert search_payload["using"] == "dense"
+    assert first_filter["key"] == "lane"
     assert hits[0].item_id == 42
     assert hits[0].point_id == "point-1"
 
 
 def test_qdrant_backend_treats_existing_collection_as_idempotent() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
     fake_session.conflict_on_collection = True
-    backend._session = fake_session  # type: ignore[assignment]
 
     backend.ensure_collection(vector_size=3)
 
-    assert fake_session.put_calls[0]["url"].endswith("/collections/hypermemory-test")
+    assert cast(str, fake_session.put_calls[0]["url"]).endswith("/collections/hypermemory-test")
 
 
 def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
     fake_session.put_outcomes = [
         requests.ReadTimeout("timed out"),
         _FakeResponse(),
@@ -208,7 +222,6 @@ def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
             }
         ),
     ]
-    backend._session = fake_session  # type: ignore[assignment]
 
     backend.ensure_collection(vector_size=3, include_sparse=True)
 
@@ -218,30 +231,30 @@ def test_qdrant_backend_retries_collection_creation_until_ready() -> None:
 
 
 def test_qdrant_backend_health_prefers_readyz_and_falls_back_to_healthz() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
     fake_session.get_outcomes = [
         _FakeResponse(status_code=404),
         _FakeResponse(),
     ]
-    backend._session = fake_session  # type: ignore[assignment]
 
     health = backend.health()
 
     assert health["healthy"] is True
     assert health["probe"] == "healthz"
-    assert fake_session.get_calls[0]["url"].endswith("/readyz")
-    assert fake_session.get_calls[1]["url"].endswith("/healthz")
+    assert cast(str, fake_session.get_calls[0]["url"]).endswith("/readyz")
+    assert cast(str, fake_session.get_calls[1]["url"]).endswith("/healthz")
 
 
 def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
-    backend._session = fake_session  # type: ignore[assignment]
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
 
     hits = backend.search_sparse(
         vector={"indices": [1, 4], "values": [0.9, 0.4]},
@@ -249,25 +262,26 @@ def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
         mode="all",
         scope=None,
     )
+    search_payload = cast(dict[str, object], fake_session.post_calls[-1]["json"])
 
-    assert fake_session.post_calls[-1]["json"]["query"] == {
+    assert search_payload["query"] == {
         "indices": [1, 4],
         "values": [0.9, 0.4],
     }
-    assert fake_session.post_calls[-1]["json"]["using"] == "sparse"
+    assert search_payload["using"] == "sparse"
     assert hits[0].item_id == 42
 
 
 def test_qdrant_backend_retries_point_upserts_after_transient_server_errors() -> None:
-    backend = QdrantBackend(
-        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
-    )
     fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test"),
+        session=fake_session,
+    )
     fake_session.put_outcomes = [
         _FakeResponse(status_code=500),
         _FakeResponse(),
     ]
-    backend._session = fake_session  # type: ignore[assignment]
 
     backend.upsert_points(
         [

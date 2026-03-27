@@ -824,7 +824,7 @@ class ReflectionSummary:
         }
 
 
-TYPE_ORDER: dict[EntryType, float] = cast(dict[EntryType, float], dict(SEARCH_TYPE_WEIGHTS))
+TYPE_ORDER: dict[EntryType, float] = dict(SEARCH_TYPE_WEIGHTS)
 
 
 def normalize_text_tokens(text: str) -> tuple[str, ...]:

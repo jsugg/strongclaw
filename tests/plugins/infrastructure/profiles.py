@@ -7,7 +7,7 @@ from typing import cast
 
 from tests.plugins.infrastructure.types import ProfileOverrideValue, ProfileValue, TestProfileName
 
-type ProfileOverrides = dict[str, ProfileOverrideValue]
+type ProfileOverrides = dict[str, str | None]
 
 
 def _normalize_value(value: ProfileValue) -> str:

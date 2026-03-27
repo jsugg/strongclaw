@@ -61,7 +61,7 @@ def _optional_string(value: object, *, path: str) -> str | None:
 def _string_list(value: object, *, path: str) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise TypeError(f"hypermemory defaults {path} must be a sequence of strings")
-    items = tuple(_string(item, path=path) for item in value)
+    items = tuple(_string(item, path=path) for item in cast(Sequence[object], value))
     return items
 
 
@@ -158,23 +158,29 @@ DEFAULT_QDRANT_SPARSE_VECTOR_NAME = _string(
     _QDRANT["sparse_vector_name"], path="qdrant.sparse_vector_name"
 )
 
-BANK_HEADERS = {
-    key: _string(value, path=f"engine.bank_headers.{key}") + "\n"
-    for key, value in _BANK_HEADERS.items()
-}
+BANK_HEADERS: dict[str, str] = {}
+for raw_key, raw_value in _BANK_HEADERS.items():
+    key = str(raw_key)
+    BANK_HEADERS[key] = _string(raw_value, path=f"engine.bank_headers.{key}") + "\n"
 WRITABLE_PREFIXES = _string_list(_ENGINE["writable_prefixes"], path="engine.writable_prefixes")
-MEMORY_PRO_CATEGORY_MAP = {
-    key: _string(value, path=f"engine.memory_pro.category_map.{key}")
-    for key, value in _MEMORY_PRO_CATEGORY.items()
-}
-MEMORY_PRO_IMPORTANCE_MAP = {
-    key: _float(value, path=f"engine.memory_pro.importance_map.{key}")
-    for key, value in _MEMORY_PRO_IMPORTANCE.items()
-}
-SEARCH_TYPE_WEIGHTS = {
-    cast(EntryTypeLiteral, key): _float(value, path=f"retrieval.type_weights.{key}")
-    for key, value in _RETRIEVAL_TYPE_WEIGHTS.items()
-}
+MEMORY_PRO_CATEGORY_MAP: dict[str, str] = {}
+for raw_key, raw_value in _MEMORY_PRO_CATEGORY.items():
+    key = str(raw_key)
+    MEMORY_PRO_CATEGORY_MAP[key] = _string(
+        raw_value,
+        path=f"engine.memory_pro.category_map.{key}",
+    )
+MEMORY_PRO_IMPORTANCE_MAP: dict[str, float] = {}
+for raw_key, raw_value in _MEMORY_PRO_IMPORTANCE.items():
+    key = str(raw_key)
+    MEMORY_PRO_IMPORTANCE_MAP[key] = _float(
+        raw_value,
+        path=f"engine.memory_pro.importance_map.{key}",
+    )
+SEARCH_TYPE_WEIGHTS: dict[EntryTypeLiteral, float] = {}
+for raw_key, raw_value in _RETRIEVAL_TYPE_WEIGHTS.items():
+    key = cast(EntryTypeLiteral, str(raw_key))
+    SEARCH_TYPE_WEIGHTS[key] = _float(raw_value, path=f"retrieval.type_weights.{raw_key}")
 
 
 def _compiled_pattern_rules(
@@ -186,7 +192,7 @@ def _compiled_pattern_rules(
     if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
         raise TypeError(f"hypermemory defaults {path} must be a sequence")
     compiled: list[tuple[re.Pattern[str], str | None]] = []
-    for index, value in enumerate(values):
+    for index, value in enumerate(cast(Sequence[object], values)):
         mapping = _mapping(value, path=f"{path}[{index}]")
         pattern = re.compile(_string(mapping.get("pattern"), path=f"{path}[{index}].pattern"))
         key_value = mapping.get("key")
@@ -220,10 +226,13 @@ CAPTURE_LLM_DEFAULTS = _CAPTURE_LLM
 DECAY_DEFAULTS = _DECAY
 NOISE_DEFAULTS = _NOISE
 ADMISSION_DEFAULTS = _ADMISSION
-ADMISSION_TYPE_PRIORS_DEFAULTS = {
-    key: _float(value, path=f"admission.type_priors.{key}")
-    for key, value in _ADMISSION_PRIORS.items()
-}
+ADMISSION_TYPE_PRIORS_DEFAULTS: dict[str, float] = {}
+for raw_key, raw_value in _ADMISSION_PRIORS.items():
+    key = str(raw_key)
+    ADMISSION_TYPE_PRIORS_DEFAULTS[key] = _float(
+        raw_value,
+        path=f"admission.type_priors.{key}",
+    )
 BACKEND_DEFAULTS = _BACKEND
 EMBEDDING_DEFAULTS = _EMBEDDING
 RERANK_DEFAULTS = _RERANK

@@ -4,39 +4,51 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import cast
 
 from clawops.common import load_yaml
+from clawops.hypermemory.contracts import BenchmarkCase
+from clawops.hypermemory.models import SearchMode
 
 
-def load_benchmark_cases(path: pathlib.Path) -> list[dict[str, Any]]:
+def load_benchmark_cases(path: pathlib.Path) -> list[BenchmarkCase]:
     """Load benchmark cases from a YAML fixture file."""
     raw = load_yaml(path)
     if not isinstance(raw, Mapping):
         raise TypeError("benchmark fixture root must be a mapping")
-    cases = raw.get("cases")
+    root = cast(Mapping[str, object], raw)
+    cases = root.get("cases")
     if not isinstance(cases, list):
         raise TypeError("benchmark fixture must contain a cases list")
-    return [_normalize_case(index, case) for index, case in enumerate(cases)]
+    normalized_cases: list[BenchmarkCase] = []
+    for index, case in enumerate(cast(list[object], cases)):
+        normalized_cases.append(_normalize_case(index, case))
+    return normalized_cases
 
 
-def _normalize_case(index: int, raw: object) -> dict[str, Any]:
+def _normalize_case(index: int, raw: object) -> BenchmarkCase:
     """Normalize a single benchmark case."""
     if not isinstance(raw, Mapping):
         raise TypeError(f"cases[{index}] must be a mapping")
-    name = _require_string(raw.get("name"), f"cases[{index}].name")
-    query = _require_string(raw.get("query"), f"cases[{index}].query")
-    expected_paths = _string_list(raw.get("expectedPaths"), f"cases[{index}].expectedPaths")
-    lane = raw.get("lane", "all")
+    case_mapping = cast(Mapping[str, object], raw)
+    name = _require_string(case_mapping.get("name"), f"cases[{index}].name")
+    query = _require_string(case_mapping.get("query"), f"cases[{index}].query")
+    expected_paths = _string_list(
+        case_mapping.get("expectedPaths"), f"cases[{index}].expectedPaths"
+    )
+    lane_value = case_mapping.get("lane", "all")
+    if not isinstance(lane_value, str):
+        raise TypeError(f"cases[{index}].lane must be all, memory, or corpus")
+    lane = lane_value.strip()
     if lane not in {"all", "memory", "corpus"}:
         raise ValueError(f"cases[{index}].lane must be all, memory, or corpus")
-    case: dict[str, Any] = {
+    case: BenchmarkCase = {
         "name": name,
         "query": query,
         "expectedPaths": expected_paths,
-        "lane": lane,
+        "lane": cast(SearchMode, lane),
     }
-    max_results = raw.get("maxResults")
+    max_results = case_mapping.get("maxResults")
     if max_results is not None:
         if isinstance(max_results, bool) or not isinstance(max_results, int) or max_results <= 0:
             raise TypeError(f"cases[{index}].maxResults must be a positive integer")
@@ -58,7 +70,7 @@ def _string_list(value: object, name: str) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise TypeError(f"{name} must be a list of strings")
     normalized: list[str] = []
-    for item in value:
+    for item in cast(Sequence[object], value):
         if not isinstance(item, str) or not item.strip():
             raise TypeError(f"{name} must be a list of strings")
         normalized.append(item.strip())

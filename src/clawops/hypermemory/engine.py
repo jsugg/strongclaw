@@ -10,6 +10,7 @@ from typing import Any, Literal
 from clawops.common import ensure_parent
 from clawops.hypermemory.config import HypermemoryConfig
 from clawops.hypermemory.contracts import (
+    BenchmarkCase,
     BenchmarkResult,
     CorpusPathStatus,
     FlushMetadataResult,
@@ -416,6 +417,6 @@ class HypermemoryEngine:
         """List current canonical facts from the registry."""
         return self.canonical_store.list_facts(category=category, scope=scope)
 
-    def benchmark_cases(self, cases: list[dict[str, Any]]) -> BenchmarkResult:
+    def benchmark_cases(self, cases: list[BenchmarkCase]) -> BenchmarkResult:
         """Run simple benchmark cases against the current engine."""
         return self.canonical_store.benchmark_cases(cases)

@@ -199,12 +199,16 @@ def test_hypermemory_status_and_verify_report_sparse_backend_state(
 
     status = engine.status()
     verification = engine.verify()
+    dense_lane = verification["laneChecks"].get("dense")
+    sparse_lane = verification["laneChecks"].get("sparse")
 
     assert status["backendActive"] == "qdrant_sparse_dense_hybrid"
     assert status["sparseVectorItems"] >= 1
     assert status["sparseFingerprint"]
     assert status["sparseFingerprintDirty"] is False
     assert verification["ok"] is True
-    assert verification["laneChecks"]["dense"]["hits"] >= 1
-    assert verification["laneChecks"]["sparse"]["hits"] >= 1
+    assert dense_lane is not None
+    assert sparse_lane is not None
+    assert dense_lane["hits"] >= 1
+    assert sparse_lane["hits"] >= 1
     assert fake_qdrant.include_sparse_calls == [True]

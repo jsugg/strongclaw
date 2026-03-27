@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 import textwrap
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import TypedDict
 
 from clawops.hypermemory import DenseSearchCandidate, RerankResponse, SparseSearchCandidate
 from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
@@ -13,6 +13,11 @@ from clawops.hypermemory.models import RerankProviderKind, SearchMode
 
 type HypermemoryWorkspaceFactory = Callable[[], pathlib.Path]
 type HypermemoryConfigWriter = Callable[[pathlib.Path, pathlib.Path], None]
+
+
+class RerankCall(TypedDict):
+    query: str
+    documents: list[str]
 
 
 def write_hypermemory_config(workspace_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -125,8 +130,12 @@ class FakeQdrantBackend:
         self.raise_on_ensure_collection = False
         self.raise_on_upsert = False
         self.include_sparse_calls: list[bool] = []
-        self.health_payload = {"enabled": True, "healthy": True, "collection": "test"}
-        self.collection_details_payload = {
+        self.health_payload: dict[str, object] = {
+            "enabled": True,
+            "healthy": True,
+            "collection": "test",
+        }
+        self.collection_details_payload: dict[str, object] = {
             "config": {
                 "params": {
                     "vectors": {"dense": {"size": 3, "distance": "Cosine"}},
@@ -135,10 +144,10 @@ class FakeQdrantBackend:
             }
         }
 
-    def health(self) -> dict[str, Any]:
+    def health(self) -> dict[str, object]:
         return dict(self.health_payload)
 
-    def collection_details(self) -> dict[str, Any]:
+    def collection_details(self) -> dict[str, object]:
         return dict(self.collection_details_payload)
 
     def ensure_collection(self, *, vector_size: int, include_sparse: bool = False) -> None:
@@ -195,7 +204,7 @@ class StaticRerankProvider:
         self._scores: tuple[float, ...] = tuple(scores)
         self._provider: RerankProviderKind = provider
         self._fallback_used: bool = fallback_used
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[RerankCall] = []
 
     def score(self, query: str, documents: Sequence[str]) -> RerankResponse:
         self.calls.append({"query": query, "documents": list(documents)})

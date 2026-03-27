@@ -75,10 +75,11 @@ def test_hypermemory_verify_requires_an_operational_rerank_provider(
     ]
 
     verification = engine.verify()
+    rerank_lane = verification["laneChecks"]["rerank"]
 
     assert verification["ok"] is True
-    assert verification["laneChecks"]["rerank"]["provider"] == "local-sentence-transformers"
-    assert verification["laneChecks"]["rerank"]["candidateCount"] == 2
+    assert rerank_lane.get("provider") == "local-sentence-transformers"
+    assert rerank_lane.get("candidateCount") == 2
 
 
 def test_hypermemory_verify_fails_when_rerank_provider_is_not_operational(
