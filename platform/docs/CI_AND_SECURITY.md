@@ -94,6 +94,9 @@ in `.github/workflows/memory-plugin-verification.yml`.
   `.github/workflows/release.yml` all call the centralized
   `clawops supply-chain quality-gate` surface so linting, typing, tests,
   coverage, and compile checks stay aligned.
+- Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
+  before invoking the shared gate, and the repo's `pre-commit` hook now uses
+  that system binary instead of a Docker-backed hook.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
   tarball SHA-256 digests before extracting the binaries.
 - `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds

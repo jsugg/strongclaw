@@ -31,6 +31,24 @@ def test_release_workflow_runs_quality_gate_before_publish() -> None:
     assert workflow.index(quality_gate_marker) < workflow.index(build_marker)
 
 
+def test_quality_gate_workflows_install_shellcheck_before_gate() -> None:
+    quality_gate_marker = "uv run python -m clawops supply-chain --repo-root . quality-gate"
+    install_marker = "sudo apt-get install --yes shellcheck"
+
+    for workflow_name in ("security.yml", "upstream-merge-validation.yml", "release.yml"):
+        workflow = _workflow_text(workflow_name)
+        assert install_marker in workflow
+        assert workflow.index(install_marker) < workflow.index(quality_gate_marker)
+
+
+def test_pre_commit_shellcheck_uses_system_binary() -> None:
+    pre_commit_config = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+
+    assert "https://github.com/koalaman/shellcheck-precommit" not in pre_commit_config
+    assert "entry: shellcheck" in pre_commit_config
+    assert "language: system" in pre_commit_config
+
+
 def test_security_workflow_verifies_downloaded_tool_archives() -> None:
     workflow = _workflow_text("security.yml")
 
