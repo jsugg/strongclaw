@@ -76,7 +76,7 @@ EmbeddingProviderKind = Literal["disabled", "compatible-http"]
 RerankProviderKind = Literal["none", "local-sentence-transformers", "compatible-http"]
 EvidenceKind = Literal["file", "lcm_summary", "lcm_message_range", "external_uri"]
 Tier = Literal["core", "working", "peripheral"]
-CaptureMode = Literal["llm", "regex", "both"]
+type CaptureMode = Literal["llm", "regex", "both"]
 FactCategory = Literal["profile", "preference", "decision", "entity"]
 
 DEFAULT_MEMORY_FILE_NAMES = RESOURCE_DEFAULT_MEMORY_FILE_NAMES

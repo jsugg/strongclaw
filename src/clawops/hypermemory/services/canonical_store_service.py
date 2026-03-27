@@ -27,6 +27,7 @@ from clawops.hypermemory.defaults import MEMORY_PRO_CATEGORY_MAP, WRITABLE_PREFI
 from clawops.hypermemory.governance import ensure_writable_scope, validate_scope
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import (
+    CaptureMode,
     FusionMode,
     ReflectionMode,
     ReflectionSummary,
@@ -543,9 +544,9 @@ class CanonicalStoreService:
         self,
         *,
         messages: Sequence[tuple[int, str, str]],
-        mode: Literal["llm", "regex", "both"] | None = None,
+        mode: CaptureMode | None = None,
     ) -> dict[str, Any]:
-        resolved_mode = cast(Literal["llm", "regex", "both"], mode or self.config.capture.mode)
+        resolved_mode = mode or self.config.capture.mode
         candidates: list[CaptureCandidate] = []
         if (
             resolved_mode in {"llm", "both"}

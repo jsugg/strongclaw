@@ -6,7 +6,7 @@ import ast
 
 from tests.utils.helpers.repo import REPO_ROOT
 
-_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "test_context.py"
+_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "core" / "test_context.py"
 
 
 def test_verify_cleanup_is_autouse() -> None:
