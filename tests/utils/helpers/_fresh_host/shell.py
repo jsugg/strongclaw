@@ -233,6 +233,21 @@ def _compose_probe_env(
     return probe_env
 
 
+def compose_probe_env(
+    context: FreshHostContext,
+    *,
+    compose_file: Path,
+    repo_local_state: bool,
+) -> dict[str, str]:
+    """Build the compose env for one context-aware probe or diagnostic command."""
+    return _compose_probe_env(
+        phase_env(context),
+        repo_root_path=repo_root(context.repo_root),
+        compose_name=compose_file.name,
+        repo_local_state=repo_local_state,
+    )
+
+
 def verify_compose_services_running(
     compose_file: Path,
     *,
