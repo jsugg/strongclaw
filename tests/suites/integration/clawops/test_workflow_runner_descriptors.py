@@ -92,7 +92,12 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
                         "prompt": "Implement feature A",
                         "operation_kind": "implement",
                         "required_auth_mode": "subscription",
-                        "context": {"config": str(config), "query": "run_task"},
+                        "context": {
+                            "provider": "codebase",
+                            "scale": "small",
+                            "config": str(config),
+                            "query": "run_task",
+                        },
                         "expected_artifacts": [
                             {
                                 "name": "implementation-report",
