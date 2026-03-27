@@ -1,7 +1,8 @@
-"""Tests for supply-chain inventory and refresh tooling."""
+"""Tests for supply-chain inventory, quality gates, and refresh tooling."""
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from clawops.process_runner import CommandResult
 from clawops.supply_chain import (
     inventory_pins,
+    main,
     propose_refresh,
     refresh_compose_image_digests,
     refresh_workflow_action_pins,
@@ -140,6 +142,61 @@ def test_refresh_compose_image_digests_rewrites_outdated_digest(
     )
 
 
+def test_quality_gate_cli_runs_declared_commands(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    commands: list[list[str]] = []
+    envs: list[dict[str, str] | None] = []
+
+    def _fake_run_command(
+        command: list[str] | str,
+        *,
+        cwd: pathlib.Path | str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> CommandResult:
+        del timeout_seconds, shell
+        assert cwd == repo_root
+        assert isinstance(command, list)
+        commands.append(command)
+        envs.append(env)
+        return CommandResult(returncode=0, stdout="ok", stderr="", duration_ms=1)
+
+    monkeypatch.setattr("clawops.supply_chain.run_command", _fake_run_command)
+
+    exit_code = main(["--repo-root", str(repo_root), "quality-gate"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["repoRoot"] == repo_root.as_posix()
+    assert payload["commands"] == commands
+    assert commands == [
+        ["uv", "run", "pre-commit", "run", "actionlint", "--all-files"],
+        ["uv", "run", "pre-commit", "run", "shellcheck", "--all-files"],
+        ["uv", "run", "isort", "--check-only", "src", "tests"],
+        ["uv", "run", "ruff", "check", "src", "tests"],
+        ["uv", "run", "black", "--check", "src", "tests"],
+        ["uv", "run", "pyright"],
+        ["uv", "run", "mypy"],
+        [
+            "bash",
+            "-lc",
+            "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
+            "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
+        ],
+        ["uv", "run", "python", "-m", "compileall", "-q", "src", "tests"],
+    ]
+    assert all(env is not None for env in envs)
+    assert all(env["PYTHONPATH"] == "src" for env in envs if env is not None)
+    assert all(env["CLAWOPS_HTTP_RETRY_MODE"] == "safe" for env in envs if env is not None)
+
+
 def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,7 +230,17 @@ def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
             return CommandResult(returncode=0, stdout="[branch] refresh", stderr="", duration_ms=1)
         if command[:3] == ["uv", "run", "pre-commit"]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
-        if command[:2] == ["uv", "run"] and "pytest" in command:
+        if command[:3] == ["uv", "run", "isort"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:3] == ["uv", "run", "ruff"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:3] == ["uv", "run", "black"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:3] == ["uv", "run", "pyright"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:3] == ["uv", "run", "mypy"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:2] == ["bash", "-lc"] and "uv run pytest" in command[-1]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
         if command[:2] == ["uv", "run"] and "compileall" in command:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
