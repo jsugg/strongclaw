@@ -9,12 +9,13 @@ import textwrap
 import pytest
 
 from clawops.hypermemory import load_config, main
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
 
 def test_hypermemory_load_config_resolves_required_env_backed_strings(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory-env.yaml"
@@ -47,9 +48,13 @@ def test_hypermemory_load_config_resolves_required_env_backed_strings(
             """).strip() + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("TEST_HYPERMEMORY_EMBED_MODEL", "hypermemory-embedding")
-    monkeypatch.setenv("TEST_HYPERMEMORY_EMBED_URL", "http://127.0.0.1:4000/v1")
-    monkeypatch.setenv("TEST_HYPERMEMORY_QDRANT_URL", "http://127.0.0.1:6333")
+    test_context.env.update(
+        {
+            "TEST_HYPERMEMORY_EMBED_MODEL": "hypermemory-embedding",
+            "TEST_HYPERMEMORY_EMBED_URL": "http://127.0.0.1:4000/v1",
+            "TEST_HYPERMEMORY_QDRANT_URL": "http://127.0.0.1:6333",
+        }
+    )
 
     config = load_config(config_path)
 
@@ -60,7 +65,7 @@ def test_hypermemory_load_config_resolves_required_env_backed_strings(
 
 def test_hypermemory_load_config_rejects_missing_required_env_backed_strings(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory-env.yaml"
@@ -86,7 +91,7 @@ def test_hypermemory_load_config_rejects_missing_required_env_backed_strings(
             """).strip() + "\n",
         encoding="utf-8",
     )
-    monkeypatch.delenv("TEST_HYPERMEMORY_CORPUS_PATH", raising=False)
+    test_context.env.remove("TEST_HYPERMEMORY_CORPUS_PATH")
 
     with pytest.raises(TypeError, match="corpus.paths\\[0\\]\\.path"):
         load_config(config_path)

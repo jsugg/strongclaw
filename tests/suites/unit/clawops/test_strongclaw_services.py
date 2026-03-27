@@ -9,6 +9,7 @@ import pytest
 from clawops import strongclaw_services
 from clawops.common import load_text
 from clawops.strongclaw_runtime import ExecResult
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -23,7 +24,7 @@ def _result(*, stdout: str = "", stderr: str = "", returncode: int = 0) -> ExecR
     )
 
 
-def test_wait_for_launchd_service_accepts_running_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_launchd_service_accepts_running_gateway(test_context: TestContext) -> None:
     """Persistent launchd services should wait until the daemon is running."""
     responses = iter(
         [
@@ -32,9 +33,17 @@ def test_wait_for_launchd_service_accepts_running_gateway(monkeypatch: pytest.Mo
         ]
     )
 
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(strongclaw_services, "run_command", lambda *args, **kwargs: next(responses))
-    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "run_command",
+        new=lambda *args, **kwargs: next(responses),
+    )
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
 
     strongclaw_services._wait_for_launchd_service(
         strongclaw_services.LAUNCHD_GATEWAY_LABEL,
@@ -44,7 +53,7 @@ def test_wait_for_launchd_service_accepts_running_gateway(monkeypatch: pytest.Mo
 
 
 def test_wait_for_launchd_service_accepts_sidecars_after_zero_exit(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """One-shot launchd services should wait for a clean exit."""
     responses = iter(
@@ -54,9 +63,17 @@ def test_wait_for_launchd_service_accepts_sidecars_after_zero_exit(
         ]
     )
 
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(strongclaw_services, "run_command", lambda *args, **kwargs: next(responses))
-    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "run_command",
+        new=lambda *args, **kwargs: next(responses),
+    )
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
 
     strongclaw_services._wait_for_launchd_service(
         strongclaw_services.LAUNCHD_SIDECARS_LABEL,
@@ -66,16 +83,20 @@ def test_wait_for_launchd_service_accepts_sidecars_after_zero_exit(
 
 
 def test_wait_for_launchd_service_raises_on_failed_exit(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """One-shot launchd services should surface non-zero exit codes."""
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
+    test_context.patch.patch_object(
         strongclaw_services,
         "run_command",
-        lambda *args, **kwargs: _result(stdout="state = exited\nlast exit code = 78\n"),
+        new=lambda *args, **kwargs: _result(stdout="state = exited\nlast exit code = 78\n"),
     )
-    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
 
     with pytest.raises(RuntimeError, match="exited with code 78"):
         strongclaw_services._wait_for_launchd_service(
@@ -86,7 +107,7 @@ def test_wait_for_launchd_service_raises_on_failed_exit(
 
 
 def test_wait_for_launchd_service_retries_transient_launchctl_print_failures(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Transient launchctl print failures should be retried until the deadline."""
     responses = iter(
@@ -97,9 +118,17 @@ def test_wait_for_launchd_service_retries_transient_launchctl_print_failures(
         ]
     )
 
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(strongclaw_services, "run_command", lambda *args, **kwargs: next(responses))
-    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "run_command",
+        new=lambda *args, **kwargs: next(responses),
+    )
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
 
     strongclaw_services._wait_for_launchd_service(
         strongclaw_services.LAUNCHD_SIDECARS_LABEL,
@@ -109,16 +138,20 @@ def test_wait_for_launchd_service_retries_transient_launchctl_print_failures(
 
 
 def test_render_service_files_includes_launchd_docker_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:
     """Rendered launchd plists should inherit the active shell Docker settings."""
     output_dir = tmp_path / "LaunchAgents"
     state_dir = tmp_path / "state"
-    monkeypatch.setattr(strongclaw_services, "launchd_dir", lambda: output_dir)
-    monkeypatch.setenv("DOCKER_HOST", "unix:///tmp/docker.sock")
-    monkeypatch.setenv("DOCKER_CONFIG", "/tmp/docker&config")
-    monkeypatch.setenv("STRONGCLAW_COMPOSE_VARIANT", "ci-hosted-macos")
-    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+    test_context.patch.patch_object(strongclaw_services, "launchd_dir", new=lambda: output_dir)
+    test_context.env.update(
+        {
+            "DOCKER_HOST": "unix:///tmp/docker.sock",
+            "DOCKER_CONFIG": "/tmp/docker&config",
+            "STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos",
+        }
+    )
+    test_context.env.remove("DOCKER_CONTEXT")
 
     payload = strongclaw_services.render_service_files(
         REPO_ROOT,
@@ -138,14 +171,14 @@ def test_render_service_files_includes_launchd_docker_env(
 
 
 def test_render_service_files_omits_launchd_passthrough_env_when_unset(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:
     """Rendered launchd plists should stay unchanged when no Docker env is exported."""
     output_dir = tmp_path / "LaunchAgents"
     state_dir = tmp_path / "state"
-    monkeypatch.setattr(strongclaw_services, "launchd_dir", lambda: output_dir)
+    test_context.patch.patch_object(strongclaw_services, "launchd_dir", new=lambda: output_dir)
     for key in strongclaw_services.LAUNCHD_PASSTHROUGH_ENV_VARS:
-        monkeypatch.delenv(key, raising=False)
+        test_context.env.remove(key)
 
     strongclaw_services.render_service_files(
         REPO_ROOT,
@@ -160,7 +193,7 @@ def test_render_service_files_omits_launchd_passthrough_env_when_unset(
 
 
 def test_activate_services_retries_launchd_sidecars_after_failed_exit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:
     """Launchd sidecars should be retried once after a transient non-zero exit."""
     output_dir = tmp_path / "LaunchAgents"
@@ -175,11 +208,21 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
     calls: list[tuple[str, str]] = []
     wait_attempts = {"sidecars": 0}
 
-    monkeypatch.setattr(
-        strongclaw_services, "render_service_files", lambda *args, **kwargs: payload
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "render_service_files",
+        new=lambda *args, **kwargs: payload,
     )
-    monkeypatch.setattr(strongclaw_services, "ensure_docker_backend_ready", lambda: None)
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "ensure_docker_backend_ready",
+        new=lambda: None,
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
 
     def fake_activate(domain: str, label: str, _plist: pathlib.Path) -> None:
         calls.append(("activate", f"{domain}:{label}"))
@@ -192,9 +235,17 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
             if wait_attempts["sidecars"] == 1:
                 raise RuntimeError(f"{label} exited with code 1")
 
-    monkeypatch.setattr(strongclaw_services, "_activate_launchd_service", fake_activate)
-    monkeypatch.setattr(strongclaw_services, "_wait_for_launchd_service", fake_wait)
-    monkeypatch.setattr(strongclaw_services.time, "sleep", lambda _seconds: None)
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_activate_launchd_service",
+        new=fake_activate,
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_wait_for_launchd_service",
+        new=fake_wait,
+    )
+    test_context.patch.patch_object(strongclaw_services.time, "sleep", new=lambda _seconds: None)
 
     activated = strongclaw_services.activate_services(tmp_path, service_manager="launchd")
 
@@ -210,7 +261,7 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
 
 
 def test_activate_services_uses_launchd_timeout_overrides(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:
     """Launchd activation should honor explicit timeout overrides."""
     output_dir = tmp_path / "LaunchAgents"
@@ -224,23 +275,41 @@ def test_activate_services_uses_launchd_timeout_overrides(
     }
     waits: list[tuple[str, bool, int]] = []
 
-    monkeypatch.setattr(
-        strongclaw_services, "render_service_files", lambda *args, **kwargs: payload
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "render_service_files",
+        new=lambda *args, **kwargs: payload,
     )
-    monkeypatch.setattr(strongclaw_services, "ensure_docker_backend_ready", lambda: None)
-    monkeypatch.setattr(strongclaw_services, "_launchd_domain", lambda: "gui/501")
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "ensure_docker_backend_ready",
+        new=lambda: None,
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_launchd_domain",
+        new=lambda: "gui/501",
+    )
+    test_context.patch.patch_object(
         strongclaw_services,
         "_activate_launchd_service",
-        lambda _domain, _label, _plist: None,
+        new=lambda _domain, _label, _plist: None,
     )
 
     def fake_wait(label: str, *, persistent: bool, timeout_seconds: int) -> None:
         waits.append((label, persistent, timeout_seconds))
 
-    monkeypatch.setattr(strongclaw_services, "_wait_for_launchd_service", fake_wait)
-    monkeypatch.setenv(strongclaw_services.LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR, "45")
-    monkeypatch.setenv(strongclaw_services.LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR, "2700")
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "_wait_for_launchd_service",
+        new=fake_wait,
+    )
+    test_context.env.update(
+        {
+            strongclaw_services.LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR: "45",
+            strongclaw_services.LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR: "2700",
+        }
+    )
 
     activated = strongclaw_services.activate_services(tmp_path, service_manager="launchd")
 
@@ -251,10 +320,8 @@ def test_activate_services_uses_launchd_timeout_overrides(
     ]
 
 
-def test_launchd_timeout_override_rejects_invalid_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_launchd_timeout_override_rejects_invalid_values(test_context: TestContext) -> None:
     """Launchd timeout overrides must be positive integers."""
-    monkeypatch.setenv("TEST_TIMEOUT", "invalid")
+    test_context.env.set("TEST_TIMEOUT", "invalid")
     with pytest.raises(RuntimeError, match="must be a positive integer"):
         strongclaw_services._launchd_timeout_seconds("TEST_TIMEOUT", 30)

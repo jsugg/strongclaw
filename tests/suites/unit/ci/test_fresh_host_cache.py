@@ -7,11 +7,12 @@ from pathlib import Path
 import pytest
 
 from clawops.strongclaw_runtime import CommandError
+from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import fresh_host_cache as fresh_host_cache_script
 
 
 def test_warm_packages_uses_bootstrap_installers(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     tmp_path: Path,
 ) -> None:
     """Package warming should reuse the StrongClaw bootstrap installers."""
@@ -20,17 +21,17 @@ def test_warm_packages_uses_bootstrap_installers(
     home_dir = tmp_path / "home"
     seen_calls: list[tuple[str, Path, Path | None]] = []
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_cache_script,
         "uv_sync_managed_environment",
-        lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
+        new=lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
             ("uv", resolved_repo_root, home_dir)
         ),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_cache_script,
         "install_memory_plugin_asset",
-        lambda resolved_repo_root: seen_calls.append(("npm", resolved_repo_root, None)),
+        new=lambda resolved_repo_root: seen_calls.append(("npm", resolved_repo_root, None)),
     )
 
     fresh_host_cache_script.warm_packages(repo_root, home_dir=home_dir)
@@ -41,16 +42,16 @@ def test_warm_packages_uses_bootstrap_installers(
     ]
 
 
-def test_main_runs_package_warming(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_main_runs_package_warming(test_context: TestContext, tmp_path: Path) -> None:
     """The cache CLI should dispatch the warm-packages command."""
     seen_calls: list[tuple[Path, Path | None]] = []
     repo_root = tmp_path / "repo"
     home_dir = tmp_path / "home"
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_cache_script,
         "warm_packages",
-        lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
+        new=lambda resolved_repo_root, *, home_dir=None: seen_calls.append(
             (resolved_repo_root, home_dir)
         ),
     )
@@ -64,7 +65,7 @@ def test_main_runs_package_warming(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 
 def test_main_reports_bootstrap_command_errors(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Bootstrap command failures should produce a user-facing nonzero exit."""
@@ -72,7 +73,7 @@ def test_main_reports_bootstrap_command_errors(
     def fail(*args: object, **kwargs: object) -> None:
         raise CommandError("boom")
 
-    monkeypatch.setattr(fresh_host_cache_script, "warm_packages", fail)
+    test_context.patch.patch_object(fresh_host_cache_script, "warm_packages", new=fail)
 
     exit_code = fresh_host_cache_script.main(["warm-packages"])
 
