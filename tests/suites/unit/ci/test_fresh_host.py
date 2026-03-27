@@ -441,17 +441,17 @@ def test_verify_compose_services_running_retries_until_service_health_recovers(
     assert sleeps == [2.0]
 
 
-def test_verify_compose_services_running_ignores_completed_init_services(
+def test_verify_compose_services_running_ignores_unexpected_completed_services(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Compose runtime verification should ignore completed one-shot init services."""
+    """Compose runtime verification should ignore unrelated exited services."""
     compose_file = tmp_path / "compose.yaml"
     compose_file.write_text("services: {}\n", encoding="utf-8")
     payload = json.dumps(
         [
             {"Service": "postgres", "State": "running", "Health": "healthy"},
-            {"Service": "litellm-migrate", "State": "exited", "ExitCode": 0},
+            {"Service": "bootstrap-helper", "State": "exited", "ExitCode": 0},
             {"Service": "litellm", "State": "running", "Health": "healthy"},
             {"Service": "otel-collector", "State": "running"},
             {"Service": "qdrant", "State": "running", "Health": "healthy"},
