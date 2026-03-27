@@ -55,9 +55,9 @@ GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 - That flow reuses `clawops config memory --set-profile memory-lancedb-pro`, which
   auto-detects the host and installs the default LanceDB dependency on
   supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
-- The script then installs the pinned
-  `openclaw@2026.3.13` CLI into a temporary tool directory, and then runs
-  `npm run test:openclaw-host`.
+- The script then installs the pinned `openclaw@2026.3.13` CLI into a
+  temporary tool directory and runs the host-functional
+  `npm run test:openclaw-host` suite.
 - The host-functional step clears ambient AWS credential env vars first so
   local Bedrock model discovery noise does not contaminate test assertions.
 
@@ -85,11 +85,18 @@ in `.github/workflows/memory-plugin-verification.yml`.
 - `.github/workflows/dependency-submission.yml` generates `sbom.spdx.json` with
   `anchore/sbom-action` and submits the resulting dependency snapshot to the
   GitHub dependency graph.
+- `.github/workflows/security.yml`,
+  `.github/workflows/upstream-merge-validation.yml`, and
+  `.github/workflows/release.yml` all call the centralized
+  `clawops supply-chain quality-gate` surface so linting, typing, tests,
+  coverage, and compile checks stay aligned.
+- `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
+  tarball SHA-256 digests before extracting the binaries.
 - `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds
-  the Python sdist/wheel, verifies each artifact with `twine check` plus fresh
-  install smoke tests, publishes the release assets with `gh release create`,
-  and emits GitHub attestations for both build provenance and the generated
-  SBOM.
+  the Python sdist/wheel only after the repository quality gate passes, verifies
+  each artifact with `twine check` plus fresh install smoke tests, publishes
+  the release assets with `gh release create`, and emits GitHub attestations
+  for both build provenance and the generated SBOM.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
   plus nightly validation steps after an upstream merge lands in the fork.
 - `.github/workflows/devflow-contract.yml` syncs the locked environment,

@@ -30,10 +30,8 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run pre-commit run actionlint --all-files
-      - run: uv run pre-commit run shellcheck --all-files
-      - run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml --cov-report=term-missing
-      - run: PYTHONPATH=src uv run python -m compileall -q src tests
+      - name: Run repository quality gate
+        run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - name: Coverage summary
         run: |
           python3 - <<'PY'
@@ -51,9 +49,11 @@ jobs:
       - name: Install gitleaks CLI
         env:
           GITLEAKS_VERSION: "8.28.0"
+          GITLEAKS_SHA256: "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb"
         run: |
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
           mkdir -p "${HOME}/.local/bin"
           tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" gitleaks
           install "${RUNNER_TEMP}/gitleaks" "${HOME}/.local/bin/gitleaks"
@@ -63,9 +63,11 @@ jobs:
       - name: Install syft CLI
         env:
           SYFT_VERSION: "v1.42.2"
+          SYFT_SHA256: "1d3cc98b13ce3dfb6083ef42f64f1033e40d7dea292e8ea85ed1cf88efb2f542"
         run: |
           archive="syft_${SYFT_VERSION#v}_linux_amd64.tar.gz"
           curl -fsSL "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          echo "${SYFT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
           tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" syft
           install "${RUNNER_TEMP}/syft" "${HOME}/.local/bin/syft"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"

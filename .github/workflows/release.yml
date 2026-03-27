@@ -29,6 +29,8 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
+      - name: Run repository quality gate
+        run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - name: Build release artifacts
         run: |
           python3 - <<'PY'
