@@ -192,7 +192,7 @@ def _as_string_list(name: str, value: object, *, default: Sequence[str]) -> tupl
     if not isinstance(value, list):
         raise TypeError(f"{name} must be a list of non-empty strings")
     normalized: list[str] = []
-    for item in cast(list[object], value):
+    for item in cast(Sequence[object], value):
         if not isinstance(item, str) or not item.strip():
             raise TypeError(f"{name} must be a list of non-empty strings")
         normalized.append(item.strip())
@@ -899,7 +899,7 @@ def _load_noise(root: Mapping[str, object]) -> NoiseConfig:
 def _load_admission(root: Mapping[str, object]) -> AdmissionConfig:
     """Load optional capture admission controls."""
     admission = _as_mapping("admission", root.get("admission") or {})
-    priors_value = admission.get("type_priors")
+    priors_value: object = admission.get("type_priors")
     priors_mapping = _as_mapping("admission.type_priors", priors_value or {})
     priors = {
         key: _as_probability(
@@ -1049,7 +1049,7 @@ def load_config(path: pathlib.Path) -> HypermemoryConfig:
     if corpus_paths_raw is not None:
         if not isinstance(corpus_paths_raw, list):
             raise TypeError("corpus.paths must be a list of mappings")
-        for index, raw_entry in enumerate(cast(list[object], corpus_paths_raw)):
+        for index, raw_entry in enumerate(cast(Sequence[object], corpus_paths_raw)):
             entry = _as_mapping(f"corpus.paths[{index}]", raw_entry)
             name = _as_string(f"corpus.paths[{index}].name", entry.get("name"))
             path_value = _as_string(f"corpus.paths[{index}].path", entry.get("path"))

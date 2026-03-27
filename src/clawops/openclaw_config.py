@@ -7,7 +7,7 @@ import dataclasses
 import os
 import pathlib
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.common import load_overlay, write_json
@@ -162,11 +162,14 @@ def _replace_placeholders(value: Any, *, replacements: Mapping[str, str]) -> Any
             rendered = rendered.replace(placeholder, replacement)
         return rendered
     if isinstance(value, list):
-        return [_replace_placeholders(item, replacements=replacements) for item in value]
+        return [
+            _replace_placeholders(item, replacements=replacements)
+            for item in cast(Sequence[object], value)
+        ]
     if isinstance(value, dict):
         return {
             str(key): _replace_placeholders(item, replacements=replacements)
-            for key, item in value.items()
+            for key, item in cast(Mapping[object, object], value).items()
         }
     return value
 
@@ -176,11 +179,13 @@ def _contains_placeholder(value: Any, placeholder: str) -> bool:
     if isinstance(value, str):
         return placeholder in value
     if isinstance(value, list):
-        return any(_contains_placeholder(item, placeholder) for item in value)
+        return any(
+            _contains_placeholder(item, placeholder) for item in cast(Sequence[object], value)
+        )
     if isinstance(value, dict):
         return any(
             _contains_placeholder(key, placeholder) or _contains_placeholder(item, placeholder)
-            for key, item in value.items()
+            for key, item in cast(Mapping[object, object], value).items()
         )
     return False
 
@@ -234,7 +239,7 @@ def render_openclaw_overlay(
     )
     if not isinstance(rendered, dict):
         raise TypeError("rendered OpenClaw overlay must be a mapping")
-    return rendered
+    return cast(dict[str, Any], rendered)
 
 
 def render_qmd_overlay(
@@ -297,7 +302,7 @@ def render_openclaw_profile(
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
-    return merged
+    return cast(dict[str, Any], merged)
 
 
 def build_profile_help() -> str:

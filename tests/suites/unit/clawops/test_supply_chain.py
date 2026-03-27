@@ -75,10 +75,12 @@ def test_refresh_workflow_action_pins_rewrites_outdated_sha(
         "steps:\n  - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 # v5\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "clawops.supply_chain.requests.get",
-        lambda *args, **kwargs: _FakeResponse(sha="89abcdef0123456789abcdef0123456789abcdef"),
-    )
+
+    def _fake_requests_get(*args: object, **kwargs: object) -> _FakeResponse:
+        del args, kwargs
+        return _FakeResponse(sha="89abcdef0123456789abcdef0123456789abcdef")
+
+    monkeypatch.setattr("clawops.supply_chain.requests.get", _fake_requests_get)
 
     payload = refresh_workflow_action_pins(repo_root, apply=True)
 
@@ -109,15 +111,17 @@ def test_refresh_compose_image_digests_rewrites_outdated_digest(
         "services:\n  app:\n    image: postgres:16-alpine@sha256:1111111111111111111111111111111111111111111111111111111111111111\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "clawops.supply_chain._run_docker_inspect",
-        lambda image: CommandResult(
+
+    def _fake_run_docker_inspect(image: str) -> CommandResult:
+        del image
+        return CommandResult(
             returncode=0,
             stdout="Name: postgres:16-alpine\nDigest: sha256:2222222222222222222222222222222222222222222222222222222222222222\n",
             stderr="",
             duration_ms=5,
-        ),
-    )
+        )
+
+    monkeypatch.setattr("clawops.supply_chain._run_docker_inspect", _fake_run_docker_inspect)
 
     payload = refresh_compose_image_digests(repo_root, apply=True)
 

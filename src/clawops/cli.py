@@ -47,7 +47,9 @@ def _dispatch_wrapper(argv: list[str] | None) -> int:
         return 2
     module = importlib.import_module(target[0])
     handler = getattr(module, target[1])
-    return handler(args)
+    if not callable(handler):
+        raise TypeError(f"{target[0]}.{target[1]} is not callable")
+    return cast(Callable[[list[str] | None], int], handler)(args)
 
 
 COMMANDS: tuple[CommandSpec, ...] = (

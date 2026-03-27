@@ -19,17 +19,23 @@ def test_ensure_model_auth_skip_mode_bypasses_agent_probe(
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
 
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    def _raise_unexpected_probe(*args: object, **kwargs: object) -> tuple[bool, list[str]]:
+        del args, kwargs
+        raise AssertionError("agent probe should be skipped")
+
     test_context.patch.patch_object(
         strongclaw_model_auth,
         "resolve_openclaw_config_path",
-        new=lambda repo_root: config_path,
+        new=_resolve_openclaw_config_path,
     )
     test_context.patch.patch_object(
         strongclaw_model_auth,
         "_all_agents_have_models",
-        new=lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("agent probe should be skipped")
-        ),
+        new=_raise_unexpected_probe,
     )
 
     payload = strongclaw_model_auth.ensure_model_auth(tmp_path, check_only=False, probe=False)
@@ -50,16 +56,29 @@ def test_ensure_model_auth_check_only_still_inspects_agents_when_skip_is_set(
     config_path.write_text("{}", encoding="utf-8")
     calls: list[tuple[bool, int]] = []
 
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    def _all_agents_have_models(
+        repo_root: pathlib.Path,
+        *,
+        probe: bool,
+        probe_max_tokens: int,
+    ) -> tuple[bool, list[str]]:
+        del repo_root
+        calls.append((probe, probe_max_tokens))
+        return True, []
+
     test_context.patch.patch_object(
         strongclaw_model_auth,
         "resolve_openclaw_config_path",
-        new=lambda repo_root: config_path,
+        new=_resolve_openclaw_config_path,
     )
     test_context.patch.patch_object(
         strongclaw_model_auth,
         "_all_agents_have_models",
-        new=lambda repo_root, *, probe, probe_max_tokens: calls.append((probe, probe_max_tokens))
-        or (True, []),
+        new=_all_agents_have_models,
     )
 
     payload = strongclaw_model_auth.ensure_model_auth(tmp_path, check_only=True, probe=True)

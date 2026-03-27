@@ -863,6 +863,48 @@ def invalidated_ratio(conn: sqlite3.Connection) -> float:
     return invalidated / total
 
 
+def adaptive_pool_size(
+    *,
+    base_pool: int,
+    total_items: int,
+    active_items: int,
+    invalidated_ratio: float,
+    query_specificity: float,
+    has_scope_filter: bool,
+    max_multiplier: int,
+) -> int:
+    """Public wrapper for adaptive retrieval pool sizing."""
+    return _adaptive_pool_size(
+        base_pool=base_pool,
+        total_items=total_items,
+        active_items=active_items,
+        invalidated_ratio=invalidated_ratio,
+        query_specificity=query_specificity,
+        has_scope_filter=has_scope_filter,
+        max_multiplier=max_multiplier,
+    )
+
+
+def estimate_query_specificity(query: str) -> float:
+    """Public wrapper for query-specificity estimation."""
+    return _estimate_query_specificity(query)
+
+
+def count_items(conn: sqlite3.Connection) -> int:
+    """Public wrapper for indexed item counting."""
+    return _count_items(conn)
+
+
+def count_active_items(conn: sqlite3.Connection) -> int:
+    """Public wrapper for active item counting."""
+    return _count_active_items(conn)
+
+
+def invalidated_ratio(conn: sqlite3.Connection) -> float:
+    """Public wrapper for invalidated-item ratio calculation."""
+    return _invalidated_ratio(conn)
+
+
 def _apply_diversity(
     candidates: Sequence[dict[str, Any]],
     *,

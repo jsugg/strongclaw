@@ -6,9 +6,11 @@ import argparse
 import dataclasses
 import json
 import pathlib
-from typing import Any, Mapping
+from collections.abc import Sequence
+from typing import Any, Mapping, cast
 
 from clawops.common import load_json, load_yaml, match_mapping
+from clawops.typed_values import as_mapping
 
 TERMINAL_ALLOW = "allow"
 TERMINAL_DENY = "deny"
@@ -70,63 +72,71 @@ class PolicyEngine:
         reasons: list[str] = []
         matched_rules: list[str] = []
 
-        defaults = self.policy.get("defaults", {})
+        defaults = _mapping_or_empty(self.policy.get("defaults"))
         default_decision = defaults.get("decision", TERMINAL_DENY)
 
         zone_name = str(payload.get("trust_zone", "unknown"))
-        zone = self.policy.get("zones", {}).get(zone_name, {})
+        zones = _mapping_or_empty(self.policy.get("zones"))
+        zone = _mapping_or_empty(zones.get(zone_name))
         action = str(payload.get("action", ""))
         category = str(payload.get("category", ""))
 
-        if action in zone.get("deny_actions", []) or category in zone.get("deny_categories", []):
+        if action in _string_members(zone.get("deny_actions")) or category in _string_members(
+            zone.get("deny_categories")
+        ):
             reasons.append(f"zone:{zone_name}:action/category denied")
             return Decision(TERMINAL_DENY, reasons, matched_rules)
 
-        allow_actions = zone.get("allow_actions", [])
-        allow_categories = zone.get("allow_categories", [])
+        allow_actions = _string_members(zone.get("allow_actions"))
+        allow_categories = _string_members(zone.get("allow_categories"))
         if allow_actions or allow_categories:
             allowed = action in allow_actions or category in allow_categories
             if not allowed:
                 reasons.append(f"zone:{zone_name}:not in allowlist")
                 return Decision(TERMINAL_DENY, reasons, matched_rules)
 
-        targets = self.policy.get("allowlists", {})
+        targets = _mapping_or_empty(self.policy.get("allowlists"))
         target_kind = str(payload.get("target_kind", ""))
         target_value = str(payload.get("target", ""))
         if target_kind:
-            allowed_targets = set(targets.get(target_kind, []))
+            allowed_targets = _string_members(targets.get(target_kind))
             if allowed_targets and target_value not in allowed_targets:
                 reasons.append(f"target:{target_kind}:not allowlisted")
                 return Decision(TERMINAL_DENY, reasons, matched_rules)
 
-        for rule in self.policy.get("rules", []):
-            when = rule.get("when", {})
-            if not isinstance(when, Mapping):
-                continue
-            if not match_mapping(when, payload):
-                continue
-            rule_id = str(rule.get("id", f"rule-{len(matched_rules)+1}"))
-            matched_rules.append(rule_id)
-            outcome = str(rule.get("decision", default_decision))
-            note = str(rule.get("reason", rule_id))
-            reasons.append(note)
-            if outcome == TERMINAL_DENY:
-                return Decision(outcome, reasons, matched_rules)
-            if outcome == TERMINAL_REQUIRE_APPROVAL:
-                return self._build_review_decision(
-                    payload=payload,
-                    decision=outcome,
-                    reasons=reasons,
-                    matched_rules=matched_rules,
-                    review_policy_id=rule_id,
-                    fallback_reason=note,
-                )
+        rules = self.policy.get("rules", [])
+        if isinstance(rules, Sequence) and not isinstance(rules, (str, bytes, bytearray)):
+            for raw_rule in cast(Sequence[object], rules):
+                rule = _mapping_or_none(raw_rule)
+                if rule is None:
+                    continue
+                when = _mapping_or_none(rule.get("when"))
+                if when is None:
+                    continue
+                if not match_mapping(cast(Mapping[str, Any], when), payload):
+                    continue
+                rule_id = str(rule.get("id", f"rule-{len(matched_rules)+1}"))
+                matched_rules.append(rule_id)
+                outcome = str(rule.get("decision", default_decision))
+                note = str(rule.get("reason", rule_id))
+                reasons.append(note)
+                if outcome == TERMINAL_DENY:
+                    return Decision(outcome, reasons, matched_rules)
+                if outcome == TERMINAL_REQUIRE_APPROVAL:
+                    return self._build_review_decision(
+                        payload=payload,
+                        decision=outcome,
+                        reasons=reasons,
+                        matched_rules=matched_rules,
+                        review_policy_id=rule_id,
+                        fallback_reason=note,
+                    )
 
-        approval_rules = self.policy.get("approval", {})
+        approval_rules = _mapping_or_empty(self.policy.get("approval"))
         review_policy_id: str | None = None
-        if action in approval_rules.get("require_for_actions", []):
+        if action in _string_members(approval_rules.get("require_for_actions")):
             review_policy_id = f"approval.actions.{action}"
-        elif category in approval_rules.get("require_for_categories", []):
+        elif category in _string_members(approval_rules.get("require_for_categories")):
             review_policy_id = f"approval.categories.{category}"
         if review_policy_id is not None:
             reasons.append("approval required by approval matrix")
@@ -141,7 +151,7 @@ class PolicyEngine:
 
         return self._build_review_decision(
             payload=payload,
-            decision=default_decision,
+            decision=str(default_decision),
             reasons=reasons or ["default"],
             matched_rules=matched_rules,
             review_policy_id="defaults.decision",
@@ -196,27 +206,27 @@ class PolicyEngine:
 
     def _resolve_review_config(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Resolve optional review overrides for the payload."""
-        review_block = self.policy.get("review", {})
-        if not isinstance(review_block, Mapping):
+        review_block = _mapping_or_none(self.policy.get("review"))
+        if review_block is None:
             return {}
 
         merged: dict[str, Any] = {}
-        defaults = review_block.get("defaults", {})
-        if isinstance(defaults, Mapping):
+        defaults = _mapping_or_none(review_block.get("defaults"))
+        if defaults is not None:
             merged.update(defaults)
 
-        categories = review_block.get("categories", {})
+        categories = _mapping_or_none(review_block.get("categories"))
         category = str(payload.get("category", ""))
-        if isinstance(categories, Mapping):
-            category_config = categories.get(category, {})
-            if isinstance(category_config, Mapping):
+        if categories is not None:
+            category_config = _mapping_or_none(categories.get(category))
+            if category_config is not None:
                 merged.update(category_config)
 
-        actions = review_block.get("actions", {})
+        actions = _mapping_or_none(review_block.get("actions"))
         action = str(payload.get("action", ""))
-        if isinstance(actions, Mapping):
-            action_config = actions.get(action, {})
-            if isinstance(action_config, Mapping):
+        if actions is not None:
+            action_config = _mapping_or_none(actions.get(action))
+            if action_config is not None:
                 merged.update(action_config)
 
         return merged
@@ -224,7 +234,26 @@ class PolicyEngine:
     @staticmethod
     def load_payload(path: pathlib.Path) -> Mapping[str, Any]:
         """Load an input payload from JSON."""
-        return load_json(path)
+        return dict(as_mapping(load_json(path), path=str(path)))
+
+
+def _mapping_or_none(value: object) -> Mapping[str, object] | None:
+    """Return *value* when it is mapping-like."""
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[str, object], value)
+
+
+def _mapping_or_empty(value: object) -> Mapping[str, object]:
+    """Return a mapping or an empty mapping for invalid values."""
+    return {} if not isinstance(value, Mapping) else cast(Mapping[str, object], value)
+
+
+def _string_members(value: object) -> set[str]:
+    """Return the string items from a sequence-like policy value."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return set()
+    return {item for item in cast(Sequence[object], value) if isinstance(item, str)}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

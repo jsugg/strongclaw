@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from typing import Any, cast
 
 import pytest
 
@@ -32,9 +33,10 @@ def test_test_context_fixture_is_accessed_from_stash(
     request: pytest.FixtureRequest,
     test_context: TestContext,
 ) -> None:
-    assert request.node.stash[CONTEXT_KEY] is test_context
-    assert test_context.nodeid == request.node.nodeid
-    assert test_context.test_name == request.node.name
+    node = cast(pytest.Item, cast(Any, request).node)
+    assert node.stash[CONTEXT_KEY] is test_context
+    assert test_context.nodeid == node.nodeid
+    assert test_context.test_name == node.name
 
 
 def test_test_context_always_exposes_env_and_patch_runtime(test_context: TestContext) -> None:

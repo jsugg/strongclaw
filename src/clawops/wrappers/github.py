@@ -270,8 +270,12 @@ def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any
     if op.kind == "github_issue_labels" and issue_match is not None:
         payload = _load_json_object(op.inputs_json)
         labels = payload.get("labels")
-        if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+        if not isinstance(labels, list):
             raise TypeError("github_issue_labels payload.labels must be a list of strings")
+        label_items = cast(list[object], labels)
+        if not all(isinstance(label, str) for label in label_items):
+            raise TypeError("github_issue_labels payload.labels must be a list of strings")
+        label_values = cast(list[str], label_items)
         return _execute_issue_operation(
             ctx=ctx,
             op=op,
@@ -279,7 +283,7 @@ def execute_github_approved(*, ctx: WrapperContext, op_id: str) -> dict[str, Any
             request=lambda: client.post(
                 f"https://api.github.com/repos/{issue_match.group('repo')}/issues/{issue_match.group('issue')}/labels",
                 headers=_github_headers(),
-                json_body={"labels": list(labels)},
+                json_body={"labels": list(label_values)},
                 retry_policy=LABELS_RETRY_POLICY,
             ),
         )

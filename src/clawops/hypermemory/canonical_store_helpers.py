@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import pathlib
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from clawops.common import ensure_parent
 from clawops.hypermemory.capture import CaptureCandidate
@@ -129,7 +129,7 @@ def load_entities_json(raw_value: object) -> list[str]:
         return []
     if not isinstance(payload, list):
         return []
-    return [item for item in cast(list[object], payload) if isinstance(item, str)]
+    return [item for item in cast(Sequence[object], payload) if isinstance(item, str)]
 
 
 def load_evidence_json(raw_value: object) -> list[dict[str, object]]:
@@ -143,12 +143,16 @@ def load_evidence_json(raw_value: object) -> list[dict[str, object]]:
     if not isinstance(payload, list):
         return []
     evidence_entries: list[dict[str, object]] = []
-    for raw_entry in cast(list[object], payload):
-        if not isinstance(raw_entry, dict):
+    for raw_entry in cast(Sequence[object], payload):
+        if not isinstance(raw_entry, Mapping):
+            continue
+        raw_entry_mapping = cast(Mapping[object, object], raw_entry)
+        if any(not isinstance(key, str) for key in raw_entry_mapping):
             continue
         try:
-            entry_mapping = cast(dict[str, object], raw_entry)
-            evidence_entries.append(EvidenceEntry.from_dict(entry_mapping).to_dict())
+            evidence_entries.append(
+                EvidenceEntry.from_dict(cast(Mapping[str, Any], raw_entry)).to_dict()
+            )
         except ValueError:
             continue
     return evidence_entries

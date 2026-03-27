@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import tomllib
+from typing import cast
 
+from clawops.typed_values import as_mapping
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -15,9 +17,10 @@ def _pyproject() -> dict[str, object]:
 
 def _project_dependencies() -> list[str]:
     payload = _pyproject()
-    dependencies = payload["project"]["dependencies"]
+    project = as_mapping(payload["project"], path="pyproject.project")
+    dependencies = project["dependencies"]
     assert isinstance(dependencies, list)
-    return [str(item) for item in dependencies]
+    return [str(item) for item in cast(list[object], dependencies)]
 
 
 def test_rerank_dependency_markers_cover_supported_host_matrix() -> None:
@@ -49,8 +52,7 @@ def test_rerank_dependency_markers_cover_supported_host_matrix() -> None:
 
 def test_uv_default_dev_group_models_repo_tooling() -> None:
     payload = _pyproject()
-    dependency_groups = payload["dependency-groups"]
-    assert isinstance(dependency_groups, dict)
+    dependency_groups = as_mapping(payload["dependency-groups"], path="pyproject.dependency-groups")
     dev_group = dependency_groups["dev"]
     assert dev_group == [
         "pytest>=8.0.0",
@@ -68,13 +70,10 @@ def test_uv_default_dev_group_models_repo_tooling() -> None:
         "matplotlib-stubs>=0.3.11",
     ]
 
-    tool_config = payload["tool"]
-    assert isinstance(tool_config, dict)
-    uv_config = tool_config["uv"]
-    assert isinstance(uv_config, dict)
+    tool_config = as_mapping(payload["tool"], path="pyproject.tool")
+    uv_config = as_mapping(tool_config["uv"], path="pyproject.tool.uv")
     assert uv_config["default-groups"] == ["dev"]
 
-    project = payload["project"]
-    assert isinstance(project, dict)
+    project = as_mapping(payload["project"], path="pyproject.project")
     optional_dependencies = project.get("optional-dependencies")
     assert optional_dependencies is None

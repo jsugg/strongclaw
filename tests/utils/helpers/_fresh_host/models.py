@@ -14,6 +14,11 @@ DEFAULT_DOCKER_PULL_PARALLELISM: Final[int] = 2
 DEFAULT_DOCKER_PULL_MAX_ATTEMPTS: Final[int] = 3
 
 
+def _empty_notes() -> list[str]:
+    """Return an empty note list for phase results."""
+    return []
+
+
 class FreshHostError(RuntimeError):
     """Raised when a fresh-host operation fails."""
 
@@ -48,7 +53,7 @@ class PhaseResult:
     finished_at: str
     command: list[str] | None
     failure_reason: str | None = None
-    notes: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=_empty_notes)
 
 
 @dataclass(slots=True)

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -16,6 +20,19 @@ from tests.utils.helpers._fresh_host import linux as fresh_host_linux
 from tests.utils.helpers._fresh_host import macos as fresh_host_macos
 from tests.utils.helpers._fresh_host import scenario as fresh_host_scenario
 from tests.utils.helpers._fresh_host import shell as fresh_host_shell
+
+_parse_args = cast(
+    Callable[[list[str] | None], argparse.Namespace],
+    cast(Any, fresh_host_script)._parse_args,
+)
+_run_named_phase = cast(
+    Callable[[fresh_host.FreshHostContext, str], list[str] | None],
+    cast(Any, fresh_host)._run_named_phase,
+)
+_venv_clawops_command = cast(
+    Callable[..., list[str]],
+    cast(Any, fresh_host)._venv_clawops_command,
+)
 
 
 def test_prepare_context_writes_context_and_env_file(
@@ -134,7 +151,7 @@ def test_prepare_context_sets_macos_variant_and_primary_compose_file(
 
 def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
     """The executable CLI should accept both current macOS scenario ids."""
-    sidecars = fresh_host_script._parse_args(
+    sidecars = _parse_args(
         [
             "prepare-context",
             "--scenario",
@@ -143,7 +160,7 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
             "/tmp/runner",
         ]
     )
-    browser_lab = fresh_host_script._parse_args(
+    browser_lab = _parse_args(
         [
             "prepare-context",
             "--scenario",
@@ -182,13 +199,16 @@ def test_run_named_phase_supports_macos_service_deactivation(
         github_env_file=github_env,
     )
 
+    def _fake_deactivate_services(loaded_context: fresh_host.FreshHostContext) -> list[str]:
+        return ["echo", loaded_context.scenario_id, "deactivate-services"]
+
     test_context.patch.patch_object(
         fresh_host_macos,
         "deactivate_macos_host_services",
-        new=lambda loaded_context: ["echo", loaded_context.scenario_id, "deactivate-services"],
+        new=_fake_deactivate_services,
     )
 
-    assert fresh_host._run_named_phase(context, "deactivate-services") == [
+    assert _run_named_phase(context, "deactivate-services") == [
         "echo",
         "macos-sidecars",
         "deactivate-services",
@@ -261,7 +281,7 @@ def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
         github_env_file=github_env,
     )
 
-    command = fresh_host._venv_clawops_command(context, "setup")
+    command = _venv_clawops_command(context, "setup")
 
     assert command[0] == str(venv_bin / "python")
     assert command[0] != str(target_python.resolve())
@@ -274,14 +294,27 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
     """Transient Linux docker probe failures should be retried before giving up."""
     attempts = {"count": 0}
 
-    def fake_run(*args: object, **kwargs: object) -> object:
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text, capture_output
         attempts["count"] += 1
         if attempts["count"] < 3:
-            return type("Result", (), {"returncode": 1})()
-        return type("Result", (), {"returncode": 0})()
+            return subprocess.CompletedProcess(args=["docker"], returncode=1)
+        return subprocess.CompletedProcess(args=["docker"], returncode=0)
+
+    def fake_sleep(_: float) -> None:
+        return None
 
     test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
-    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=lambda _: None)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=fake_sleep)
 
     fresh_host_shell.wait_for_docker_backend(cwd=tmp_path, env={"PATH": "/usr/bin"})
 
@@ -303,9 +336,23 @@ def test_verify_compose_services_running_accepts_json_lines_output(
         ]
     )
 
-    def fake_run(*args: object, **kwargs: object) -> object:
-        del args, kwargs
-        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text, capture_output
+        return subprocess.CompletedProcess(
+            args=["docker", "compose"],
+            returncode=0,
+            stdout=payload,
+            stderr="",
+        )
 
     test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
@@ -495,10 +542,25 @@ def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
         ]
     )
 
-    def fake_run(*args: object, **kwargs: object) -> object:
-        del args
-        captured_env.update(kwargs["env"])
-        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, check, timeout, text, capture_output
+        assert env is not None
+        captured_env.update(env)
+        return subprocess.CompletedProcess(
+            args=["docker", "compose"],
+            returncode=0,
+            stdout=payload,
+            stderr="",
+        )
 
     test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
@@ -541,10 +603,25 @@ def test_verify_compose_services_running_honors_repo_local_state_override_for_va
         ]
     )
 
-    def fake_run(*args: object, **kwargs: object) -> object:
-        del args
-        captured_env.update(kwargs["env"])
-        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, check, timeout, text, capture_output
+        assert env is not None
+        captured_env.update(env)
+        return subprocess.CompletedProcess(
+            args=["docker", "compose"],
+            returncode=0,
+            stdout=payload,
+            stderr="",
+        )
 
     test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
@@ -593,20 +670,47 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
     )
     calls: list[str] = []
 
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    def _fake_verify_sidecars(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 120,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, timeout_seconds, repo_root_path, repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
     test_context.patch.patch_object(
         fresh_host_linux,
         "wait_for_docker_backend",
-        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=_fake_wait_for_docker_backend,
     )
     test_context.patch.patch_object(
         fresh_host_linux,
         "run_command",
-        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=_fake_run_command,
     )
     test_context.patch.patch_object(
         fresh_host_linux,
         "verify_sidecar_services_running",
-        new=lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+        new=_fake_verify_sidecars,
     )
 
     fresh_host_linux.exercise_linux_sidecars(context)
@@ -637,20 +741,50 @@ def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
     )
     calls: list[str] = []
 
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    def _fake_verify_compose_services(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        expected_services: tuple[str, ...],
+        healthy_services: tuple[str, ...] = (),
+        timeout_seconds: int = 120,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, expected_services, healthy_services, timeout_seconds, repo_root_path
+        del repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
     test_context.patch.patch_object(
         fresh_host_linux,
         "wait_for_docker_backend",
-        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=_fake_wait_for_docker_backend,
     )
     test_context.patch.patch_object(
         fresh_host_linux,
         "run_command",
-        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=_fake_run_command,
     )
     test_context.patch.patch_object(
         fresh_host_linux,
         "verify_compose_services_running",
-        new=lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+        new=_fake_verify_compose_services,
     )
 
     fresh_host_linux.exercise_linux_browser_lab(context)
@@ -682,15 +816,30 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     calls: list[str] = []
     verify_kwargs: dict[str, object] = {}
 
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
     test_context.patch.patch_object(
         fresh_host_macos,
         "wait_for_docker_backend",
-        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=_fake_wait_for_docker_backend,
     )
     test_context.patch.patch_object(
         fresh_host_macos,
         "run_command",
-        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=_fake_run_command,
     )
 
     def fake_verify_sidecars(compose_file: Path, **kwargs: object) -> None:

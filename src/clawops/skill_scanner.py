@@ -10,7 +10,7 @@ import re
 import shutil
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Final, Iterable
+from typing import Any, Final, Iterable, cast
 
 from clawops.common import load_json, sha256_hex, write_json
 
@@ -164,7 +164,7 @@ def _load_manifest(path: pathlib.Path) -> dict[str, Any]:
             raise ValueError(f"manifest missing required field {key}: {path}")
     if not isinstance(payload["stageHistory"], list):
         raise ValueError(f"manifest stageHistory must be a list: {path}")
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def _write_manifest(path: pathlib.Path, manifest: dict[str, Any]) -> None:
@@ -211,7 +211,7 @@ def _transition_manifest(
     manifest["status"] = status
     stage_history = manifest["stageHistory"]
     assert isinstance(stage_history, list)
-    stage_history.append(
+    cast(list[dict[str, object]], stage_history).append(
         {
             "status": status,
             "path": destination.as_posix(),

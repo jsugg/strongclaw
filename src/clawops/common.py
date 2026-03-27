@@ -9,10 +9,15 @@ import json
 import os
 import pathlib
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 import json5
 import yaml
+
+
+def _empty_extra() -> dict[str, Any]:
+    """Return an empty extra payload with a concrete type."""
+    return {}
 
 
 def ensure_parent(path: pathlib.Path) -> None:
@@ -38,7 +43,7 @@ def load_json(path: pathlib.Path) -> Any:
 
 def load_json5(path: pathlib.Path, *, allow_duplicate_keys: bool = False) -> Any:
     """Load full JSON5 content from *path* for human-edited overlays."""
-    return json5.loads(load_text(path), allow_duplicate_keys=allow_duplicate_keys)
+    return cast(Any, json5.loads(load_text(path), allow_duplicate_keys=allow_duplicate_keys))
 
 
 def load_overlay(path: pathlib.Path) -> Any:
@@ -99,12 +104,15 @@ def deep_merge(base: Any, overlay: Any) -> Any:
     Mapping values are merged recursively. Other values replace the base.
     """
     if isinstance(base, Mapping) and isinstance(overlay, Mapping):
-        merged: dict[str, Any] = dict(base)
-        for key, value in overlay.items():
-            if key in merged:
-                merged[key] = deep_merge(merged[key], value)
+        merged: dict[str, Any] = {
+            str(key): value for key, value in cast(Mapping[object, Any], base).items()
+        }
+        for key, value in cast(Mapping[object, Any], overlay).items():
+            key_text = str(key)
+            if key_text in merged:
+                merged[key_text] = deep_merge(merged[key_text], value)
             else:
-                merged[key] = value
+                merged[key_text] = value
         return merged
     return overlay
 
@@ -122,7 +130,10 @@ def match_mapping(rule: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
         if isinstance(expected, Mapping):
             if not isinstance(actual, Mapping):
                 return False
-            if not match_mapping(expected, actual):
+            if not match_mapping(
+                cast(Mapping[str, Any], expected),
+                cast(Mapping[str, Any], actual),
+            ):
                 return False
             continue
         if isinstance(expected, list):
@@ -144,7 +155,7 @@ class ResultSummary:
 
     ok: bool
     message: str
-    extra: dict[str, Any] = dataclasses.field(default_factory=dict)
+    extra: dict[str, Any] = dataclasses.field(default_factory=_empty_extra)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the result to a serializable dictionary."""

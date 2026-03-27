@@ -80,11 +80,6 @@ def _prompt_yes_no(prompt: str, *, default_yes: bool) -> bool:
         print("Please answer y or n.", file=sys.stderr)
 
 
-def _current_env_values(repo_root: pathlib.Path) -> dict[str, str]:
-    """Return the current env assignments."""
-    return load_env_assignments(varlock_local_env_file(repo_root))
-
-
 def _save_plugin_overlay(path: pathlib.Path, content: str) -> None:
     """Write the managed backend overlay with strict permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)

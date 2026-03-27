@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast, runtime_checkable
 
 import pytest
 
@@ -198,7 +198,8 @@ CONTEXT_KEY = pytest.StashKey[TestContext]()
 
 def current_test_context(request: pytest.FixtureRequest) -> TestContext:
     """Return the current test context from the node stash."""
-    context = request.node.stash.get(CONTEXT_KEY, None)
+    node = cast(pytest.Item, cast(Any, request).node)
+    context = node.stash.get(CONTEXT_KEY, None)
     if context is None:
-        raise RuntimeError(f"TestContext was not initialized for {request.node.nodeid}")
-    return cast(TestContext, context)
+        raise RuntimeError(f"TestContext was not initialized for {node.nodeid}")
+    return context

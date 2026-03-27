@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterator
-from typing import cast
+from typing import Any, cast
 
 import pytest
+from _pytest.nodes import Node
 
 from tests.plugins.infrastructure.context import CONTEXT_KEY, TestContext, current_test_context
 from tests.plugins.infrastructure.environment import EnvironmentManager, register_env_addoption
@@ -29,7 +30,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
-def _iter_declared_profiles(node: pytest.Item) -> tuple[str, ...]:
+def _iter_declared_profiles(node: Node) -> tuple[str, ...]:
     declared: list[str] = []
     for marker in node.iter_markers("test_profile"):
         for value in marker.args:
@@ -39,21 +40,22 @@ def _iter_declared_profiles(node: pytest.Item) -> tuple[str, ...]:
     return tuple(declared)
 
 
-@pytest.fixture(autouse=True)
-def _test_infrastructure_runtime(request: pytest.FixtureRequest) -> Iterator[TestContext]:
+@pytest.fixture(autouse=True, name="_test_infrastructure_runtime")
+def test_infrastructure_runtime(request: pytest.FixtureRequest) -> Iterator[TestContext]:
     """Create a universal ``TestContext`` and bind core runtime services to it."""
-    ctx = TestContext(nodeid=request.node.nodeid, test_name=request.node.name)
+    node = cast(Node, cast(Any, request).node)
+    ctx = TestContext(nodeid=node.nodeid, test_name=node.name)
     env_mode = cast(IsolationMode, request.config.getoption("test_context_mode"))
     env_manager = EnvironmentManager(mode=env_mode)
     env_manager.snapshot()
     env_manager.inject_framework_vars(ctx)
-    for profile_name in _iter_declared_profiles(request.node):
+    for profile_name in _iter_declared_profiles(node):
         env_manager.apply_profile(profile_name)
 
     patch_manager = PatchManager(ctx)
     ctx.attach_environment(env_manager)
     ctx.attach_patch_manager(patch_manager)
-    request.node.stash[CONTEXT_KEY] = ctx
+    node.stash[CONTEXT_KEY] = ctx
 
     try:
         yield ctx
@@ -66,7 +68,7 @@ def _test_infrastructure_runtime(request: pytest.FixtureRequest) -> Iterator[Tes
         uncleaned = ctx.audit_uncleaned()
         if uncleaned:
             warnings.warn(
-                f"Uncleaned resources in {request.node.nodeid}: {uncleaned}",
+                f"Uncleaned resources in {node.nodeid}: {uncleaned}",
                 stacklevel=1,
             )
 
@@ -82,5 +84,6 @@ __all__ = [
     "EnvironmentManager",
     "PatchManager",
     "TestContext",
+    "_test_infrastructure_runtime",
     "test_context",
 ]

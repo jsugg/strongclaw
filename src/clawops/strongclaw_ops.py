@@ -9,7 +9,8 @@ import pathlib
 import shutil
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import cast
 
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
@@ -24,6 +25,7 @@ from clawops.strongclaw_runtime import (
     run_command_inherited,
     wrap_command_with_varlock,
 )
+from clawops.typed_values import as_mapping, as_optional_mapping
 
 DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
 DEFAULT_TEST_COLLECTION_PREFIX = "memory-v2-int-"
@@ -241,16 +243,24 @@ def prune_qdrant_test_collections(
     request = urllib.request.Request(f"{qdrant_url.rstrip('/')}/collections", method="GET")
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = as_mapping(
+                json.loads(response.read().decode("utf-8")),
+                path="qdrant collections response",
+            )
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         raise CommandError(f"failed to query Qdrant collections: {exc}") from exc
-    collections = payload.get("result", {}).get("collections", [])
+    result = as_optional_mapping(payload.get("result"), path="qdrant collections response.result")
+    collections_value: object = [] if result is None else result.get("collections", [])
     matching: list[str] = []
-    if isinstance(collections, list):
-        for entry in collections:
-            if not isinstance(entry, dict):
+    if isinstance(collections_value, list):
+        for entry in cast(Sequence[object], collections_value):
+            if not isinstance(entry, Mapping):
                 continue
-            name = entry.get("name")
+            entry_mapping_any = cast(Mapping[object, object], entry)
+            if any(not isinstance(key, str) for key in entry_mapping_any):
+                continue
+            entry_mapping = cast(Mapping[str, object], entry)
+            name = entry_mapping.get("name")
             if isinstance(name, str) and any(name.startswith(prefix) for prefix in prefixes):
                 matching.append(name)
     pruned: list[str] = []

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from clawops.app_paths import (
     strongclaw_compose_state_dir,
@@ -244,8 +244,8 @@ def run_command(
     result = ExecResult(
         argv=argv,
         returncode=completed.returncode,
-        stdout="" if completed.stdout is None else completed.stdout,
-        stderr="" if completed.stderr is None else completed.stderr,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
         duration_ms=int((time.perf_counter() - start) * 1000),
     )
     if check and not result.ok:
@@ -596,14 +596,14 @@ def load_openclaw_config(config_path: pathlib.Path) -> dict[str, Any]:
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise TypeError(f"expected a mapping in {config_path}")
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
     """Return a nested mapping value when present."""
     value = payload.get(key)
     if isinstance(value, Mapping):
-        return value
+        return cast(Mapping[str, Any], value)
     return None
 
 
@@ -651,7 +651,7 @@ def rendered_openclaw_hypermemory_config_path(config_path: pathlib.Path) -> path
     plugin_entry = entries.get("strongclaw-hypermemory")
     if not isinstance(plugin_entry, Mapping):
         return None
-    config_mapping = _nested_mapping(plugin_entry, "config")
+    config_mapping = _nested_mapping(cast(Mapping[str, Any], plugin_entry), "config")
     if config_mapping is None:
         return None
     raw_value = config_mapping.get("configPath")
@@ -671,7 +671,7 @@ def rendered_openclaw_lossless_plugin_path(config_path: pathlib.Path) -> pathlib
     paths_value = load_mapping.get("paths")
     if not isinstance(paths_value, list):
         return None
-    for raw_entry in paths_value:
+    for raw_entry in cast(Sequence[object], paths_value):
         if isinstance(raw_entry, str) and "lossless-claw" in raw_entry:
             return pathlib.Path(raw_entry).expanduser().resolve()
     return None

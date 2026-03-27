@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+from typing import Any
 
 import matplotlib.pyplot as plt
 
@@ -34,8 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     args = parse_args(argv)
     labels, values = load_results(args.input)
-    fig = plt.figure(figsize=(max(6, len(labels) * 1.2), 4))
-    ax = fig.add_subplot(111)
+    fig: Any = plt.figure(figsize=(max(6, len(labels) * 1.2), 4))
+    ax: Any = fig.add_subplot(111)
     ax.bar(labels, values)
     ax.set_ylim(0, 1.2)
     ax.set_ylabel("pass=1 / fail=0")

@@ -356,7 +356,7 @@ def run_session(spec: SessionSpec) -> SessionSummary:
     )
     broker = CredentialBroker()
     credential_status = broker.evaluate(spec.backend, required_auth_mode=required_auth_mode)
-    started, base_summary = _base_summary(
+    _started, base_summary = _base_summary(
         spec,
         definition=definition,
         credential_status=credential_status,

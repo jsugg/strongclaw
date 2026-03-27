@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
-from typing import Literal
+from typing import Literal, cast
 
 from clawops.process_runner import CommandResult, run_command
 
@@ -80,7 +80,7 @@ def parse_acpx_output(stdout_text: str) -> ParsedAcpxOutput:
             return ParsedAcpxOutput(format="text", payload=None, events=())
         if not isinstance(payload, dict):
             return ParsedAcpxOutput(format="text", payload=None, events=())
-        events.append(payload)
+        events.append(cast(dict[str, object], payload))
     return ParsedAcpxOutput(format="ndjson", payload=None, events=tuple(events))
 
 

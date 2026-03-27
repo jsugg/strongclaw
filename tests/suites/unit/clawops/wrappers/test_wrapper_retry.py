@@ -8,6 +8,7 @@ import pathlib
 import pytest
 import requests
 
+from clawops.typed_values import as_mapping
 from clawops.wrappers.base import HttpTimeouts, JsonHttpClient, RetryPolicy
 from clawops.wrappers.github import add_labels
 from clawops.wrappers.webhook import invoke_webhook
@@ -233,8 +234,9 @@ def test_non_retry_wrappers_fail_once_on_retryable_http_status(
     assert first["request_attempts"] == 1
     assert first["request_id"] == "req-503"
     assert first["retry_after_seconds"] == 5.0
-    assert first["error"]["request_id"] == "req-503"
-    assert first["error"]["retry_after_seconds"] == 5.0
+    first_error = as_mapping(first["error"], path="first.error")
+    assert first_error["request_id"] == "req-503"
+    assert first_error["retry_after_seconds"] == 5.0
     assert calls == ["request"]
     assert second == first
 

@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+from clawops.typed_values import as_mapping
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
     SPECS,
@@ -112,8 +113,9 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     assert first["error_type"] == "timeout"
     assert first["retryable"] is expected_failure_retryable(spec)
     assert first["request_attempts"] == expected_failure_attempts(spec)
-    assert first["error"]["type"] == "timeout"
-    assert first["error"]["message"] == "simulated timeout"
+    first_error = as_mapping(first["error"], path="first.error")
+    assert first_error["type"] == "timeout"
+    assert first_error["message"] == "simulated timeout"
     assert second == first
     assert calls == ["request"] * expected_failure_attempts(spec)
 
@@ -152,8 +154,9 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
     assert result["retryable"] is expected_failure_retryable(spec)
     assert result["request_method"] == ("PUT" if spec.kind == "github_pull_merge" else "POST")
     assert result["request_attempts"] == expected_failure_attempts(spec)
-    assert result["error"]["type"] == "timeout"
-    assert result["error"]["message"] == "simulated timeout"
+    result_error = as_mapping(result["error"], path="result.error")
+    assert result_error["type"] == "timeout"
+    assert result_error["message"] == "simulated timeout"
 
     persisted = journal.get(str(result["op_id"]))
     assert persisted.status == "failed"
@@ -204,7 +207,8 @@ def test_wrapper_replays_running_operation_without_duplicate_side_effect(
     assert replayed["accepted"] is True
     assert replayed["executed"] is False
     assert replayed["status"] == "running"
-    assert replayed["decision"]["decision"] == "allow"
+    replayed_decision = as_mapping(replayed["decision"], path="replayed.decision")
+    assert replayed_decision["decision"] == "allow"
     assert calls == []
 
     persisted = journal.get(str(replayed["op_id"]))

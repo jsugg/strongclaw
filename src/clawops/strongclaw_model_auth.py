@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 from collections.abc import Sequence
+from typing import cast
 
 from clawops.strongclaw_runtime import (
     DEFAULT_REPO_ROOT,
@@ -25,6 +26,13 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
+
+
+def _mapping_or_none(value: object) -> dict[str, object] | None:
+    """Return a string-keyed mapping copy when *value* is mapping-like."""
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
 
 
 def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
@@ -51,11 +59,22 @@ def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
 def _extract_agent_ids(payload: object) -> list[str]:
     """Extract OpenClaw agent ids from a JSON payload."""
     if isinstance(payload, list):
-        return [str(item["id"]) for item in payload if isinstance(item, dict) and "id" in item]
-    if isinstance(payload, dict):
-        agents = payload.get("agents")
+        agent_ids: list[str] = []
+        for item in cast(Sequence[object], payload):
+            item_mapping = _mapping_or_none(item)
+            if item_mapping is not None and "id" in item_mapping:
+                agent_ids.append(str(item_mapping["id"]))
+        return agent_ids
+    payload_mapping = _mapping_or_none(payload)
+    if payload_mapping is not None:
+        agents = payload_mapping.get("agents")
         if isinstance(agents, list):
-            return [str(item["id"]) for item in agents if isinstance(item, dict) and "id" in item]
+            nested_agent_ids: list[str] = []
+            for item in cast(Sequence[object], agents):
+                item_mapping = _mapping_or_none(item)
+                if item_mapping is not None and "id" in item_mapping:
+                    nested_agent_ids.append(str(item_mapping["id"]))
+            return nested_agent_ids
     return []
 
 
@@ -98,10 +117,17 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         return False
-    models = payload.get("models")
+    payload_mapping = _mapping_or_none(payload)
+    if payload_mapping is None:
+        return False
+    models = payload_mapping.get("models")
     if not isinstance(models, list):
         return False
-    return any(isinstance(model, dict) and model.get("available") is True for model in models)
+    return any(
+        (model_mapping := _mapping_or_none(model)) is not None
+        and model_mapping.get("available") is True
+        for model in cast(Sequence[object], models)
+    )
 
 
 def _agent_model_status_ok(

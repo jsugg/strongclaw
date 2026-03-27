@@ -33,11 +33,6 @@ class _Deletable:
         self.deleted = True
 
 
-class _BrokenCleanup:
-    def close(self) -> None:
-        raise RuntimeError("boom")
-
-
 def test_context_generates_unique_tid() -> None:
     assert TestContext().tid != TestContext().tid
 

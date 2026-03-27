@@ -6,9 +6,10 @@ import os
 import shutil
 import time
 from pathlib import Path
+from typing import cast
 
 from tests.utils.helpers._fresh_host.macos import cleanup_macos
-from tests.utils.helpers._fresh_host.models import FreshHostReport, PhaseResult
+from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostReport, PhaseResult
 from tests.utils.helpers._fresh_host.shell import capture_to_file, phase_env
 from tests.utils.helpers._fresh_host.storage import (
     context_path,
@@ -23,7 +24,7 @@ from tests.utils.helpers._fresh_host.storage import (
 )
 
 
-def _diagnostic_commands(context) -> dict[Path, list[str]]:
+def _diagnostic_commands(context: FreshHostContext) -> dict[Path, list[str]]:
     """Build the diagnostic command plan for a scenario."""
     diagnostics_dir = context_path(context.diagnostics_dir)
     commands = {
@@ -66,6 +67,12 @@ def _diagnostic_commands(context) -> dict[Path, list[str]]:
         commands[diagnostics_dir / "colima-status.txt"] = ["colima", "status"]
         commands[diagnostics_dir / "colima-list.txt"] = ["colima", "list"]
     return commands
+
+
+def _list_length(payload: dict[str, object], key: str) -> int:
+    """Return the length of one JSON list field when present."""
+    value = payload.get(key)
+    return len(cast(list[object], value)) if isinstance(value, list) else 0
 
 
 def collect_diagnostics(context_file: Path) -> FreshHostReport:
@@ -157,11 +164,11 @@ def _append_child_report_sections(lines: list[str], report: FreshHostReport) -> 
             [
                 "| Image ensure field | Value |",
                 "| --- | --- |",
-                f"| Images requested | {len(image_report.get('images', []))} |",
-                f"| Missing before pull | {len(image_report.get('missing_before_pull', []))} |",
+                f"| Images requested | {_list_length(image_report, 'images')} |",
+                f"| Missing before pull | {_list_length(image_report, 'missing_before_pull')} |",
                 f"| Pull attempts | {image_report.get('pull_attempt_count')} |",
-                f"| Retried images | {len(image_report.get('retried_images', []))} |",
-                f"| Pulled images | {len(image_report.get('pulled_images', []))} |",
+                f"| Retried images | {_list_length(image_report, 'retried_images')} |",
+                f"| Pulled images | {_list_length(image_report, 'pulled_images')} |",
                 f"| Failure reason | {image_report.get('failure_reason')} |",
                 "",
             ]

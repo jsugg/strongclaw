@@ -110,16 +110,19 @@ def _as_mapping(name: str, value: object) -> dict[str, object]:
         return {}
     if not isinstance(value, dict):
         raise TypeError(f"{name} config must be a mapping")
-    return value
+    return cast(dict[str, object], value)
 
 
 def _as_string_list(name: str, value: object) -> list[str]:
     """Validate a list of string config values."""
     if value is None:
         return []
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list):
         raise TypeError(f"{name} must be a list of strings")
-    return value
+    items = cast(list[object], value)
+    if not all(isinstance(item, str) for item in items):
+        raise TypeError(f"{name} must be a list of strings")
+    return [cast(str, item) for item in items]
 
 
 def _as_bool(name: str, value: object, *, default: bool) -> bool:
@@ -595,9 +598,7 @@ class ContextService:
 
 def load_config(path: pathlib.Path) -> ContextConfig:
     """Load and validate the context-service YAML config."""
-    config = load_yaml(path)
-    if not isinstance(config, dict):
-        raise TypeError(f"expected mapping config, got: {type(config)!r}")
+    config = _as_mapping("context service", load_yaml(path))
     index = _as_mapping("index", config.get("index"))
     paths = _as_mapping("paths", config.get("paths"))
     db_path = index.get("db_path", ".clawops/context.sqlite")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from clawops.common import write_yaml
+from clawops.typed_values import as_string
 from clawops.workflow_runner import WorkflowRunner
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.cli import write_fake_acpx, write_status_script
@@ -45,10 +46,16 @@ def test_workflow_runner_supports_workspace_and_delivery_descriptors(
     )
 
     results = runner.run()
+    workspace_descriptor_path = pathlib.Path(
+        as_string(results[0].details["descriptor_path"], path="results[0].details.descriptor_path")
+    )
+    delivery_descriptor_path = pathlib.Path(
+        as_string(results[1].details["descriptor_path"], path="results[1].details.descriptor_path")
+    )
 
     assert [item.ok for item in results] == [True, True]
-    assert pathlib.Path(results[0].details["descriptor_path"]).exists()
-    assert pathlib.Path(results[1].details["descriptor_path"]).exists()
+    assert workspace_descriptor_path.exists()
+    assert delivery_descriptor_path.exists()
 
 
 def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
@@ -106,10 +113,19 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
     )
 
     results = runner.run()
+    summary_path = pathlib.Path(
+        as_string(results[0].details["summary_path"], path="results[0].details.summary_path")
+    )
+    context_manifest_path = pathlib.Path(
+        as_string(
+            results[0].details["context_manifest"],
+            path="results[0].details.context_manifest",
+        )
+    )
 
     assert [item.ok for item in results] == [True, True]
-    assert pathlib.Path(results[0].details["summary_path"]).exists()
-    assert pathlib.Path(results[0].details["context_manifest"]).exists()
+    assert summary_path.exists()
+    assert context_manifest_path.exists()
     assert results[1].message == "succeeded"
 
 

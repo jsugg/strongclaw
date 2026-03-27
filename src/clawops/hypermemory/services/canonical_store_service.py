@@ -849,6 +849,10 @@ class CanonicalStoreService:
     def _normalize_tier(self, value: str | Tier | None) -> Tier:
         return normalize_tier(value)
 
+    def normalize_tier(self, value: str) -> Tier:
+        """Expose tier normalization for shared row-mapping helpers."""
+        return self._normalize_tier(value)
+
     def _infer_fact_key(
         self,
         *,

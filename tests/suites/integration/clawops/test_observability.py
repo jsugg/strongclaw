@@ -45,10 +45,11 @@ def test_wrapper_execution_exports_trace_span(
     journal = create_journal(tmp_path / "journal.sqlite")
     ctx = WrapperContext(policy_engine=PolicyEngine.from_file(policy_path), journal=journal)
 
-    test_context.patch.patch(
-        "clawops.wrappers.base.requests.request",
-        new=lambda *args, **kwargs: _FakeResponse(),
-    )
+    def _fake_request(*args: object, **kwargs: object) -> _FakeResponse:
+        del args, kwargs
+        return _FakeResponse()
+
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_fake_request)
 
     result = invoke_webhook(
         ctx=ctx,
@@ -60,10 +61,12 @@ def test_wrapper_execution_exports_trace_span(
     observability.force_flush()
 
     span = next(span for span in tracing_exporter.spans if span.name == "clawops.wrapper.execute")
+    attributes = span.attributes
+    assert attributes is not None
     assert result["ok"] is True
-    assert span.attributes["kind"] == "webhook_post"
-    assert span.attributes["status_code"] == 200
-    assert span.attributes["request_attempts"] == 1
+    assert attributes["kind"] == "webhook_post"
+    assert attributes["status_code"] == 200
+    assert attributes["request_attempts"] == 1
 
 
 def test_context_index_exports_trace_span(
@@ -80,6 +83,8 @@ def test_context_index_exports_trace_span(
     observability.force_flush()
 
     span = next(span for span in tracing_exporter.spans if span.name == "clawops.context.index")
+    attributes = span.attributes
+    assert attributes is not None
     assert stats.indexed_files == 1
-    assert span.attributes["repo"] == repo.resolve().as_posix()
-    assert span.attributes["indexed_files"] == 1
+    assert attributes["repo"] == repo.resolve().as_posix()
+    assert attributes["indexed_files"] == 1

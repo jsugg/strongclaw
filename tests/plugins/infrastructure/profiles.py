@@ -7,7 +7,12 @@ from typing import cast
 
 from tests.plugins.infrastructure.types import ProfileOverrideValue, ProfileValue, TestProfileName
 
-type ProfileOverrides = dict[str, str | None]
+type ProfileOverrides = dict[str, ProfileOverrideValue]
+type ResolvedProfileEnv = dict[str, str | None]
+
+
+def _empty_resolved_profile_env() -> ResolvedProfileEnv:
+    return {}
 
 
 def _normalize_value(value: ProfileValue) -> str:
@@ -16,10 +21,10 @@ def _normalize_value(value: ProfileValue) -> str:
 
 def _normalize_overrides(
     overrides: dict[str, ProfileOverrideValue] | None,
-) -> ProfileOverrides:
+) -> ResolvedProfileEnv:
     if overrides is None:
         return {}
-    normalized: ProfileOverrides = {}
+    normalized: ResolvedProfileEnv = {}
     for key, value in overrides.items():
         normalized[key] = None if value is None else _normalize_value(value)
     return normalized
@@ -31,16 +36,16 @@ class TestProfile:
 
     name: TestProfileName
     description: str
-    env: dict[str, str | None] = field(default_factory=dict)
+    env: ResolvedProfileEnv = field(default_factory=_empty_resolved_profile_env)
     required_overrides: frozenset[str] = frozenset()
 
     def resolve_env(
         self,
         *,
         overrides: dict[str, ProfileOverrideValue] | None = None,
-    ) -> dict[str, str | None]:
+    ) -> ResolvedProfileEnv:
         """Return the final environment mutations for this profile."""
-        resolved = dict(self.env)
+        resolved: ResolvedProfileEnv = dict(self.env)
         normalized_overrides = _normalize_overrides(overrides)
         missing = self.required_overrides.difference(normalized_overrides)
         if missing:
@@ -94,7 +99,7 @@ _PROFILES: dict[TestProfileName, TestProfile] = {
 
 def available_profiles() -> tuple[TestProfileName, ...]:
     """Return the stable list of available profile names."""
-    return cast(tuple[TestProfileName, ...], tuple(sorted(_PROFILES)))
+    return tuple(sorted(_PROFILES))
 
 
 def resolve_profile(name: str) -> TestProfile:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -35,7 +35,8 @@ def resolve_service_mode(
     if env_mode is not None:
         return env_mode
 
-    marker = request.node.get_closest_marker(marker_name or service)
+    node = cast(pytest.Item, cast(Any, request).node)
+    marker = node.get_closest_marker(marker_name or service)
     if marker is not None:
         marker_mode = _coerce_mode(marker.kwargs.get("mode"))
         if marker_mode is not None:

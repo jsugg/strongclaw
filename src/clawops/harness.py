@@ -11,6 +11,7 @@ from typing import Any
 from clawops.common import load_yaml, write_text
 from clawops.policy_engine import PolicyEngine
 from clawops.process_runner import run_command
+from clawops.typed_values import as_mapping, as_mapping_list, as_string
 
 
 def _assert_contains(label: str, haystack: str, needles: list[str]) -> list[str]:
@@ -82,17 +83,17 @@ def run_policy_case(case: dict[str, Any]) -> dict[str, Any]:
 
 def run_suite(path: pathlib.Path) -> list[dict[str, Any]]:
     """Run all cases in a YAML suite."""
-    suite = load_yaml(path)
-    if not isinstance(suite, dict) or "cases" not in suite:
-        raise ValueError(f"invalid suite file: {path}")
+    suite = as_mapping(load_yaml(path), path=str(path))
+    cases = as_mapping_list(suite.get("cases"), path=f"{path}.cases")
     results: list[dict[str, Any]] = []
-    for case in suite["cases"]:
-        kind = case["kind"]
+    for index, case in enumerate(cases):
+        kind = as_string(case.get("kind"), path=f"{path}.cases[{index}].kind")
+        normalized_case = dict(case)
         if kind == "command":
-            results.append(run_command_case(case))
+            results.append(run_command_case(normalized_case))
             continue
         if kind == "policy":
-            results.append(run_policy_case(case))
+            results.append(run_policy_case(normalized_case))
             continue
         raise ValueError(f"unknown harness case kind: {kind}")
     return results

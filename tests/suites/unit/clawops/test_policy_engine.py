@@ -17,7 +17,8 @@ def test_policy_denies_non_allowlisted_target(policy_factory: PolicyFactory) -> 
                 }
             },
             "allowlists": {"webhook_url": ["https://example.internal/hooks/deploy"]},
-        }
+        },
+        "deny-policy.yaml",
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(
@@ -43,7 +44,8 @@ def test_policy_requires_approval_for_external_write(policy_factory: PolicyFacto
                 }
             },
             "approval": {"require_for_actions": ["github.comment.create"]},
-        }
+        },
+        "approval-policy.yaml",
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(
@@ -81,7 +83,8 @@ def test_policy_review_action_overrides_defaults(policy_factory: PolicyFactory) 
                     }
                 },
             },
-        }
+        },
+        "review-policy.yaml",
     )
     engine = PolicyEngine.from_file(policy_path)
     decision = engine.evaluate(

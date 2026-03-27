@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import fcntl
 import json
 import pathlib
 import subprocess
+from collections.abc import Callable
+from typing import Any, Protocol, cast
 
 import pytest
 
-from clawops.acp_runner import _lock_name, _resolve_session_spec
+import clawops.acp_runner as acp_runner
 from clawops.acp_runner import main as acp_runner_main
 from clawops.acp_runner import parse_args
 from tests.utils.helpers.cli import (
@@ -18,6 +21,22 @@ from tests.utils.helpers.cli import (
     symlink_executable,
     write_fake_acpx,
     write_status_script,
+)
+
+
+class _SessionSpecLike(Protocol):
+    """Subset of the runner session spec used by this test."""
+
+    lock_identity: str
+
+
+_lock_name = cast(
+    Callable[[str], str],
+    cast(Any, acp_runner)._lock_name,
+)
+_resolve_session_spec = cast(
+    Callable[[argparse.Namespace], _SessionSpecLike],
+    cast(Any, acp_runner)._resolve_session_spec,
 )
 
 

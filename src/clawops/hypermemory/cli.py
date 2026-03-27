@@ -382,7 +382,12 @@ def _parse_item_ids(raw_value: str) -> list[int]:
         payload = json.loads(stripped)
         if not isinstance(payload, list):
             raise ValueError("item id payload must be a list")
-        return [_coerce_int(item, name="item id") for item in cast(list[object], payload)]
+        item_ids: list[int] = []
+        for index, item in enumerate(cast(list[object], payload)):
+            if isinstance(item, bool) or not isinstance(item, (int, str)):
+                raise ValueError(f"item id payload entry {index} must be an integer")
+            item_ids.append(int(item))
+        return item_ids
     return [int(part.strip()) for part in stripped.split(",") if part.strip()]
 
 
@@ -399,18 +404,7 @@ def _parse_messages(raw_value: str) -> list[tuple[int, str, str]]:
         if len(parts) != 3:
             raise ValueError("each message must be a three-item array")
         turn_index = parts[0]
-        role = parts[1]
-        text = parts[2]
-        messages.append((_coerce_int(turn_index, name="message turn"), str(role), str(text)))
+        if isinstance(turn_index, bool) or not isinstance(turn_index, (int, str)):
+            raise ValueError("message turn index must be an integer")
+        messages.append((int(turn_index), str(parts[1]), str(parts[2])))
     return messages
-
-
-def _coerce_int(value: object, *, name: str) -> int:
-    """Normalize an integer-like CLI payload value."""
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer")
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        return int(value)
-    raise ValueError(f"{name} must be an integer")

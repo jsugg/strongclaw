@@ -4,12 +4,35 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 import pytest
 
 from tests.utils.helpers import fresh_host, hosted_docker
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
+
+
+class _PullOneImage(Protocol):
+    def __call__(self, image: str, timeout_seconds: int) -> tuple[str, int, float, str]: ...
+
+
+class _WaitForDockerReady(Protocol):
+    def __call__(self, *, cwd: Path, env: dict[str, str], max_attempts: int = 60) -> None: ...
+
+
+_pull_one_image = cast(
+    _PullOneImage,
+    cast(Any, hosted_docker)._pull_one_image,
+)
+_wait_for_docker_ready = cast(
+    _WaitForDockerReady,
+    cast(Any, hosted_docker)._wait_for_docker_ready,
+)
+
+
+def _sleep(_: float) -> None:
+    return None
 
 
 def test_pull_images_retries_with_reduced_parallelism(
@@ -26,7 +49,8 @@ def test_pull_images_retries_with_reduced_parallelism(
         return image, 0, 0.1, ""
 
     monkeypatch.setattr(hosted_docker_images, "pull_one_image", fake_pull_one_image)
-    monkeypatch.setattr(hosted_docker_images.time, "sleep", lambda _: None)
+
+    monkeypatch.setattr(hosted_docker_images.time, "sleep", _sleep)
 
     report = hosted_docker.pull_images(
         ["postgres:16", "qdrant:v1"],
@@ -48,7 +72,7 @@ def test_pull_one_image_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(hosted_docker_images.subprocess, "run", fake_run)
 
-    image, returncode, _, output = hosted_docker._pull_one_image("postgres:16", 42)
+    image, returncode, _, output = _pull_one_image("postgres:16", 42)
 
     assert image == "postgres:16"
     assert returncode == 1
@@ -145,9 +169,9 @@ def test_wait_for_docker_ready_retries_after_probe_timeout(
         return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
 
     monkeypatch.setattr(hosted_docker_shell, "run_command", fake_run_command)
-    monkeypatch.setattr(hosted_docker_shell.time, "sleep", lambda _: None)
+    monkeypatch.setattr(hosted_docker_shell.time, "sleep", _sleep)
 
-    hosted_docker._wait_for_docker_ready(
+    _wait_for_docker_ready(
         cwd=tmp_path,
         env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
         max_attempts=4,

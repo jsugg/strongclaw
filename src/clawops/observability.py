@@ -18,7 +18,7 @@ type TelemetryScalar = bool | int | float | str
 type TelemetryValue = TelemetryScalar | None
 
 _TRACER_LOCK = threading.Lock()
-_TRACER_STATE: _TracerState | None = None
+_tracer_state: _TracerState | None = None
 
 
 def _parse_bool_env(name: str, *, default: bool = False) -> bool:
@@ -114,11 +114,11 @@ def _build_tracer_state() -> _TracerState | None:
 
 def _get_tracer_state() -> _TracerState | None:
     """Return the cached tracer state."""
-    global _TRACER_STATE
+    global _tracer_state
     with _TRACER_LOCK:
-        if _TRACER_STATE is None:
-            _TRACER_STATE = _build_tracer_state()
-        return _TRACER_STATE
+        if _tracer_state is None:
+            _tracer_state = _build_tracer_state()
+        return _tracer_state
 
 
 class ObservedSpan:
@@ -181,8 +181,8 @@ def force_flush() -> None:
 
 def reset_for_tests() -> None:
     """Reset cached telemetry state for deterministic tests."""
-    global _TRACER_STATE
+    global _tracer_state
     with _TRACER_LOCK:
-        if _TRACER_STATE is not None:
-            _TRACER_STATE.provider.shutdown()
-        _TRACER_STATE = None
+        if _tracer_state is not None:
+            _tracer_state.provider.shutdown()
+        _tracer_state = None

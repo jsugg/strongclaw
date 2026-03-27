@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from time import perf_counter
-from typing import cast
 
 from clawops.hypermemory.contracts import VerificationDeps, VerifyLaneChecks, VerifyResult
 from clawops.hypermemory.models import HypermemoryConfig, RerankResponse
@@ -15,6 +14,7 @@ from clawops.hypermemory.providers import RerankProvider
 from clawops.hypermemory.qdrant_backend import VectorBackend
 from clawops.hypermemory.services.backend_service import BackendService
 from clawops.observability import TelemetryValue, emit_structured_log, observed_span
+from clawops.typed_values import as_optional_mapping
 
 
 class VerificationService:
@@ -263,14 +263,23 @@ class VerificationService:
         self, collection_details: dict[str, object]
     ) -> bool:
         """Return whether the live Qdrant collection exposes both named vector lanes."""
-        config = _mapping_value(collection_details, "config")
+        config = as_optional_mapping(
+            collection_details.get("config"),
+            path="collection_details.config",
+        )
         if config is None:
             return False
-        params = _mapping_value(config, "params")
+        params = as_optional_mapping(config.get("params"), path="collection_details.config.params")
         if params is None:
             return False
-        vectors = _mapping_value(params, "vectors")
-        sparse_vectors = _mapping_value(params, "sparse_vectors")
+        vectors = as_optional_mapping(
+            params.get("vectors"),
+            path="collection_details.config.params.vectors",
+        )
+        sparse_vectors = as_optional_mapping(
+            params.get("sparse_vectors"),
+            path="collection_details.config.params.sparse_vectors",
+        )
         if vectors is None or sparse_vectors is None:
             return False
         return (
@@ -293,11 +302,3 @@ class VerificationService:
         if not text:
             return None
         return " ".join(text.split()[:8])
-
-
-def _mapping_value(mapping: Mapping[str, object], key: str) -> Mapping[str, object] | None:
-    """Return a nested mapping value when present."""
-    value = mapping.get(key)
-    if not isinstance(value, Mapping):
-        return None
-    return cast(Mapping[str, object], value)

@@ -25,6 +25,11 @@ class RecordingExporter(SpanExporter):
         return None
 
 
+def _make_span_processor(span_exporter: SpanExporter) -> SimpleSpanProcessor:
+    """Build a simple span processor for a typed exporter."""
+    return SimpleSpanProcessor(span_exporter)
+
+
 def configure_test_tracing(
     test_context: TestContext,
     observability_module: Any,
@@ -39,6 +44,6 @@ def configure_test_tracing(
     test_context.patch.patch_object(
         observability_module,
         "_make_span_processor",
-        new=lambda span_exporter: SimpleSpanProcessor(span_exporter),
+        new=_make_span_processor,
     )
     return exporter
