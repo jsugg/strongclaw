@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from clawops.app_paths import scoped_state_dir
 from clawops.common import canonical_json, load_json, sha256_hex, write_json, write_text
-from clawops.context_service import ContextService, IndexedFile
+from clawops.context.codebase.service import CodebaseContextService, IndexedFile
 from clawops.orchestration import (
     CONTEXT_ENVELOPE_SCHEMA_VERSION,
     ProjectDescriptor,
@@ -48,6 +48,9 @@ class ContextEnvelopeManifest:
     workspace_id: str
     lane: str
     role: str
+    context_provider: str
+    context_scale: str
+    retrieval_modes: tuple[str, ...]
     backend: str
     query: str
     created_at: str
@@ -73,6 +76,9 @@ class ContextEnvelopeManifest:
             "workspace_id": self.workspace_id,
             "lane": self.lane,
             "role": self.role,
+            "context_provider": self.context_provider,
+            "context_scale": self.context_scale,
+            "retrieval_modes": list(self.retrieval_modes),
             "backend": self.backend,
             "query": self.query,
             "created_at": self.created_at,
@@ -146,6 +152,11 @@ class ContextEnvelopeManifest:
             workspace_id=_required_str("workspace_id"),
             lane=_required_str("lane"),
             role=_required_str("role"),
+            context_provider=_required_str("context_provider"),
+            context_scale=_required_str("context_scale"),
+            retrieval_modes=tuple(
+                as_string_list(payload_mapping.get("retrieval_modes", []), path="retrieval_modes")
+            ),
             backend=_required_str("backend"),
             query=_required_str("query"),
             created_at=_required_str("created_at"),
@@ -236,6 +247,9 @@ def _render_body(
     lines.append(f"- workspace_id: {manifest.workspace_id}")
     lines.append(f"- lane: {manifest.lane}")
     lines.append(f"- role: {manifest.role}")
+    lines.append(f"- context_provider: {manifest.context_provider}")
+    lines.append(f"- context_scale: {manifest.context_scale}")
+    lines.append(f"- retrieval_modes: {', '.join(manifest.retrieval_modes)}")
     lines.append(f"- backend: {manifest.backend}")
     lines.append(f"- query: {manifest.query}")
     lines.append("")
@@ -298,7 +312,7 @@ class ContextEnvelopeBuilder:
 
     def __init__(
         self,
-        service: ContextService,
+        service: CodebaseContextService,
         *,
         project: ProjectDescriptor,
         workspace: WorkspaceDescriptor,
@@ -360,6 +374,9 @@ class ContextEnvelopeBuilder:
                     "workspace_id": self.workspace.workspace_id,
                     "lane": self.lane,
                     "role": self.role,
+                    "context_provider": self.service.provider,
+                    "context_scale": self.service.scale,
+                    "retrieval_modes": list(self.service.retrieval_modes),
                     "backend": self.backend,
                     "query": query,
                     "index_snapshot_id": index_snapshot_id,
@@ -381,6 +398,9 @@ class ContextEnvelopeBuilder:
             workspace_id=self.workspace.workspace_id,
             lane=self.lane,
             role=self.role,
+            context_provider=self.service.provider,
+            context_scale=self.service.scale,
+            retrieval_modes=self.service.retrieval_modes,
             backend=self.backend,
             query=query,
             created_at=_timestamp_text(),
@@ -448,7 +468,7 @@ class ContextEnvelopeBuilder:
 def validate_context_envelope(
     envelope: ContextEnvelope,
     *,
-    service: ContextService | None = None,
+    service: CodebaseContextService | None = None,
     workspace: WorkspaceDescriptor | None = None,
 ) -> None:
     """Validate one materialized context envelope."""

@@ -300,7 +300,7 @@ clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-ru
 ## 9. Enable repo lexical context indexing and verify QMD
 
 ```bash
-clawops context index --config platform/configs/context/context-service.yaml --repo .
+clawops context codebase index --config platform/configs/context/codebase.yaml --repo . --scale small
 qmd status
 ```
 
@@ -309,17 +309,19 @@ qmd status
 Index a repo:
 
 ```bash
-clawops context index \
-  --config platform/configs/context/context-service.yaml \
-  --repo ~/Projects/strongclaw
+clawops context codebase index \
+  --config platform/configs/context/codebase.yaml \
+  --repo ~/Projects/strongclaw \
+  --scale small
 ```
 
 Query it:
 
 ```bash
-clawops context query \
-  --config platform/configs/context/context-service.yaml \
+clawops context codebase query \
+  --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/strongclaw \
+  --scale small \
   --query "operation journal idempotency"
 ```
 

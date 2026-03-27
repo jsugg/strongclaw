@@ -1,4 +1,4 @@
-"""Repository indexing and lexical context packing service."""
+"""Codebase context provider backed by a local lexical index."""
 
 from __future__ import annotations
 
@@ -15,6 +15,12 @@ from collections.abc import Iterable, Sequence
 from typing import Literal, cast
 
 from clawops.common import canonical_json, expand, load_yaml, sha256_hex, utc_now_ms, write_text
+from clawops.context.contracts import (
+    CONTEXT_PROVIDER_CODEBASE,
+    CONTEXT_SCALES,
+    ContextScale,
+    require_context_scale,
+)
 from clawops.observability import emit_structured_log, observed_span
 
 DEFAULT_TEXT_EXTENSIONS = {
@@ -223,8 +229,8 @@ class IndexedFile:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class ContextConfig:
-    """Context-service configuration."""
+class CodebaseContextConfig:
+    """Codebase-context configuration."""
 
     db_path: pathlib.Path
     include_globs: tuple[str, ...] = ()
@@ -234,13 +240,26 @@ class ContextConfig:
     symlink_policy: SymlinkPolicy = "in_repo_only"
 
 
-class ContextService:
-    """Lexical repo indexer and query engine."""
+class CodebaseContextService:
+    """Lexical repo indexer and query engine for the codebase provider."""
 
-    def __init__(self, repo: pathlib.Path, config: ContextConfig) -> None:
+    def __init__(
+        self,
+        repo: pathlib.Path,
+        config: CodebaseContextConfig,
+        *,
+        scale: ContextScale,
+    ) -> None:
         self.repo = repo.expanduser().resolve()
         self.config = config
         self.db_path = config.db_path.expanduser().resolve()
+        self.provider = CONTEXT_PROVIDER_CODEBASE
+        self.scale = scale
+
+    @property
+    def retrieval_modes(self) -> tuple[str, ...]:
+        """Return the retrieval modes currently active for this provider."""
+        return ("lexical",)
 
     def connect(self) -> sqlite3.Connection:
         """Open the sqlite database."""
@@ -323,7 +342,12 @@ class ContextService:
         seen_paths: set[str] = set()
         started_at = time.perf_counter()
         with observed_span(
-            "clawops.context.index", attributes={"repo": self.repo.as_posix()}
+            "clawops.context.codebase.index",
+            attributes={
+                "repo": self.repo.as_posix(),
+                "provider": self.provider,
+                "scale": self.scale,
+            },
         ) as span:
             with self.connect() as conn:
                 existing_metadata = self._load_indexed_metadata(conn)
@@ -393,6 +417,8 @@ class ContextService:
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             observation: dict[str, bool | int | float | str] = {
                 "repo": self.repo.as_posix(),
+                "provider": self.provider,
+                "scale": self.scale,
                 "total_files": stats.total_files,
                 "indexed_files": stats.indexed_files,
                 "skipped_files": stats.skipped_files,
@@ -400,7 +426,7 @@ class ContextService:
                 "elapsed_ms": elapsed_ms,
             }
             span.set_attributes(observation)
-            emit_structured_log("clawops.context.index", observation)
+            emit_structured_log("clawops.context.codebase.index", observation)
             return stats
 
     def index(self) -> int:
@@ -572,9 +598,13 @@ class ContextService:
         lines: list[str] = []
         lines.append("# Repo Context Pack")
         lines.append("")
+        lines.append(f"- provider: {self.provider}")
+        lines.append(f"- scale: {self.scale}")
         lines.append(f"- generated_at_ms: {utc_now_ms()}")
-        lines.append(f"- repo: {self.repo}")
+        lines.append(f"- repo_root: {self.repo}")
         lines.append(f"- query: {query}")
+        lines.append(f"- snapshot_id: {self.index_snapshot_id()}")
+        lines.append(f"- backend_modes: {', '.join(self.retrieval_modes)}")
         lines.append("")
         diff = self.git_diff()
         if diff:
@@ -596,9 +626,9 @@ class ContextService:
         return "\n".join(lines).rstrip() + "\n"
 
 
-def load_config(path: pathlib.Path) -> ContextConfig:
-    """Load and validate the context-service YAML config."""
-    config = _as_mapping("context service", load_yaml(path))
+def load_config(path: pathlib.Path) -> CodebaseContextConfig:
+    """Load and validate the codebase-context YAML config."""
+    config = _as_mapping("codebase context", load_yaml(path))
     index = _as_mapping("index", config.get("index"))
     paths = _as_mapping("paths", config.get("paths"))
     db_path = index.get("db_path", ".clawops/context.sqlite")
@@ -606,7 +636,7 @@ def load_config(path: pathlib.Path) -> ContextConfig:
         raise TypeError("index.db_path must be a string")
     include = _as_string_list("paths.include", paths.get("include"))
     exclude = _as_string_list("paths.exclude", paths.get("exclude"))
-    return ContextConfig(
+    return CodebaseContextConfig(
         db_path=pathlib.Path(db_path),
         include_globs=tuple(include),
         exclude_globs=tuple(exclude),
@@ -628,24 +658,34 @@ def load_config(path: pathlib.Path) -> ContextConfig:
     )
 
 
-def service_from_config(config_path: pathlib.Path, repo: pathlib.Path) -> ContextService:
-    """Build a ContextService from a YAML config."""
+def service_from_config(
+    config_path: pathlib.Path,
+    repo: pathlib.Path,
+    *,
+    scale: ContextScale,
+) -> CodebaseContextService:
+    """Build a codebase-context service from a YAML config."""
     config = load_config(config_path)
     db_path = config.db_path
     if not db_path.is_absolute():
         db_path = repo / db_path
-    return ContextService(repo, dataclasses.replace(config, db_path=db_path))
+    return CodebaseContextService(
+        repo,
+        dataclasses.replace(config, db_path=db_path),
+        scale=scale,
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse context CLI arguments."""
+    """Parse codebase-context CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    for name in ("index", "query", "pack"):
+    for name in ("index", "query", "pack", "worker"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--config", required=True, type=pathlib.Path)
         cmd.add_argument("--repo", required=True, type=pathlib.Path)
+        cmd.add_argument("--scale", required=True, choices=sorted(CONTEXT_SCALES))
 
     index = sub.choices["index"]
     index.add_argument("--json", action="store_true")
@@ -659,28 +699,53 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     pack.add_argument("--limit", type=int, default=8)
     pack.add_argument("--output", required=True, type=pathlib.Path)
 
+    worker = sub.choices["worker"]
+    mode = worker.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true")
+    mode.add_argument("--loop", action="store_true")
+    worker.add_argument("--interval-seconds", type=int, default=30)
+    worker.add_argument("--json", action="store_true")
+
     return parser.parse_args(argv)
+
+
+def _print_index_stats(
+    stats: IndexStats,
+    *,
+    json_mode: bool,
+    service: CodebaseContextService,
+) -> None:
+    """Emit one stable indexing summary."""
+    payload: dict[str, object] = {
+        **stats.to_dict(),
+        "provider": service.provider,
+        "scale": service.scale,
+    }
+    if json_mode:
+        print(json.dumps(payload, sort_keys=True))
+        return
+    print(
+        " ".join(
+            (
+                f"provider={service.provider}",
+                f"scale={service.scale}",
+                f"indexed={stats.total_files}",
+                f"changed={stats.indexed_files}",
+                f"skipped={stats.skipped_files}",
+                f"deleted={stats.deleted_files}",
+            )
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     args = parse_args(argv)
-    service = service_from_config(args.config, expand(args.repo))
+    scale = require_context_scale(args.scale, path="context.scale")
+    service = service_from_config(args.config, expand(args.repo), scale=scale)
     if args.command == "index":
         stats = service.index_with_stats()
-        if args.json:
-            print(json.dumps(stats.to_dict(), sort_keys=True))
-        else:
-            print(
-                " ".join(
-                    (
-                        f"indexed={stats.total_files}",
-                        f"changed={stats.indexed_files}",
-                        f"skipped={stats.skipped_files}",
-                        f"deleted={stats.deleted_files}",
-                    )
-                )
-            )
+        _print_index_stats(stats, json_mode=args.json, service=service)
         return 0
     if args.command == "query":
         hits = service.query(args.query, limit=args.limit)
@@ -692,4 +757,17 @@ def main(argv: list[str] | None = None) -> int:
         write_text(args.output, output)
         print(args.output)
         return 0
+    if args.command == "worker":
+        if args.interval_seconds <= 0:
+            raise SystemExit("--interval-seconds must be positive")
+        run_once = args.once or not args.loop
+        try:
+            while True:
+                stats = service.index_with_stats()
+                _print_index_stats(stats, json_mode=args.json, service=service)
+                if run_once:
+                    return 0
+                time.sleep(args.interval_seconds)
+        except KeyboardInterrupt:
+            return 130
     raise AssertionError("unreachable")
