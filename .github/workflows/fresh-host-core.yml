@@ -1,0 +1,192 @@
+name: Fresh Host Core
+
+on:
+  workflow_call:
+    inputs:
+      macos_runtime_provider:
+        required: false
+        type: string
+        default: colima
+      docker_pull_parallelism:
+        required: false
+        type: string
+        default: "2"
+      docker_pull_max_attempts:
+        required: false
+        type: string
+        default: "3"
+      enable_package_cache:
+        required: false
+        type: boolean
+        default: true
+      enable_homebrew_cache:
+        required: false
+        type: boolean
+        default: true
+      enable_runtime_download_cache:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
+  FRESH_HOST_DOCKER_PULL_PARALLELISM: "2"
+  FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS: "3"
+  MACOS_COLIMA_VERSION: "v0.10.1"
+  MACOS_LIMA_VERSION: "v2.0.3"
+  MACOS_COLIMA_DISK_GIB: "20"
+  FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
+  UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
+  npm_config_cache: ${{ github.workspace }}/.github-cache/npm
+  npm_config_prefer_offline: "true"
+  HOMEBREW_CACHE: ${{ github.workspace }}/.github-cache/homebrew
+
+jobs:
+  linux-fresh-host:
+    name: Linux Fresh Host
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        id: linux_package_cache
+        if: ${{ inputs.enable_package_cache }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Prepare Linux fresh-host context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Run Linux fresh-host scenario
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Collect Linux fresh-host diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
+      - name: Write Linux fresh-host summary
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        env:
+          FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
+          FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
+        run: ./tests/scripts/fresh_host.py write-summary --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
+      - if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: linux-fresh-host-artifacts
+          path: |
+            ${{ runner.temp }}/strongclaw-linux-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-linux-host/home/.config/systemd/user
+            ${{ runner.temp }}/fresh-host-reports/linux
+          include-hidden-files: true
+
+  macos-fresh-host:
+    name: ${{ matrix.job_name }}
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario_id: macos-sidecars
+            job_name: macOS Fresh Host Sidecars
+            artifact_name: macos-sidecars-fresh-host-artifacts
+            report_dir_name: macos-sidecars
+          - scenario_id: macos-browser-lab
+            job_name: macOS Fresh Host Browser Lab
+            artifact_name: macos-browser-lab-fresh-host-artifacts
+            report_dir_name: macos-browser-lab
+    env:
+      FRESH_HOST_RUNTIME_PROVIDER: ${{ inputs.macos_runtime_provider }}
+      FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM: ${{ inputs.docker_pull_parallelism }}
+      FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: ${{ inputs.docker_pull_max_attempts }}
+      FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/.github-cache/macos-runtime-tools
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        id: macos_package_cache
+        if: ${{ inputs.enable_package_cache }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS Homebrew download cache
+        id: macos_homebrew_cache
+        if: ${{ inputs.enable_homebrew_cache }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ env.HOMEBREW_CACHE }}
+          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
+          restore-keys: |
+            fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS runtime download cache
+        id: macos_runtime_download_cache
+        if: ${{ inputs.enable_runtime_download_cache }}
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .github-cache/macos-runtime-tools
+          key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
+          restore-keys: |
+            fresh-host-macos-runtime-tools-${{ runner.arch }}-
+      - name: Prepare macOS fresh-host context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Install hosted macOS Docker runtime
+        run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Ensure hosted macOS Docker images
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Run macOS fresh-host scenario
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Collect hosted macOS Docker diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
+      - name: Collect macOS fresh-host diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
+      - name: Clean up macOS fresh-host context
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
+      - name: Write macOS fresh-host summary
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        env:
+          FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
+          FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}
+          FRESH_HOST_HOMEBREW_CACHE_ENABLED: ${{ inputs.enable_homebrew_cache }}
+          FRESH_HOST_HOMEBREW_CACHE_HIT: ${{ steps.macos_homebrew_cache.outputs.cache-hit == 'true' }}
+          FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED: ${{ inputs.enable_runtime_download_cache }}
+          FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT: ${{ steps.macos_runtime_download_cache.outputs.cache-hit == 'true' }}
+        run: ./tests/scripts/fresh_host.py write-summary --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
+      - if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ runner.temp }}/strongclaw-macos-host/home/.openclaw
+            ${{ runner.temp }}/strongclaw-macos-host/home/Library/LaunchAgents
+            ${{ runner.temp }}/fresh-host-reports/${{ matrix.report_dir_name }}
+          include-hidden-files: true

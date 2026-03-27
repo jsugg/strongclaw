@@ -24,14 +24,22 @@ jobs:
         with:
           version: "0.10.9"
           enable-cache: true
-      - run: uv sync --locked
-      - run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml
-      - run: PYTHONPATH=src uv run python -m compileall -q src tests
-      - run: mkdir -p "$RUNNER_TEMP/strongclaw/nightly"
-      - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/security.jsonl"
-      - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/policy.jsonl"
-      - run: PYTHONPATH=src uv run python -m clawops context index --config platform/configs/context/context-service.yaml --repo . --json
-      - run: PYTHONPATH=src uv run python -m clawops workflow --workflow platform/configs/workflows/daily_healthcheck.yaml --dry-run
+      - name: Sync nightly environment
+        run: uv sync --locked
+      - name: Run nightly pytest suite
+        run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml
+      - name: Compile nightly Python sources
+        run: PYTHONPATH=src uv run python -m compileall -q src tests
+      - name: Create nightly artifact directory
+        run: mkdir -p "$RUNNER_TEMP/strongclaw/nightly"
+      - name: Run nightly security harness
+        run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/security.jsonl"
+      - name: Run nightly policy harness
+        run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/policy.jsonl"
+      - name: Rebuild nightly context index
+        run: PYTHONPATH=src uv run python -m clawops context index --config platform/configs/context/context-service.yaml --repo . --json
+      - name: Dry-run nightly healthcheck workflow
+        run: PYTHONPATH=src uv run python -m clawops workflow --workflow platform/configs/workflows/daily_healthcheck.yaml --dry-run
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always()
         with:
@@ -40,3 +48,19 @@ jobs:
             coverage.xml
             pytest.xml
             ${{ runner.temp }}/strongclaw/nightly
+
+  warm-fresh-host-caches:
+    name: Warm Fresh Host Caches
+    uses: ./.github/workflows/fresh-host-cache-warm.yml
+
+  run-nightly-fresh-host-acceptance:
+    name: Nightly Fresh Host Acceptance
+    needs: warm-fresh-host-caches
+    uses: ./.github/workflows/fresh-host-core.yml
+    with:
+      macos_runtime_provider: colima
+      docker_pull_parallelism: "2"
+      docker_pull_max_attempts: "3"
+      enable_package_cache: true
+      enable_homebrew_cache: true
+      enable_runtime_download_cache: true
