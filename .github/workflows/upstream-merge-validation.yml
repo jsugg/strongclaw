@@ -23,10 +23,7 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run pre-commit run actionlint --all-files
-      - run: uv run pre-commit run shellcheck --all-files
-      - run: uv run pytest -q --junitxml=pytest.xml --cov=src/clawops --cov-report=xml --cov-report=term-missing
-      - run: PYTHONPATH=src uv run python -m compileall -q src tests
+      - run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/upstream"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/upstream/security.jsonl"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/upstream/policy.jsonl"

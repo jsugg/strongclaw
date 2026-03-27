@@ -26,6 +26,22 @@ COMPOSE_IMAGE_RE = re.compile(
     r"^(?P<prefix>\s*image:\s+)(?P<image>[^@\s]+)@(?P<digest>sha256:[0-9a-f]+)(?P<suffix>\s*)$"
 )
 DIGEST_LINE_RE = re.compile(r"^\s*Digest:\s*(?P<digest>sha256:[0-9a-f]+)\s*$")
+QUALITY_GATE_COMMANDS: tuple[tuple[str, ...], ...] = (
+    ("uv", "run", "pre-commit", "run", "actionlint", "--all-files"),
+    ("uv", "run", "pre-commit", "run", "shellcheck", "--all-files"),
+    ("uv", "run", "isort", "--check-only", "src", "tests"),
+    ("uv", "run", "ruff", "check", "src", "tests"),
+    ("uv", "run", "black", "--check", "src", "tests"),
+    ("uv", "run", "pyright"),
+    ("uv", "run", "mypy"),
+    (
+        "bash",
+        "-lc",
+        "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
+        "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
+    ),
+    ("uv", "run", "python", "-m", "compileall", "-q", "src", "tests"),
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -329,31 +345,23 @@ def _switch_branch(repo_root: pathlib.Path, branch: str) -> None:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git switch failed")
 
 
-def _run_quality_gate(repo_root: pathlib.Path) -> None:
-    """Run the repository quality gate."""
-    commands = (
-        ["uv", "run", "pre-commit", "run", "actionlint", "--all-files"],
-        ["uv", "run", "pre-commit", "run", "shellcheck", "--all-files"],
-        [
-            "uv",
-            "run",
-            "pytest",
-            "-q",
-            "--cov=src/clawops",
-            "--cov-report=xml",
-            "--cov-report=term-missing",
-        ],
-        ["uv", "run", "python", "-m", "compileall", "-q", "src", "tests"],
-    )
+def quality_gate(repo_root: pathlib.Path) -> dict[str, object]:
+    """Run the repository quality gate and return the executed command surface."""
+    resolved_root = _resolve_repo_root(repo_root)
     env = dict(os.environ)
     env["CLAWOPS_HTTP_RETRY_MODE"] = env.get("CLAWOPS_HTTP_RETRY_MODE", "safe")
     env["PYTHONPATH"] = "src"
-    for command in commands:
-        result = run_command(command, cwd=repo_root, env=env, timeout_seconds=1800)
+    for command in QUALITY_GATE_COMMANDS:
+        result = run_command(list(command), cwd=resolved_root, env=env, timeout_seconds=1800)
         if not result.ok:
             raise RuntimeError(
                 result.stderr.strip() or result.stdout.strip() or "quality gate failed"
             )
+    return {
+        "ok": True,
+        "repoRoot": resolved_root.as_posix(),
+        "commands": [list(command) for command in QUALITY_GATE_COMMANDS],
+    }
 
 
 def _run_sbom_generation(repo_root: pathlib.Path) -> str:
@@ -451,7 +459,7 @@ def propose_refresh(
     for command in refresh_commands:
         _run_refresh_command(resolved_root, command)
 
-    _run_quality_gate(resolved_root)
+    quality_gate(resolved_root)
     sbom_path = _run_sbom_generation(resolved_root)
 
     add_result = _git(resolved_root, "add", "-A")
@@ -522,6 +530,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inventory", help="List workflow action pins and compose image digests.")
+    sub.add_parser("quality-gate", help="Run the repository quality gate.")
 
     refresh_actions = sub.add_parser(
         "refresh-actions", help="Refresh workflow action SHAs from pinned release tags."
@@ -568,6 +577,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "inventory":
             print(json.dumps(inventory_pins(args.repo_root), indent=2, sort_keys=True))
+            return 0
+        if args.command == "quality-gate":
+            print(json.dumps(quality_gate(args.repo_root), indent=2, sort_keys=True))
             return 0
         if args.command == "refresh-actions":
             payload = refresh_workflow_action_pins(
