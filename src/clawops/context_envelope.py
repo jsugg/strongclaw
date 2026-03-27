@@ -48,10 +48,10 @@ class ContextEnvelopeManifest:
     workspace_id: str
     lane: str
     role: str
-    backend: str
     context_provider: str
     context_scale: str
     retrieval_modes: tuple[str, ...]
+    backend: str
     query: str
     created_at: str
     producer: str
@@ -76,10 +76,10 @@ class ContextEnvelopeManifest:
             "workspace_id": self.workspace_id,
             "lane": self.lane,
             "role": self.role,
-            "backend": self.backend,
             "context_provider": self.context_provider,
             "context_scale": self.context_scale,
             "retrieval_modes": list(self.retrieval_modes),
+            "backend": self.backend,
             "query": self.query,
             "created_at": self.created_at,
             "producer": self.producer,
@@ -152,12 +152,12 @@ class ContextEnvelopeManifest:
             workspace_id=_required_str("workspace_id"),
             lane=_required_str("lane"),
             role=_required_str("role"),
-            backend=_required_str("backend"),
             context_provider=_required_str("context_provider"),
             context_scale=_required_str("context_scale"),
             retrieval_modes=tuple(
                 as_string_list(payload_mapping.get("retrieval_modes", []), path="retrieval_modes")
             ),
+            backend=_required_str("backend"),
             query=_required_str("query"),
             created_at=_required_str("created_at"),
             producer=_required_str("producer"),
@@ -247,6 +247,9 @@ def _render_body(
     lines.append(f"- workspace_id: {manifest.workspace_id}")
     lines.append(f"- lane: {manifest.lane}")
     lines.append(f"- role: {manifest.role}")
+    lines.append(f"- context_provider: {manifest.context_provider}")
+    lines.append(f"- context_scale: {manifest.context_scale}")
+    lines.append(f"- retrieval_modes: {', '.join(manifest.retrieval_modes)}")
     lines.append(f"- backend: {manifest.backend}")
     lines.append(f"- context_provider: {manifest.context_provider}")
     lines.append(f"- context_scale: {manifest.context_scale}")
@@ -378,10 +381,10 @@ class ContextEnvelopeBuilder:
                     "workspace_id": self.workspace.workspace_id,
                     "lane": self.lane,
                     "role": self.role,
-                    "backend": self.backend,
                     "context_provider": self.provider,
                     "context_scale": self.scale,
                     "retrieval_modes": list(self.service.backend_modes()),
+                    "backend": self.backend,
                     "query": query,
                     "index_snapshot_id": index_snapshot_id,
                     "source_state_hash": source_state_hash,
@@ -402,10 +405,10 @@ class ContextEnvelopeBuilder:
             workspace_id=self.workspace.workspace_id,
             lane=self.lane,
             role=self.role,
-            backend=self.backend,
             context_provider=self.provider,
             context_scale=self.scale,
             retrieval_modes=self.service.backend_modes(),
+            backend=self.backend,
             query=query,
             created_at=_timestamp_text(),
             producer="clawops.context_envelope",

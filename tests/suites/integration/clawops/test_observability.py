@@ -89,4 +89,6 @@ def test_context_index_exports_trace_span(
     assert attributes is not None
     assert stats.indexed_files == 1
     assert attributes["repo"] == repo.resolve().as_posix()
+    assert attributes["provider"] == "codebase"
+    assert attributes["scale"] == "small"
     assert attributes["indexed_files"] == 1

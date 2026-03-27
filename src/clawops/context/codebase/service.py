@@ -1163,7 +1163,11 @@ class CodebaseContextService:
         started_at = time.perf_counter()
         with observed_span(
             "clawops.context.codebase.index",
-            attributes={"repo": self.repo.as_posix(), "scale": self.scale},
+            attributes={
+                "repo": self.repo.as_posix(),
+                "provider": "codebase",
+                "scale": self.scale,
+            },
         ) as span:
             with self.connect() as conn:
                 existing_metadata = self._load_indexed_metadata(conn)
@@ -1263,6 +1267,7 @@ class CodebaseContextService:
 
             observation: dict[str, bool | int | str] = {
                 "repo": self.repo.as_posix(),
+                "provider": "codebase",
                 "scale": self.scale,
                 "total_files": stats.total_files,
                 "indexed_files": stats.indexed_files,

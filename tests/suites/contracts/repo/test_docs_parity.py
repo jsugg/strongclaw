@@ -47,6 +47,29 @@ def test_shipped_context_config_loads() -> None:
     assert "platform/plugins/memory-lancedb-pro/**" in config.exclude_globs
 
 
+def test_operator_docs_surface_codebase_context_commands() -> None:
+    quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
+    setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    usage = (REPO_ROOT / "USAGE_GUIDE.md").read_text(encoding="utf-8")
+    skill = (
+        REPO_ROOT / "platform" / "skills" / "local" / "repo-context-pack" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "clawops context codebase index" in quickstart
+    assert "platform/configs/context/codebase.yaml" in quickstart
+    assert "clawops context codebase index" in setup
+    assert "clawops context codebase query" in setup
+    assert "clawops context codebase index" in usage
+    assert "clawops context codebase query" in usage
+    assert "clawops context codebase pack" in usage
+    assert "clawops context codebase index" in skill
+    for markdown_file in _official_markdown_files(REPO_ROOT):
+        text = markdown_file.read_text(encoding="utf-8")
+        assert "clawops context index" not in text
+        assert "clawops context query" not in text
+        assert "clawops context pack" not in text
+
+
 def test_operator_docs_surface_platform_verification_commands() -> None:
     quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

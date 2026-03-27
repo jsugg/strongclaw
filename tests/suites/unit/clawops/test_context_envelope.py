@@ -48,6 +48,9 @@ def test_context_envelope_reuses_identical_inputs(tmp_path: pathlib.Path) -> Non
     assert first.manifest.retrieval_modes == ("lexical",)
     assert first.body_path == second.body_path
     assert second.reused is True
+    assert first.manifest.context_provider == "codebase"
+    assert first.manifest.context_scale == "small"
+    assert first.manifest.retrieval_modes == ("lexical",)
     validate_context_envelope(second, service=service, workspace=workspace)
 
 

@@ -27,7 +27,7 @@ jobs:
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/upstream"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/upstream/security.jsonl"
       - run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/policy_regressions.yaml --output "$RUNNER_TEMP/strongclaw/upstream/policy.jsonl"
-      - run: PYTHONPATH=src uv run python -m clawops context index --config platform/configs/context/context-service.yaml --repo . --json
+      - run: PYTHONPATH=src uv run python -m clawops context codebase index --config platform/configs/context/codebase.yaml --repo . --scale small --json
       - run: PYTHONPATH=src uv run python -m clawops workflow --workflow platform/configs/workflows/daily_healthcheck.yaml --dry-run
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always()

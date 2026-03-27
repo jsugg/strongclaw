@@ -432,6 +432,7 @@ class WorkflowRunner:
                 step_name=str(step["name"]),
                 ok=True,
                 message="dry-run context pack",
+                details={"provider": provider, "scale": scale},
             )
         config_path = self._resolve_step_path(step["config"], field_name="context_pack.config")
         repo_path = self._resolve_step_path(step["repo"], field_name="context_pack.repo")
@@ -476,6 +477,8 @@ class WorkflowRunner:
                 ok=True,
                 message=f"context envelope -> {envelope.manifest_path}",
                 details={
+                    "provider": provider,
+                    "scale": scale,
                     "context_manifest": str(envelope.manifest_path),
                     "context_body": str(envelope.body_path),
                     "reused": envelope.reused,
@@ -495,7 +498,11 @@ class WorkflowRunner:
             step_name=str(step["name"]),
             ok=True,
             message=f"context packed -> {output_path}",
-            details={"output_path": str(output_path)},
+            details={
+                "provider": provider,
+                "scale": scale,
+                "output_path": str(output_path),
+            },
         )
 
     def _workspace_prepare_step(self, step: Mapping[str, object]) -> StepResult:

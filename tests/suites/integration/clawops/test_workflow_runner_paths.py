@@ -129,6 +129,8 @@ def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     context_pack = scoped_state_dir(repo, category="context-packs") / "context.md"
     assert context_pack.exists()
     assert "run_review" in context_pack.read_text(encoding="utf-8")
+    assert results[2].details["provider"] == "codebase"
+    assert results[2].details["scale"] == "small"
     assert results[2].message.endswith(str(context_pack))
 
 
