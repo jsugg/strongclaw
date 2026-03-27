@@ -35,6 +35,14 @@ def _test_source_files(repo_root: Path) -> list[Path]:
     return sorted((repo_root / "tests" / "suites").glob("**/test_*.py"))
 
 
+def _is_direct_monkeypatch_call(node: ast.Call) -> bool:
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr not in {"delenv", "setattr", "setenv"}:
+        return False
+    return isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
+
+
 def _decorator_target_name(node: ast.expr) -> str | None:
     if isinstance(node, ast.Call):
         return _decorator_target_name(node.func)
@@ -113,10 +121,11 @@ def collect_fixture_definitions(
 def collect_fixture_references(
     fixture_names: set[str],
     repo_root: Path | None = None,
-) -> dict[str, int]:
-    """Count explicit fixture references in suite tests."""
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Count explicit fixture references in suite tests and fixture dependencies."""
     root = _repo_root() if repo_root is None else repo_root
-    references = {name: 0 for name in fixture_names}
+    test_references = {name: 0 for name in fixture_names}
+    fixture_references = {name: 0 for name in fixture_names}
 
     for path in _test_source_files(root):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
@@ -124,25 +133,52 @@ def collect_fixture_references(
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 if node.name.startswith("test_"):
                     for arg in node.args.args:
-                        if arg.arg in references:
-                            references[arg.arg] += 1
+                        if arg.arg in test_references:
+                            test_references[arg.arg] += 1
                 for decorator in node.decorator_list:
                     for fixture_name in _extract_usefixtures(decorator):
-                        if fixture_name in references:
-                            references[fixture_name] += 1
+                        if fixture_name in test_references:
+                            test_references[fixture_name] += 1
             elif isinstance(node, ast.ClassDef):
                 for decorator in node.decorator_list:
                     for fixture_name in _extract_usefixtures(decorator):
-                        if fixture_name in references:
-                            references[fixture_name] += 1
-    return references
+                        if fixture_name in test_references:
+                            test_references[fixture_name] += 1
+
+    for path in _fixture_source_files(root):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if _extract_fixture_metadata(node) is None:
+                continue
+            for arg in node.args.args:
+                if arg.arg in fixture_references:
+                    fixture_references[arg.arg] += 1
+            for decorator in node.decorator_list:
+                for fixture_name in _extract_usefixtures(decorator):
+                    if fixture_name in fixture_references:
+                        fixture_references[fixture_name] += 1
+
+    return test_references, fixture_references
 
 
 def analyze_fixture_tree(repo_root: Path | None = None) -> dict[str, Any]:
     """Analyze fixture definitions and references for the repository."""
     root = _repo_root() if repo_root is None else repo_root
     definitions = collect_fixture_definitions(root)
-    references = collect_fixture_references(set(definitions), root)
+    test_references, fixture_references = collect_fixture_references(set(definitions), root)
+    direct_monkeypatch_files: dict[str, int] = {}
+
+    for path in _test_source_files(root):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
+        calls = sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and _is_direct_monkeypatch_call(node)
+        )
+        if calls:
+            direct_monkeypatch_files[path.relative_to(root).as_posix()] = calls
 
     flattened = [definition for items in definitions.values() for definition in items]
     duplicates = [
@@ -153,7 +189,9 @@ def analyze_fixture_tree(repo_root: Path | None = None) -> dict[str, Any]:
     fixtures = [
         {
             **asdict(definition),
-            "references": references[definition.name],
+            "fixture_references": fixture_references[definition.name],
+            "references": test_references[definition.name] + fixture_references[definition.name],
+            "test_references": test_references[definition.name],
         }
         for definition in sorted(flattened, key=lambda item: (item.file, item.name))
     ]
@@ -161,9 +199,15 @@ def analyze_fixture_tree(repo_root: Path | None = None) -> dict[str, Any]:
     return {
         "total_fixtures": len(definitions),
         "total_definitions": len(flattened),
-        "total_references": sum(references.values()),
-        "unused": sorted(name for name, count in references.items() if count == 0),
+        "total_fixture_references": sum(fixture_references.values()),
+        "total_references": sum(test_references.values()) + sum(fixture_references.values()),
+        "total_test_references": sum(test_references.values()),
+        "unused": sorted(
+            name for name in definitions if test_references[name] + fixture_references[name] == 0
+        ),
         "duplicates": duplicates,
+        "direct_monkeypatch_calls": sum(direct_monkeypatch_files.values()),
+        "direct_monkeypatch_files": direct_monkeypatch_files,
         "undocumented": sorted(
             definition.name for definition in flattened if not definition.has_docstring
         ),
@@ -175,14 +219,20 @@ def _format_summary(report: dict[str, Any]) -> str:
     lines = [
         f"fixtures: {report['total_fixtures']}",
         f"definitions: {report['total_definitions']}",
+        f"test references: {report['total_test_references']}",
+        f"fixture references: {report['total_fixture_references']}",
         f"references: {report['total_references']}",
         f"duplicates: {len(report['duplicates'])}",
+        f"direct monkeypatch files: {len(report['direct_monkeypatch_files'])}",
+        f"direct monkeypatch calls: {report['direct_monkeypatch_calls']}",
         f"undocumented: {len(report['undocumented'])}",
         f"unused: {len(report['unused'])}",
     ]
     for fixture in report["fixtures"]:
         lines.append(
             f"{fixture['name']}: scope={fixture['scope']} autouse={fixture['autouse']} "
+            f"test_references={fixture['test_references']} "
+            f"fixture_references={fixture['fixture_references']} "
             f"references={fixture['references']} file={fixture['file']}"
         )
     return "\n".join(lines)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.types import FixtureTestContext
 from tests.utils.helpers.network import (
     HttpServerFactory,
     ListenerFactory,
@@ -12,7 +13,6 @@ from tests.utils.helpers.network import (
     tcp_listener,
 )
 from tests.utils.helpers.network_runtime import NetworkRuntime
-from tests.utils.helpers.test_context import TestContext
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def http_server_factory() -> HttpServerFactory:
 
 
 @pytest.fixture
-def network_runtime(test_context: TestContext) -> NetworkRuntime:
+def network_runtime(test_context: FixtureTestContext) -> NetworkRuntime:
     """Return a managed network runtime bound to the current test context."""
     return NetworkRuntime(context=test_context)
 

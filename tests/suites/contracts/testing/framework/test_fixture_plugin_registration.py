@@ -32,7 +32,12 @@ def _extract_pytest_plugins(path: Path) -> tuple[str, ...]:
 def test_recursive_fixture_plugin_registries_are_explicit() -> None:
     fixture_root = REPO_ROOT / "tests" / "fixtures"
     expected = {
-        REPO_ROOT / "tests" / "conftest.py": ("tests.fixtures",),
+        REPO_ROOT
+        / "tests"
+        / "conftest.py": (
+            "tests.plugins.infrastructure",
+            "tests.fixtures",
+        ),
         fixture_root
         / "__init__.py": (
             "tests.fixtures.core",
@@ -44,7 +49,6 @@ def test_recursive_fixture_plugin_registries_are_explicit() -> None:
         / "__init__.py": (
             "tests.fixtures.core.cli",
             "tests.fixtures.core.context",
-            "tests.fixtures.core.test_context",
         ),
         fixture_root / "hypermemory" / "__init__.py": ("tests.fixtures.hypermemory.workspace",),
         fixture_root
@@ -66,4 +70,4 @@ def test_fixture_leaf_modules_live_under_domain_packages() -> None:
     top_level_python_files = sorted(
         path.name for path in fixture_root.glob("*.py") if path.name != "__init__.py"
     )
-    assert top_level_python_files == []
+    assert top_level_python_files == ["types.py"]

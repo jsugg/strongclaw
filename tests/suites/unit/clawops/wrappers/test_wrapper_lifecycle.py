@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
@@ -22,12 +23,12 @@ from tests.utils.helpers.wrappers_http import install_success_response, install_
 def test_wrapper_replays_pending_approval_without_side_effect(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=True)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -53,12 +54,12 @@ def test_wrapper_replays_pending_approval_without_side_effect(
 def test_wrapper_replays_success_without_duplicate_side_effect(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -93,12 +94,12 @@ def test_wrapper_replays_success_without_duplicate_side_effect(
 def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_transport_error(monkeypatch, "simulated timeout", calls)
+    install_transport_error(test_context, "simulated timeout", calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
     second = spec.invoke(ctx, spec.allowed_input)
@@ -134,11 +135,11 @@ def test_wrapper_replays_failed_terminal_result_without_duplicate_side_effect(
 def test_wrapper_transport_error_transitions_to_failed_terminal_state(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
-    install_transport_error(monkeypatch, "simulated timeout")
+    configure_wrapper_environment(spec, test_context)
+    install_transport_error(test_context, "simulated timeout")
 
     result = spec.invoke(ctx, spec.allowed_input)
 
@@ -174,12 +175,12 @@ def test_wrapper_transport_error_transitions_to_failed_terminal_state(
 def test_wrapper_replays_running_operation_without_duplicate_side_effect(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     op = journal.begin(
         scope="test",

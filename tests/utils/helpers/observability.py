@@ -8,6 +8,8 @@ from typing import Any
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
+from tests.plugins.infrastructure.context import TestContext
+
 
 class RecordingExporter(SpanExporter):
     """Collect spans for assertions."""
@@ -24,17 +26,19 @@ class RecordingExporter(SpanExporter):
 
 
 def configure_test_tracing(
-    monkeypatch: Any,
+    test_context: TestContext,
     observability_module: Any,
 ) -> RecordingExporter:
     """Install an in-memory OTEL exporter for a test run."""
     exporter = RecordingExporter()
     observability_module.reset_for_tests()
-    monkeypatch.setenv("CLAWOPS_OTEL_ENABLED", "1")
-    monkeypatch.setattr(observability_module, "_make_span_exporter", lambda: exporter)
-    monkeypatch.setattr(
+    test_context.env.set("CLAWOPS_OTEL_ENABLED", "1")
+    test_context.patch.patch_object(
+        observability_module, "_make_span_exporter", new=lambda: exporter
+    )
+    test_context.patch.patch_object(
         observability_module,
         "_make_span_processor",
-        lambda span_exporter: SimpleSpanProcessor(span_exporter),
+        new=lambda span_exporter: SimpleSpanProcessor(span_exporter),
     )
     return exporter

@@ -1,4 +1,4 @@
-"""Core pytest configuration and core fixtures."""
+"""Core pytest bootstrap and shared path fixtures."""
 
 from __future__ import annotations
 
@@ -6,19 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.helpers.env import register_env_addoption
-from tests.utils.helpers.mode import register_mock_addoption
 from tests.utils.helpers.repo import REPO_ROOT
 
-pytest_plugins = ("tests.fixtures",)
+pytest_plugins = (
+    "tests.plugins.infrastructure",
+    "tests.fixtures",
+)
 
 TESTS_ROOT = Path(__file__).resolve().parent
-
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register framework-level CLI options."""
-    register_env_addoption(parser)
-    register_mock_addoption(parser)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

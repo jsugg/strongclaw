@@ -8,6 +8,7 @@ import pytest
 
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
@@ -21,12 +22,12 @@ from tests.utils.helpers.wrappers_http import install_success_response
 def test_wrapper_requires_explicit_approval_then_replays_terminal_result(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=True)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     prepared = spec.invoke(ctx, spec.allowed_input)
 
@@ -65,10 +66,10 @@ def test_wrapper_requires_explicit_approval_then_replays_terminal_result(
 def test_execute_approved_rejects_manual_rows_without_execution_contract(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     op = journal.begin(
         scope="test",
         kind=spec.kind,
@@ -87,12 +88,12 @@ def test_execute_approved_rejects_manual_rows_without_execution_contract(
 def test_execute_approved_can_restamp_legacy_rows_when_policy_is_supplied(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     op = journal.begin(
         scope="test",

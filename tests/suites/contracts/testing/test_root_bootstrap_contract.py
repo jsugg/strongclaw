@@ -50,4 +50,7 @@ def test_root_conftest_registers_shared_fixture_plugins() -> None:
         )
         break
 
-    assert plugin_values == ("tests.fixtures",)
+    assert plugin_values == (
+        "tests.plugins.infrastructure",
+        "tests.fixtures",
+    )

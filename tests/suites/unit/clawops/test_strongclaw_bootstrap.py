@@ -5,25 +5,33 @@ from types import SimpleNamespace
 import pytest
 
 from clawops import strongclaw_bootstrap
+from tests.plugins.infrastructure.context import TestContext
 
 
-def test_uv_sync_managed_environment_uses_uv_default_dev_group(monkeypatch, tmp_path) -> None:
+def test_uv_sync_managed_environment_uses_uv_default_dev_group(
+    test_context: TestContext,
+    tmp_path,
+) -> None:
     """Bootstrap should rely on uv's default dev group instead of `--extra dev`."""
 
     uv_binary = tmp_path / "uv"
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        lambda **_: uv_binary,
+        new=lambda **_: uv_binary,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
         seen["command"] = command
         seen["timeout_seconds"] = kwargs["timeout_seconds"]
 
-    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=fake_stream_checked,
+    )
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -45,17 +53,20 @@ def test_uv_sync_managed_environment_uses_uv_default_dev_group(monkeypatch, tmp_
     }
 
 
-def test_uv_sync_managed_environment_retries_transient_failure(monkeypatch, tmp_path) -> None:
+def test_uv_sync_managed_environment_retries_transient_failure(
+    test_context: TestContext,
+    tmp_path,
+) -> None:
     """Bootstrap should retry uv sync after a transient command failure."""
 
     uv_binary = tmp_path / "uv"
     seen_commands: list[list[str]] = []
     seen_sleeps: list[int] = []
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        lambda **_: uv_binary,
+        new=lambda **_: uv_binary,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
@@ -64,8 +75,12 @@ def test_uv_sync_managed_environment_retries_transient_failure(monkeypatch, tmp_
         if len(seen_commands) == 1:
             raise strongclaw_bootstrap.CommandError("temporary download timeout")
 
-    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
-    monkeypatch.setattr(strongclaw_bootstrap.time, "sleep", seen_sleeps.append)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=fake_stream_checked,
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap.time, "sleep", new=seen_sleeps.append)
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -96,17 +111,20 @@ def test_uv_sync_managed_environment_retries_transient_failure(monkeypatch, tmp_
     assert seen_sleeps == [5]
 
 
-def test_uv_sync_managed_environment_raises_after_retry_budget(monkeypatch, tmp_path) -> None:
+def test_uv_sync_managed_environment_raises_after_retry_budget(
+    test_context: TestContext,
+    tmp_path,
+) -> None:
     """Bootstrap should surface the last uv sync failure after exhausting retries."""
 
     uv_binary = tmp_path / "uv"
     seen_sleeps: list[int] = []
     call_count = 0
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_uv_installed",
-        lambda **_: uv_binary,
+        new=lambda **_: uv_binary,
     )
 
     def fake_stream_checked(command: list[str], **kwargs: object) -> None:
@@ -124,8 +142,12 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(monkeypatch, tmp_
         assert kwargs["timeout_seconds"] == 3600
         raise strongclaw_bootstrap.CommandError("persistent download timeout")
 
-    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", fake_stream_checked)
-    monkeypatch.setattr(strongclaw_bootstrap.time, "sleep", seen_sleeps.append)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=fake_stream_checked,
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap.time, "sleep", new=seen_sleeps.append)
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -136,19 +158,19 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(monkeypatch, tmp_
     assert seen_sleeps == [5, 10]
 
 
-def test_resolve_node_command_falls_back_to_nodejs(monkeypatch) -> None:
+def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) -> None:
     """Prefer `nodejs` when `node` is unavailable."""
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "command_exists",
-        lambda command_name: command_name == "nodejs",
+        new=lambda command_name: command_name == "nodejs",
     )
 
     assert strongclaw_bootstrap._resolve_node_command() == "nodejs"
 
 
-def test_node_satisfies_minimum_uses_resolved_command(monkeypatch) -> None:
+def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext) -> None:
     """Version checks should use the resolved Node.js executable name."""
 
     seen_commands: list[list[str]] = []
@@ -157,8 +179,12 @@ def test_node_satisfies_minimum_uses_resolved_command(monkeypatch) -> None:
         seen_commands.append(command)
         return SimpleNamespace(ok=True)
 
-    monkeypatch.setattr(strongclaw_bootstrap, "_resolve_node_command", lambda: "nodejs")
-    monkeypatch.setattr(strongclaw_bootstrap, "run_command", fake_run_command)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_resolve_node_command",
+        new=lambda: "nodejs",
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
 
     assert strongclaw_bootstrap._node_satisfies_minimum() is True
     assert seen_commands == [
@@ -170,7 +196,10 @@ def test_node_satisfies_minimum_uses_resolved_command(monkeypatch) -> None:
     ]
 
 
-def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(monkeypatch, tmp_path) -> None:
+def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(
+    test_context: TestContext,
+    tmp_path,
+) -> None:
     """The generated QMD wrapper should invoke the resolved Node.js command."""
 
     qmd_install_prefix = tmp_path / ".strongclaw" / "qmd"
@@ -180,22 +209,30 @@ def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(monkeypatch
     qmd_dist_entry.parent.mkdir(parents=True, exist_ok=True)
     qmd_dist_entry.write_text("console.log('ok');\n", encoding="utf-8")
 
-    monkeypatch.setattr(strongclaw_bootstrap, "_resolve_node_command", lambda: "nodejs")
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_resolve_node_command",
+        new=lambda: "nodejs",
+    )
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "command_exists",
-        lambda command_name: command_name == "npm",
+        new=lambda command_name: command_name == "npm",
     )
-    monkeypatch.setattr(strongclaw_bootstrap, "_stream_checked", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=lambda *args, **kwargs: None,
+    )
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "strongclaw_qmd_install_dir",
-        lambda **_: qmd_install_prefix,
+        new=lambda **_: qmd_install_prefix,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_bootstrap,
         "run_command",
-        lambda *args, **kwargs: SimpleNamespace(ok=True),
+        new=lambda *args, **kwargs: SimpleNamespace(ok=True),
     )
 
     wrapper_path = strongclaw_bootstrap.install_qmd_asset(home_dir=tmp_path)

@@ -93,7 +93,7 @@ known_first_party = ["clawops"]
 src_paths = ["src", "tests"]
 
 [tool.mypy]
-files = ["src"]
+files = ["src", "tests"]
 python_version = "3.12"
 mypy_path = "src"
 namespace_packages = true
@@ -102,20 +102,22 @@ pretty = true
 show_error_codes = true
 warn_unused_configs = true
 cache_dir = ".mypy_cache"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_return_any = true
 
 [tool.pyright]
-include = ["src"]
+include = ["src", "tests"]
 exclude = [
   "**/__pycache__",
   ".venv",
   "build",
   "dist",
-  "tests",
 ]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 reportMissingImports = "error"
 reportMissingTypeStubs = false
 reportUnsupportedDunderAll = "none"
@@ -131,6 +133,7 @@ markers = [
   "contract: repository and artifact contract checks",
   "e2e: black-box end-to-end orchestration tests",
   "framework: explicit validation of the pytest framework itself",
+  "test_profile: named infrastructure runtime profile declarations",
   "hypermemory: hypermemory-related coverage",
   "qdrant: tests requiring or exercising qdrant behavior",
   "network_local: tests that open local sockets or local HTTP servers",

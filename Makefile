@@ -80,7 +80,7 @@ test-contracts: ## Run the contract pytest lane.
 	$(PYTEST) -q -m contract
 
 test-framework: ## Run the explicit pytest framework lane.
-	$(PYTEST) -q -m framework tests/suites/framework
+	$(PYTEST) -q -m framework tests/suites/contracts/testing/framework
 
 test-e2e: ## Run the end-to-end pytest lane.
 	$(PYTEST) -q -m e2e

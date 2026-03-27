@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import requests
-from pytest import MonkeyPatch
+
+from tests.plugins.infrastructure.context import TestContext
 
 
 class FakeResponse:
@@ -25,7 +26,7 @@ class FakeResponse:
         self.headers = {} if headers is None else headers
 
 
-def install_success_response(monkeypatch: MonkeyPatch, calls: list[str]) -> None:
+def install_success_response(test_context: TestContext, calls: list[str]) -> None:
     """Install a one-shot successful HTTP response."""
 
     def _request(*args: object, **kwargs: object) -> FakeResponse:
@@ -33,11 +34,11 @@ def install_success_response(monkeypatch: MonkeyPatch, calls: list[str]) -> None
         calls.append("request")
         return FakeResponse(text="ok")
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)
 
 
 def install_transport_error(
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
     message: str,
     calls: list[str] | None = None,
 ) -> None:
@@ -49,11 +50,11 @@ def install_transport_error(
             calls.append("request")
         raise requests.Timeout(message)
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)
 
 
 def install_status_sequence(
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
     responses: Sequence[FakeResponse],
     calls: list[str],
 ) -> None:
@@ -64,4 +65,4 @@ def install_status_sequence(
         calls.append("request")
         return responses[len(calls) - 1]
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)

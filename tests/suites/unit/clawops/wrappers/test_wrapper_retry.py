@@ -7,11 +7,11 @@ import pathlib
 
 import pytest
 import requests
-from pytest import MonkeyPatch
 
 from clawops.wrappers.base import HttpTimeouts, JsonHttpClient, RetryPolicy
 from clawops.wrappers.github import add_labels
 from clawops.wrappers.webhook import invoke_webhook
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
@@ -26,7 +26,7 @@ from tests.utils.helpers.wrappers_http import (
 )
 
 
-def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -> None:
+def test_json_http_client_retries_when_policy_allows(test_context: TestContext) -> None:
     calls: list[str] = []
 
     def _request(*args: object, **kwargs: object) -> FakeResponse:
@@ -36,8 +36,8 @@ def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -
             raise requests.Timeout("transient timeout")
         return FakeResponse(text="ok")
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
-    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)
+    test_context.env.apply_profile("retry_safe")
     client = JsonHttpClient(timeout=5)
 
     outcome = client.post(
@@ -61,13 +61,13 @@ def test_json_http_client_retries_when_policy_allows(monkeypatch: MonkeyPatch) -
 
 def test_retry_mode_off_disables_safe_label_retries(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, SPECS[2], require_approval=False)
-    configure_wrapper_environment(SPECS[2], monkeypatch)
-    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "off")
+    configure_wrapper_environment(SPECS[2], test_context)
+    test_context.env.apply_profile("retry_off")
     calls: list[str] = []
-    install_transport_error(monkeypatch, "simulated timeout", calls)
+    install_transport_error(test_context, "simulated timeout", calls)
 
     result = add_labels(
         ctx=ctx,
@@ -90,14 +90,14 @@ def test_retry_mode_off_disables_safe_label_retries(
 
 def test_github_labels_retry_retryable_http_status_then_succeeds(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, SPECS[2], require_approval=False)
-    configure_wrapper_environment(SPECS[2], monkeypatch)
-    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
+    configure_wrapper_environment(SPECS[2], test_context)
+    test_context.env.apply_profile("retry_safe")
     calls: list[str] = []
     install_status_sequence(
-        monkeypatch,
+        test_context,
         responses=[
             FakeResponse(
                 ok=False,
@@ -143,11 +143,11 @@ def test_github_labels_retry_retryable_http_status_then_succeeds(
 
 def test_github_labels_retry_timeout_then_succeeds(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, SPECS[2], require_approval=False)
-    configure_wrapper_environment(SPECS[2], monkeypatch)
-    monkeypatch.setenv("CLAWOPS_HTTP_RETRY_MODE", "safe")
+    configure_wrapper_environment(SPECS[2], test_context)
+    test_context.env.apply_profile("retry_safe")
     calls: list[str] = []
 
     def _request(*args: object, **kwargs: object) -> FakeResponse:
@@ -162,7 +162,7 @@ def test_github_labels_retry_timeout_then_succeeds(
             headers={"X-GitHub-Request-Id": "req-success"},
         )
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)
 
     result = add_labels(
         ctx=ctx,
@@ -203,13 +203,13 @@ def test_github_labels_retry_timeout_then_succeeds(
 def test_non_retry_wrappers_fail_once_on_retryable_http_status(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
     install_status_sequence(
-        monkeypatch,
+        test_context,
         responses=[
             FakeResponse(
                 ok=False,
@@ -247,13 +247,13 @@ def test_non_retry_wrappers_fail_once_on_retryable_http_status(
 
 def test_wrapper_emits_structured_log_when_enabled(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ctx, _ = build_context(tmp_path, SPECS[0], require_approval=False)
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
+    test_context.env.apply_profile("structured_logs")
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     result = invoke_webhook(
         ctx=ctx,
@@ -274,7 +274,7 @@ def test_wrapper_emits_structured_log_when_enabled(
     assert calls == ["request"]
 
 
-def test_json_http_client_supports_split_timeouts(monkeypatch: MonkeyPatch) -> None:
+def test_json_http_client_supports_split_timeouts(test_context: TestContext) -> None:
     captured_timeouts: list[object] = []
 
     def _request(*args: object, **kwargs: object) -> FakeResponse:
@@ -282,7 +282,7 @@ def test_json_http_client_supports_split_timeouts(monkeypatch: MonkeyPatch) -> N
         captured_timeouts.append(kwargs["timeout"])
         return FakeResponse(text="ok")
 
-    monkeypatch.setattr("clawops.wrappers.base.requests.request", _request)
+    test_context.patch.patch("clawops.wrappers.base.requests.request", new=_request)
     client = JsonHttpClient(timeout=HttpTimeouts(connect_seconds=2.5, read_seconds=7.5))
 
     outcome = client.post(

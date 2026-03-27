@@ -5,19 +5,19 @@ from __future__ import annotations
 from contextlib import ExitStack
 from typing import ContextManager
 
+from tests.plugins.infrastructure.types import RuntimeTestContext
 from tests.utils.helpers.network import (
     Endpoint,
     disconnecting_listener,
     http_server,
     tcp_listener,
 )
-from tests.utils.helpers.test_context import TestContext
 
 
 class NetworkRuntime:
     """Manage listener lifecycles through ``TestContext`` or a local exit stack."""
 
-    def __init__(self, context: TestContext | None = None) -> None:
+    def __init__(self, context: RuntimeTestContext | None = None) -> None:
         self._context = context
         self._exit_stack = ExitStack()
         self._resource_index = 0

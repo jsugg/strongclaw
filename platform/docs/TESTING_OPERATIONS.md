@@ -6,7 +6,7 @@
 - Unit lane: `uv run pytest -q -m unit`
 - Integration lane: `uv run pytest -q -m integration`
 - Contract lane: `uv run pytest -q -m contract`
-- Framework lane: `uv run pytest -q -m framework tests/suites/framework`
+- Framework lane: `uv run pytest -q -m framework tests/suites/contracts/testing/framework`
 - E2E lane: `uv run pytest -q -m e2e`
 - Hypermemory lane: `uv run pytest -q -m hypermemory`
 - Qdrant lane: `uv run pytest -q -m "hypermemory and qdrant"`
@@ -29,7 +29,7 @@ Add a new test in the suite that matches its behavior:
 - `tests/suites/unit/...` for isolated behavior
 - `tests/suites/integration/...` for cross-module or service-backed behavior
 - `tests/suites/contracts/...` for repository and governance rules
-- `tests/suites/framework/...` for explicit pytest-framework self-checks
+- `tests/suites/contracts/testing/framework/...` for explicit pytest-framework self-checks
 - `tests/suites/e2e/...` for black-box CLI and workflow-shaped coverage
 
 Add a new fixture when pytest injection is the public entrypoint.

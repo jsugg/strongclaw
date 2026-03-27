@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+from tests.fixtures.types import FixtureTestContext
 from tests.utils.helpers.hypermemory import (
     HypermemoryConfigWriter,
     HypermemoryWorkspaceFactory,
@@ -15,7 +16,6 @@ from tests.utils.helpers.hypermemory import (
 )
 from tests.utils.helpers.mode import ServiceMode, resolve_service_mode
 from tests.utils.helpers.qdrant_runtime import QdrantRuntime
-from tests.utils.helpers.test_context import TestContext
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def qdrant_mode(request: pytest.FixtureRequest) -> ServiceMode:
 
 
 @pytest.fixture
-def qdrant_runtime(test_context: TestContext, qdrant_mode: ServiceMode) -> QdrantRuntime:
+def qdrant_runtime(test_context: FixtureTestContext, qdrant_mode: ServiceMode) -> QdrantRuntime:
     """Return a managed Qdrant runtime bound to the current test context."""
     return QdrantRuntime(context=test_context, mode=qdrant_mode)
 
