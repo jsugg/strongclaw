@@ -21,15 +21,51 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # LiteLLM's bundled Prisma bootstrap uses a hard 60s subprocess timeout with
+  # retries. Run schema setup as a one-shot init service so cold databases do
+  # not make the runtime proxy flap unhealthy before it binds the health port.
+  litellm-migrate:
+    image: ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--skip_server_startup"]
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      HYPERMEMORY_EMBEDDING_MODEL: ${HYPERMEMORY_EMBEDDING_MODEL}
+      HYPERMEMORY_EMBEDDING_API_BASE: ${HYPERMEMORY_EMBEDDING_API_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ZAI_API_KEY: ${ZAI_API_KEY}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../configs/litellm/config.yaml:/app/config.yaml:ro
+      - litellm-data:/app/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
   litellm:
     image: ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193
     depends_on:
       postgres:
         condition: service_healthy
+      litellm-migrate:
+        condition: service_completed_successfully
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DISABLE_SCHEMA_UPDATE: "true"
       HYPERMEMORY_EMBEDDING_MODEL: ${HYPERMEMORY_EMBEDDING_MODEL}
       HYPERMEMORY_EMBEDDING_API_BASE: ${HYPERMEMORY_EMBEDDING_API_BASE}
       OPENAI_API_KEY: ${OPENAI_API_KEY}

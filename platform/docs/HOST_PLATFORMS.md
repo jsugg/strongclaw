@@ -90,6 +90,9 @@ Regardless of host OS, the baseline flow is:
 - Preflight requires Homebrew.
 - OrbStack, Rancher Desktop, Colima, and Docker Desktop are all acceptable as
   long as they expose `docker` plus `docker compose`.
+- The hosted macOS fresh-host sidecar stack pre-runs LiteLLM Prisma migrations
+  in a one-shot compose init service before the runtime proxy starts. That keeps
+  cold-database bootstrap work out of the runtime health window.
 - If one of those runtimes is installed but its Docker CLI integration is not
   enabled yet, bootstrap stops instead of installing Docker over it.
 - Service definitions render into `~/Library/LaunchAgents`.
