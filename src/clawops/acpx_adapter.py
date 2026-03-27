@@ -9,6 +9,8 @@ from typing import Literal, cast
 
 from clawops.process_runner import CommandResult, run_command
 
+type AcpxPermissionMode = Literal["approve-all", "approve-reads", "deny-all"]
+type RequestedOutputFormat = Literal["text", "json", "ndjson"]
 type ParsedOutputFormat = Literal["text", "json", "ndjson"]
 
 
@@ -37,12 +39,29 @@ class AcpxInvocation:
     prompt: str
     cwd: pathlib.Path
     timeout_seconds: int
+    permissions_mode: AcpxPermissionMode | None = None
+    output_format: RequestedOutputFormat = "text"
+    backend_profile: str | None = None
+    config_path: pathlib.Path | None = None
     no_wait: bool = False
 
     @property
     def command(self) -> list[str]:
         """Return the ACPX command line."""
-        command = ["acpx", self.agent_name, "exec"]
+        command = ["acpx"]
+        if self.permissions_mode == "approve-all":
+            command.append("--approve-all")
+        elif self.permissions_mode == "approve-reads":
+            command.append("--approve-reads")
+        elif self.permissions_mode == "deny-all":
+            command.append("--deny-all")
+        if self.output_format == "text":
+            command.extend(["--format", "text"])
+        else:
+            command.extend(["--format", "json", "--json-strict"])
+        if self.backend_profile is not None:
+            command.extend(["--model", self.backend_profile])
+        command.extend([self.agent_name, "exec"])
         if self.no_wait:
             command.append("--no-wait")
         command.append(self.prompt)
@@ -80,7 +99,10 @@ def parse_acpx_output(stdout_text: str) -> ParsedAcpxOutput:
             return ParsedAcpxOutput(format="text", payload=None, events=())
         if not isinstance(payload, dict):
             return ParsedAcpxOutput(format="text", payload=None, events=())
-        events.append(cast(dict[str, object], payload))
+        raw_payload = cast(dict[object, object], payload)
+        if not all(isinstance(raw_key, str) for raw_key in raw_payload):
+            return ParsedAcpxOutput(format="text", payload=None, events=())
+        events.append(cast(dict[str, object], raw_payload))
     return ParsedAcpxOutput(format="ndjson", payload=None, events=tuple(events))
 
 

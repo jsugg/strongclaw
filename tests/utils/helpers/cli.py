@@ -31,14 +31,25 @@ def write_status_script(
     target.chmod(0o755)
 
 
-def write_fake_acpx(bin_dir: pathlib.Path, *, exit_code: int = 0) -> None:
+def write_fake_acpx(
+    bin_dir: pathlib.Path,
+    *,
+    stdout_text: str | None = None,
+    stderr_text: str = "stderr from fake-acpx",
+    exit_code: int = 0,
+) -> None:
     """Write a fake ACPX executable for orchestration tests."""
     target = bin_dir / "acpx"
+    rendered_stdout = (
+        "printf 'fake-acpx %s\\n' \"$*\""
+        if stdout_text is None
+        else f"printf '%s\\n' {stdout_text!r}"
+    )
     target.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "printf 'fake-acpx %s\\n' \"$*\"\n"
-        "printf 'stderr from fake-acpx\\n' >&2\n"
+        f"{rendered_stdout}\n"
+        f"printf '%s\\n' {stderr_text!r} >&2\n"
         f"exit {exit_code}\n",
         encoding="utf-8",
     )

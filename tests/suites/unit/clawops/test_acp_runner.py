@@ -1,5 +1,7 @@
 """Tests for ACP session orchestration."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import argparse
@@ -100,15 +102,106 @@ def test_acp_runner_writes_summary_and_logs(
     assert summary["branch"] == "main"
     assert summary["session_type"] == "developer"
     assert summary["workspace_root"] == str(worktree.resolve())
-    assert summary["command"] == ["acpx", "codex", "exec", "Summarize the worktree"]
+    assert summary["command"] == [
+        "acpx",
+        "--approve-reads",
+        "--format",
+        "text",
+        "codex",
+        "exec",
+        "Summarize the worktree",
+    ]
+    assert summary["requested_permissions_mode"] is None
+    assert summary["applied_permissions_mode"] == "approve-reads"
+    assert summary["requested_output_format"] == "text"
+    assert summary["backend_profile"] is None
+    assert summary["acpx_command"] == summary["command"]
 
     stdout_path = pathlib.Path(summary["stdout_path"])
     stderr_path = pathlib.Path(summary["stderr_path"])
     audit_path = pathlib.Path(summary["audit_path"])
-    assert "fake-acpx codex exec Summarize the worktree" in stdout_path.read_text(encoding="utf-8")
+    assert (
+        "fake-acpx --approve-reads --format text codex exec Summarize the worktree"
+        in stdout_path.read_text(encoding="utf-8")
+    )
     assert "stderr from fake-acpx" in stderr_path.read_text(encoding="utf-8")
     audit_payload = json.loads(audit_path.read_text(encoding="utf-8"))
     assert audit_payload["credential_state"] == "ready"
+    assert audit_payload["applied_permissions_mode"] == "approve-reads"
+    assert audit_payload["requested_output_format"] == "text"
+
+
+def test_acp_runner_persists_requested_adapter_contract(
+    tmp_path: pathlib.Path,
+    cli_bin_dir: pathlib.Path,
+    prepend_path: PathPrepender,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "repo-root"
+    worktree = repo_root / "repo" / "upstream"
+    worktree.mkdir(parents=True)
+    _init_git_worktree(worktree)
+
+    write_fake_acpx(cli_bin_dir, stdout_text='{"ok": true}')
+    write_status_script(cli_bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    prepend_path(cli_bin_dir)
+
+    state_dir = repo_root / ".runs" / "acp"
+    exit_code = acp_runner_main(
+        [
+            "--backend",
+            "codex",
+            "--backend-profile",
+            "gpt-5",
+            "--permissions-mode",
+            "approve-all",
+            "--output-format",
+            "json",
+            "--branch",
+            "main",
+            "--session-type",
+            "developer",
+            "--repo-root",
+            str(repo_root),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(state_dir),
+            "--prompt",
+            "Summarize the worktree",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    summary_stdout = json.loads(captured.out)
+    assert summary_stdout["requested_permissions_mode"] == "approve-all"
+    assert summary_stdout["applied_permissions_mode"] == "approve-all"
+    assert summary_stdout["requested_output_format"] == "json"
+    assert summary_stdout["backend_profile"] == "gpt-5"
+    assert summary_stdout["parsed_output_format"] == "json"
+    assert summary_stdout["acpx_command"] == [
+        "acpx",
+        "--approve-all",
+        "--format",
+        "json",
+        "--json-strict",
+        "--model",
+        "gpt-5",
+        "codex",
+        "exec",
+        "Summarize the worktree",
+    ]
+
+    summary_path = _session_summary_path(state_dir)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    audit_payload = json.loads(pathlib.Path(summary["audit_path"]).read_text(encoding="utf-8"))
+    structured_output = json.loads(
+        pathlib.Path(summary["structured_output_path"]).read_text(encoding="utf-8")
+    )
+    assert audit_payload["backend_profile"] == "gpt-5"
+    assert audit_payload["acpx_command"] == summary["acpx_command"]
+    assert structured_output == {"events": [], "format": "json", "payload": {"ok": True}}
 
 
 def test_acp_runner_fails_preflight_when_acpx_is_missing(

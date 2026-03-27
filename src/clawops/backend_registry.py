@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Final
 
+from clawops.acpx_adapter import AcpxPermissionMode, RequestedOutputFormat
 from clawops.orchestration import AuthMode
 from clawops.platform_compat import DEFAULT_ACPX_VERSION, HostPlatform, build_compatibility_record
 
@@ -30,11 +31,27 @@ class BackendDefinition:
     sanitized_env_by_mode: dict[AuthMode, tuple[str, ...]] = dataclasses.field(
         default_factory=_empty_sanitized_env_by_mode
     )
+    supported_permission_modes: tuple[AcpxPermissionMode, ...] = (
+        "approve-all",
+        "approve-reads",
+        "deny-all",
+    )
+    default_permission_mode: AcpxPermissionMode = "approve-reads"
+    supported_output_formats: tuple[RequestedOutputFormat, ...] = ("text", "json", "ndjson")
+    default_output_format: RequestedOutputFormat = "text"
     compatibility_version: str | None = None
 
     def supports_auth_mode(self, auth_mode: str) -> bool:
         """Return True when the backend supports *auth_mode*."""
         return auth_mode in self.supported_auth_modes
+
+    def supports_permission_mode(self, permissions_mode: str) -> bool:
+        """Return True when the backend supports *permissions_mode*."""
+        return permissions_mode in self.supported_permission_modes
+
+    def supports_output_format(self, output_format: str) -> bool:
+        """Return True when the backend supports *output_format*."""
+        return output_format in self.supported_output_formats
 
 
 def _local_backend(name: str) -> BackendDefinition:
@@ -114,6 +131,10 @@ def registry_contract() -> list[dict[str, object]]:
                 "supported_auth_modes": list(backend.supported_auth_modes),
                 "default_auth_mode": backend.default_auth_mode,
                 "readiness_commands": [list(command) for command in backend.readiness_commands],
+                "supported_permission_modes": list(backend.supported_permission_modes),
+                "default_permission_mode": backend.default_permission_mode,
+                "supported_output_formats": list(backend.supported_output_formats),
+                "default_output_format": backend.default_output_format,
                 "compatibility_version": backend.compatibility_version,
             }
         )

@@ -1,6 +1,6 @@
 {
   "defaultAgent": "codex",
-  "defaultPermissions": "approve-all",
+  "defaultPermissions": "approve-reads",
   "nonInteractivePermissions": "deny",
   "authPolicy": "skip",
   "ttl": 3600,
