@@ -6,7 +6,7 @@ graph:
   enabled: true
   backend: neo4j
   allow_degraded_fallback: true
-  neo4j_url: http://127.0.0.1:7474
+  neo4j_url: bolt://127.0.0.1:7687
   neo4j_username_env: NEO4J_USERNAME
   neo4j_password_env: NEO4J_PASSWORD
   database: neo4j

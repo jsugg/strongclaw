@@ -13,7 +13,7 @@ and adds scale-aware chunk, hybrid, and graph state.
 - updates lexical, chunk, and graph state inline during reindexing
 - lets `clawops context codebase worker` consolidate dense and sparse chunk vectors into a dedicated Qdrant collection when the hybrid lane is configured and healthy
 - reranks the fused candidate pool for medium and large retrieval when rerank providers are configured
-- expands dependency context from import edges
+- expands dependency context from import edges plus symbol-level define/call/reference edges
 - builds stable markdown context packs with provider and scale metadata
 - keeps markdown memory and docs as source-of-truth
 - respects configured include and exclude globs
@@ -73,7 +73,7 @@ The shipped codebase config supports:
 - `graph.enabled`
 - `graph.backend`
 - `graph.allow_degraded_fallback`
-- `graph.neo4j_url`
+- `graph.neo4j_url` (`bolt://127.0.0.1:7687` by default; legacy HTTP URLs are normalized for the driver)
 - `graph.neo4j_username_env`
 - `graph.neo4j_password_env`
 - `graph.database`
@@ -146,6 +146,10 @@ Hybrid runtime artifacts are intentionally deferred for medium and large reindex
 - `index` refreshes lexical, chunk, and edge state synchronously
 - `worker` reconciles pending Qdrant point deletions and chunk-vector upserts in the background
 - `query` and `pack` transparently fall back to lexical chunk retrieval until the worker finishes a healthy hybrid sync
+
+The Neo4j lane now uses the official Python driver over the Bolt protocol and
+keeps the SQLite graph fallback aligned by materializing symbol-aware
+`DEFINES`, `CALLS`, and `REFERENCES` edges alongside file import edges.
 
 ## Benchmark fixtures
 
