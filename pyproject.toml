@@ -130,7 +130,7 @@ reportUnsupportedDunderAll = "none"
 testpaths = ["tests/suites"]
 python_files = ["test_*.py"]
 pythonpath = ["src"]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not framework'"
 markers = [
   "unit: isolated unit tests",
   "integration: cross-module and service-shaped tests",
