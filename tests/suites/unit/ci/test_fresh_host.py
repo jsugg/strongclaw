@@ -9,6 +9,7 @@ import pytest
 
 from clawops.strongclaw_compose import compose_project_name
 from clawops.strongclaw_runtime import resolve_repo_local_compose_state_dir
+from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import linux as fresh_host_linux
@@ -19,14 +20,14 @@ from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 
 def test_prepare_context_writes_context_and_env_file(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Context preparation should persist files and downstream env exports."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    test_context.apply_profiles("fresh_host_push")
 
     context = fresh_host.prepare_context(
         scenario_id="linux",
@@ -46,15 +47,14 @@ def test_prepare_context_writes_context_and_env_file(
 
 def test_scenario_phase_names_match_macos_browser_lab(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Browser-lab scenarios should skip machine-name and launchd phases."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    test_context.apply_profiles("fresh_host_macos_colima")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-browser-lab",
@@ -75,15 +75,14 @@ def test_scenario_phase_names_match_macos_browser_lab(
 
 def test_scenario_phase_names_deactivate_host_services_before_repo_local_sidecars(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Sidecars scenarios should tear down host services before repo-local exercise."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    test_context.apply_profiles("fresh_host_macos_colima")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -105,15 +104,14 @@ def test_scenario_phase_names_deactivate_host_services_before_repo_local_sidecar
 
 def test_prepare_context_sets_macos_variant_and_primary_compose_file(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Sidecars scenarios should export the hosted macOS compose variant details."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    test_context.apply_profiles("fresh_host_macos_colima")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -167,15 +165,14 @@ def test_load_context_rejects_directory_path(tmp_path: Path) -> None:
 
 def test_run_named_phase_supports_macos_service_deactivation(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """The sidecars macOS scenario should dispatch the deactivation phase."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    test_context.apply_profiles("fresh_host_macos_colima")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -185,10 +182,10 @@ def test_run_named_phase_supports_macos_service_deactivation(
         github_env_file=github_env,
     )
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_macos,
         "deactivate_macos_host_services",
-        lambda loaded_context: ["echo", loaded_context.scenario_id, "deactivate-services"],
+        new=lambda loaded_context: ["echo", loaded_context.scenario_id, "deactivate-services"],
     )
 
     assert fresh_host._run_named_phase(context, "deactivate-services") == [
@@ -200,14 +197,14 @@ def test_run_named_phase_supports_macos_service_deactivation(
 
 def test_run_scenario_records_successful_phase_sequence(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Scenario execution should append one successful phase result per planned phase."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    test_context.apply_profiles("fresh_host_push")
     context = fresh_host.prepare_context(
         scenario_id="linux",
         repo_root=workspace,
@@ -226,7 +223,11 @@ def test_run_scenario_records_successful_phase_sequence(
         assert loaded_context.scenario_id == "linux"
         return ["echo", phase_name]
 
-    monkeypatch.setattr(fresh_host_scenario, "run_named_phase", fake_run_named_phase)
+    test_context.patch.patch_object(
+        fresh_host_scenario,
+        "run_named_phase",
+        new=fake_run_named_phase,
+    )
 
     report = fresh_host.run_scenario(Path(context.context_path))
 
@@ -238,7 +239,7 @@ def test_run_scenario_records_successful_phase_sequence(
 
 def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Managed commands should execute through the venv path, not the symlink target."""
     github_env = tmp_path / "github.env"
@@ -250,7 +251,7 @@ def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
     target_python = tmp_path / "python-target"
     target_python.write_text("#!/bin/sh\n", encoding="utf-8")
     (venv_bin / "python").symlink_to(target_python)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    test_context.apply_profiles("fresh_host_push")
 
     context = fresh_host.prepare_context(
         scenario_id="linux",
@@ -268,7 +269,7 @@ def test_venv_clawops_command_preserves_virtualenv_entrypoint_path(
 
 def test_wait_for_docker_backend_retries_after_transient_failure(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Transient Linux docker probe failures should be retried before giving up."""
     attempts = {"count": 0}
@@ -279,8 +280,8 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
             return type("Result", (), {"returncode": 1})()
         return type("Result", (), {"returncode": 0})()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
-    monkeypatch.setattr(fresh_host_shell.time, "sleep", lambda _: None)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=lambda _: None)
 
     fresh_host_shell.wait_for_docker_backend(cwd=tmp_path, env={"PATH": "/usr/bin"})
 
@@ -289,7 +290,7 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
 
 def test_verify_compose_services_running_accepts_json_lines_output(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime verification should accept JSON-lines output from Docker."""
     compose_file = tmp_path / "compose.yaml"
@@ -306,7 +307,7 @@ def test_verify_compose_services_running_accepts_json_lines_output(
         del args, kwargs
         return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -318,7 +319,7 @@ def test_verify_compose_services_running_accepts_json_lines_output(
 
 def test_verify_compose_services_running_requires_healthy_services(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime verification should reject unhealthy services."""
     compose_file = tmp_path / "compose.yaml"
@@ -333,7 +334,7 @@ def test_verify_compose_services_running_requires_healthy_services(
         del args, kwargs
         return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
     with pytest.raises(fresh_host.FreshHostError, match="health 'unhealthy'"):
         fresh_host_shell.verify_compose_services_running(
@@ -348,7 +349,7 @@ def test_verify_compose_services_running_requires_healthy_services(
 
 def test_verify_compose_services_running_retries_until_service_health_recovers(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime verification should tolerate transient unhealthy health checks."""
     compose_file = tmp_path / "compose.yaml"
@@ -377,8 +378,8 @@ def test_verify_compose_services_running_retries_until_service_health_recovers(
             {"returncode": 0, "stdout": next(payloads), "stderr": ""},
         )()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
-    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=sleeps.append)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -394,7 +395,7 @@ def test_verify_compose_services_running_retries_until_service_health_recovers(
 
 def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_empty(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime verification should retry through transient empty ps output."""
     compose_file = tmp_path / "compose.yaml"
@@ -420,8 +421,8 @@ def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_
             {"returncode": 0, "stdout": next(payloads), "stderr": ""},
         )()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
-    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=sleeps.append)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -435,7 +436,7 @@ def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_
 
 def test_verify_compose_services_running_retries_until_services_are_ready(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime verification should tolerate short startup races."""
     compose_file = tmp_path / "compose.yaml"
@@ -461,8 +462,8 @@ def test_verify_compose_services_running_retries_until_services_are_ready(
             {"returncode": 0, "stdout": next(payloads), "stderr": ""},
         )()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
-    monkeypatch.setattr(fresh_host_shell.time, "sleep", sleeps.append)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=sleeps.append)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -476,7 +477,7 @@ def test_verify_compose_services_running_retries_until_services_are_ready(
 
 def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Compose runtime probes should inherit state/config paths from the scenario home."""
     repo_root = tmp_path / "repo"
@@ -499,7 +500,7 @@ def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
         captured_env.update(kwargs["env"])
         return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -521,7 +522,7 @@ def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
 
 def test_verify_compose_services_running_honors_repo_local_state_override_for_variants(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Variant compose probes should target the same repo-local project as ops up/down."""
     repo_root = tmp_path / "repo"
@@ -545,7 +546,7 @@ def test_verify_compose_services_running_honors_repo_local_state_override_for_va
         captured_env.update(kwargs["env"])
         return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
 
-    monkeypatch.setattr(fresh_host_shell.subprocess, "run", fake_run)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
 
     fresh_host_shell.verify_compose_services_running(
         compose_file,
@@ -574,14 +575,14 @@ def test_verify_compose_services_running_honors_repo_local_state_override_for_va
 
 def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Linux sidecar exercises should wait for Docker and verify runtime before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    test_context.apply_profiles("fresh_host_push")
 
     context = fresh_host.prepare_context(
         scenario_id="linux",
@@ -592,20 +593,20 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
     )
     calls: list[str] = []
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "wait_for_docker_backend",
-        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "run_command",
-        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "verify_sidecar_services_running",
-        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+        new=lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
     )
 
     fresh_host_linux.exercise_linux_sidecars(context)
@@ -618,14 +619,14 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
 
 def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Linux browser-lab exercises should prove runtime state before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    test_context.apply_profiles("fresh_host_push")
 
     context = fresh_host.prepare_context(
         scenario_id="linux",
@@ -636,20 +637,20 @@ def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
     )
     calls: list[str] = []
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "wait_for_docker_backend",
-        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "run_command",
-        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_linux,
         "verify_compose_services_running",
-        lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
+        new=lambda compose_file, **kwargs: calls.append(f"verify:{Path(compose_file).name}"),
     )
 
     fresh_host_linux.exercise_linux_browser_lab(context)
@@ -662,15 +663,14 @@ def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
 
 def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Hosted macOS sidecar exercises should verify runtime before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
+    test_context.apply_profiles("fresh_host_macos_colima")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -682,25 +682,25 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     calls: list[str] = []
     verify_kwargs: dict[str, object] = {}
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_macos,
         "wait_for_docker_backend",
-        lambda *, cwd, env: calls.append(f"wait:{cwd}"),
+        new=lambda *, cwd, env: calls.append(f"wait:{cwd}"),
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_macos,
         "run_command",
-        lambda command, **kwargs: calls.append("run:" + " ".join(command)),
+        new=lambda command, **kwargs: calls.append("run:" + " ".join(command)),
     )
 
     def fake_verify_sidecars(compose_file: Path, **kwargs: object) -> None:
         verify_kwargs.update(kwargs)
         calls.append(f"verify:{Path(compose_file).name}")
 
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         fresh_host_macos,
         "verify_sidecar_services_running",
-        fake_verify_sidecars,
+        new=fake_verify_sidecars,
     )
 
     fresh_host_macos.exercise_macos_sidecars(context)
@@ -718,17 +718,20 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
 
 def test_write_summary_includes_child_reports(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Summary rendering should include child runtime and image reports when present."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    monkeypatch.setenv("DEFAULT_MACOS_RUNTIME_PROVIDER", "colima")
-    monkeypatch.setenv("FRESH_HOST_PACKAGE_CACHE_ENABLED", "true")
-    monkeypatch.setenv("FRESH_HOST_PACKAGE_CACHE_HIT", "false")
+    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.env.update(
+        {
+            "FRESH_HOST_PACKAGE_CACHE_ENABLED": "true",
+            "FRESH_HOST_PACKAGE_CACHE_HIT": "false",
+        }
+    )
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
