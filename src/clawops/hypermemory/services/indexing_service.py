@@ -15,6 +15,7 @@ from clawops.hypermemory.models import (
     EvidenceEntry,
     HypermemoryConfig,
     IndexedDocument,
+    ParsedItem,
     ReindexSummary,
 )
 from clawops.hypermemory.parser import build_document
@@ -374,7 +375,7 @@ class IndexingService:
         conn: sqlite3.Connection,
         item_id: int,
         document_rel_path: str,
-        item,
+        item: ParsedItem,
         typed_counts: dict[str, int],
         evidence: list[EvidenceEntry],
     ) -> None:

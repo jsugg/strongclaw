@@ -23,6 +23,7 @@ from clawops.hypermemory.contracts import (
 )
 from clawops.hypermemory.models import (
     FusionMode,
+    IndexedDocument,
     ReflectionMode,
     ReindexSummary,
     SearchBackend,
@@ -60,10 +61,10 @@ class _QueryDepsImpl(QueryDeps):
     reindex_callback: Callable[[bool], ReindexSummary]
     fact_lookup_callback: Callable[[str, sqlite3.Connection | None, str | None], SearchHit | None]
 
-    def iter_documents(self):
+    def iter_documents(self) -> tuple[IndexedDocument, ...]:
         return self.indexing.iter_documents()
 
-    def missing_corpus_paths(self):
+    def missing_corpus_paths(self) -> list[CorpusPathStatus]:
         return self.indexing.missing_corpus_paths()
 
     def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
@@ -87,7 +88,7 @@ class _VerificationDepsImpl(VerificationDeps):
     def status(self) -> StatusResult:
         return self.status_callback()
 
-    def missing_required_corpus_paths(self):
+    def missing_required_corpus_paths(self) -> list[CorpusPathStatus]:
         return self.missing_required_corpus_paths_callback()
 
 

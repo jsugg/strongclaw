@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import sqlite3
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from typing import Any, Literal, Protocol, cast
 
@@ -55,7 +56,9 @@ from clawops.hypermemory.governance import ensure_writable_scope, validate_scope
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
 from clawops.hypermemory.models import (
     CaptureMode,
+    FactCategory,
     FusionMode,
+    ProposalRecord,
     ReflectionMode,
     ReflectionSummary,
     ReindexSummary,
@@ -856,7 +859,7 @@ class CanonicalStoreService:
     def _infer_query_fact_key(self, query: str) -> str | None:
         return infer_query_fact_key(query)
 
-    def _fact_category(self, fact_key: str):
+    def _fact_category(self, fact_key: str) -> FactCategory:
         return fact_category(fact_key)
 
     def _entry_hash_prefix(self, entry_line: str) -> str:
@@ -1095,7 +1098,9 @@ class CanonicalStoreService:
             timestamp = timestamp.replace(tzinfo=UTC)
         return max((datetime.now(tz=UTC) - timestamp).total_seconds() / 86400.0, 0.0)
 
-    def _memory_pro_export_rows(self, conn: sqlite3.Connection, *, scope: str):
+    def _memory_pro_export_rows(
+        self, conn: sqlite3.Connection, *, scope: str
+    ) -> Iterator[sqlite3.Row]:
         specs = (
             ("fact", "facts"),
             ("reflection", "reflections"),
@@ -1143,7 +1148,7 @@ class CanonicalStoreService:
     def _memory_pro_timestamp_ms(self, value: str) -> int:
         return memory_pro_timestamp_ms(value)
 
-    def _resolve_writable_path(self, rel_path: str):
+    def _resolve_writable_path(self, rel_path: str) -> pathlib.Path:
         return resolve_writable_path(self.config, rel_path)
 
     def _store_target(
@@ -1151,26 +1156,26 @@ class CanonicalStoreService:
         *,
         kind: Literal["fact", "reflection", "opinion", "entity"],
         entity: str | None = None,
-    ):
+    ) -> pathlib.Path:
         return store_target(self.config, kind=kind, entity=entity)
 
     def _format_entry_line(self, **kwargs: Any) -> str:
         return format_entry_line(**kwargs)
 
-    def _append_unique_entry(self, path, *, kind: str, entry_line: str) -> bool:
+    def _append_unique_entry(self, path: pathlib.Path, *, kind: str, entry_line: str) -> bool:
         return append_unique_entry(self.config, path, kind=kind, entry_line=entry_line)
 
-    def _document_header(self, path, kind: str) -> str:
+    def _document_header(self, path: pathlib.Path, kind: str) -> str:
         return document_header(path, kind=kind)
 
-    def _entry_identity(self, entry_line: str):
+    def _entry_identity(self, entry_line: str) -> tuple[str, str, str | None] | None:
         return entry_identity(entry_line, config=self.config)
 
-    def _build_proposal(self, **kwargs: Any):
+    def _build_proposal(self, **kwargs: Any) -> ProposalRecord:
         return build_proposal(self.config, **kwargs)
 
-    def _format_proposal_line(self, proposal):
+    def _format_proposal_line(self, proposal: ProposalRecord) -> str:
         return format_proposal_line(proposal)
 
-    def _proposal_kind(self, entry_line: str):
+    def _proposal_kind(self, entry_line: str) -> Literal["fact", "reflection", "opinion", "entity"]:
         return proposal_kind(entry_line, config=self.config)
