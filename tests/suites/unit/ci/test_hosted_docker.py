@@ -10,6 +10,7 @@ import pytest
 
 from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.utils.helpers import fresh_host, hosted_docker
+from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
 
@@ -309,3 +310,63 @@ def test_install_runtime_rejects_non_macos_context(
 
     with pytest.raises(fresh_host.FreshHostError):
         hosted_docker.install_runtime(Path(context.context_path))
+
+
+def test_collect_runtime_diagnostics_uses_compose_probe_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hosted runtime diagnostics should reuse compose probe env for compose commands."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    local_env_file = varlock_local_env_file(workspace)
+    local_env_file.parent.mkdir(parents=True, exist_ok=True)
+    write_env_assignments(
+        local_env_file,
+        {
+            "NEO4J_PASSWORD": "runtime-secret",
+        },
+    )
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    commands: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, timeout_seconds, capture_output
+        commands.append((command, env))
+        return subprocess.CompletedProcess(command, 0, stdout="ok\n", stderr="")
+
+    def fake_sysctl_int(name: str) -> int | None:
+        return 4 if name == "hw.ncpu" else 8
+
+    monkeypatch.setattr(hosted_docker_diagnostics, "run_command", fake_run_command)
+    monkeypatch.setattr(
+        hosted_docker_diagnostics,
+        "sysctl_int",
+        fake_sysctl_int,
+    )
+
+    hosted_docker.collect_runtime_diagnostics(Path(context.context_path))
+
+    compose_commands = [
+        env for command, env in commands if command[:3] == ["docker", "compose", "-f"]
+    ]
+    assert compose_commands
+    assert all(env["NEO4J_PASSWORD"] == "runtime-secret" for env in compose_commands)
+    assert all("COMPOSE_PROJECT_NAME" in env for env in compose_commands)

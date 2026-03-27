@@ -18,6 +18,7 @@ from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import linux as fresh_host_linux
 from tests.utils.helpers._fresh_host import macos as fresh_host_macos
+from tests.utils.helpers._fresh_host import reporting as fresh_host_reporting
 from tests.utils.helpers._fresh_host import scenario as fresh_host_scenario
 from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 
@@ -438,6 +439,36 @@ def test_verify_compose_services_running_retries_until_service_health_recovers(
     )
 
     assert sleeps == [2.0]
+
+
+def test_verify_compose_services_running_ignores_completed_init_services(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Compose runtime verification should ignore completed one-shot init services."""
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    payload = json.dumps(
+        [
+            {"Service": "postgres", "State": "running", "Health": "healthy"},
+            {"Service": "litellm-migrate", "State": "exited", "ExitCode": 0},
+            {"Service": "litellm", "State": "running", "Health": "healthy"},
+            {"Service": "otel-collector", "State": "running"},
+            {"Service": "qdrant", "State": "running", "Health": "healthy"},
+        ]
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return type("Result", (), {"returncode": 0, "stdout": payload, "stderr": ""})()
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+
+    fresh_host_shell.verify_sidecar_services_running(
+        compose_file,
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+    )
 
 
 def test_verify_compose_services_running_retries_when_compose_ps_is_temporarily_empty(
@@ -863,6 +894,54 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         == fresh_host_macos.HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS
     )
     assert verify_kwargs["repo_local_state"] is True
+
+
+def test_collect_diagnostics_uses_compose_probe_env_for_macos_compose_commands(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Fresh-host diagnostics should reuse compose probe env for compose commands."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+    local_env_file = workspace / "platform" / "configs" / "varlock" / ".env.local"
+    local_env_file.parent.mkdir(parents=True, exist_ok=True)
+    local_env_file.write_text("NEO4J_PASSWORD=diag-secret\n", encoding="utf-8")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    captured: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_capture_to_file(
+        command: list[str],
+        *,
+        output_path: Path,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> None:
+        del output_path, cwd
+        captured.append((command, env))
+        return None
+
+    test_context.patch.patch_object(
+        fresh_host_reporting,
+        "capture_to_file",
+        new=fake_capture_to_file,
+    )
+
+    fresh_host.collect_diagnostics(Path(context.context_path))
+
+    compose_envs = [env for command, env in captured if command[:3] == ["docker", "compose", "-f"]]
+    assert compose_envs
+    assert all(env["NEO4J_PASSWORD"] == "diag-secret" for env in compose_envs)
+    assert all("COMPOSE_PROJECT_NAME" in env for env in compose_envs)
 
 
 def test_write_summary_includes_child_reports(

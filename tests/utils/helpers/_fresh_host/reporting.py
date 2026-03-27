@@ -10,7 +10,7 @@ from typing import cast
 
 from tests.utils.helpers._fresh_host.macos import cleanup_macos
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostReport, PhaseResult
-from tests.utils.helpers._fresh_host.shell import capture_to_file, phase_env
+from tests.utils.helpers._fresh_host.shell import capture_to_file, compose_probe_env, phase_env
 from tests.utils.helpers._fresh_host.storage import (
     context_path,
     format_duration,
@@ -69,6 +69,21 @@ def _diagnostic_commands(context: FreshHostContext) -> dict[Path, list[str]]:
     return commands
 
 
+def _diagnostic_env(
+    context: FreshHostContext,
+    *,
+    command: list[str],
+) -> dict[str, str]:
+    """Return the environment for one diagnostic command."""
+    if len(command) >= 4 and command[:3] == ["docker", "compose", "-f"]:
+        return compose_probe_env(
+            context,
+            compose_file=Path(command[3]),
+            repo_local_state=context.platform == "macos",
+        )
+    return phase_env(context)
+
+
 def _list_length(payload: dict[str, object], key: str) -> int:
     """Return the length of one JSON list field when present."""
     value = payload.get(key)
@@ -89,7 +104,7 @@ def collect_diagnostics(context_file: Path) -> FreshHostReport:
             command,
             output_path=output_path,
             cwd=repo_root(context.repo_root),
-            env=phase_env(context),
+            env=_diagnostic_env(context, command=command),
         )
         if note is not None:
             notes.append(note)
