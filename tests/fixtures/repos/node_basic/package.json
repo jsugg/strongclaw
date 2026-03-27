@@ -1,0 +1,7 @@
+{
+  "name": "node-basic",
+  "version": "0.1.0",
+  "scripts": {
+    "test": "node -e \"console.log('ok')\""
+  }
+}

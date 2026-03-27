@@ -171,6 +171,24 @@ clawops policy \
   --input examples/policy-inputs/github-comment.json
 ```
 
+## Devflow
+
+Use the public devflow surface for staged planning, execution, recovery, and
+audit:
+
+```bash
+clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
+clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --repo-root . --run-id <run-id>
+clawops devflow status --repo-root . --stuck-only
+clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
+clawops devflow cancel --repo-root . --run-id <run-id> --requested-by operator
+clawops devflow audit --repo-root . --run-id <run-id>
+```
+
+Run-local state lands under `.clawops/devflow/<run-id>/` and the audit bundle
+is written under that run's `audit/` directory.
+
 ## Context service
 
 Index:

@@ -164,6 +164,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "workflow", "clawops.workflow_runner", "main", "Run deterministic operational workflows."
     ),
     CommandSpec(
+        "devflow",
+        "clawops.devflow",
+        "main",
+        "Run the production devflow planner, executor, and audit surface.",
+    ),
+    CommandSpec(
         "acp-runner", "clawops.acp_runner", "main", "Run ACP sessions with locking and summaries."
     ),
     CommandSpec(

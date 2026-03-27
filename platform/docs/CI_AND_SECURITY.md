@@ -11,6 +11,7 @@ The repository includes:
 - Repository Dependency Snapshot from a generated SPDX SBOM snapshot
 - Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
 - `strongclaw-hypermemory` host-functional checks through the local plugin SDK stub
+- Devflow contract checks for the public `clawops devflow` surface
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
 - Upstream Integration Validation
 
@@ -91,5 +92,9 @@ in `.github/workflows/memory-plugin-verification.yml`.
   SBOM.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
   plus nightly validation steps after an upstream merge lands in the fork.
+- `.github/workflows/devflow-contract.yml` syncs the locked environment,
+  compile-checks the repo, runs targeted devflow tests, and validates
+  `clawops devflow plan --repo-root . --goal "contract smoke"` without live ACP
+  providers.
 - Operators can verify published provenance with GitHub's attestation tooling
   after a tagged release lands.

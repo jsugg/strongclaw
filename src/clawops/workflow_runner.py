@@ -10,10 +10,25 @@ from collections.abc import Mapping
 from typing import cast
 
 from clawops.acp_runner import SessionSpec, run_session
+from clawops.acpx_adapter import AcpxPermissionMode
 from clawops.app_paths import scoped_state_dir
 from clawops.common import canonical_json, load_json, load_yaml, write_json, write_text
 from clawops.context_envelope import ContextEnvelopeBuilder, validate_context_envelope
 from clawops.context_service import service_from_config
+from clawops.devflow_artifacts import build_stage_artifact_manifest, update_artifact_manifest
+from clawops.devflow_roles import RoleArtifact
+from clawops.devflow_state import (
+    cancel_run,
+    record_stage_completed,
+    record_stage_failed,
+    record_stage_started,
+)
+from clawops.git_gates import (
+    capture_git_snapshot,
+    check_tracked_mutations,
+    load_git_snapshot,
+    write_git_snapshot,
+)
 from clawops.op_journal import OperationJournal
 from clawops.orchestration import (
     DeliveryTargetDescriptor,
@@ -104,6 +119,10 @@ ALLOWED_WORKFLOW_KINDS = frozenset(
         "approval_gate",
         "workspace_prepare",
         "delivery_prepare",
+        "git_snapshot",
+        "git_mutation_gate",
+        "stage_record",
+        "artifact_manifest",
     }
 )
 
@@ -194,6 +213,37 @@ def _validate_workflow(workflow: object) -> dict[str, object]:
         if kind == "delivery_prepare":
             as_mapping(step.get("project"), path=f"{prefix}.project")
             as_mapping(step.get("delivery_target"), path=f"{prefix}.delivery_target")
+            continue
+        if kind == "git_snapshot":
+            if not isinstance(step.get("workspace"), str):
+                raise TypeError(f"{prefix}.workspace must be a string")
+            if step.get("output") is not None and not isinstance(step.get("output"), str):
+                raise TypeError(f"{prefix}.output must be a string")
+            continue
+        if kind == "git_mutation_gate":
+            if not isinstance(step.get("workspace"), str):
+                raise TypeError(f"{prefix}.workspace must be a string")
+            if step.get("snapshot") is None and step.get("from_step") is None:
+                raise TypeError(f"{prefix} must define snapshot or from_step")
+            if step.get("allow_non_git_degrade") is not None and not isinstance(
+                step.get("allow_non_git_degrade"), bool
+            ):
+                raise TypeError(f"{prefix}.allow_non_git_degrade must be a boolean")
+            continue
+        if kind == "stage_record":
+            for field in ("db", "run_id", "stage_name", "role", "workspace_root", "status"):
+                if not isinstance(step.get(field), str):
+                    raise TypeError(f"{prefix}.{field} must be a string")
+            if isinstance(step.get("stage_index"), bool) or not isinstance(
+                step.get("stage_index"), int
+            ):
+                raise TypeError(f"{prefix}.stage_index must be an integer")
+            continue
+        if kind == "artifact_manifest":
+            for field in ("run_root", "manifest", "run_id", "stage_name", "role"):
+                if not isinstance(step.get(field), str):
+                    raise TypeError(f"{prefix}.{field} must be a string")
+            as_mapping_list(step.get("artifacts", []), path=f"{prefix}.artifacts")
             continue
     return workflow_mapping
 
@@ -629,6 +679,7 @@ class WorkflowRunner:
                 ttl_seconds=3600,
                 required_auth_mode=task.required_auth_mode,
                 backend_profile=task.backend_profile,
+                permissions_mode=cast(AcpxPermissionMode | None, task.permissions_mode),
                 journal_db=journal_db,
                 session_type=task.role,
                 branch=task.workspace.branch,
@@ -661,6 +712,249 @@ class WorkflowRunner:
             ok=summary.ok,
             message=f"{summary.status} -> {summary.summary_path}",
             details=details,
+        )
+
+    def _git_snapshot_step(self, step: Mapping[str, object]) -> StepResult:
+        """Capture a tracked-file snapshot for one workspace."""
+        workspace_root = self._resolve_step_path(
+            step["workspace"], field_name="git_snapshot.workspace"
+        )
+        output_path = (
+            scoped_state_dir(workspace_root, category="git-snapshots")
+            / f"{_safe_step_slug(str(step['name']))}.json"
+            if step.get("output") is None
+            else self._resolve_step_path(step["output"], field_name="git_snapshot.output")
+        )
+        snapshot = capture_git_snapshot(workspace_root)
+        if not self.dry_run:
+            write_git_snapshot(output_path, snapshot)
+        return self._store_step_result(
+            step_name=str(step["name"]),
+            ok=snapshot.git_root is not None,
+            message=(
+                f"snapshot -> {output_path}"
+                if snapshot.git_root is not None
+                else f"non-git workspace -> {workspace_root}"
+            ),
+            details={
+                "workspace_root": workspace_root.as_posix(),
+                "snapshot_path": output_path.as_posix(),
+                "git_root": None if snapshot.git_root is None else snapshot.git_root.as_posix(),
+            },
+        )
+
+    def _git_mutation_gate_step(self, step: Mapping[str, object]) -> StepResult:
+        """Fail when tracked files changed after a protected stage."""
+        workspace_root = self._resolve_step_path(
+            step["workspace"], field_name="git_mutation_gate.workspace"
+        )
+        if step.get("snapshot") is not None:
+            snapshot_path = self._resolve_step_path(
+                step["snapshot"], field_name="git_mutation_gate.snapshot"
+            )
+        else:
+            from_step = as_string(step["from_step"], path="git_mutation_gate.from_step")
+            snapshot_path = self._resolve_step_path(
+                self.step_state[from_step]["snapshot_path"],
+                field_name="git_mutation_gate.snapshot_path",
+            )
+        before = load_git_snapshot(snapshot_path)
+        after = capture_git_snapshot(workspace_root)
+        result = check_tracked_mutations(before, after)
+        if (
+            not result.ok
+            and after.git_root is None
+            and as_bool(
+                step.get("allow_non_git_degrade", False),
+                path="git_mutation_gate.allow_non_git_degrade",
+            )
+        ):
+            result = dataclasses.replace(result, ok=True, reason="non-git workspace degraded")
+        return self._store_step_result(
+            step_name=str(step["name"]),
+            ok=result.ok,
+            message=result.reason,
+            details={
+                "workspace_root": workspace_root.as_posix(),
+                "mutated_paths": list(result.mutated_paths),
+                "reason": result.reason,
+            },
+        )
+
+    def _stage_record_step(self, step: Mapping[str, object]) -> StepResult:
+        """Write one devflow stage lifecycle update."""
+        db_path = self._resolve_step_path(step["db"], field_name="stage_record.db")
+        run_id = as_string(step["run_id"], path="stage_record.run_id")
+        stage_name = as_string(step["stage_name"], path="stage_record.stage_name")
+        stage_index = as_int(step["stage_index"], path="stage_record.stage_index")
+        role = as_string(step["role"], path="stage_record.role")
+        workspace_root = self._resolve_step_path(
+            step["workspace_root"], field_name="stage_record.workspace_root"
+        )
+        status = as_string(step["status"], path="stage_record.status")
+        if self.dry_run:
+            return self._store_step_result(
+                step_name=str(step["name"]),
+                ok=True,
+                message=f"dry-run stage_record:{status}",
+            )
+        if status == "running":
+            record = record_stage_started(
+                db_path,
+                run_id=run_id,
+                stage_name=stage_name,
+                stage_index=stage_index,
+                role=role,
+                workspace_root=workspace_root,
+                retry_budget=as_int(step.get("retry_budget", 0), path="stage_record.retry_budget"),
+                op_id=(
+                    cast(str | None, step.get("op_id"))
+                    if isinstance(step.get("op_id"), str)
+                    else None
+                ),
+                session_identity=(
+                    cast(str | None, step.get("session_identity"))
+                    if isinstance(step.get("session_identity"), str)
+                    else None
+                ),
+            )
+        elif status == "succeeded":
+            record = record_stage_completed(
+                db_path,
+                run_id=run_id,
+                stage_name=stage_name,
+                summary_path=(
+                    None
+                    if step.get("summary_path") is None
+                    else self._resolve_step_path(
+                        step["summary_path"], field_name="stage_record.summary_path"
+                    )
+                ),
+                audit_path=(
+                    None
+                    if step.get("audit_path") is None
+                    else self._resolve_step_path(
+                        step["audit_path"], field_name="stage_record.audit_path"
+                    )
+                ),
+                artifact_manifest_path=(
+                    None
+                    if step.get("artifact_manifest_path") is None
+                    else self._resolve_step_path(
+                        step["artifact_manifest_path"],
+                        field_name="stage_record.artifact_manifest_path",
+                    )
+                ),
+            )
+        elif status == "failed":
+            record = record_stage_failed(
+                db_path,
+                run_id=run_id,
+                stage_name=stage_name,
+                summary_path=(
+                    None
+                    if step.get("summary_path") is None
+                    else self._resolve_step_path(
+                        step["summary_path"], field_name="stage_record.summary_path"
+                    )
+                ),
+                audit_path=(
+                    None
+                    if step.get("audit_path") is None
+                    else self._resolve_step_path(
+                        step["audit_path"], field_name="stage_record.audit_path"
+                    )
+                ),
+                artifact_manifest_path=(
+                    None
+                    if step.get("artifact_manifest_path") is None
+                    else self._resolve_step_path(
+                        step["artifact_manifest_path"],
+                        field_name="stage_record.artifact_manifest_path",
+                    )
+                ),
+                reason=(
+                    cast(str | None, step.get("reason"))
+                    if isinstance(step.get("reason"), str)
+                    else None
+                ),
+            )
+        elif status == "cancelled":
+            cancel_run(
+                db_path,
+                run_id=run_id,
+                requested_by=as_string(
+                    step.get("requested_by", "workflow"), path="stage_record.requested_by"
+                ),
+            )
+            record = record_stage_failed(
+                db_path,
+                run_id=run_id,
+                stage_name=stage_name,
+                reason="cancelled",
+            )
+        else:
+            raise ValueError(
+                "stage_record.status must be one of: running, succeeded, failed, cancelled"
+            )
+        return self._store_step_result(
+            step_name=str(step["name"]),
+            ok=True,
+            message=f"stage {stage_name} -> {status}",
+            details=record.to_dict(),
+        )
+
+    def _artifact_manifest_step(self, step: Mapping[str, object]) -> StepResult:
+        """Write or update the run-level artifact manifest."""
+        run_root = self._resolve_step_path(
+            step["run_root"], field_name="artifact_manifest.run_root"
+        )
+        manifest_path = self._resolve_step_path(
+            step["manifest"], field_name="artifact_manifest.manifest"
+        )
+        run_id = as_string(step["run_id"], path="artifact_manifest.run_id")
+        stage_name = as_string(step["stage_name"], path="artifact_manifest.stage_name")
+        role = as_string(step["role"], path="artifact_manifest.role")
+        artifacts = tuple(
+            RoleArtifact(
+                name=as_string(
+                    artifact.get("name"), path=f"artifact_manifest.artifacts[{index}].name"
+                ),
+                path=pathlib.Path(
+                    as_string(
+                        artifact.get("path"), path=f"artifact_manifest.artifacts[{index}].path"
+                    )
+                ),
+                required=as_bool(
+                    artifact.get("required", True),
+                    path=f"artifact_manifest.artifacts[{index}].required",
+                ),
+            )
+            for index, artifact in enumerate(
+                as_mapping_list(step.get("artifacts", []), path="artifact_manifest.artifacts")
+            )
+        )
+        stage_manifest = build_stage_artifact_manifest(
+            run_id=run_id,
+            run_root=run_root,
+            stage_name=stage_name,
+            role=role,
+            expected_artifacts=artifacts,
+        )
+        payload = update_artifact_manifest(
+            manifest_path=manifest_path,
+            run_id=run_id,
+            stage_manifest=stage_manifest,
+        )
+        return self._store_step_result(
+            step_name=str(step["name"]),
+            ok=True,
+            message=f"artifact manifest -> {manifest_path}",
+            details={
+                "manifest_path": manifest_path.as_posix(),
+                "stage_status": stage_manifest.status,
+                "manifest": payload,
+            },
         )
 
     def _worker_poll_step(self, step: Mapping[str, object]) -> StepResult:
@@ -798,14 +1092,25 @@ class WorkflowRunner:
             "worker_poll": self._worker_poll_step,
             "artifact_gate": self._artifact_gate_step,
             "approval_gate": self._approval_gate_step,
+            "git_snapshot": self._git_snapshot_step,
+            "git_mutation_gate": self._git_mutation_gate_step,
+            "stage_record": self._stage_record_step,
+            "artifact_manifest": self._artifact_manifest_step,
         }
+        stop_on_failure = as_bool(
+            self.workflow.get("stop_on_failure", False),
+            path="workflow.stop_on_failure",
+        )
         steps = as_mapping_list(self.workflow.get("steps", []), path="workflow.steps")
         for step in steps:
             kind = str(step["kind"])
             handler = handlers.get(kind)
             if handler is None:
                 raise ValueError(f"unknown workflow step kind: {kind}")
-            results.append(handler(step))
+            result = handler(step)
+            results.append(result)
+            if stop_on_failure and not result.ok:
+                break
         return results
 
 

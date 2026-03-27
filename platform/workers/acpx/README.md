@@ -6,7 +6,11 @@ This directory contains the external coding worker plane.
 
 - `global-config.example.json`: template for `~/.acpx/config.json`
 - `project-config.example.json`: template for `<repo>/.acpxrc.json`
+- `architect-system.md`: design-stage guidance
 - `coder-system.md`: system prompt guidance for coding workers
+- `sdet-system.md`: test-design guidance
+- `qa-system.md`: verification-stage guidance
+- `lead-system.md`: final decision guidance
 - `reviewer-system.md`: review guidance
 - `security-reviewer-system.md`: stricter review guidance
 
@@ -31,3 +35,6 @@ acpx --approve-all --format json --json-strict --model claude-sonnet-4-5 claude 
 now passes permission mode, output mode, and backend profile explicitly on the command line so
 session summaries record the effective execution contract instead of inheriting implicit local
 defaults.
+
+The `clawops devflow` surface consumes these role prompts through the config
+catalog in `platform/configs/devflow/roles.yaml`.

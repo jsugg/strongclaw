@@ -24,6 +24,7 @@ Read these in order:
 4. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
 5. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
 6. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
+7. [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md)
 
 ## Repository map
 
@@ -228,3 +229,16 @@ verifies the full pre-commit stack in one final pass.
 compile smoke. That keeps the two targets distinct: `make precommit` is the
 repository normalization and hook gate, while `make dev-check` is the deeper
 development verification pass.
+
+## Devflow
+
+The repository now exposes a production devflow surface for multi-stage
+planning, execution, recovery, and audit:
+
+```bash
+clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
+clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --repo-root . --run-id <run-id>
+clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
+clawops devflow audit --repo-root . --run-id <run-id>
+```

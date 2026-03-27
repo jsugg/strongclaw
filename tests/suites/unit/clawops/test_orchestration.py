@@ -91,7 +91,10 @@ def test_orchestration_task_resolution_includes_context_and_artifacts(
             "role": "developer",
             "backend": "codex",
             "prompt": "Implement the change",
+            "permissions_mode": "approve-all",
+            "workspace_mode": "mutable_primary",
             "operation_kind": "implement",
+            "artifact_contract_id": "artifact-contract",
             "required_auth_mode": "subscription",
             "allowed_capabilities": ["code.write"],
             "context": {
@@ -126,6 +129,9 @@ def test_orchestration_task_resolution_includes_context_and_artifacts(
     )
     assert task.context_request is not None
     assert task.expected_artifacts[0].name == "implementation-report"
+    assert task.permissions_mode == "approve-all"
+    assert task.workspace_mode == "mutable_primary"
+    assert task.artifact_contract_id == "artifact-contract"
 
 
 def test_backend_registry_exposes_pinned_contract_and_compatibility_fixture() -> None:

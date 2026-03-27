@@ -341,3 +341,63 @@ def test_session_lease_conflicts_raise(tmp_path: pathlib.Path) -> None:
         assert "active lease already exists" in str(exc)
     else:
         raise AssertionError("expected duplicate active lease to fail")
+
+
+def test_devflow_tables_are_created_and_stuck_runs_are_queryable(tmp_path: pathlib.Path) -> None:
+    db = tmp_path / "journal.sqlite"
+    journal = OperationJournal(db)
+    journal.init()
+
+    with journal.connect() as conn:
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        conn.execute(
+            """
+            INSERT INTO devflow_run (
+              run_id,
+              created_at_ms,
+              updated_at_ms,
+              status,
+              repo_root,
+              project_id,
+              workspace_id,
+              lane,
+              goal,
+              run_profile,
+              bootstrap_profile,
+              workflow_path,
+              plan_sha256,
+              current_stage_name,
+              requested_by,
+              resume_token,
+              summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "df_stale",
+                1,
+                1,
+                "running",
+                "/repo",
+                "project-1",
+                "workspace-1",
+                "default",
+                "goal",
+                "production",
+                "strongclaw",
+                "/repo/workflow.yaml",
+                "hash",
+                "developer",
+                "tester",
+                None,
+                None,
+            ),
+        )
+
+    assert {"devflow_run", "devflow_stage", "devflow_stage_event"} <= tables
+    stuck = journal.list_stuck_devflow_runs(older_than_ms=0)
+    assert [item["run_id"] for item in stuck] == ["df_stale"]

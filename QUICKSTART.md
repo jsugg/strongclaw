@@ -218,6 +218,21 @@ It runs:
 - `openclaw memory status --deep`
 - `openclaw memory search --query "ClawOps" --max-results 1`
 - `clawops model-auth check`
+
+## 6. Run devflow
+
+Plan and execute the Strongclaw devflow surface from the repo root:
+
+```bash
+clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
+clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --repo-root . --run-id <run-id>
+clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
+clawops devflow audit --repo-root . --run-id <run-id>
+```
+
+See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run
+layout, recovery flow, and audit bundle details.
 - `clawops verify-platform sidecars --skip-runtime`
 - `clawops verify-platform observability --skip-runtime`
 - `clawops verify-platform channels`

@@ -20,6 +20,7 @@ def test_root_help_is_available(capsys: pytest.CaptureFixture[str]) -> None:
     assert "baseline" in captured.out
     assert "recovery" in captured.out
     assert "varlock-env" in captured.out
+    assert "devflow" in captured.out
 
 
 def test_root_without_args_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:

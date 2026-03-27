@@ -141,3 +141,16 @@ Legacy note:
 - older approved rows that predate execution contracts may require an explicit
   policy file on `--execute-approved` so the wrapper can restamp the row before
   sending the side effect
+
+## Devflow audit spine
+
+The production devflow surface reuses the same SQLite audit spine in
+`op_journal.sqlite` and adds devflow-specific run, stage, and stage-event
+tables. Operators inspect and recover that workflow state through:
+
+```bash
+clawops devflow status --repo-root . --run-id <run-id>
+clawops devflow status --repo-root . --stuck-only
+clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
+clawops devflow audit --repo-root . --run-id <run-id>
+```

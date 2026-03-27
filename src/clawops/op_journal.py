@@ -90,6 +90,66 @@ CREATE INDEX IF NOT EXISTS session_lease_status_idx ON session_lease(status);
 CREATE UNIQUE INDEX IF NOT EXISTS session_lease_active_lock_idx
 ON session_lease(lock_identity)
 WHERE released_at_ms IS NULL;
+
+CREATE TABLE IF NOT EXISTS devflow_run (
+  run_id TEXT PRIMARY KEY,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  repo_root TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  lane TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  run_profile TEXT NOT NULL,
+  bootstrap_profile TEXT NOT NULL,
+  workflow_path TEXT NOT NULL,
+  plan_sha256 TEXT NOT NULL,
+  current_stage_name TEXT,
+  requested_by TEXT NOT NULL,
+  resume_token TEXT,
+  summary_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS devflow_run_status_idx ON devflow_run(status);
+CREATE INDEX IF NOT EXISTS devflow_run_updated_idx ON devflow_run(updated_at_ms);
+
+CREATE TABLE IF NOT EXISTS devflow_stage (
+  stage_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  stage_index INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  workspace_root TEXT NOT NULL,
+  op_id TEXT,
+  session_identity TEXT,
+  status TEXT NOT NULL,
+  retry_budget INTEGER NOT NULL DEFAULT 0,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  summary_path TEXT,
+  audit_path TEXT,
+  artifact_manifest_path TEXT,
+  started_at_ms INTEGER,
+  finished_at_ms INTEGER,
+  FOREIGN KEY(run_id) REFERENCES devflow_run(run_id),
+  UNIQUE(run_id, stage_name)
+);
+
+CREATE INDEX IF NOT EXISTS devflow_stage_run_idx ON devflow_stage(run_id, stage_index);
+CREATE INDEX IF NOT EXISTS devflow_stage_status_idx ON devflow_stage(status);
+
+CREATE TABLE IF NOT EXISTS devflow_stage_event (
+  event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  stage_name TEXT NOT NULL,
+  event_kind TEXT NOT NULL,
+  payload_json TEXT,
+  created_at_ms INTEGER NOT NULL,
+  FOREIGN KEY(run_id) REFERENCES devflow_run(run_id)
+);
+
+CREATE INDEX IF NOT EXISTS devflow_stage_event_run_idx
+ON devflow_stage_event(run_id, created_at_ms);
 """
 
 MIGRATION_COLUMNS: dict[str, str] = {
@@ -904,6 +964,21 @@ class OperationJournal:
                 (cutoff,),
             ).fetchall()
             return [Operation.from_row(row) for row in rows]
+
+    def list_stuck_devflow_runs(self, *, older_than_ms: int) -> list[dict[str, object]]:
+        """Return non-terminal devflow runs that have not been updated recently."""
+        cutoff = utc_now_ms() - older_than_ms
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM devflow_run
+                WHERE status IN ('planned', 'running')
+                  AND updated_at_ms < ?
+                ORDER BY updated_at_ms ASC
+                """,
+                (cutoff,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def _load_payload(payload_file: pathlib.Path | None) -> dict[str, Any]:
