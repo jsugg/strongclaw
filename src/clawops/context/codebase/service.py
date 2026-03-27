@@ -1214,6 +1214,11 @@ class CodebaseContextService:
                 )
             if self.scale == "large":
                 raise RuntimeError("large codebase context requires a healthy neo4j graph backend")
+            if not self.config.graph.allow_degraded_fallback:
+                raise RuntimeError(
+                    "medium codebase context requires a healthy neo4j graph backend "
+                    "when degraded fallback is disabled"
+                )
             emit_structured_log(
                 "clawops.context.codebase.graph.degraded",
                 {
