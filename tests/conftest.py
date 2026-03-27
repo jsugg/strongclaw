@@ -8,10 +8,7 @@ import pytest
 
 from tests.utils.helpers.repo import REPO_ROOT
 
-pytest_plugins = (
-    "tests.plugins.infrastructure",
-    "tests.fixtures",
-)
+pytest_plugins = ("tests.plugins.infrastructure", "tests.fixtures")
 
 TESTS_ROOT = Path(__file__).resolve().parent
 _DEVFLOW_MARKED_FILES = {

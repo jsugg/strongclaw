@@ -13,6 +13,7 @@ from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 
 _EXPECTED_MARKERS = {
     "contract",
+    "devflow",
     "e2e",
     "framework",
     "hypermemory",
