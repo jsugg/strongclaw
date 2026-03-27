@@ -9,6 +9,7 @@ import pathlib
 import re
 import shutil
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from clawops.app_paths import scoped_state_dir
@@ -72,13 +73,13 @@ def _default_import_report_output(snapshot_path: pathlib.Path, scope: str) -> pa
     return snapshot_path.parent / f"import-report-{_scope_slug(scope)}.json"
 
 
-def _category_counts(memories: list[dict[str, Any]]) -> dict[str, int]:
+def _category_counts(memories: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     """Return per-category counts for exported memories."""
     counts = Counter(str(memory.get("category", "unknown")) for memory in memories)
     return dict(sorted(counts.items()))
 
 
-def _source_path_counts(memories: list[dict[str, Any]]) -> dict[str, int]:
+def _source_path_counts(memories: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     """Return per-source counts for exported memories."""
     counts: Counter[str] = Counter()
     for memory in memories:
@@ -96,7 +97,7 @@ def _source_path_counts(memories: list[dict[str, Any]]) -> dict[str, int]:
 
 def _build_migration_summary(
     *,
-    export_payload: dict[str, Any],
+    export_payload: Mapping[str, Any],
     import_output: pathlib.Path,
     report_output: pathlib.Path,
     dry_run: bool,
@@ -219,7 +220,7 @@ def import_pro_snapshot(
 
 
 def _default_queries(
-    export_payload: dict[str, Any], *, limit: int = DEFAULT_QUERY_COUNT
+    export_payload: Mapping[str, Any], *, limit: int = DEFAULT_QUERY_COUNT
 ) -> list[str]:
     """Derive deterministic verification queries from the exported payload."""
     queries: list[str] = []
@@ -272,7 +273,7 @@ def _tokenize_query(query: str) -> list[str]:
 
 
 def _search_import_snapshot(
-    export_payload: dict[str, Any], *, query: str, limit: int
+    export_payload: Mapping[str, Any], *, query: str, limit: int
 ) -> list[CandidateMemory]:
     """Search the exported import payload as a parity proxy."""
     tokens = _tokenize_query(query)

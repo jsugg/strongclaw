@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+from collections.abc import Mapping
 from typing import Any
 
 from clawops.common import write_json
@@ -211,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     config = load_config(args.config)
     engine = HypermemoryEngine(config)
+    payload: Mapping[str, Any]
     if args.command == "status":
         _print_payload(engine.status(), as_json=bool(args.json))
         return 0
@@ -363,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     raise SystemExit(f"unsupported command: {args.command}")
 
 
-def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+def _print_payload(payload: Mapping[str, Any], *, as_json: bool) -> None:
     """Print a CLI payload in a human-readable or JSON format."""
     if as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))

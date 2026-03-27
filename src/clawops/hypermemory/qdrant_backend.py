@@ -10,6 +10,7 @@ from typing import Any, Protocol, TypeVar
 
 import requests
 
+from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
 from clawops.hypermemory.models import (
     DenseSearchCandidate,
     QdrantConfig,
@@ -20,6 +21,7 @@ from clawops.hypermemory.models import (
 _CandidateT = TypeVar("_CandidateT", DenseSearchCandidate, SparseSearchCandidate)
 _COLLECTION_RETRY_ATTEMPTS = 4
 _COLLECTION_READY_ATTEMPTS = 8
+_POINTS_WRITE_RETRY_ATTEMPTS = 4
 
 
 class VectorBackend(Protocol):
@@ -42,7 +44,7 @@ class VectorBackend(Protocol):
         """Create the collection when it does not exist."""
         ...
 
-    def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
+    def upsert_points(self, points: Sequence[VectorPoint]) -> None:
         """Upsert dense and sparse points into the configured collection."""
         ...
 
@@ -64,7 +66,7 @@ class VectorBackend(Protocol):
     def search_sparse(
         self,
         *,
-        vector: dict[str, list[int] | list[float]],
+        vector: SparseVectorPayload,
         limit: int,
         mode: SearchMode,
         scope: str | None,
@@ -169,18 +171,30 @@ class QdrantBackend:
         if last_error is not None:
             raise last_error
 
-    def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
+    def upsert_points(self, points: Sequence[VectorPoint]) -> None:
         """Upsert dense and sparse points into the configured collection."""
         if not self._config.enabled or not points:
             return
-        response = self._session.put(
-            f"{self._config.url.rstrip('/')}/collections/{self._config.collection}/points",
-            params={"wait": "true"},
-            json={"points": list(points)},
-            headers=self._headers(),
-            timeout=self._config.timeout_ms / 1000.0,
-        )
-        response.raise_for_status()
+        url = f"{self._config.url.rstrip('/')}/collections/{self._config.collection}/points"
+        last_error: requests.RequestException | None = None
+        for attempt in range(_POINTS_WRITE_RETRY_ATTEMPTS):
+            try:
+                response = self._session.put(
+                    url,
+                    params={"wait": "true"},
+                    json={"points": list(points)},
+                    headers=self._headers(),
+                    timeout=self._config.timeout_ms / 1000.0,
+                )
+                response.raise_for_status()
+                return
+            except requests.RequestException as err:
+                last_error = err
+                if attempt == _POINTS_WRITE_RETRY_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.25 * float(attempt + 1))
+        if last_error is not None:
+            raise last_error
 
     def delete_points(self, point_ids: Sequence[str]) -> None:
         """Delete stale point IDs from the configured collection."""
@@ -225,7 +239,7 @@ class QdrantBackend:
     def search_sparse(
         self,
         *,
-        vector: dict[str, list[int] | list[float]],
+        vector: SparseVectorPayload,
         limit: int,
         mode: SearchMode,
         scope: str | None,
@@ -350,7 +364,7 @@ class QdrantBackend:
     def _query_payload(
         self,
         *,
-        query: list[float] | dict[str, list[int] | list[float]],
+        query: list[float] | SparseVectorPayload,
         using: str,
         limit: int,
         mode: SearchMode,

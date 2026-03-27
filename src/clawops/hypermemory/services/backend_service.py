@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
 
+from clawops.hypermemory.config import HypermemoryConfig
+from clawops.hypermemory.contracts import (
+    EmbeddedVectorRow,
+    SparseVectorPayload,
+    VectorPoint,
+    VectorRow,
+)
 from clawops.hypermemory.models import (
     DenseSearchCandidate,
     IndexedDocument,
@@ -35,20 +41,18 @@ class BackendService:
     def __init__(
         self,
         *,
-        config: Any,
-        connect: Callable[[], sqlite3.Connection],
+        config: HypermemoryConfig,
         embedding_provider: EmbeddingProvider,
         vector_backend: VectorBackend,
         index: IndexService,
     ) -> None:
         self._config = config
-        self._connect = connect
         self._embedding_provider = embedding_provider
         self._vector_backend = vector_backend
         self._index = index
 
     @property
-    def config(self) -> Any:
+    def config(self) -> HypermemoryConfig:
         return self._config
 
     def backend_uses_qdrant(self) -> bool:
@@ -78,38 +82,28 @@ class BackendService:
         }
         return sha256(json.dumps(payload, sort_keys=True))
 
-    def vector_rows_for_documents(
-        self, documents: Sequence[IndexedDocument]
-    ) -> list[dict[str, str]]:
+    def vector_rows_for_documents(self, documents: Sequence[IndexedDocument]) -> list[str]:
         """Build deterministic retrieval rows from indexed documents."""
-        vector_rows: list[dict[str, str]] = []
+        vector_rows: list[str] = []
         for document in documents:
             for item in document.items:
-                vector_rows.append(
-                    {
-                        "content": normalized_retrieval_text(item.title, item.snippet),
-                    }
-                )
+                vector_rows.append(normalized_retrieval_text(item.title, item.snippet))
         return vector_rows
 
     def sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
         """Build the sparse encoder for the current indexed corpus."""
         if not self.backend_uses_sparse_vectors():
             return build_sparse_encoder(())
-        return build_sparse_encoder(
-            [str(entry["content"]) for entry in self.vector_rows_for_documents(documents)]
-        )
+        return build_sparse_encoder(self.vector_rows_for_documents(documents))
 
     def sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
         """Return the sparse fingerprint for *documents*."""
         return self.sparse_encoder_for_documents(documents).fingerprint
 
-    def embedding_batches(
-        self, vector_rows: list[dict[str, Any]]
-    ) -> Iterator[list[dict[str, Any]]]:
+    def embedding_batches(self, vector_rows: Sequence[VectorRow]) -> Iterator[list[VectorRow]]:
         batch_size = max(int(self._config.embedding.batch_size), 1)
         for index in range(0, len(vector_rows), batch_size):
-            yield vector_rows[index : index + batch_size]
+            yield list(vector_rows[index : index + batch_size])
 
     def embed_texts(self, texts: Sequence[str], *, purpose: str) -> list[list[float]]:
         with observed_span(
@@ -245,7 +239,7 @@ class BackendService:
         self,
         *,
         conn: sqlite3.Connection,
-        vector_rows: list[dict[str, Any]],
+        vector_rows: Sequence[VectorRow],
         stale_point_ids: set[str],
         sparse_encoder: SparseEncoder,
     ) -> None:
@@ -287,37 +281,44 @@ class BackendService:
             sync_started_at = perf_counter()
             try:
                 include_sparse = self.backend_uses_sparse_vectors()
-                points: list[dict[str, Any]] = []
-                embedded_vectors: list[
-                    tuple[dict[str, Any], list[float], dict[str, Any] | None]
-                ] = []
+                points: list[VectorPoint] = []
+                embedded_vectors: list[EmbeddedVectorRow] = []
                 for batch in self.embedding_batches(vector_rows):
                     vectors = self.embed_texts(
                         [str(entry["content"]) for entry in batch],
                         purpose="index",
                     )
                     for entry, vector in zip(batch, vectors, strict=True):
-                        sparse_payload = None
+                        sparse_payload: SparseVectorPayload | None = None
                         if include_sparse:
                             sparse_vector = sparse_encoder.encode_document(str(entry["content"]))
                             sparse_payload = sparse_vector.to_qdrant()
                             entry["sparse_term_count"] = len(sparse_vector.indices)
                         else:
                             entry["sparse_term_count"] = 0
-                        embedded_vectors.append((entry, vector, sparse_payload))
-                vector_dim = len(embedded_vectors[0][1])
+                        embedded_vectors.append(
+                            EmbeddedVectorRow(
+                                row=entry,
+                                dense_vector=vector,
+                                sparse_vector=sparse_payload,
+                            )
+                        )
+                vector_dim = len(embedded_vectors[0].dense_vector)
                 self._vector_backend.ensure_collection(
                     vector_size=vector_dim, include_sparse=include_sparse
                 )
                 new_point_ids: set[str] = set()
-                for entry, vector, sparse_payload in embedded_vectors:
+                for embedded_row in embedded_vectors:
+                    entry = embedded_row.row
                     point_id = str(entry["point_id"])
                     new_point_ids.add(point_id)
-                    vector_payload: dict[str, Any] = {
-                        self._config.qdrant.dense_vector_name: vector,
+                    vector_payload: dict[str, list[float] | SparseVectorPayload] = {
+                        self._config.qdrant.dense_vector_name: embedded_row.dense_vector,
                     }
-                    if include_sparse and sparse_payload is not None:
-                        vector_payload[self._config.qdrant.sparse_vector_name] = sparse_payload
+                    if include_sparse and embedded_row.sparse_vector is not None:
+                        vector_payload[self._config.qdrant.sparse_vector_name] = (
+                            embedded_row.sparse_vector
+                        )
                     points.append(
                         {"id": point_id, "vector": vector_payload, "payload": entry["payload"]}
                     )
@@ -326,7 +327,8 @@ class BackendService:
                 if stale_ids:
                     self._vector_backend.delete_points(stale_ids)
                 conn.execute("DELETE FROM vector_items")
-                for entry, vector, _sparse_payload in embedded_vectors:
+                for embedded_row in embedded_vectors:
+                    entry = embedded_row.row
                     conn.execute(
                         """
                         INSERT INTO vector_items(
@@ -346,7 +348,7 @@ class BackendService:
                             int(entry["item_id"]),
                             str(entry["point_id"]),
                             self._config.embedding.model,
-                            len(vector),
+                            len(embedded_row.dense_vector),
                             sha256(str(entry["content"])),
                             int(entry.get("sparse_term_count", 0)),
                             sparse_encoder.fingerprint if include_sparse else "",

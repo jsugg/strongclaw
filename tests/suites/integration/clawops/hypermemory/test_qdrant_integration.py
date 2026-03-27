@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import pathlib
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
 import pytest
 import requests
 
-from clawops.hypermemory import HypermemoryEngine, load_config
+from clawops.hypermemory import HypermemoryEngine, SearchBackend, load_config
 from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 from tests.utils.helpers.qdrant_runtime import QdrantRuntime
 
@@ -18,7 +19,7 @@ pytestmark = [pytest.mark.qdrant(mode="real"), pytest.mark.network_local]
 
 
 class _DeterministicEmbeddingProvider:
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed(text) for text in texts]
 
     def _embed(self, text: str) -> list[float]:
@@ -76,7 +77,7 @@ def _build_engine(
     tmp_path: pathlib.Path,
     qdrant_runtime: QdrantRuntime,
     *,
-    active_backend: str,
+    active_backend: SearchBackend,
     collection_prefix: str,
 ) -> tuple[HypermemoryEngine, Any, pathlib.Path, str, str]:
     workspace = build_workspace(tmp_path, include_daily_memory=False)
@@ -175,7 +176,7 @@ def test_hypermemory_qdrant_sparse_dense_backend_uses_qdrant_sparse_candidates(
     assert config.qdrant.sparse_vector_name in params["sparse_vectors"]
 
     with engine.connect() as conn:
-        encoder = engine._load_sparse_encoder(conn)
+        encoder = engine.index.load_sparse_encoder(conn, enabled=True)
         assert encoder is not None
         conn.execute("DELETE FROM search_items_fts")
         conn.commit()

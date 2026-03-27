@@ -3,79 +3,25 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from clawops.common import ensure_parent
-from clawops.hypermemory._engine.indexing import (
-    _clear_derived_rows,
-    _evidence_entries,
-    _insert_typed_row,
-    _iter_corpus_documents,
-    _iter_documents,
-    _iter_memory_documents,
-    _missing_corpus_paths,
-    _missing_required_corpus_paths,
-    _rebuild_fact_registry,
-)
-from clawops.hypermemory._engine.indexing import reindex as _reindex
-from clawops.hypermemory._engine.query import (
-    _exact_fact_lookup,
-    _filter_current_fact_hits,
-    _search_invalidated_hits,
-)
-from clawops.hypermemory._engine.query import is_dirty as _is_dirty
-from clawops.hypermemory._engine.query import read as _read
-from clawops.hypermemory._engine.query import search as _search
-from clawops.hypermemory._engine.query import status as _status
-from clawops.hypermemory._engine.storage import (
-    _age_days,
-    _allows_memory_pro_export_path,
-    _append_unique_entry,
-    _apply_forget,
-    _build_proposal,
-    _document_header,
-    _entry_hash_prefix,
-    _entry_identity,
-    _entry_reference_from_item_id,
-    _entry_reference_from_text,
-    _fact_category,
-    _format_entry_line,
-    _format_proposal_line,
-    _increment_feedback_counts,
-    _infer_fact_key,
-    _infer_query_fact_key,
-    _invalidated_line,
-    _is_noise,
-    _is_semantically_duplicate,
-    _load_entities_json,
-    _load_evidence_json,
-    _memory_pro_export_rows,
-    _memory_pro_importance,
-    _memory_pro_timestamp_ms,
-    _normalize_tier,
-    _passes_admission,
-    _proposal_kind,
-    _resolve_entry_reference,
-    _resolve_read_path,
-    _resolve_writable_path,
-    _search_hit_text,
-    _store_target,
-    _synced_line_from_row,
-    _typed_entry_text,
-)
-from clawops.hypermemory._engine.verify import (
-    _collection_has_hypermemory_vector_lanes,
-    _hypermemory_probe_query,
-    _observed_rerank_scorer,
-    _rerank_probe_documents,
-    _rerank_resolved_device,
-    _verify_rerank_provider,
-)
-from clawops.hypermemory._engine.verify import verify as _verify
 from clawops.hypermemory.config import HypermemoryConfig
+from clawops.hypermemory.contracts import (
+    BenchmarkResult,
+    CorpusPathStatus,
+    FlushMetadataResult,
+    IndexingDeps,
+    MemoryProImportResult,
+    QueryDeps,
+    ReadResult,
+    StatusResult,
+    VerificationDeps,
+    VerifyResult,
+)
 from clawops.hypermemory.models import (
-    DenseSearchCandidate,
     FusionMode,
     IndexedDocument,
     ReflectionMode,
@@ -83,7 +29,6 @@ from clawops.hypermemory.models import (
     SearchBackend,
     SearchHit,
     SearchMode,
-    SparseSearchCandidate,
     Tier,
 )
 from clawops.hypermemory.providers import (
@@ -94,18 +39,57 @@ from clawops.hypermemory.providers import (
 )
 from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
 from clawops.hypermemory.schema import ensure_schema
-from clawops.hypermemory.search_hit_mapper import row_to_search_hit
 from clawops.hypermemory.services.backend_service import BackendService
 from clawops.hypermemory.services.canonical_store_service import CanonicalStoreService
 from clawops.hypermemory.services.index_service import IndexService
-from clawops.hypermemory.sparse import SparseEncoder
-from clawops.hypermemory.utils import (
-    normalize_text,
-    normalized_retrieval_text,
-    point_id,
-    sha256,
-    slugify,
-)
+from clawops.hypermemory.services.indexing_service import IndexingService
+from clawops.hypermemory.services.query_service import QueryService
+from clawops.hypermemory.services.verification_service import VerificationService
+
+
+@dataclass(slots=True)
+class _IndexingDepsImpl(IndexingDeps):
+    flush_metadata_callback: Callable[[], FlushMetadataResult]
+
+    def flush_metadata(self) -> FlushMetadataResult:
+        return self.flush_metadata_callback()
+
+
+@dataclass(slots=True)
+class _QueryDepsImpl(QueryDeps):
+    indexing: IndexingService
+    reindex_callback: Callable[[bool], ReindexSummary]
+    fact_lookup_callback: Callable[[str, sqlite3.Connection | None, str | None], SearchHit | None]
+
+    def iter_documents(self) -> tuple[IndexedDocument, ...]:
+        return self.indexing.iter_documents()
+
+    def missing_corpus_paths(self) -> list[CorpusPathStatus]:
+        return self.indexing.missing_corpus_paths()
+
+    def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
+        return self.reindex_callback(flush_metadata)
+
+    def get_fact(
+        self,
+        fact_key: str,
+        *,
+        conn: sqlite3.Connection | None = None,
+        scope: str | None = None,
+    ) -> SearchHit | None:
+        return self.fact_lookup_callback(fact_key, conn, scope)
+
+
+@dataclass(slots=True)
+class _VerificationDepsImpl(VerificationDeps):
+    status_callback: Callable[[], StatusResult]
+    missing_required_corpus_paths_callback: Callable[[], list[CorpusPathStatus]]
+
+    def status(self) -> StatusResult:
+        return self.status_callback()
+
+    def missing_required_corpus_paths(self) -> list[CorpusPathStatus]:
+        return self.missing_required_corpus_paths_callback()
 
 
 class HypermemoryEngine:
@@ -130,133 +114,79 @@ class HypermemoryEngine:
             if rerank_provider is not None
             else create_rerank_provider(config.rerank)
         )
-        self._qdrant_backend: VectorBackend = (
+        self._vector_backend: VectorBackend = (
             vector_backend if vector_backend is not None else QdrantBackend(config.qdrant)
         )
+
+        canonical_store_service: CanonicalStoreService | None = None
+        query_service: QueryService | None = None
+
+        def flush_metadata_callback() -> FlushMetadataResult:
+            if canonical_store_service is None:
+                raise RuntimeError("canonical store is not initialized")
+            return canonical_store_service.flush_metadata()
+
+        def fact_lookup_callback(
+            fact_key: str,
+            conn: sqlite3.Connection | None,
+            scope: str | None,
+        ) -> SearchHit | None:
+            if canonical_store_service is None:
+                raise RuntimeError("canonical store is not initialized")
+            return canonical_store_service.get_fact(fact_key, conn=conn, scope=scope)
+
+        def query_status_callback() -> StatusResult:
+            if query_service is None:
+                raise RuntimeError("query service is not initialized")
+            return query_service.status()
+
         self.index = IndexService(connect=self.connect)
         self.backend = BackendService(
             config=self.config,
-            connect=self.connect,
             embedding_provider=self._embedding_provider,
-            vector_backend=self._qdrant_backend,
+            vector_backend=self._vector_backend,
             index=self.index,
         )
-        self.canonical_store = CanonicalStoreService(
+        self.indexing = IndexingService(
+            config=self.config,
+            connect=self.connect,
+            backend=self.backend,
+            index=self.index,
+            deps=_IndexingDepsImpl(flush_metadata_callback=flush_metadata_callback),
+        )
+        self.verification = VerificationService(
+            config=self.config,
+            connect=self.connect,
+            backend=self.backend,
+            vector_backend=self._vector_backend,
+            rerank_provider=self._rerank_provider,
+            deps=_VerificationDepsImpl(
+                status_callback=query_status_callback,
+                missing_required_corpus_paths_callback=self.indexing.missing_required_corpus_paths,
+            ),
+        )
+        query_service = QueryService(
+            config=self.config,
+            connect=self.connect,
+            backend=self.backend,
+            index=self.index,
+            vector_backend=self._vector_backend,
+            rerank_scorer=self.verification.observed_rerank_scorer,
+            rerank_device_resolver=self.verification.rerank_resolved_device,
+            deps=_QueryDepsImpl(
+                indexing=self.indexing,
+                reindex_callback=lambda flush_metadata: self.indexing.reindex(
+                    flush_metadata=flush_metadata
+                ),
+                fact_lookup_callback=fact_lookup_callback,
+            ),
+        )
+        self.query = query_service
+        canonical_store_service = CanonicalStoreService(
             config=self.config,
             deps=self,
         )
-
-    # ---- phase-1 composition: internal helper compatibility layer ----
-    # `_engine/*` modules still call `self._...` today. We keep those names on the
-    # engine, but delegate selected responsibilities into stateful services.
-
-    def _backend_uses_qdrant(self) -> bool:
-        return self.backend.backend_uses_qdrant()
-
-    def _backend_uses_sparse_vectors(self) -> bool:
-        return self.backend.backend_uses_sparse_vectors()
-
-    def _canonical_backend(self, backend: SearchBackend) -> SearchBackend:
-        return self.backend.canonical_backend(backend)
-
-    def _backend_fingerprint(self) -> str:
-        return self.backend.backend_fingerprint()
-
-    def _backend_state_value(self, conn: sqlite3.Connection, key: str) -> str | None:
-        return self.index.backend_state_value(conn, key)
-
-    def _write_backend_state(self, conn: sqlite3.Connection, key: str, value: str) -> None:
-        self.index.write_backend_state(conn, key, value)
-
-    def _count_rows(self, conn: sqlite3.Connection, table_name: str) -> int:
-        return self.index.count_rows(conn, table_name)
-
-    def _count_sparse_vector_items(self, conn: sqlite3.Connection) -> int:
-        return self.index.count_sparse_vector_items(conn)
-
-    def _write_sparse_state(self, conn: sqlite3.Connection, sparse_encoder: SparseEncoder) -> None:
-        self.index.write_sparse_state(
-            conn,
-            sparse_encoder,
-            enabled=self._backend_uses_sparse_vectors(),
-        )
-
-    def _load_sparse_encoder(self, conn: sqlite3.Connection) -> SparseEncoder | None:
-        return self.index.load_sparse_encoder(
-            conn,
-            enabled=self._backend_uses_sparse_vectors(),
-        )
-
-    def _embedding_batches(
-        self,
-        vector_rows: list[dict[str, Any]],
-    ) -> Iterator[list[dict[str, Any]]]:
-        return self.backend.embedding_batches(vector_rows)
-
-    def _embed_texts(self, texts: Sequence[str], *, purpose: str) -> list[list[float]]:
-        return self.backend.embed_texts(texts, purpose=purpose)
-
-    def _dense_search(
-        self,
-        *,
-        query: str,
-        lane: SearchMode,
-        scope: str | None,
-        candidate_limit: int,
-    ) -> tuple[list[DenseSearchCandidate], float]:
-        return self.backend.dense_search(
-            query=query,
-            lane=lane,
-            scope=scope,
-            candidate_limit=candidate_limit,
-        )
-
-    def _sparse_search(
-        self,
-        *,
-        conn: sqlite3.Connection,
-        query: str,
-        lane: SearchMode,
-        scope: str | None,
-        candidate_limit: int,
-    ) -> tuple[list[SparseSearchCandidate], float]:
-        return self.backend.sparse_search(
-            conn=conn,
-            query=query,
-            lane=lane,
-            scope=scope,
-            candidate_limit=candidate_limit,
-        )
-
-    def _sync_dense_backend(
-        self,
-        *,
-        conn: sqlite3.Connection,
-        vector_rows: list[dict[str, Any]],
-        stale_point_ids: set[str],
-        sparse_encoder: SparseEncoder,
-    ) -> None:
-        self.backend.sync_vectors(
-            conn=conn,
-            vector_rows=vector_rows,
-            stale_point_ids=stale_point_ids,
-            sparse_encoder=sparse_encoder,
-        )
-
-    def _vector_rows_for_documents(
-        self,
-        documents: Sequence[IndexedDocument],
-    ) -> list[dict[str, str]]:
-        return self.backend.vector_rows_for_documents(documents)
-
-    def _sparse_encoder_for_documents(self, documents: Sequence[IndexedDocument]) -> SparseEncoder:
-        return self.backend.sparse_encoder_for_documents(documents)
-
-    def _sparse_fingerprint_for_documents(self, documents: Sequence[IndexedDocument]) -> str:
-        return self.backend.sparse_fingerprint_for_documents(documents)
-
-    def _current_sparse_fingerprint(self) -> str:
-        return self.backend.sparse_fingerprint_for_documents(list(self._iter_documents()))
+        self.canonical_store = canonical_store_service
 
     def connect(self) -> sqlite3.Connection:
         """Open a configured SQLite connection."""
@@ -266,19 +196,17 @@ class HypermemoryEngine:
         ensure_schema(conn)
         return conn
 
-    # Public API wrappers. These delegate to implementation functions in `_engine/*`.
-
-    def status(self) -> dict[str, Any]:
+    def status(self) -> StatusResult:
         """Return index and governance status."""
-        return _status(self)
+        return self.query.status()
 
     def is_dirty(self) -> bool:
         """Return whether the derived index differs from canonical Markdown files."""
-        return _is_dirty(self)
+        return self.query.is_dirty()
 
     def reindex(self, *, flush_metadata: bool = True) -> ReindexSummary:
         """Rebuild the derived index from canonical Markdown files."""
-        return _reindex(self, flush_metadata=flush_metadata)
+        return self.indexing.reindex(flush_metadata=flush_metadata)
 
     def search(
         self,
@@ -297,8 +225,7 @@ class HypermemoryEngine:
         include_invalidated: bool = False,
     ) -> list[SearchHit]:
         """Search the derived store through the dual-lane retrieval planner."""
-        return _search(
-            self,
+        return self.query.search(
             query,
             max_results=max_results,
             min_score=min_score,
@@ -313,14 +240,9 @@ class HypermemoryEngine:
             include_invalidated=include_invalidated,
         )
 
-    _observed_rerank_scorer = _observed_rerank_scorer
-    _rerank_resolved_device = _rerank_resolved_device
-    _rerank_probe_documents = _rerank_probe_documents
-    _verify_rerank_provider = _verify_rerank_provider
-
-    def verify(self) -> dict[str, Any]:
+    def verify(self) -> VerifyResult:
         """Verify the supported sparse+dense backend contract for hypermemory."""
-        return _verify(self)
+        return self.verification.verify()
 
     def read(
         self,
@@ -328,9 +250,9 @@ class HypermemoryEngine:
         *,
         from_line: int | None = None,
         lines: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ReadResult:
         """Read a canonical file returned by the memory index."""
-        return _read(self, rel_path, from_line=from_line, lines=lines)
+        return self.query.read(rel_path, from_line=from_line, lines=lines)
 
     def export_memory_pro_import(
         self,
@@ -338,7 +260,7 @@ class HypermemoryEngine:
         scope: str | None = None,
         include_daily: bool = False,
         auto_index: bool = True,
-    ) -> dict[str, Any]:
+    ) -> MemoryProImportResult:
         """Export durable hypermemory entries as `memory-lancedb-pro` import JSON."""
         return self.canonical_store.export_memory_pro_import(
             scope=scope,
@@ -467,7 +389,7 @@ class HypermemoryEngine:
         """Record that recalled items were contradicted or unhelpful."""
         return self.canonical_store.record_bad_recall(item_ids=item_ids)
 
-    def flush_metadata(self) -> dict[str, Any]:
+    def flush_metadata(self) -> FlushMetadataResult:
         """Flush lifecycle metadata from SQLite rows back into canonical Markdown."""
         return self.canonical_store.flush_metadata()
 
@@ -494,92 +416,6 @@ class HypermemoryEngine:
         """List current canonical facts from the registry."""
         return self.canonical_store.list_facts(category=category, scope=scope)
 
-    def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    def benchmark_cases(self, cases: list[dict[str, Any]]) -> BenchmarkResult:
         """Run simple benchmark cases against the current engine."""
         return self.canonical_store.benchmark_cases(cases)
-
-    # Pure helper wrappers. `_engine/*` no longer depends on these being bound on the
-    # engine, but we keep them for internal/test seams.
-
-    def _normalized_retrieval_text(self, title: str, snippet: str) -> str:
-        return normalized_retrieval_text(title, snippet)
-
-    def _normalize_text(self, text: str) -> tuple[str, ...]:
-        return normalize_text(text)
-
-    def _point_id(
-        self,
-        *,
-        document_rel_path: str,
-        item_type: str,
-        start_line: int,
-        end_line: int,
-        snippet: str,
-    ) -> str:
-        return point_id(
-            document_rel_path=document_rel_path,
-            item_type=item_type,
-            start_line=start_line,
-            end_line=end_line,
-            snippet=snippet,
-        )
-
-    def _slugify(self, value: str) -> str:
-        return slugify(value)
-
-    def _sha256(self, value: str) -> str:
-        return sha256(value)
-
-    # Internal/test seam bindings. These are intentionally attached to simplify tests
-    # and to avoid duplicating utility functions across modules.
-    _is_noise = _is_noise
-    _passes_admission = _passes_admission
-    _normalize_tier = _normalize_tier
-    _infer_fact_key = _infer_fact_key
-    _infer_query_fact_key = _infer_query_fact_key
-    _fact_category = _fact_category
-    _entry_hash_prefix = _entry_hash_prefix
-    _search_hit_text = _search_hit_text
-    _typed_entry_text = _typed_entry_text
-    _resolve_entry_reference = _resolve_entry_reference
-    _entry_reference_from_item_id = _entry_reference_from_item_id
-    _entry_reference_from_text = _entry_reference_from_text
-    _apply_forget = _apply_forget
-    _invalidated_line = _invalidated_line
-    _synced_line_from_row = _synced_line_from_row
-    _row_to_search_hit = row_to_search_hit
-    _rebuild_fact_registry = _rebuild_fact_registry
-    _exact_fact_lookup = _exact_fact_lookup
-    _filter_current_fact_hits = _filter_current_fact_hits
-    _search_invalidated_hits = _search_invalidated_hits
-    _is_semantically_duplicate = _is_semantically_duplicate
-    _increment_feedback_counts = _increment_feedback_counts
-    _age_days = _age_days
-    _memory_pro_export_rows = _memory_pro_export_rows
-    _allows_memory_pro_export_path = _allows_memory_pro_export_path
-    _load_entities_json = _load_entities_json
-    _load_evidence_json = _load_evidence_json
-    _memory_pro_importance = _memory_pro_importance
-    _memory_pro_timestamp_ms = _memory_pro_timestamp_ms
-    _iter_documents = _iter_documents
-    _iter_memory_documents = _iter_memory_documents
-    _iter_corpus_documents = _iter_corpus_documents
-    _missing_corpus_paths = _missing_corpus_paths
-    _missing_required_corpus_paths = _missing_required_corpus_paths
-    _clear_derived_rows = _clear_derived_rows
-    _insert_typed_row = _insert_typed_row
-    _evidence_entries = _evidence_entries
-    _resolve_read_path = _resolve_read_path
-    _resolve_writable_path = _resolve_writable_path
-    _store_target = _store_target
-    _format_entry_line = _format_entry_line
-    _append_unique_entry = _append_unique_entry
-    _document_header = _document_header
-    _entry_identity = _entry_identity
-    _build_proposal = _build_proposal
-    _format_proposal_line = _format_proposal_line
-    _proposal_kind = _proposal_kind
-    # Vector backend / sparse state helpers are implemented as delegating methods.
-    _collection_has_hypermemory_vector_lanes = _collection_has_hypermemory_vector_lanes
-    _hypermemory_probe_query = _hypermemory_probe_query
-    # End of HypermemoryEngine helper bindings.
