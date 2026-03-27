@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import cast
 
 from clawops.common import load_yaml
+from clawops.hypermemory.contracts import BenchmarkCase
+from clawops.hypermemory.models import SearchMode
 from clawops.typed_values import as_mapping
 
 
-def load_benchmark_cases(path: pathlib.Path) -> list[dict[str, Any]]:
+def load_benchmark_cases(path: pathlib.Path) -> list[BenchmarkCase]:
     """Load benchmark cases from a YAML fixture file."""
     raw = as_mapping(load_yaml(path), path=str(path))
     cases = raw.get("cases")
@@ -21,7 +23,7 @@ def load_benchmark_cases(path: pathlib.Path) -> list[dict[str, Any]]:
     ]
 
 
-def _normalize_case(index: int, raw: object) -> dict[str, Any]:
+def _normalize_case(index: int, raw: object) -> BenchmarkCase:
     """Normalize a single benchmark case."""
     case_mapping = as_mapping(raw, path=f"cases[{index}]")
     name = _require_string(case_mapping.get("name"), f"cases[{index}].name")
@@ -30,10 +32,11 @@ def _normalize_case(index: int, raw: object) -> dict[str, Any]:
         case_mapping.get("expectedPaths"),
         f"cases[{index}].expectedPaths",
     )
-    lane = case_mapping.get("lane", "all")
+    lane_value = case_mapping.get("lane", "all")
+    lane = cast(SearchMode, lane_value)
     if lane not in {"all", "memory", "corpus"}:
         raise ValueError(f"cases[{index}].lane must be all, memory, or corpus")
-    case: dict[str, Any] = {
+    case: BenchmarkCase = {
         "name": name,
         "query": query,
         "expectedPaths": expected_paths,

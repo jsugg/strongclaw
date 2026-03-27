@@ -482,4 +482,4 @@ class QueryService:
         return self._normalize_tier(value)
 
     def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
-        return row_to_search_hit(row)
+        return row_to_search_hit(self, row)
