@@ -153,7 +153,7 @@ def _build_service(tmp_path: pathlib.Path) -> tuple[pathlib.Path, CodebaseContex
     return repo, service
 
 
-def test_medium_scale_index_syncs_chunk_vectors_when_hybrid_enabled(
+def test_medium_scale_worker_syncs_chunk_vectors_when_hybrid_enabled(
     tmp_path: pathlib.Path,
 ) -> None:
     repo, service = _build_service(tmp_path)
@@ -176,6 +176,17 @@ def test_medium_scale_index_syncs_chunk_vectors_when_hybrid_enabled(
     count = service.index()
 
     assert count == 2
+    assert fake_backend.ensured == []
+    assert fake_backend.upserted == []
+    assert fake_embedder.calls == []
+    with service.connect() as conn:
+        vector_rows = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
+        sparse_terms = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
+    assert vector_rows == 0
+    assert sparse_terms == 0
+
+    service.consolidate_runtime_artifacts()
+
     assert fake_backend.ensured == [(3, True)]
     assert len(fake_backend.upserted) == 1
     assert fake_embedder.calls
@@ -207,6 +218,7 @@ def test_medium_scale_query_uses_hybrid_fusion_and_rerank(tmp_path: pathlib.Path
     )
 
     service.index()
+    service.consolidate_runtime_artifacts()
     with service.connect() as conn:
         item_rows = conn.execute(
             "SELECT path, item_id FROM chunk_vectors ORDER BY path ASC, item_id ASC"
@@ -243,9 +255,61 @@ def test_medium_scale_falls_back_to_lexical_when_hybrid_backend_is_unhealthy(
     )
 
     service.index()
+    service.consolidate_runtime_artifacts()
     hits = service.query("credential rotation", limit=1)
     pack = service.pack("credential rotation", limit=1)
 
     assert hits
     assert hits[0].path == "guide.py"
     assert "- backend_modes: lexical" in pack
+
+
+def test_medium_scale_deletion_keeps_hybrid_pending_until_worker_sync(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo, service = _build_service(tmp_path)
+    obsolete = repo / "obsolete.py"
+    obsolete.write_text(
+        "def stale_path():\n    return 'obsolete'\n",
+        encoding="utf-8",
+    )
+    (repo / "active.py").write_text(
+        "def active_path():\n    return 'active'\n",
+        encoding="utf-8",
+    )
+
+    fake_backend = _FakeVectorBackend()
+    service.override_runtime_deps(
+        embedding_provider=_FakeEmbeddingProvider(),
+        vector_backend=fake_backend,
+    )
+
+    service.index()
+    service.consolidate_runtime_artifacts()
+    with service.connect() as conn:
+        stale_point_ids = [
+            str(row["point_id"])
+            for row in conn.execute(
+                "SELECT point_id FROM chunk_vectors WHERE path = ? ORDER BY point_id ASC",
+                ("obsolete.py",),
+            ).fetchall()
+        ]
+
+    obsolete.unlink()
+    service.index()
+
+    assert service.backend_modes() == ("lexical",)
+    with service.connect() as conn:
+        pending = [
+            str(row["point_id"])
+            for row in conn.execute(
+                "SELECT point_id FROM hybrid_pending_deletions ORDER BY point_id ASC"
+            ).fetchall()
+        ]
+    assert pending == stale_point_ids
+
+    service.consolidate_runtime_artifacts()
+
+    assert service.backend_modes() == ("lexical", "hybrid")
+    assert fake_backend.deleted
+    assert set(fake_backend.deleted[-1]) == set(stale_point_ids)

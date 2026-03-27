@@ -663,6 +663,10 @@ CREATE TABLE IF NOT EXISTS sparse_terms (
     term_id INTEGER NOT NULL UNIQUE,
     document_freq INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hybrid_pending_deletions (
+    point_id TEXT PRIMARY KEY
+);
 """
 
 MIGRATION_COLUMNS = {
@@ -1154,9 +1158,12 @@ class CodebaseContextService:
             chunk_count = int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
             vector_count = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
             sparse_term_count = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
+            pending_delete_count = int(
+                conn.execute("SELECT COUNT(*) FROM hybrid_pending_deletions").fetchone()[0]
+            )
         if chunk_count == 0:
             return False
-        return vector_count == chunk_count and sparse_term_count > 0
+        return vector_count == chunk_count and sparse_term_count > 0 and pending_delete_count == 0
 
     def _hybrid_features(self) -> tuple[bool, bool]:
         """Return whether hybrid retrieval is active and whether it is degraded."""
@@ -1426,6 +1433,43 @@ class CodebaseContextService:
             (("sparse_fingerprint",), ("sparse_doc_count",), ("sparse_avg_doc_length",)),
         )
 
+    def _queue_hybrid_deletions(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        point_ids: Sequence[str],
+    ) -> None:
+        """Persist remote point deletions until the worker can reconcile them."""
+        pending_ids = sorted({point_id for point_id in point_ids if point_id})
+        if not pending_ids:
+            return
+        conn.executemany(
+            "INSERT OR IGNORE INTO hybrid_pending_deletions(point_id) VALUES (?)",
+            ((point_id,) for point_id in pending_ids),
+        )
+
+    def _load_pending_hybrid_deletions(self, conn: sqlite3.Connection) -> list[str]:
+        """Load queued remote point deletions in stable order."""
+        rows = conn.execute(
+            "SELECT point_id FROM hybrid_pending_deletions ORDER BY point_id ASC"
+        ).fetchall()
+        return [str(row["point_id"]) for row in rows]
+
+    def _clear_pending_hybrid_deletions(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        point_ids: Sequence[str],
+    ) -> None:
+        """Acknowledge one or more queued point deletions after a successful sync."""
+        acknowledged_ids = sorted({point_id for point_id in point_ids if point_id})
+        if not acknowledged_ids:
+            return
+        conn.executemany(
+            "DELETE FROM hybrid_pending_deletions WHERE point_id = ?",
+            ((point_id,) for point_id in acknowledged_ids),
+        )
+
     def _persist_sparse_encoder(self, conn: sqlite3.Connection, encoder: SparseEncoder) -> None:
         """Persist the deterministic sparse vocabulary state."""
         conn.execute("DELETE FROM sparse_terms")
@@ -1475,19 +1519,32 @@ class CodebaseContextService:
             fingerprint=fingerprint,
         )
 
-    def _sync_hybrid_index(self, *, stale_point_ids: Sequence[str]) -> None:
+    def _sync_hybrid_index(self) -> None:
         """Synchronize chunk embeddings and sparse vectors into the Qdrant lane."""
         with self.connect() as conn:
+            stale_point_ids = self._load_pending_hybrid_deletions(conn)
             if not self._hybrid_requested():
                 self._clear_hybrid_state(conn)
                 conn.commit()
+                rows: list[sqlite3.Row] = []
+            else:
+                rows = conn.execute("""
+                    SELECT chunk_id, path, language, kind, start_line, end_line, symbol, content, content_hash,
+                           updated_at_ms
+                    FROM chunks
+                    ORDER BY path ASC, start_line ASC, chunk_id ASC
+                    """).fetchall()
+        if not self._hybrid_requested():
+            try:
+                if stale_point_ids:
+                    self._vector_backend.delete_points(sorted(set(stale_point_ids)))
+            except requests.RequestException:
                 return
-            rows = conn.execute("""
-                SELECT chunk_id, path, language, kind, start_line, end_line, symbol, content, content_hash,
-                       updated_at_ms
-                FROM chunks
-                ORDER BY path ASC, start_line ASC, chunk_id ASC
-                """).fetchall()
+            if stale_point_ids:
+                with self.connect() as conn:
+                    self._clear_pending_hybrid_deletions(conn, point_ids=stale_point_ids)
+                    conn.commit()
+            return
         if not rows:
             with self.connect() as conn:
                 self._clear_hybrid_state(conn)
@@ -1496,7 +1553,10 @@ class CodebaseContextService:
                 try:
                     self._vector_backend.delete_points(sorted(set(stale_point_ids)))
                 except requests.RequestException:
-                    pass
+                    return
+                with self.connect() as conn:
+                    self._clear_pending_hybrid_deletions(conn, point_ids=stale_point_ids)
+                    conn.commit()
             return
         try:
             health = self._vector_backend.health()
@@ -1583,6 +1643,7 @@ class CodebaseContextService:
                         for row in rows
                     ],
                 )
+                self._clear_pending_hybrid_deletions(conn, point_ids=stale_ids)
                 conn.commit()
         except (requests.RequestException, RuntimeError, ValueError) as err:
             emit_structured_log(
@@ -1597,11 +1658,14 @@ class CodebaseContextService:
                 self._clear_hybrid_state(conn)
                 conn.commit()
 
+    def consolidate_runtime_artifacts(self) -> None:
+        """Synchronize deferred runtime artifacts such as hybrid vectors."""
+        self._sync_hybrid_index()
+
     def index_with_stats(self) -> IndexStats:
         """Index repository contents into the lexical and graph stores."""
         indexed_files = 0
         skipped_files = 0
-        stale_point_ids: list[str] = []
         changed_rows: list[tuple[str, str, str, int, int, list[str], str]] = []
         seen_paths: set[str] = set()
         started_at = time.perf_counter()
@@ -1648,7 +1712,7 @@ class CodebaseContextService:
 
                 stale_paths = set(existing_metadata) - seen_paths
                 if stale_paths:
-                    stale_point_ids.extend(
+                    stale_point_ids = [
                         str(row["point_id"])
                         for row in conn.execute(
                             f"""
@@ -1659,7 +1723,8 @@ class CodebaseContextService:
                             """,
                             tuple(sorted(stale_paths)),
                         ).fetchall()
-                    )
+                    ]
+                    self._queue_hybrid_deletions(conn, point_ids=stale_point_ids)
                     conn.executemany(
                         "DELETE FROM files WHERE path = ?", ((path,) for path in stale_paths)
                     )
@@ -1681,8 +1746,9 @@ class CodebaseContextService:
                     )
 
                 for rel, language, sha256, mtime_ns, size_bytes, symbols, text in changed_rows:
-                    stale_point_ids.extend(
-                        self._store_changed_file(
+                    self._queue_hybrid_deletions(
+                        conn,
+                        point_ids=self._store_changed_file(
                             conn,
                             rel_path=rel,
                             language=language,
@@ -1692,7 +1758,7 @@ class CodebaseContextService:
                             symbols=symbols,
                             content=text,
                             all_paths=seen_paths,
-                        )
+                        ),
                     )
 
                 stats = IndexStats(
@@ -1727,8 +1793,6 @@ class CodebaseContextService:
                         snapshot_id=snapshot_id,
                     )
 
-            self._sync_hybrid_index(stale_point_ids=stale_point_ids)
-
             observation: dict[str, bool | int | str] = {
                 "repo": self.repo.as_posix(),
                 "provider": "codebase",
@@ -1738,6 +1802,7 @@ class CodebaseContextService:
                 "skipped_files": stats.skipped_files,
                 "deleted_files": stats.deleted_files,
                 "elapsed_ms": elapsed_ms,
+                "hybrid_sync_pending": self._hybrid_requested() and not self._hybrid_state_ready(),
             }
             span.set_attributes(observation)
             emit_structured_log("clawops.context.codebase.index", observation)
@@ -2612,6 +2677,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--interval-seconds must be positive")
         while True:
             stats = service.index_with_stats()
+            service.consolidate_runtime_artifacts()
             if args.json:
                 print(json.dumps(stats.to_dict(), sort_keys=True))
             else:

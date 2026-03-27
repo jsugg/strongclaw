@@ -10,7 +10,8 @@ and adds scale-aware chunk, hybrid, and graph state.
 - builds chunk records for medium and large retrieval
 - extracts a lightweight symbol map
 - supports lexical search
-- syncs dense and sparse chunk vectors into a dedicated Qdrant collection when the hybrid lane is configured and healthy
+- updates lexical, chunk, and graph state inline during reindexing
+- lets `clawops context codebase worker` consolidate dense and sparse chunk vectors into a dedicated Qdrant collection when the hybrid lane is configured and healthy
 - reranks the fused candidate pool for medium and large retrieval when rerank providers are configured
 - expands dependency context from import edges
 - builds stable markdown context packs with provider and scale metadata
@@ -138,6 +139,12 @@ Scale behavior is explicit per invocation:
 - `small` keeps the file-level lexical path and avoids graph expansion
 - `medium` uses chunk retrieval, hybrid lexical+dense+sparse fusion when the shared embedding and Qdrant sidecars are healthy, and graph expansion that prefers Neo4j with SQLite fallback when allowed
 - `large` keeps hybrid and graph expansion enabled and fails closed when Neo4j is unhealthy
+
+Hybrid runtime artifacts are intentionally deferred for medium and large reindexing:
+
+- `index` refreshes lexical, chunk, and edge state synchronously
+- `worker` reconciles pending Qdrant point deletions and chunk-vector upserts in the background
+- `query` and `pack` transparently fall back to lexical chunk retrieval until the worker finishes a healthy hybrid sync
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
