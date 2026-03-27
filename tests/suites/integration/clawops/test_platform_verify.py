@@ -227,7 +227,7 @@ def test_repo_aux_stack_keeps_litellm_rootfs_writable_for_prisma_sanity_check() 
     assert litellm_service.get("read_only") is not True
 
 
-def test_repo_aux_stack_bootstraps_litellm_schema_before_runtime_startup() -> None:
+def test_repo_aux_stack_keeps_litellm_bootstrap_out_of_runtime_compose() -> None:
     compose_paths = (
         REPO_ROOT / "platform/compose/docker-compose.aux-stack.yaml",
         REPO_ROOT / "platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml",
@@ -235,21 +235,12 @@ def test_repo_aux_stack_bootstraps_litellm_schema_before_runtime_startup() -> No
 
     for compose_path in compose_paths:
         compose = load_yaml(compose_path)
-        migrate_service = compose["services"]["litellm-migrate"]
+        services = compose["services"]
         litellm_service = compose["services"]["litellm"]
 
-        assert migrate_service["command"] == [
-            "--config",
-            "/app/config.yaml",
-            "--skip_server_startup",
-        ]
-        assert migrate_service["depends_on"]["postgres"]["condition"] == "service_healthy"
-        assert migrate_service["restart"] == "no"
+        assert "litellm-migrate" not in services
         assert litellm_service["environment"]["DISABLE_SCHEMA_UPDATE"] == "true"
-        assert (
-            litellm_service["depends_on"]["litellm-migrate"]["condition"]
-            == "service_completed_successfully"
-        )
+        assert litellm_service["depends_on"]["postgres"]["condition"] == "service_healthy"
 
 
 def test_repo_aux_stack_healthchecks_use_binaries_available_in_the_pinned_images() -> None:

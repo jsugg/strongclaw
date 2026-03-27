@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import pathlib
 import shutil
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -27,10 +29,54 @@ from clawops.strongclaw_runtime import (
     varlock_local_env_file,
     wrap_command_with_varlock,
 )
-from clawops.typed_values import as_mapping, as_optional_mapping
+from clawops.typed_values import (
+    as_mapping,
+    as_mapping_list,
+    as_optional_mapping,
+    as_optional_string,
+    as_string,
+)
 
 DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
 DEFAULT_TEST_COLLECTION_PREFIX = "memory-v2-int-"
+SIDECARS_COMPOSE_NAME = "docker-compose.aux-stack.yaml"
+POSTGRES_SERVICE_NAME = "postgres"
+LITELLM_SERVICE_NAME = "litellm"
+SIDECAR_RUNTIME_SERVICE_NAMES = ("litellm", "otel-collector", "qdrant", "neo4j")
+COMPOSE_STATUS_TIMEOUT_SECONDS = 30
+POSTGRES_HEALTH_TIMEOUT_SECONDS = 180
+LITELLM_BOOTSTRAP_TIMEOUT_SECONDS = 1800
+COMPOSE_POLL_INTERVAL_SECONDS = 2.0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ComposeExecution:
+    """Resolved compose execution context."""
+
+    repo_root: pathlib.Path
+    compose_path: pathlib.Path
+    cwd: pathlib.Path
+    env: dict[str, str]
+
+    def command(self, *arguments: str) -> list[str]:
+        """Return a wrapped compose command for the configured file."""
+        base_command = [
+            "docker",
+            "compose",
+            "-f",
+            str(self.compose_path),
+            *[str(argument) for argument in arguments],
+        ]
+        return wrap_command_with_varlock(self.repo_root, base_command)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _ComposeServiceStatus:
+    """Structured service status from `docker compose ps`."""
+
+    name: str
+    state: str
+    health: str | None = None
 
 
 def _compose_state_dir(repo_root: pathlib.Path, *, repo_local_state: bool) -> pathlib.Path:
@@ -76,6 +122,43 @@ def _compose_path(repo_root: pathlib.Path, compose_name: str) -> pathlib.Path:
     return resolve_compose_file(repo_root, compose_name)
 
 
+def _compose_execution(
+    repo_root: pathlib.Path,
+    *,
+    compose_name: str,
+    repo_local_state: bool,
+) -> _ComposeExecution:
+    """Resolve the compose execution context for one command sequence."""
+    ensure_docker_backend_ready()
+    compose_path = _compose_path(repo_root, compose_name)
+    compose_env = _compose_env(
+        repo_root,
+        repo_local_state=repo_local_state,
+        compose_name=compose_name,
+    )
+    return _ComposeExecution(
+        repo_root=repo_root,
+        compose_path=compose_path,
+        cwd=repo_root / "platform" / "compose",
+        env=compose_env,
+    )
+
+
+def _run_compose_command_with_context(
+    execution: _ComposeExecution,
+    *,
+    arguments: Sequence[str],
+    timeout_seconds: int = 1800,
+) -> int:
+    """Run a compose command with inherited stdio for one execution context."""
+    return run_command_inherited(
+        execution.command(*[str(argument) for argument in arguments]),
+        cwd=execution.cwd,
+        env=execution.env,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _run_compose_command(
     repo_root: pathlib.Path,
     *,
@@ -85,26 +168,126 @@ def _run_compose_command(
     timeout_seconds: int = 1800,
 ) -> int:
     """Run a docker compose command with StrongClaw state wiring."""
-    ensure_docker_backend_ready()
-    compose_path = _compose_path(repo_root, compose_name)
-    compose_env = _compose_env(
+    execution = _compose_execution(
         repo_root,
-        repo_local_state=repo_local_state,
         compose_name=compose_name,
+        repo_local_state=repo_local_state,
     )
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(compose_path),
-        *[str(argument) for argument in arguments],
-    ]
-    wrapped = wrap_command_with_varlock(repo_root, command)
-    return run_command_inherited(
-        wrapped,
-        cwd=repo_root / "platform" / "compose",
-        env=compose_env,
+    return _run_compose_command_with_context(
+        execution,
+        arguments=arguments,
         timeout_seconds=timeout_seconds,
+    )
+
+
+def _compose_service_statuses(execution: _ComposeExecution) -> dict[str, _ComposeServiceStatus]:
+    """Return the current compose service states keyed by service name."""
+    result = run_command(
+        execution.command("ps", "--format", "json"),
+        cwd=execution.cwd,
+        env=execution.env,
+        timeout_seconds=COMPOSE_STATUS_TIMEOUT_SECONDS,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker compose ps failed"
+        raise CommandError(f"failed to inspect sidecar services: {detail}", result=result)
+    raw_output = result.stdout.strip()
+    if not raw_output:
+        return {}
+
+    def _coerce_entries(payload: object) -> tuple[Mapping[str, object], ...]:
+        if isinstance(payload, Mapping):
+            return (as_mapping(cast(object, payload), path="docker compose ps"),)
+        return as_mapping_list(payload, path="docker compose ps")
+
+    try:
+        entries = _coerce_entries(json.loads(raw_output))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        try:
+            entries = tuple(
+                as_mapping(json.loads(line), path=f"docker compose ps line {index}")
+                for index, line in enumerate(raw_output.splitlines())
+                if line.strip()
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as line_exc:
+            raise CommandError("docker compose ps returned invalid JSON.") from line_exc
+    statuses: dict[str, _ComposeServiceStatus] = {}
+    for index, entry in enumerate(entries):
+        service_name = as_string(entry.get("Service"), path=f"docker compose ps[{index}].Service")
+        state = as_string(entry.get("State"), path=f"docker compose ps[{index}].State").strip()
+        health = as_optional_string(
+            entry.get("Health"),
+            path=f"docker compose ps[{index}].Health",
+        )
+        normalized_health = None if health is None else health.strip().lower() or None
+        statuses[service_name] = _ComposeServiceStatus(
+            name=service_name,
+            state=state.lower(),
+            health=normalized_health,
+        )
+    return statuses
+
+
+def _service_matches(
+    status: _ComposeServiceStatus | None,
+    *,
+    state: str,
+    health: str | None = None,
+) -> bool:
+    """Return whether one compose service matches the required state."""
+    if status is None or status.state != state:
+        return False
+    if health is None:
+        return True
+    return status.health == health
+
+
+def _wait_for_compose_service(
+    execution: _ComposeExecution,
+    *,
+    service_name: str,
+    state: str,
+    health: str | None = None,
+    timeout_seconds: int,
+) -> None:
+    """Wait for one compose service to reach the requested state."""
+    deadline = time.monotonic() + timeout_seconds
+    last_status: _ComposeServiceStatus | None = None
+    while True:
+        last_status = _compose_service_statuses(execution).get(service_name)
+        if _service_matches(last_status, state=state, health=health):
+            return
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(COMPOSE_POLL_INTERVAL_SECONDS)
+    target = state if health is None else f"{state}/{health}"
+    observed = (
+        "service not listed in compose status"
+        if last_status is None
+        else f"state={last_status.state!r}, health={last_status.health or 'n/a'!r}"
+    )
+    raise CommandError(
+        f"timed out waiting for compose service '{service_name}' to reach {target}; "
+        f"last observed {observed}."
+    )
+
+
+def _run_litellm_schema_bootstrap(execution: _ComposeExecution) -> int:
+    """Run LiteLLM schema bootstrap without treating it as a long-lived service."""
+    return _run_compose_command_with_context(
+        execution,
+        arguments=(
+            "run",
+            "--rm",
+            "--no-deps",
+            "-e",
+            "DISABLE_SCHEMA_UPDATE=false",
+            LITELLM_SERVICE_NAME,
+            "--config",
+            "/app/config.yaml",
+            "--skip_server_startup",
+        ),
+        timeout_seconds=LITELLM_BOOTSTRAP_TIMEOUT_SECONDS,
     )
 
 
@@ -116,11 +299,48 @@ def gateway_start(repo_root: pathlib.Path) -> int:
 
 def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
     """Start the auxiliary sidecar stack."""
-    return _run_compose_command(
+    execution = _compose_execution(
         repo_root,
-        compose_name="docker-compose.aux-stack.yaml",
-        arguments=("up", "-d"),
+        compose_name=SIDECARS_COMPOSE_NAME,
         repo_local_state=repo_local_state,
+    )
+    postgres_exit = _run_compose_command_with_context(
+        execution,
+        arguments=("up", "-d", POSTGRES_SERVICE_NAME),
+    )
+    if postgres_exit != 0:
+        return postgres_exit
+    _wait_for_compose_service(
+        execution,
+        service_name=POSTGRES_SERVICE_NAME,
+        state="running",
+        health="healthy",
+        timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
+    )
+    litellm_status = _compose_service_statuses(execution).get(LITELLM_SERVICE_NAME)
+    litellm_ready = _service_matches(litellm_status, state="running", health="healthy")
+    if not litellm_ready:
+        bootstrap_exit = _run_litellm_schema_bootstrap(execution)
+        if bootstrap_exit != 0:
+            return bootstrap_exit
+        litellm_exit = _run_compose_command_with_context(
+            execution,
+            arguments=("up", "-d", "--force-recreate", LITELLM_SERVICE_NAME),
+        )
+        if litellm_exit != 0:
+            return litellm_exit
+        runtime_services = tuple(
+            service_name
+            for service_name in SIDECAR_RUNTIME_SERVICE_NAMES
+            if service_name != LITELLM_SERVICE_NAME
+        )
+        return _run_compose_command_with_context(
+            execution,
+            arguments=("up", "-d", *runtime_services),
+        )
+    return _run_compose_command_with_context(
+        execution,
+        arguments=("up", "-d", *SIDECAR_RUNTIME_SERVICE_NAMES),
     )
 
 
@@ -128,7 +348,7 @@ def sidecars_down(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
     """Stop the auxiliary sidecar stack."""
     return _run_compose_command(
         repo_root,
-        compose_name="docker-compose.aux-stack.yaml",
+        compose_name=SIDECARS_COMPOSE_NAME,
         arguments=("down",),
         repo_local_state=repo_local_state,
     )
