@@ -98,6 +98,8 @@ def test_orchestration_task_resolution_includes_context_and_artifacts(
             "required_auth_mode": "subscription",
             "allowed_capabilities": ["code.write"],
             "context": {
+                "provider": "codebase",
+                "scale": "small",
                 "config": str(config),
                 "query": "implement",
                 "prior_artifacts": [str(artifact)],
@@ -128,6 +130,8 @@ def test_orchestration_task_resolution_includes_context_and_artifacts(
         operation_kind="implement",
     )
     assert task.context_request is not None
+    assert task.context_request.provider == "codebase"
+    assert task.context_request.scale == "small"
     assert task.expected_artifacts[0].name == "implementation-report"
     assert task.permissions_mode == "approve-all"
     assert task.workspace_mode == "mutable_primary"

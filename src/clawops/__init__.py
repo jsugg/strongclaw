@@ -9,7 +9,7 @@ __all__ = [
     "hypermemory",
     "op_journal",
     "policy_engine",
-    "context_service",
+    "context",
     "skill_scanner",
     "supply_chain",
     "harness",

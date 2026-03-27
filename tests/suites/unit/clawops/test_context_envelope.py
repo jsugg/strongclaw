@@ -6,13 +6,13 @@ import pathlib
 
 import pytest
 
+from clawops.context.codebase.service import service_from_config
 from clawops.context_envelope import (
     ContextEnvelopeBuilder,
     ContextEnvelopeValidationError,
     load_context_envelope,
     validate_context_envelope,
 )
-from clawops.context_service import service_from_config
 from clawops.orchestration import ProjectDescriptor, WorkspaceDescriptor
 from tests.utils.helpers.context import build_context_repo
 
@@ -26,7 +26,7 @@ def _build_service(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
 
 def test_context_envelope_reuses_identical_inputs(tmp_path: pathlib.Path) -> None:
     repo, config = _build_service(tmp_path)
-    service = service_from_config(config, repo)
+    service = service_from_config(config, repo, scale="small")
     project = ProjectDescriptor.resolve(repo)
     workspace = WorkspaceDescriptor.resolve(project, kind="local_dir", path=repo)
     builder = ContextEnvelopeBuilder(
@@ -43,12 +43,15 @@ def test_context_envelope_reuses_identical_inputs(tmp_path: pathlib.Path) -> Non
 
     assert first.body_path == second.body_path
     assert second.reused is True
+    assert first.manifest.context_provider == "codebase"
+    assert first.manifest.context_scale == "small"
+    assert first.manifest.retrieval_modes == ("lexical",)
     validate_context_envelope(second, service=service, workspace=workspace)
 
 
 def test_context_envelope_persists_diff_when_inputs_change(tmp_path: pathlib.Path) -> None:
     repo, config = _build_service(tmp_path)
-    service = service_from_config(config, repo)
+    service = service_from_config(config, repo, scale="small")
     project = ProjectDescriptor.resolve(repo)
     workspace = WorkspaceDescriptor.resolve(project, kind="local_dir", path=repo)
     builder = ContextEnvelopeBuilder(
@@ -76,7 +79,7 @@ def test_context_envelope_validation_fails_when_workspace_file_disappears(
     tmp_path: pathlib.Path,
 ) -> None:
     repo, config = _build_service(tmp_path)
-    service = service_from_config(config, repo)
+    service = service_from_config(config, repo, scale="small")
     project = ProjectDescriptor.resolve(repo)
     workspace = WorkspaceDescriptor.resolve(project, kind="local_dir", path=repo)
     builder = ContextEnvelopeBuilder(

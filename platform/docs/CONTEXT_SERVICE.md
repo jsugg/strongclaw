@@ -1,6 +1,7 @@
 # Context Service
 
-This repo includes a local lexical context service backed by SQLite FTS.
+This repo includes a generic `clawops context` namespace whose first explicit
+provider is the local codebase-context service backed by SQLite FTS.
 
 ## What it does
 
@@ -8,19 +9,36 @@ This repo includes a local lexical context service backed by SQLite FTS.
 - extracts a lightweight symbol map
 - supports lexical search
 - builds stable markdown context packs
+- requires an explicit provider and scale per invocation
 - keeps markdown memory and docs as source-of-truth
 - respects configured include and exclude globs
 - skips oversized files by configured size limit
 
 ## Why not vector-only
 
-The service is intentionally auditable and deterministic. QMD and context-engine plugins are additive, not replacements for disciplined source material.
+The shipped codebase provider is intentionally auditable and deterministic. QMD
+and context-engine plugins are additive, not replacements for disciplined
+source material.
 
 ## Included integrations
 
-- base lexical indexer in `src/clawops/context_service.py`
+- generic namespace dispatcher in `src/clawops/context/cli.py`
+- base lexical codebase provider in `src/clawops/context/codebase/service.py`
 - built-in OpenClaw QMD memory overlay from `platform/configs/openclaw/40-qmd-context.json5`
 - lossless-claw example in `platform/configs/openclaw/70-lossless-context-engine.example.json5`
+
+## CLI contract
+
+Use the explicit provider form:
+
+- `clawops context codebase index --config platform/configs/context/codebase.yaml --repo . --scale small`
+- `clawops context codebase query --config platform/configs/context/codebase.yaml --repo . --scale small --query "jwt"`
+- `clawops context codebase pack --config platform/configs/context/codebase.yaml --repo . --scale small --query "jwt" --output /tmp/context-pack.md`
+
+`scale` is now required for direct CLI usage, workflow `context_pack` steps, and
+orchestration task context payloads. The current implementation keeps lexical
+retrieval across all scales; hybrid retrieval and graph-backed expansion remain
+planned follow-up work.
 
 ## Default memory retrieval
 
@@ -52,6 +70,9 @@ The shipped context config supports:
 - `index.symlink_policy`
 - `paths.include`
 - `paths.exclude`
+
+The default shipped provider config lives at
+`platform/configs/context/codebase.yaml`.
 
 Path filters are applied to repo-relative POSIX paths before indexing.
 
