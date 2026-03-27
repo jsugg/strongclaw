@@ -27,5 +27,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       - run: uv run python -m compileall -q src tests
-      - run: uv run --locked pytest -q tests/suites/unit/clawops/test_devflow_roles.py tests/suites/unit/clawops/test_workspace_bootstrap.py tests/suites/unit/clawops/test_devflow_workspaces.py tests/suites/unit/clawops/test_devflow_state.py tests/suites/unit/clawops/test_git_gates.py tests/suites/unit/clawops/test_devflow_artifacts.py tests/suites/unit/clawops/test_devflow_cli.py tests/suites/integration/clawops/test_workspace_bootstrap_profiles.py tests/suites/integration/clawops/test_workflow_runner_devflow.py tests/suites/integration/clawops/test_workflow_runner_resume.py tests/suites/integration/clawops/test_devflow_plan_run.py tests/suites/integration/clawops/test_devflow_recovery.py tests/suites/integration/clawops/test_devflow_sample_repos.py tests/suites/contracts/repo/test_devflow_role_assets.py tests/suites/contracts/repo/test_devflow_docs_contract.py tests/suites/contracts/repo/test_devflow_ci_contract.py tests/suites/e2e/ci/test_devflow_public_cli.py
+      - run: uv run --locked pytest -q -m devflow
       - run: uv run clawops devflow plan --repo-root . --goal "contract smoke"
