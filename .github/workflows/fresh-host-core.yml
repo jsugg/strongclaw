@@ -70,11 +70,15 @@ jobs:
           key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
-      - run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
-      - run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Prepare Linux fresh-host context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Run Linux fresh-host scenario
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Collect Linux fresh-host diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Write Linux fresh-host summary
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
@@ -149,17 +153,25 @@ jobs:
           key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
           restore-keys: |
             fresh-host-macos-runtime-tools-${{ runner.arch }}-
-      - run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
-      - run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
-      - run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
-      - run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Prepare macOS fresh-host context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Install hosted macOS Docker runtime
+        run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Ensure hosted macOS Docker images
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Run macOS fresh-host scenario
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Collect hosted macOS Docker diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Collect macOS fresh-host diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Clean up macOS fresh-host context
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Write macOS fresh-host summary
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}

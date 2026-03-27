@@ -42,7 +42,8 @@ jobs:
           key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
-      - run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
+      - name: Warm Linux fresh-host package cache
+        run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - if: ${{ success() && steps.linux_package_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -89,10 +90,14 @@ jobs:
           key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
           restore-keys: |
             fresh-host-macos-runtime-tools-${{ runner.arch }}-
-      - run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
-      - run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
-      - run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
-      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+      - name: Warm macOS fresh-host package cache
+        run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
+      - name: Prepare macOS cache warm context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Warm hosted macOS runtime downloads
+        run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Clean up macOS cache warm context
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
       - if: ${{ success() && steps.macos_package_cache.outputs.cache-hit != 'true' }}
