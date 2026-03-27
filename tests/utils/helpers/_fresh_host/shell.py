@@ -192,6 +192,9 @@ def _compose_probe_env(
     probe_env = dict(base_env)
     home_dir = Path(probe_env.get("HOME", Path.home().as_posix())).expanduser().resolve()
     local_env = load_env_assignments(varlock_local_env_file(repo_root_path))
+    for key, value in local_env.items():
+        if value and not probe_env.get(key, "").strip():
+            probe_env[key] = value
     openclaw_state_dir = expand_user_path(
         local_env.get("OPENCLAW_STATE_DIR", "~/.openclaw"),
         home_dir=home_dir,
