@@ -189,24 +189,24 @@ clawops devflow audit --repo-root . --run-id <run-id>
 Run-local state lands under `.clawops/devflow/<run-id>/` and the audit bundle
 is written under that run's `audit/` directory.
 
-## Codebase context
+## Context service
 
 Index:
 
 ```bash
 clawops context codebase index \
+  --scale small \
   --config platform/configs/context/codebase.yaml \
-  --repo ~/Projects/myrepo \
-  --scale small
+  --repo ~/Projects/myrepo
 ```
 
 Query:
 
 ```bash
 clawops context codebase query \
+  --scale medium \
   --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/myrepo \
-  --scale small \
   --query "JWT validation bug"
 ```
 
@@ -214,9 +214,9 @@ Build a pack:
 
 ```bash
 clawops context codebase pack \
+  --scale medium \
   --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/myrepo \
-  --scale small \
   --query "regression around auth middleware" \
   --output /tmp/context-pack.md
 ```

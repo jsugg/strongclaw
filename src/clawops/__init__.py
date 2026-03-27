@@ -5,11 +5,11 @@ __version__ = "0.1.0"
 __all__ = [
     "acp_runner",
     "common",
+    "context",
     "json_merge",
     "hypermemory",
     "op_journal",
     "policy_engine",
-    "context",
     "skill_scanner",
     "supply_chain",
     "harness",

@@ -251,6 +251,9 @@ def _render_body(
     lines.append(f"- context_scale: {manifest.context_scale}")
     lines.append(f"- retrieval_modes: {', '.join(manifest.retrieval_modes)}")
     lines.append(f"- backend: {manifest.backend}")
+    lines.append(f"- context_provider: {manifest.context_provider}")
+    lines.append(f"- context_scale: {manifest.context_scale}")
+    lines.append(f"- retrieval_modes: {', '.join(manifest.retrieval_modes)}")
     lines.append(f"- query: {manifest.query}")
     lines.append("")
     if scm_delta_text:
@@ -319,6 +322,8 @@ class ContextEnvelopeBuilder:
         lane: str,
         role: str,
         backend: str,
+        provider: str,
+        scale: str,
     ) -> None:
         self.service = service
         self.project = project
@@ -326,6 +331,8 @@ class ContextEnvelopeBuilder:
         self.lane = lane
         self.role = role
         self.backend = backend
+        self.provider = provider
+        self.scale = scale
 
     def _scm_delta(self, previous_manifest: ContextEnvelopeManifest | None) -> tuple[str, str, str]:
         """Return the SCM delta kind, text, and hash."""
@@ -374,9 +381,9 @@ class ContextEnvelopeBuilder:
                     "workspace_id": self.workspace.workspace_id,
                     "lane": self.lane,
                     "role": self.role,
-                    "context_provider": self.service.provider,
-                    "context_scale": self.service.scale,
-                    "retrieval_modes": list(self.service.retrieval_modes),
+                    "context_provider": self.provider,
+                    "context_scale": self.scale,
+                    "retrieval_modes": list(self.service.backend_modes()),
                     "backend": self.backend,
                     "query": query,
                     "index_snapshot_id": index_snapshot_id,
@@ -398,9 +405,9 @@ class ContextEnvelopeBuilder:
             workspace_id=self.workspace.workspace_id,
             lane=self.lane,
             role=self.role,
-            context_provider=self.service.provider,
-            context_scale=self.service.scale,
-            retrieval_modes=self.service.retrieval_modes,
+            context_provider=self.provider,
+            context_scale=self.scale,
+            retrieval_modes=self.service.backend_modes(),
             backend=self.backend,
             query=query,
             created_at=_timestamp_text(),

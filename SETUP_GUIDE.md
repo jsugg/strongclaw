@@ -95,6 +95,12 @@ If `varlock` is already installed on the host, you can validate the contract now
 varlock load --path platform/configs/varlock
 ```
 
+The repo-local env contract also carries the local Neo4j sidecar credentials
+used by the codebase context provider. `clawops varlock-env configure` repairs
+them automatically; for manual edits keep `NEO4J_USERNAME=neo4j` unless you
+also rotate the compose-side username, and set `NEO4J_PASSWORD` to a real
+secret.
+
 Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports both guided and env-driven setup:
 
@@ -300,7 +306,7 @@ clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-ru
 ## 9. Enable repo lexical context indexing and verify QMD
 
 ```bash
-clawops context codebase index --config platform/configs/context/codebase.yaml --repo . --scale small
+clawops context codebase index --scale small --config platform/configs/context/codebase.yaml --repo .
 qmd status
 ```
 
@@ -310,18 +316,18 @@ Index a repo:
 
 ```bash
 clawops context codebase index \
+  --scale small \
   --config platform/configs/context/codebase.yaml \
-  --repo ~/Projects/strongclaw \
-  --scale small
+  --repo ~/Projects/strongclaw
 ```
 
 Query it:
 
 ```bash
 clawops context codebase query \
+  --scale medium \
   --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/strongclaw \
-  --scale small \
   --query "operation journal idempotency"
 ```
 

@@ -1,4 +1,4 @@
-"""Unit tests for the lexical codebase-context provider."""
+"""Unit tests for the lexical context service."""
 
 from __future__ import annotations
 
@@ -8,18 +8,8 @@ import sqlite3
 
 import pytest
 
-from clawops.cli import main as root_cli_main
 from clawops.common import write_yaml
-from clawops.context.codebase.service import (
-    CodebaseContextService,
-    load_config,
-    service_from_config,
-)
-
-
-def _service(config_path: pathlib.Path, repo: pathlib.Path) -> CodebaseContextService:
-    """Build the default test service."""
-    return service_from_config(config_path, repo, scale="small")
+from clawops.context.codebase.service import load_config, service_from_config
 
 
 def test_index_and_query(tmp_path: pathlib.Path) -> None:
@@ -31,18 +21,15 @@ def test_index_and_query(tmp_path: pathlib.Path) -> None:
     )
     config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     count = service.index()
     assert count == 1
     hits = service.query("validate_jwt", limit=3)
-    pack = service.pack("validate_jwt", limit=3)
     assert hits
     assert hits[0].path == "auth.py"
     assert hits[0].start_line == 1
     assert hits[0].end_line >= hits[0].start_line
     assert "2:     def validate_jwt(self):" in hits[0].snippet
-    assert "- provider: codebase" in pack
-    assert "- scale: small" in pack
 
 
 def test_context_service_respects_include_and_exclude_globs(tmp_path: pathlib.Path) -> None:
@@ -64,7 +51,7 @@ def test_context_service_respects_include_and_exclude_globs(tmp_path: pathlib.Pa
             },
         },
     )
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     count = service.index()
     assert count == 2
     hits = service.query("ignore_me", limit=3)
@@ -78,7 +65,7 @@ def test_reindex_prunes_deleted_files(tmp_path: pathlib.Path) -> None:
     target.write_text("def validate_jwt():\n    return True\n", encoding="utf-8")
     config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     assert service.index() == 1
     assert service.query("validate_jwt", limit=3)
 
@@ -101,7 +88,7 @@ def test_reindex_prunes_newly_excluded_files_from_search_and_packs(tmp_path: pat
         },
     )
 
-    initial_service = _service(config_path, repo)
+    initial_service = service_from_config(config_path, repo, scale="small")
     assert initial_service.index() == 2
     assert initial_service.query("ignore_me", limit=3)
 
@@ -116,7 +103,7 @@ def test_reindex_prunes_newly_excluded_files_from_search_and_packs(tmp_path: pat
         },
     )
 
-    filtered_service = _service(config_path, repo)
+    filtered_service = service_from_config(config_path, repo, scale="small")
     assert filtered_service.index() == 1
     keep_hits = filtered_service.query("keep_me", limit=3)
     keep_pack = filtered_service.pack("keep_me", limit=3)
@@ -156,7 +143,7 @@ def test_context_service_skips_symlinks_that_escape_repo_root(tmp_path: pathlib.
         },
     )
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     assert service.index() == 0
     assert service.query("TOPSECRET", limit=3) == []
     assert "TOPSECRET=1" not in service.pack("TOPSECRET", limit=3)
@@ -180,7 +167,7 @@ def test_context_service_allows_in_repo_symlinks_by_default(tmp_path: pathlib.Pa
         },
     )
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     assert service.index() == 2
     hits = service.query("INTERNAL_ONLY", limit=4)
     assert {hit.path for hit in hits} == {"alias.md", "docs/source.md"}
@@ -243,7 +230,7 @@ def test_index_with_stats_skips_unchanged_files(tmp_path: pathlib.Path) -> None:
     config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     first = service.index_with_stats()
     second = service.index_with_stats()
 
@@ -270,7 +257,7 @@ def test_index_with_stats_preloads_metadata_once_for_unchanged_repos(
     config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     first = service.index_with_stats()
     statements: list[str] = []
     original_connect = service.connect
@@ -307,7 +294,7 @@ def test_index_with_stats_reports_deleted_files_after_preloaded_metadata(
     config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     initial = service.index_with_stats()
     remove.unlink()
     second = service.index_with_stats()
@@ -332,46 +319,37 @@ def test_index_with_stats_emits_structured_log_when_enabled(
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
     monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
 
-    service = _service(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     stats = service.index_with_stats()
 
     payload = json.loads(capsys.readouterr().err.strip())
     assert stats.indexed_files == 1
     assert payload["event"] == "clawops.context.codebase.index"
-    assert payload["provider"] == "codebase"
-    assert payload["scale"] == "small"
     assert payload["repo"] == repo.resolve().as_posix()
     assert payload["indexed_files"] == 1
     assert payload["total_files"] == 1
 
 
-def test_root_cli_dispatches_codebase_context_index(
+def test_medium_scale_pack_emits_provider_metadata_and_dependency_expansion(
     tmp_path: pathlib.Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "auth.py").write_text("def validate_jwt():\n    return True\n", encoding="utf-8")
-    config_path = tmp_path / "codebase.yaml"
+    (repo / "app.py").write_text(
+        "from support import helper\n\n\ndef run_review():\n    return helper()\n",
+        encoding="utf-8",
+    )
+    (repo / "support.py").write_text("def helper():\n    return 'ok'\n", encoding="utf-8")
+    config_path = tmp_path / "context.yaml"
     write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
 
-    result = root_cli_main(
-        [
-            "context",
-            "codebase",
-            "index",
-            "--config",
-            str(config_path),
-            "--repo",
-            str(repo),
-            "--scale",
-            "small",
-            "--json",
-        ]
-    )
+    service = service_from_config(config_path, repo, scale="medium")
+    service.index()
+    pack = service.pack("run_review", limit=4)
 
-    payload = json.loads(capsys.readouterr().out.strip())
-    assert result == 0
-    assert payload["provider"] == "codebase"
-    assert payload["scale"] == "small"
-    assert payload["indexed_files"] == 1
+    assert "- provider: codebase" in pack
+    assert "- scale: medium" in pack
+    assert "- backend_modes: lexical, graph" in pack
+    assert "## Top retrieved chunks" in pack
+    assert "## Dependency expansion" in pack
+    assert "support.py" in pack

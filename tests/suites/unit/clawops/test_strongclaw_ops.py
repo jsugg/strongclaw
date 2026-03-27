@@ -117,6 +117,42 @@ def test_compose_env_exports_openclaw_and_compose_state(
     assert env["OPENCLAW_CONFIG"] == str(config_path)
 
 
+def test_compose_env_inherits_repo_local_varlock_assignments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Compose env should surface repo-local Varlock secrets for direct compose probes."""
+    openclaw_state_dir = tmp_path / ".openclaw"
+    config_path = openclaw_state_dir / "openclaw.json"
+    local_env_file = tmp_path / "platform" / "configs" / "varlock" / ".env.local"
+    local_env_file.parent.mkdir(parents=True, exist_ok=True)
+    local_env_file.write_text(
+        "NEO4J_PASSWORD=repo-secret\nNEO4J_USERNAME=neo4j\n", encoding="utf-8"
+    )
+
+    def _resolve_openclaw_state_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+        return openclaw_state_dir
+
+    def _resolve_openclaw_config_path(_repo_root: pathlib.Path) -> pathlib.Path:
+        return config_path
+
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    monkeypatch.setattr(strongclaw_ops, "resolve_openclaw_state_dir", _resolve_openclaw_state_dir)
+    monkeypatch.setattr(
+        strongclaw_ops,
+        "resolve_openclaw_config_path",
+        _resolve_openclaw_config_path,
+    )
+
+    env = _compose_env(
+        tmp_path,
+        repo_local_state=False,
+        compose_name="docker-compose.aux-stack.yaml",
+    )
+
+    assert env["NEO4J_PASSWORD"] == "repo-secret"
+    assert env["NEO4J_USERNAME"] == "neo4j"
+
+
 def test_compose_env_sets_project_name_for_variant(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:

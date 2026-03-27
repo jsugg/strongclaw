@@ -250,8 +250,7 @@ make doctor
 Add these only in order:
 
 1. ACP workers: `clawops render-openclaw-config --repo-root . --profile acp`
-2. Repo codebase context provider:
-   `clawops context codebase index --config platform/configs/context/codebase.yaml --repo . --scale small`
+2. Repo codebase context: `clawops context codebase index --scale small --config platform/configs/context/codebase.yaml --repo .`
 3. QMD prewarm: `qmd status`
 4. Built-in OpenClaw memory fallback:
    `clawops setup --profile openclaw-default`

@@ -69,10 +69,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "policy", "clawops.policy_engine", "main", "Evaluate policy payloads against YAML rules."
     ),
     CommandSpec(
-        "context",
-        "clawops.context.cli",
-        "main",
-        "Manage explicit execution-plane context providers.",
+        "context", "clawops.context", "main", "Index, query, or pack provider-specific context."
     ),
     CommandSpec(
         "credential-status",

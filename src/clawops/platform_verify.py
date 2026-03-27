@@ -297,11 +297,25 @@ def verify_sidecars(
         container_port=6333,
         require_healthcheck=True,
     )
+    neo4j_http_checks, neo4j_http_port = _check_required_service(
+        compose,
+        service_name="neo4j",
+        container_port=7474,
+        require_healthcheck=True,
+    )
+    neo4j_bolt_checks, neo4j_bolt_port = _check_required_service(
+        compose,
+        service_name="neo4j",
+        container_port=7687,
+        require_healthcheck=True,
+    )
     checks.extend(postgres_checks)
     checks.extend(litellm_checks)
     checks.extend(otlp_checks)
     checks.extend(metrics_checks)
     checks.extend(qdrant_checks)
+    checks.extend(neo4j_http_checks)
+    checks.extend(neo4j_bolt_checks)
 
     if skip_runtime:
         checks.append(_ok("runtime-probes", "runtime probes skipped"))
@@ -334,9 +348,32 @@ def verify_sidecars(
                 f"http://{qdrant_port.host}:{qdrant_port.host_port}/healthz",
             )
         )
+    if neo4j_http_port is not None:
+        checks.append(
+            _check_http_endpoint(
+                "neo4j-runtime",
+                f"http://{neo4j_http_port.host}:{neo4j_http_port.host_port}/",
+            )
+        )
+    if neo4j_bolt_port is not None:
+        checks.append(
+            _check_tcp_endpoint(
+                "neo4j-bolt-runtime",
+                neo4j_bolt_port.host,
+                neo4j_bolt_port.host_port,
+            )
+        )
     discovered_ports = [
         published.host_port
-        for published in (postgres_port, litellm_port, otlp_port, metrics_port, qdrant_port)
+        for published in (
+            postgres_port,
+            litellm_port,
+            otlp_port,
+            metrics_port,
+            qdrant_port,
+            neo4j_http_port,
+            neo4j_bolt_port,
+        )
         if published is not None
     ]
     checks.append(_check_loopback_ports(discovered_ports))

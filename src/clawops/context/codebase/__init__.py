@@ -1,4 +1,6 @@
-"""Codebase-specific context provider exports."""
+"""Codebase context provider."""
+
+from __future__ import annotations
 
 from clawops.context.codebase.service import (
     CodebaseContextConfig,
@@ -7,17 +9,15 @@ from clawops.context.codebase.service import (
     IndexStats,
     SearchHit,
     load_config,
-    main,
     service_from_config,
 )
 
 __all__ = [
     "CodebaseContextConfig",
     "CodebaseContextService",
-    "IndexStats",
     "IndexedFile",
+    "IndexStats",
     "SearchHit",
     "load_config",
-    "main",
     "service_from_config",
 ]

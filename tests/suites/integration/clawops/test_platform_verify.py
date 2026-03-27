@@ -28,6 +28,8 @@ def _write_sidecars_compose(
     otlp: Endpoint,
     metrics: Endpoint,
     qdrant: Endpoint,
+    neo4j_http: Endpoint,
+    neo4j_bolt: Endpoint,
 ) -> None:
     write_yaml(
         compose_path,
@@ -49,6 +51,13 @@ def _write_sidecars_compose(
                 },
                 "qdrant": {
                     "ports": [_port_mapping(qdrant, 6333)],
+                    "healthcheck": {"test": ["CMD", "true"]},
+                },
+                "neo4j": {
+                    "ports": [
+                        _port_mapping(neo4j_http, 7474),
+                        _port_mapping(neo4j_bolt, 7687),
+                    ],
                     "healthcheck": {"test": ["CMD", "true"]},
                 },
             }
@@ -103,6 +112,8 @@ def test_verify_sidecars_supports_runtime_probes(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.http_listener(b"ok\n"),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -121,6 +132,8 @@ def test_verify_sidecars_reports_http_disconnects_without_crashing(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.http_listener(b"ok\n"),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -142,6 +155,8 @@ def test_verify_sidecars_reports_qdrant_runtime_failures(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.disconnecting_listener(),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -217,8 +232,34 @@ def test_repo_aux_stack_healthchecks_use_binaries_available_in_the_pinned_images
 
     litellm_test = compose["services"]["litellm"]["healthcheck"]["test"]
     qdrant_test = compose["services"]["qdrant"]["healthcheck"]["test"]
+    neo4j_test = compose["services"]["neo4j"]["healthcheck"]["test"]
 
     assert litellm_test[:2] == ["CMD", "/usr/bin/python3"]
     assert "urllib.request.urlopen" in litellm_test[3]
     assert qdrant_test[:3] == ["CMD", "bash", "-lc"]
     assert "/dev/tcp/127.0.0.1/6333" in qdrant_test[3]
+    assert neo4j_test[:3] == ["CMD", "bash", "-lc"]
+    assert "/dev/tcp/127.0.0.1/7474" in neo4j_test[3]
+
+
+def test_repo_aux_stack_neo4j_auth_uses_shared_varlock_credentials() -> None:
+    compose_paths = (
+        REPO_ROOT / "platform/compose/docker-compose.aux-stack.yaml",
+        REPO_ROOT / "platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml",
+    )
+
+    expected_auth = (
+        "${NEO4J_USERNAME:-neo4j}/"
+        "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}"
+    )
+    expected_image = (
+        "neo4j:5.26.23-community@"
+        "sha256:40bf5ae9282213087e4d6036aab3ec443fe9c974d3dd4f14a11892c63157238f"
+    )
+
+    for compose_path in compose_paths:
+        compose = load_yaml(compose_path)
+        neo4j_env = compose["services"]["neo4j"]["environment"]
+        neo4j_image = compose["services"]["neo4j"]["image"]
+        assert neo4j_image == expected_image
+        assert neo4j_env["NEO4J_AUTH"] == expected_auth

@@ -2,6 +2,17 @@ index:
   db_path: .clawops/context.sqlite
   symlink_policy: in_repo_only
 
+graph:
+  enabled: true
+  backend: neo4j
+  allow_degraded_fallback: true
+  neo4j_url: http://127.0.0.1:7474
+  neo4j_username_env: NEO4J_USERNAME
+  neo4j_password_env: NEO4J_PASSWORD
+  database: neo4j
+  depth: 1
+  limit: 12
+
 paths:
   include:
     - "**/*.md"

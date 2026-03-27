@@ -12,8 +12,8 @@ from clawops.common import canonical_json, sha256_hex
 from clawops.context.contracts import (
     ContextProvider,
     ContextScale,
-    require_context_provider,
-    require_context_scale,
+    validate_context_provider,
+    validate_context_scale,
 )
 from clawops.process_runner import run_command
 from clawops.typed_values import (
@@ -448,7 +448,7 @@ class OrchestrationTask:
             payload["context"] = {
                 "provider": self.context_request.provider,
                 "scale": self.context_request.scale,
-                "config": str(self.context_request.config_path),
+                "config_path": str(self.context_request.config_path),
                 "query": self.context_request.query,
                 "limit": self.context_request.limit,
                 "ttl_seconds": self.context_request.ttl_seconds,
@@ -507,10 +507,10 @@ def _parse_context_request(
     if value is None:
         return None
     context_mapping = as_mapping(value, path="task.context")
-    provider = require_context_provider(
+    provider = validate_context_provider(
         context_mapping.get("provider"), path="task.context.provider"
     )
-    scale = require_context_scale(context_mapping.get("scale"), path="task.context.scale")
+    scale = validate_context_scale(context_mapping.get("scale"), path="task.context.scale")
     config_path = _resolve_path(
         base_dir, context_mapping.get("config"), field_name="task.context.config"
     )

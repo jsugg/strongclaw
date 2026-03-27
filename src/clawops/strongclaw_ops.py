@@ -17,12 +17,14 @@ from clawops.strongclaw_runtime import (
     DEFAULT_REPO_ROOT,
     CommandError,
     ensure_docker_backend_ready,
+    load_env_assignments,
     resolve_openclaw_config_path,
     resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
     resolve_repo_root,
     run_command,
     run_command_inherited,
+    varlock_local_env_file,
     wrap_command_with_varlock,
 )
 from clawops.typed_values import as_mapping, as_optional_mapping
@@ -52,6 +54,9 @@ def _compose_env(
     state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
     state_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
+        if value and not env.get(key, "").strip():
+            env[key] = value
     env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
     env["OPENCLAW_CONFIG"] = str(resolve_openclaw_config_path(repo_root))

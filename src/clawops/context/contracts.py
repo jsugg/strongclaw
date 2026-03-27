@@ -2,35 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Final, Literal, cast
+from typing import Literal
 
 type ContextProvider = Literal["codebase"]
 type ContextScale = Literal["small", "medium", "large"]
 
-CONTEXT_PROVIDER_CODEBASE: Final[ContextProvider] = "codebase"
-CONTEXT_PROVIDERS: Final[frozenset[str]] = frozenset({CONTEXT_PROVIDER_CODEBASE})
-CONTEXT_SCALES: Final[tuple[ContextScale, ...]] = ("small", "medium", "large")
+CONTEXT_PROVIDERS: frozenset[ContextProvider] = frozenset({"codebase"})
+CONTEXT_SCALES: frozenset[ContextScale] = frozenset({"small", "medium", "large"})
 
 
-def require_context_provider(value: object, *, path: str) -> ContextProvider:
-    """Validate and return one supported context provider."""
+def validate_context_provider(value: object, *, path: str) -> ContextProvider:
+    """Validate and normalize a context provider name."""
     if not isinstance(value, str):
         raise TypeError(f"{path} must be a string")
-    if value not in CONTEXT_PROVIDERS:
-        allowed = ", ".join(sorted(CONTEXT_PROVIDERS))
-        raise ValueError(f"{path} must be one of: {allowed}")
-    return cast(ContextProvider, value)
+    if value == "codebase":
+        return "codebase"
+    allowed = ", ".join(sorted(CONTEXT_PROVIDERS))
+    raise ValueError(f"{path} must be one of: {allowed}")
 
 
-def require_context_scale(value: object, *, path: str) -> ContextScale:
-    """Validate and return one supported context scale."""
+def validate_context_scale(value: object, *, path: str) -> ContextScale:
+    """Validate and normalize a context scale."""
     if not isinstance(value, str):
         raise TypeError(f"{path} must be a string")
-    if value not in CONTEXT_SCALES:
-        allowed = ", ".join(CONTEXT_SCALES)
-        raise ValueError(f"{path} must be one of: {allowed}")
     if value == "small":
         return "small"
     if value == "medium":
         return "medium"
-    return "large"
+    if value == "large":
+        return "large"
+    allowed = ", ".join(sorted(CONTEXT_SCALES))
+    raise ValueError(f"{path} must be one of: {allowed}")

@@ -13,8 +13,8 @@ from clawops.acp_runner import SessionSpec, run_session
 from clawops.acpx_adapter import AcpxPermissionMode
 from clawops.app_paths import scoped_state_dir
 from clawops.common import canonical_json, load_json, load_yaml, write_json, write_text
-from clawops.context.codebase.service import service_from_config
-from clawops.context.contracts import require_context_provider, require_context_scale
+from clawops.context.contracts import validate_context_provider, validate_context_scale
+from clawops.context.registry import create_context_service
 from clawops.context_envelope import ContextEnvelopeBuilder, validate_context_envelope
 from clawops.devflow_artifacts import build_stage_artifact_manifest, update_artifact_manifest
 from clawops.devflow_roles import RoleArtifact
@@ -184,8 +184,8 @@ def _validate_workflow(workflow: object) -> dict[str, object]:
             for field in ("config", "repo", "query"):
                 if not isinstance(step.get(field), str):
                     raise TypeError(f"{prefix}.{field} must be a string")
-            require_context_provider(step.get("provider"), path=f"{prefix}.provider")
-            require_context_scale(step.get("scale"), path=f"{prefix}.scale")
+            validate_context_provider(step.get("provider"), path=f"{prefix}.provider")
+            validate_context_scale(step.get("scale"), path=f"{prefix}.scale")
             _validate_optional_positive_int(f"{prefix}.limit", step.get("limit"))
             if step.get("output") is not None and not isinstance(step.get("output"), str):
                 raise TypeError(f"{prefix}.output must be a string")
@@ -425,17 +425,23 @@ class WorkflowRunner:
 
     def _context_pack_step(self, step: Mapping[str, object]) -> StepResult:
         """Build one context pack or context envelope."""
+        provider = validate_context_provider(step.get("provider"), path="context_pack.provider")
+        scale = validate_context_scale(step.get("scale"), path="context_pack.scale")
         if self.dry_run:
             return self._store_step_result(
                 step_name=str(step["name"]),
                 ok=True,
                 message="dry-run context pack",
+                details={"provider": provider, "scale": scale},
             )
-        provider = require_context_provider(step.get("provider"), path="context_pack.provider")
-        scale = require_context_scale(step.get("scale"), path="context_pack.scale")
         config_path = self._resolve_step_path(step["config"], field_name="context_pack.config")
         repo_path = self._resolve_step_path(step["repo"], field_name="context_pack.repo")
-        service = service_from_config(config_path, repo_path, scale=scale)
+        service = create_context_service(
+            provider=provider,
+            config_path=config_path,
+            repo=repo_path,
+            scale=scale,
+        )
         service.index()
         if bool(step.get("envelope", False)):
             project = ProjectDescriptor.resolve(repo_path)
@@ -453,6 +459,8 @@ class WorkflowRunner:
                 lane=str(step.get("lane", "default")),
                 role=str(step.get("role", "developer")),
                 backend=str(step.get("backend", "codex")),
+                provider=provider,
+                scale=scale,
             )
             envelope = builder.build(
                 query=as_string(step["query"], path="context_pack.query"),
@@ -592,9 +600,10 @@ class WorkflowRunner:
         context_manifest: str | None = None
         context_body: str | None = None
         if task.context_request is not None:
-            service = service_from_config(
-                task.context_request.config_path,
-                task.workspace.working_directory,
+            service = create_context_service(
+                provider=task.context_request.provider,
+                config_path=task.context_request.config_path,
+                repo=task.workspace.working_directory,
                 scale=task.context_request.scale,
             )
             builder = ContextEnvelopeBuilder(
@@ -604,6 +613,8 @@ class WorkflowRunner:
                 lane=task.lane,
                 role=task.role,
                 backend=task.backend,
+                provider=task.context_request.provider,
+                scale=task.context_request.scale,
             )
             envelope = builder.build(
                 query=task.context_request.query,
