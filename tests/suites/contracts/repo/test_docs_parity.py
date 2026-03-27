@@ -54,6 +54,9 @@ def test_operator_docs_surface_codebase_context_commands() -> None:
     skill = (
         REPO_ROOT / "platform" / "skills" / "local" / "repo-context-pack" / "SKILL.md"
     ).read_text(encoding="utf-8")
+    context_doc = (REPO_ROOT / "platform" / "docs" / "CONTEXT_SERVICE.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "clawops context codebase index" in quickstart
     assert "platform/configs/context/codebase.yaml" in quickstart
@@ -63,6 +66,8 @@ def test_operator_docs_surface_codebase_context_commands() -> None:
     assert "clawops context codebase query" in usage
     assert "clawops context codebase pack" in usage
     assert "clawops context codebase index" in skill
+    assert "clawops context codebase benchmark" in context_doc
+    assert "platform/configs/context/benchmarks/codebase.yaml" in context_doc
     for markdown_file in _official_markdown_files(REPO_ROOT):
         text = markdown_file.read_text(encoding="utf-8")
         assert "clawops context index" not in text

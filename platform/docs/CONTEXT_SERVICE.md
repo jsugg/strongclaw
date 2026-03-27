@@ -30,6 +30,7 @@ clawops context codebase index --scale small --config platform/configs/context/c
 clawops context codebase query --scale medium --config platform/configs/context/codebase.yaml --repo . --query "context request"
 clawops context codebase pack --scale medium --config platform/configs/context/codebase.yaml --repo . --query "workflow runner" --output /tmp/context-pack.md
 clawops context codebase worker --scale medium --config platform/configs/context/codebase.yaml --repo . --once
+clawops context codebase benchmark --scale medium --config platform/configs/context/codebase.yaml --repo . --fixtures platform/configs/context/benchmarks/codebase.yaml --json
 ```
 
 ## Included integrations
@@ -145,6 +146,22 @@ Hybrid runtime artifacts are intentionally deferred for medium and large reindex
 - `index` refreshes lexical, chunk, and edge state synchronously
 - `worker` reconciles pending Qdrant point deletions and chunk-vector upserts in the background
 - `query` and `pack` transparently fall back to lexical chunk retrieval until the worker finishes a healthy hybrid sync
+
+## Benchmark fixtures
+
+Use `clawops context codebase benchmark` to measure Recall@k and MRR against a
+curated fixture file. The command reindexes the repo, consolidates runtime
+artifacts, and then evaluates each case against the current provider scale.
+
+Fixture files live under `platform/configs/context/benchmarks/` and accept:
+
+- `name`
+- `query`
+- `maxResults`
+- `expectedPaths`
+- `expectedChunkIds`
+
+Each case must define at least one expected path or chunk id.
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env

@@ -18,6 +18,12 @@ from typing import Literal, Protocol, cast
 import requests
 
 from clawops.common import canonical_json, expand, load_yaml, sha256_hex, utc_now_ms, write_text
+from clawops.context.codebase.benchmark import (
+    CodebaseBenchmarkCase,
+    CodebaseBenchmarkCaseResult,
+    CodebaseBenchmarkResult,
+    load_benchmark_cases,
+)
 from clawops.context.contracts import ContextScale, validate_context_scale
 from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
 from clawops.hypermemory.models import (
@@ -2150,6 +2156,76 @@ class CodebaseContextService:
             return self._query_chunks_hybrid(query, limit=limit)
         return self._query_chunks(query, limit=limit)
 
+    def benchmark_cases(self, cases: Sequence[CodebaseBenchmarkCase]) -> CodebaseBenchmarkResult:
+        """Run benchmark fixtures against the current codebase provider."""
+        results: list[CodebaseBenchmarkCaseResult] = []
+        passed_cases = 0
+        backend_modes = list(self.backend_modes())
+
+        for case in cases:
+            query = case["query"]
+            max_results = case.get("maxResults", 8)
+            expected_paths = list(case.get("expectedPaths", []))
+            expected_chunk_ids = list(case.get("expectedChunkIds", []))
+            hits = self.query(query, limit=max_results)
+
+            retrieved_paths: list[str] = []
+            path_rank: dict[str, int] = {}
+            retrieved_chunk_ids: list[str] = []
+            chunk_rank: dict[str, int] = {}
+            for index, hit in enumerate(hits, start=1):
+                if hit.path not in path_rank:
+                    path_rank[hit.path] = index
+                    retrieved_paths.append(hit.path)
+                if hit.chunk_id is not None and hit.chunk_id not in chunk_rank:
+                    chunk_rank[hit.chunk_id] = index
+                    retrieved_chunk_ids.append(hit.chunk_id)
+
+            matched_paths = [path for path in expected_paths if path in path_rank]
+            matched_chunk_ids = [
+                chunk_id for chunk_id in expected_chunk_ids if chunk_id in chunk_rank
+            ]
+            expected_total = len(expected_paths) + len(expected_chunk_ids)
+            matched_total = len(matched_paths) + len(matched_chunk_ids)
+            recall_at_k = matched_total / float(expected_total) if expected_total else 1.0
+            relevant_ranks = [
+                *(path_rank[path] for path in expected_paths if path in path_rank),
+                *(
+                    chunk_rank[chunk_id]
+                    for chunk_id in expected_chunk_ids
+                    if chunk_id in chunk_rank
+                ),
+            ]
+            mrr = 0.0 if not relevant_ranks else 1.0 / float(min(relevant_ranks))
+            passed = matched_total == expected_total
+            if passed:
+                passed_cases += 1
+            results.append(
+                CodebaseBenchmarkCaseResult(
+                    name=case["name"],
+                    query=query,
+                    maxResults=max_results,
+                    expectedPaths=expected_paths,
+                    expectedChunkIds=expected_chunk_ids,
+                    matchedPaths=matched_paths,
+                    matchedChunkIds=matched_chunk_ids,
+                    retrievedPaths=retrieved_paths,
+                    retrievedChunkIds=retrieved_chunk_ids,
+                    recallAtK=recall_at_k,
+                    mrr=mrr,
+                    passed=passed,
+                )
+            )
+
+        return CodebaseBenchmarkResult(
+            provider="codebase",
+            scale=self.scale,
+            backendModes=backend_modes,
+            total=len(results),
+            passed=passed_cases,
+            cases=results,
+        )
+
     def load_file_records(self, paths: Sequence[str]) -> list[IndexedFile]:
         """Load indexed file metadata for repo-relative paths."""
         if not paths:
@@ -2611,7 +2687,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    for name in ("index", "query", "pack"):
+    for name in ("index", "query", "pack", "benchmark"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--config", required=True, type=pathlib.Path)
         cmd.add_argument("--repo", required=True, type=pathlib.Path)
@@ -2628,6 +2704,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     pack.add_argument("--query", required=True)
     pack.add_argument("--limit", type=int, default=8)
     pack.add_argument("--output", required=True, type=pathlib.Path)
+
+    benchmark = sub.choices["benchmark"]
+    benchmark.add_argument("--fixtures", required=True, type=pathlib.Path)
+    benchmark.add_argument("--json", action="store_true")
 
     worker = sub.add_parser("worker")
     worker.add_argument("--config", required=True, type=pathlib.Path)
@@ -2671,6 +2751,12 @@ def main(argv: list[str] | None = None) -> int:
         output = service.pack(args.query, limit=args.limit)
         write_text(args.output, output)
         print(args.output)
+        return 0
+    if args.command == "benchmark":
+        service.index()
+        service.consolidate_runtime_artifacts()
+        payload = service.benchmark_cases(load_benchmark_cases(args.fixtures))
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if args.command == "worker":
         if args.interval_seconds <= 0:
