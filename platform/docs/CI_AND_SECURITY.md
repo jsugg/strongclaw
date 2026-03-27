@@ -45,6 +45,10 @@ Linux and macOS runners.
   images ahead of the scenario run, but now uses bounded retries and heartbeat
   logging instead of restoring immutable Docker image tarballs from the
   workflow cache.
+- Repository workflow contract tests verify that shell steps invoking
+  `tests/scripts/*.py` either call an explicit Python interpreter or target an
+  executable script, so nightly cache warming cannot silently regress on file
+  mode drift.
 
 ## Vendored plugin verification
 
