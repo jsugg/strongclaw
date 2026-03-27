@@ -9,6 +9,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
+from typing import Final
 
 from clawops.strongclaw_runtime import load_env_assignments, varlock_local_env_file
 from tests.utils.helpers._fresh_host.models import FreshHostError
@@ -21,6 +22,8 @@ from tests.utils.helpers._hosted_docker.models import (
     PullReport,
 )
 from tests.utils.helpers._hosted_docker.shell import run_checked
+
+COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
 
 
 def resolve_compose_images(
@@ -169,6 +172,11 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
     for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
         if value and not env.get(key, "").strip():
             env[key] = value
+    # `docker compose config --images` still resolves env interpolation before setup creates
+    # the repo-local Varlock contract, so pre-fill the required secrets with placeholders.
+    for key in ("LITELLM_DB_PASSWORD", "NEO4J_PASSWORD"):
+        if not env.get(key, "").strip():
+            env[key] = COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(compose_state_dir)
     if context.compose_variant is not None:
         env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant

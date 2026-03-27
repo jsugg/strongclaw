@@ -202,6 +202,55 @@ def test_ensure_images_inherits_repo_local_varlock_assignments(
     assert report.pull_attempt_count == 0
 
 
+def test_ensure_images_uses_compose_resolution_placeholders_before_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image resolution should prefill required compose secrets before setup runs."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert timeout_seconds == 120
+        assert cwd == workspace.resolve()
+        assert env["NEO4J_PASSWORD"] == hosted_docker_images.COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER
+        assert (
+            env["LITELLM_DB_PASSWORD"] == hosted_docker_images.COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="postgres:16\n", stderr="")
+
+    def fake_list_local_images(images: list[str]) -> list[str]:
+        return list(images)
+
+    monkeypatch.setattr(hosted_docker_images, "run_checked", fake_run_checked)
+    monkeypatch.setattr(hosted_docker_images, "list_local_images", fake_list_local_images)
+
+    report = hosted_docker.ensure_images(Path(context.context_path))
+
+    assert report.images == ["postgres:16"]
+    assert report.missing_before_pull == []
+    assert report.pull_attempt_count == 0
+
+
 def test_wait_for_docker_ready_retries_after_probe_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
