@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 import requests
 
+from tests.plugins.infrastructure.types import RuntimeTestContext
 from tests.utils.helpers.hypermemory import FakeQdrantBackend
 from tests.utils.helpers.mode import ServiceMode
-from tests.utils.helpers.test_context import TestContext
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
 
@@ -53,7 +53,7 @@ def _reserve_local_port() -> int:
 class QdrantRuntime:
     """Resolve mock-or-real Qdrant behavior and track lifecycle cleanup."""
 
-    def __init__(self, context: TestContext | None, mode: ServiceMode) -> None:
+    def __init__(self, context: RuntimeTestContext | None, mode: ServiceMode) -> None:
         self._context = context
         self.mode = mode
         self._cleanup_stack: list[tuple[str, CleanupFn]] = []
@@ -141,14 +141,17 @@ class QdrantRuntime:
             detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
             pytest.fail(f"unable to start Qdrant test container: {detail}")
 
-        self._register_cleanup(
-            f"qdrant:container:{container_name}",
-            lambda: subprocess.run(
+        def _cleanup_container() -> None:
+            subprocess.run(
                 [docker_bin, "rm", "-f", container_name],
                 check=False,
                 capture_output=True,
                 text=True,
-            ),
+            )
+
+        self._register_cleanup(
+            f"qdrant:container:{container_name}",
+            _cleanup_container,
         )
         self._live_url = f"http://127.0.0.1:{port}"
         _wait_for_qdrant(self._live_url)

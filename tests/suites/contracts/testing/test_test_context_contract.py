@@ -1,16 +1,21 @@
-"""Contracts for the per-test context fixture bootstrap."""
+"""Contracts for the universal test-context infrastructure bootstrap."""
 
 from __future__ import annotations
 
 import ast
 
+import pytest
+
+from tests.plugins.infrastructure import TestContext
+from tests.plugins.infrastructure.context import CONTEXT_KEY
 from tests.utils.helpers.repo import REPO_ROOT
 
-_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "test_context.py"
+_PLUGIN_FILE = REPO_ROOT / "tests" / "plugins" / "infrastructure" / "__init__.py"
+_FIXTURE_REGISTRY = REPO_ROOT / "tests" / "fixtures" / "core" / "__init__.py"
 
 
-def test_verify_cleanup_is_autouse() -> None:
-    tree = ast.parse(_FIXTURE_FILE.read_text(encoding="utf-8"))
+def test_runtime_fixture_is_autouse() -> None:
+    tree = ast.parse(_PLUGIN_FILE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -20,19 +25,23 @@ def test_verify_cleanup_is_autouse() -> None:
             if keyword.arg == "autouse":
                 if isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
                     return
-    raise AssertionError("_verify_cleanup must be @pytest.fixture(autouse=True)")
+    raise AssertionError("_test_infrastructure_runtime must be @pytest.fixture(autouse=True)")
 
 
-def test_test_context_fixture_is_function_scoped() -> None:
-    tree = ast.parse(_FIXTURE_FILE.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != "test_context":
-            continue
-        for decorator in node.decorator_list:
-            if not isinstance(decorator, ast.Call):
-                continue
-            for keyword in decorator.keywords:
-                if keyword.arg == "scope":
-                    raise AssertionError("test_context must not override function scope.")
-        return
-    raise AssertionError("test_context fixture not found")
+def test_test_context_fixture_is_accessed_from_stash(
+    request: pytest.FixtureRequest,
+    test_context: TestContext,
+) -> None:
+    assert request.node.stash[CONTEXT_KEY] is test_context
+    assert test_context.nodeid == request.node.nodeid
+    assert test_context.test_name == request.node.name
+
+
+def test_test_context_always_exposes_env_and_patch_runtime(test_context: TestContext) -> None:
+    assert test_context.env is not None
+    assert test_context.patch is not None
+
+
+def test_fixture_registry_no_longer_loads_legacy_test_context_plugin() -> None:
+    source = _FIXTURE_REGISTRY.read_text(encoding="utf-8")
+    assert "tests.fixtures.core.test_context" not in source

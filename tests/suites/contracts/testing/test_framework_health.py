@@ -14,10 +14,12 @@ from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 _EXPECTED_MARKERS = {
     "contract",
     "e2e",
+    "framework",
     "hypermemory",
     "integration",
     "network_local",
     "qdrant",
+    "test_profile",
     "unit",
 }
 
@@ -33,8 +35,22 @@ def test_no_helper_module_exceeds_250_lines() -> None:
         assert line_count <= 250, f"{path.relative_to(REPO_ROOT)} has {line_count} lines"
 
 
+def test_no_infrastructure_module_exceeds_250_lines() -> None:
+    for path in sorted((REPO_ROOT / "tests" / "plugins" / "infrastructure").glob("*.py")):
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        assert line_count <= 250, f"{path.relative_to(REPO_ROOT)} has {line_count} lines"
+
+
 def test_all_fixture_modules_have_docstrings() -> None:
-    for path in sorted((REPO_ROOT / "tests" / "fixtures").glob("*.py")):
+    for path in sorted((REPO_ROOT / "tests" / "fixtures").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
+        assert ast.get_docstring(
+            tree
+        ), f"{path.relative_to(REPO_ROOT)} is missing a module docstring"
+
+
+def test_all_infrastructure_modules_have_docstrings() -> None:
+    for path in sorted((REPO_ROOT / "tests" / "plugins" / "infrastructure").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.as_posix())
         assert ast.get_docstring(
             tree

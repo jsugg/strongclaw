@@ -22,5 +22,15 @@ def test_docs_mention_lane_model() -> None:
         encoding="utf-8"
     )
 
-    for lane in ("unit", "integration", "contracts"):
+    for lane in ("unit", "integration", "contracts", "framework"):
         assert lane in framework_doc
+
+
+def test_docs_mention_infrastructure_runtime_namespace() -> None:
+    framework_doc = (REPO_ROOT / "platform" / "docs" / "TESTING_FRAMEWORK.md").read_text(
+        encoding="utf-8"
+    )
+    fixture_readme = (REPO_ROOT / "tests" / "fixtures" / "README.md").read_text(encoding="utf-8")
+
+    assert "tests/plugins/infrastructure" in framework_doc
+    assert "tests/plugins/infrastructure" in fixture_readme

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
-
-import pytest
 
 from clawops.common import write_yaml
 from clawops.workflow_runner import WorkflowRunner
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.cli import write_fake_acpx, write_status_script
 from tests.utils.helpers.context import build_context_project
 from tests.utils.helpers.journal import create_journal
@@ -55,9 +53,12 @@ def test_workflow_runner_supports_workspace_and_delivery_descriptors(
 
 def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
-    monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "state"))
+    test_context.env.apply_profile(
+        "workflow_state",
+        overrides={"STRONGCLAW_STATE_DIR": tmp_path / "state"},
+    )
     project, workspace, config = build_context_project(tmp_path)
     (workspace / "main.py").write_text("def run_task():\n    return 'ok'\n", encoding="utf-8")
     write_yaml(config, {"index": {"db_path": ".clawops/context.sqlite"}})
@@ -66,7 +67,7 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
     bin_dir.mkdir()
     write_fake_acpx(bin_dir)
     write_status_script(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    test_context.env.prepend_path(bin_dir)
 
     runner = WorkflowRunner(
         {

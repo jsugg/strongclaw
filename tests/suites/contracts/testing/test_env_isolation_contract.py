@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from tests.plugins.infrastructure import TestContext
 from tests.utils.helpers.env import FRAMEWORK_ENV_VARS, EnvironmentManager
 
 
@@ -25,13 +26,13 @@ def test_shared_mode_restores_only_injected_vars(monkeypatch) -> None:
     monkeypatch.setenv("BASELINE_ONLY", "before")
     manager = EnvironmentManager(mode="shared")
     manager.snapshot()
-    manager.inject(TEST_ID="tid")
+    manager.inject(RUNTIME_ONLY="tid")
     os.environ["BASELINE_ONLY"] = "after"
 
     manager.restore()
 
     assert os.environ["BASELINE_ONLY"] == "after"
-    assert "TEST_ID" not in os.environ
+    assert "RUNTIME_ONLY" not in os.environ
 
 
 def test_framework_vars_are_injected_during_test() -> None:
@@ -54,3 +55,9 @@ def test_framework_vars_are_removed_after_test(monkeypatch) -> None:
     manager.restore()
 
     assert not any(key in os.environ for key in FRAMEWORK_ENV_VARS)
+
+
+def test_universal_test_context_matches_framework_env(test_context: TestContext) -> None:
+    assert os.environ["TEST_ID"] == test_context.tid
+    assert os.environ["RESOURCE_PREFIX"] == test_context.resource_prefix
+    assert os.environ["WORKER_ID"] == test_context.worker_id

@@ -7,8 +7,6 @@ import json
 import pathlib
 from collections.abc import Callable
 
-from pytest import MonkeyPatch
-
 from clawops.op_journal import OperationJournal
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
@@ -19,6 +17,7 @@ from clawops.wrappers.github import (
     merge_pull_request,
 )
 from clawops.wrappers.webhook import execute_webhook_approved, invoke_webhook
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.journal import create_journal
 from tests.utils.helpers.policy import write_policy_file
 
@@ -202,10 +201,10 @@ def build_context(
     return ctx, journal
 
 
-def configure_wrapper_environment(spec: WrapperSpec, monkeypatch: MonkeyPatch) -> None:
+def configure_wrapper_environment(spec: WrapperSpec, test_context: TestContext) -> None:
     """Set per-wrapper environment variables for one test."""
-    for key, value in spec.env.items():
-        monkeypatch.setenv(key, value)
+    if spec.env:
+        test_context.env.update(spec.env)
 
 
 def allow_decision_json() -> str:

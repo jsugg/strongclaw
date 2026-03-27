@@ -25,6 +25,8 @@ from tests.utils.helpers.hypermemory import (
 )
 from tests.utils.helpers.observability import RecordingExporter
 
+pytestmark = pytest.mark.test_profile("structured_logs")
+
 
 def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, FakeQdrantBackend]:
     workspace = build_workspace(tmp_path)
@@ -93,10 +95,8 @@ def _configure_rerank_engine(
 
 def test_hypermemory_emits_structured_logs_for_dense_search(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     engine, fake_qdrant = _configure_engine(tmp_path)
     engine.reindex()
 
@@ -157,10 +157,8 @@ def test_hypermemory_search_exports_trace_spans(
 
 def test_hypermemory_logs_fallback_activation(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     engine, fake_qdrant = _configure_engine(tmp_path)
     fake_qdrant.raise_on_search = True
     engine.reindex()
@@ -182,10 +180,8 @@ def test_hypermemory_logs_fallback_activation(
 
 def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
     write_hypermemory_config(workspace, config_path)
@@ -242,10 +238,8 @@ def test_hypermemory_logs_sparse_candidate_counts_for_hypermemory_search(
 
 def test_hypermemory_emits_rerank_logs(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     engine, fake_qdrant = _configure_rerank_engine(
         tmp_path,
         rerank_provider=StaticRerankProvider((0.2, 0.4)),
@@ -283,11 +277,9 @@ def test_hypermemory_emits_rerank_logs(
 
 def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tracing_exporter: RecordingExporter,
 ) -> None:
-    monkeypatch.setenv("CLAWOPS_STRUCTURED_LOGS", "1")
     engine, fake_qdrant = _configure_rerank_engine(
         tmp_path,
         rerank_provider=FailingRerankProvider(),

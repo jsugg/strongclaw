@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import pathlib
 
-from pytest import MonkeyPatch
-
 from clawops import observability
 from clawops.context_service import service_from_config
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
 from clawops.wrappers.webhook import invoke_webhook
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.context import build_context_repo
 from tests.utils.helpers.journal import create_journal
 from tests.utils.helpers.observability import RecordingExporter
@@ -27,7 +26,7 @@ class _FakeResponse:
 
 def test_wrapper_execution_exports_trace_span(
     tmp_path: pathlib.Path,
-    monkeypatch: MonkeyPatch,
+    test_context: TestContext,
     tracing_exporter: RecordingExporter,
 ) -> None:
     policy_path = write_policy_file(
@@ -46,9 +45,9 @@ def test_wrapper_execution_exports_trace_span(
     journal = create_journal(tmp_path / "journal.sqlite")
     ctx = WrapperContext(policy_engine=PolicyEngine.from_file(policy_path), journal=journal)
 
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.wrappers.base.requests.request",
-        lambda *args, **kwargs: _FakeResponse(),
+        new=lambda *args, **kwargs: _FakeResponse(),
     )
 
     result = invoke_webhook(

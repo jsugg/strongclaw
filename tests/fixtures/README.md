@@ -1,11 +1,23 @@
 # Test Fixture Layout
 
-`tests/fixtures/` contains pytest activation surfaces.
-Each module should stay thin and expose fixtures that are meaningful to multiple tests or suites.
-The package is loaded through root `tests/conftest.py`; tests should use fixture injection instead of importing from `tests.fixtures`.
+`tests/plugins/infrastructure/` contains the structural runtime for every test.
+It owns the universal `TestContext`, framework env injection, patch teardown, profile handling,
+and infrastructure-owned pytest hooks.
 
-`tests/utils/helpers/` contains reusable builders, runtimes, and support code.
-Move implementation detail there when it is not itself a pytest fixture.
+`tests/fixtures/` contains domain-facing pytest activation surfaces.
+The package is loaded through root `tests/conftest.py`, then aggregated by package-level
+`pytest_plugins` registries:
+- `tests.plugins.infrastructure`
+- `tests.fixtures`
+- `tests.fixtures.core`
+- `tests.fixtures.platform`
+- `tests.fixtures.hypermemory`
+
+Leaf fixture modules should stay thin and expose fixtures that are meaningful to multiple tests or suites.
+Tests should use fixture injection instead of importing from `tests.fixtures`.
+
+`tests/utils/helpers/` contains reusable builders, subsystem runtimes, and support code.
+Move implementation detail there when it is not itself structural infrastructure or a pytest fixture.
 Import helper functions, fakes, and types from `tests.utils.helpers.*`.
 
 Add a new fixture module when:
@@ -23,10 +35,11 @@ Add a contract test when:
 - Fixture or helper placement matters for maintainability.
 - CI and local test invocation rules need enforcement.
 
-Two-layer pattern:
-- Fixture modules expose pytest fixtures only.
-- Helper modules hold typed implementation logic and runtime helpers.
+Three-layer pattern:
+- Infrastructure modules own universal test runtime behavior.
+- Fixture modules expose domain-facing pytest fixtures only.
+- Helper modules hold typed implementation logic and subsystem runtime helpers.
 
 Example:
-- `tests/fixtures/hypermemory.py` exports `hypermemory_workspace_factory`.
+- `tests/fixtures/hypermemory/workspace.py` exports `hypermemory_workspace_factory`.
 - `tests/utils/helpers/hypermemory.py` implements the workspace builders and fake backends.

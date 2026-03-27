@@ -9,6 +9,7 @@ import pytest
 from clawops.common import write_yaml
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.wrappers import (
     SPECS,
     WrapperSpec,
@@ -22,10 +23,10 @@ from tests.utils.helpers.wrappers_http import install_success_response
 def test_wrapper_denies_non_allowlisted_target(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False, dry_run=True)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
 
     result = spec.invoke(ctx, spec.denied_input)
 
@@ -44,12 +45,12 @@ def test_wrapper_denies_non_allowlisted_target(
 def test_wrapper_replays_stored_decision_when_policy_changes(
     spec: WrapperSpec,
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     ctx, journal = build_context(tmp_path, spec, require_approval=False)
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
     calls: list[str] = []
-    install_success_response(monkeypatch, calls)
+    install_success_response(test_context, calls)
 
     first = spec.invoke(ctx, spec.allowed_input)
 
@@ -74,7 +75,7 @@ def test_wrapper_replays_stored_decision_when_policy_changes(
         journal=journal,
         dry_run=False,
     )
-    configure_wrapper_environment(spec, monkeypatch)
+    configure_wrapper_environment(spec, test_context)
 
     replayed = spec.invoke(deny_ctx, spec.allowed_input)
 

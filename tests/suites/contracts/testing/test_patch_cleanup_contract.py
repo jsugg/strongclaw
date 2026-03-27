@@ -47,3 +47,17 @@ def test_dict_patches_are_stopped_on_context_cleanup() -> None:
     ctx.cleanup_all()
 
     assert payload["mode"] == "before"
+
+
+def test_patch_cleanup_runs_before_resource_cleanup() -> None:
+    events: list[str] = []
+    ctx = TestContext()
+    manager = PatchManager(ctx)
+
+    manager.patch_dict({"mode": "before"}, {"mode": "after"})
+    ctx.register_cleanup("resource", lambda: events.append("resource"))
+    ctx.register_patch_cleanup("patch", lambda: events.append("patch"))
+
+    ctx.cleanup_all()
+
+    assert events == ["patch", "resource"]

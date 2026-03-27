@@ -9,6 +9,7 @@ import pytest
 from clawops.app_paths import scoped_state_dir
 from clawops.common import load_yaml, write_yaml
 from clawops.workflow_runner import WorkflowRunner, main
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -58,9 +59,12 @@ def test_workflow_main_allows_untrusted_paths_with_explicit_override(
 
 def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
-    monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "state"))
+    test_context.env.apply_profile(
+        "workflow_state",
+        overrides={"STRONGCLAW_STATE_DIR": tmp_path / "state"},
+    )
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "module.py").write_text("def run_review():\n    return 'ok'\n", encoding="utf-8")

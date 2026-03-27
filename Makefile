@@ -15,7 +15,7 @@ DOCTOR_ARGS ?=
 PREFERRED_PYTHON := $(shell $(PYTHON) src/clawops/platform_compat.py --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
-.PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: help install setup doctor dev fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-framework test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -78,6 +78,9 @@ test-integration: ## Run the integration pytest lane.
 
 test-contracts: ## Run the contract pytest lane.
 	$(PYTEST) -q -m contract
+
+test-framework: ## Run the explicit pytest framework lane.
+	$(PYTEST) -q -m framework tests/suites/contracts/testing/framework
 
 test-e2e: ## Run the end-to-end pytest lane.
 	$(PYTEST) -q -m e2e

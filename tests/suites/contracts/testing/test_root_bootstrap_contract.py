@@ -51,12 +51,6 @@ def test_root_conftest_registers_shared_fixture_plugins() -> None:
         break
 
     assert plugin_values == (
-        "tests.fixtures.cli",
-        "tests.fixtures.context",
-        "tests.fixtures.hypermemory",
-        "tests.fixtures.journal",
-        "tests.fixtures.network",
-        "tests.fixtures.observability",
-        "tests.fixtures.policy",
-        "tests.fixtures.test_context",
+        "tests.plugins.infrastructure",
+        "tests.fixtures",
     )
