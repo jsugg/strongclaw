@@ -161,6 +161,7 @@ def _ensure_required_defaults(
         "OPENCLAW_CONTROL_USER": values.get("OPENCLAW_CONTROL_USER", "openclawsvc")
         or "openclawsvc",
         "OPENCLAW_STATE_DIR": values.get("OPENCLAW_STATE_DIR", "~/.openclaw") or "~/.openclaw",
+        "NEO4J_USERNAME": values.get("NEO4J_USERNAME", "neo4j") or "neo4j",
         "HYPERMEMORY_EMBEDDING_BASE_URL": "http://127.0.0.1:4000/v1",
         "HYPERMEMORY_QDRANT_URL": "http://127.0.0.1:6333",
         "WHATSAPP_SESSION_DIR": "~/.openclaw/channels/whatsapp",
@@ -172,6 +173,7 @@ def _ensure_required_defaults(
         "OPENCLAW_GATEWAY_TOKEN": generate_secret_value(),
         "LITELLM_MASTER_KEY": generate_secret_value(),
         "LITELLM_DB_PASSWORD": generate_secret_value(),
+        "NEO4J_PASSWORD": generate_secret_value(),
     }
     required_defaults.update(generated_secret_defaults)
     for key, default_value in required_defaults.items():

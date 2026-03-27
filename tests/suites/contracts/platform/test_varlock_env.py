@@ -42,3 +42,17 @@ def test_varlock_schema_and_examples_surface_hypermemory_hypermemory_keys() -> N
         assert "HYPERMEMORY_EMBEDDING_API_BASE" in text
         assert "HYPERMEMORY_EMBEDDING_BASE_URL" in text
         assert "HYPERMEMORY_QDRANT_URL" in text
+
+
+def test_varlock_schema_and_examples_surface_neo4j_credentials() -> None:
+    files = (
+        REPO_ROOT / "platform/configs/varlock/.env.schema",
+        REPO_ROOT / "platform/configs/varlock/.env.local.example",
+        REPO_ROOT / "platform/configs/varlock/.env.prod.example",
+        REPO_ROOT / "platform/configs/varlock/.env.ci.example",
+    )
+
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert "NEO4J_USERNAME" in text
+        assert "NEO4J_PASSWORD" in text

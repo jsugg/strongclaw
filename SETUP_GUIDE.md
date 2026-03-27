@@ -95,6 +95,12 @@ If `varlock` is already installed on the host, you can validate the contract now
 varlock load --path platform/configs/varlock
 ```
 
+The repo-local env contract also carries the local Neo4j sidecar credentials
+used by the codebase context provider. `clawops varlock-env configure` repairs
+them automatically; for manual edits keep `NEO4J_USERNAME=neo4j` unless you
+also rotate the compose-side username, and set `NEO4J_PASSWORD` to a real
+secret.
+
 Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports both guided and env-driven setup:
 

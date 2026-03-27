@@ -107,7 +107,7 @@ services:
   neo4j:
     image: neo4j:5.28.2-community
     environment:
-      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH in username/password form}
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}
     ports:
       - "127.0.0.1:7474:7474"
       - "127.0.0.1:7687:7687"

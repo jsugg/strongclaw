@@ -98,3 +98,9 @@ Scale behavior is explicit per invocation:
 - `small` keeps the file-level lexical path and avoids graph expansion
 - `medium` uses chunk retrieval and graph expansion, preferring Neo4j and degrading to SQLite edges when allowed
 - `large` keeps graph expansion enabled and expects the graph backend to stay healthy
+
+For the shipped local sidecar stack, the codebase provider reads Neo4j
+credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
+contract now carries those keys directly, and the compose stack derives the
+container's `NEO4J_AUTH` value from the same pair so fresh-host bring-up and
+graph-backed retrieval stay aligned.

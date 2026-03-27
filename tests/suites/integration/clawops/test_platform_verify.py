@@ -240,3 +240,20 @@ def test_repo_aux_stack_healthchecks_use_binaries_available_in_the_pinned_images
     assert "/dev/tcp/127.0.0.1/6333" in qdrant_test[3]
     assert neo4j_test[:3] == ["CMD", "bash", "-lc"]
     assert "/dev/tcp/127.0.0.1/7474" in neo4j_test[3]
+
+
+def test_repo_aux_stack_neo4j_auth_uses_shared_varlock_credentials() -> None:
+    compose_paths = (
+        REPO_ROOT / "platform/compose/docker-compose.aux-stack.yaml",
+        REPO_ROOT / "platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml",
+    )
+
+    expected_auth = (
+        "${NEO4J_USERNAME:-neo4j}/"
+        "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}"
+    )
+
+    for compose_path in compose_paths:
+        compose = load_yaml(compose_path)
+        neo4j_env = compose["services"]["neo4j"]["environment"]
+        assert neo4j_env["NEO4J_AUTH"] == expected_auth
