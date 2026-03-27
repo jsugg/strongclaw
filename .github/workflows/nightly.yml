@@ -40,3 +40,19 @@ jobs:
             coverage.xml
             pytest.xml
             ${{ runner.temp }}/strongclaw/nightly
+
+  warm-fresh-host-caches:
+    name: Warm Fresh Host Caches
+    uses: ./.github/workflows/fresh-host-cache-warm.yml
+
+  run-nightly-fresh-host-acceptance:
+    name: Nightly Fresh Host Acceptance
+    needs: warm-fresh-host-caches
+    uses: ./.github/workflows/fresh-host-core.yml
+    with:
+      macos_runtime_provider: colima
+      docker_pull_parallelism: "2"
+      docker_pull_max_attempts: "3"
+      enable_package_cache: true
+      enable_homebrew_cache: true
+      enable_runtime_download_cache: true

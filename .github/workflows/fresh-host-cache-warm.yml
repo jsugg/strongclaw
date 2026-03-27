@@ -1,0 +1,114 @@
+name: Fresh Host Cache Warm
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  MACOS_COLIMA_VERSION: "v0.10.1"
+  MACOS_LIMA_VERSION: "v2.0.3"
+  MACOS_COLIMA_DISK_GIB: "20"
+  DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
+  FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
+  UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
+  npm_config_cache: ${{ github.workspace }}/.github-cache/npm
+  npm_config_prefer_offline: "true"
+  HOMEBREW_CACHE: ${{ github.workspace }}/.github-cache/homebrew
+  FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/.github-cache/macos-runtime-tools
+
+jobs:
+  linux-package-cache:
+    name: Warm Linux Fresh Host Package Cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        id: linux_package_cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
+      - if: ${{ success() && steps.linux_package_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+
+  macos-caches:
+    name: Warm macOS Fresh Host Caches
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        id: macos_package_cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          restore-keys: |
+            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS Homebrew download cache
+        id: macos_homebrew_cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ env.HOMEBREW_CACHE }}
+          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
+          restore-keys: |
+            fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
+      - name: Restore hosted macOS runtime download cache
+        id: macos_runtime_download_cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .github-cache/macos-runtime-tools
+          key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
+          restore-keys: |
+            fresh-host-macos-runtime-tools-${{ runner.arch }}-
+      - run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
+      - run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
+      - if: ${{ success() && steps.macos_package_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+      - if: ${{ success() && steps.macos_homebrew_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ env.HOMEBREW_CACHE }}
+          key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
+      - if: ${{ success() && steps.macos_runtime_download_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .github-cache/macos-runtime-tools
+          key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
