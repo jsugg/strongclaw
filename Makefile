@@ -7,7 +7,8 @@ RUN ?= $(UV) run
 PRE_COMMIT ?= $(RUN) pre-commit
 PYTEST ?= $(UV) run --locked pytest
 DEV_SYNC_FLAGS ?= --locked
-CONTEXT_CONFIG ?= platform/configs/context/context-service.yaml
+CONTEXT_CONFIG ?= platform/configs/context/codebase.yaml
+CONTEXT_SCALE ?= small
 REPO_DIR ?= .
 RUNS_DIR ?=
 SETUP_ARGS ?=
@@ -114,7 +115,7 @@ verify: ## Run the baseline verification flow.
 	$(RUN) clawops baseline verify
 
 context-index: ## Build the repo lexical context index.
-	$(RUN) clawops context index --config $(CONTEXT_CONFIG) --repo $(REPO_DIR)
+	$(RUN) clawops context codebase index --scale $(CONTEXT_SCALE) --config $(CONTEXT_CONFIG) --repo $(REPO_DIR)
 
 run-harness: ## Execute the harness smoke suite.
 	$(RUN) clawops baseline harness-smoke --runs-dir $(if $(RUNS_DIR),$(RUNS_DIR),.tmp/harness)

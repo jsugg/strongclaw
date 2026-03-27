@@ -8,7 +8,7 @@ This manifest lists the major components shipped in the platform bundle.
 - `src/clawops/json_merge.py`
 - `src/clawops/op_journal.py`
 - `src/clawops/policy_engine.py`
-- `src/clawops/context_service.py`
+- `src/clawops/context/`
 - `src/clawops/skill_scanner.py`
 - `src/clawops/harness.py`
 - `src/clawops/charts.py`

@@ -9,6 +9,12 @@ from collections.abc import Mapping, Sequence
 from typing import Final, Literal, cast
 
 from clawops.common import canonical_json, sha256_hex
+from clawops.context.contracts import (
+    ContextProvider,
+    ContextScale,
+    validate_context_provider,
+    validate_context_scale,
+)
 from clawops.process_runner import run_command
 from clawops.typed_values import (
     as_bool,
@@ -342,6 +348,8 @@ def build_lock_identity(
 class ContextRequest:
     """Context envelope assembly inputs for a workflow task."""
 
+    provider: ContextProvider
+    scale: ContextScale
     config_path: pathlib.Path
     query: str
     limit: int = 8
@@ -438,6 +446,8 @@ class OrchestrationTask:
         }
         if self.context_request is not None:
             payload["context"] = {
+                "provider": self.context_request.provider,
+                "scale": self.context_request.scale,
                 "config_path": str(self.context_request.config_path),
                 "query": self.context_request.query,
                 "limit": self.context_request.limit,
@@ -497,6 +507,10 @@ def _parse_context_request(
     if value is None:
         return None
     context_mapping = as_mapping(value, path="task.context")
+    provider = validate_context_provider(
+        context_mapping.get("provider"), path="task.context.provider"
+    )
+    scale = validate_context_scale(context_mapping.get("scale"), path="task.context.scale")
     config_path = _resolve_path(
         base_dir, context_mapping.get("config"), field_name="task.context.config"
     )
@@ -518,6 +532,8 @@ def _parse_context_request(
         for item in prior_artifact_values
     )
     return ContextRequest(
+        provider=provider,
+        scale=scale,
         config_path=config_path,
         query=query,
         limit=limit,

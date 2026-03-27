@@ -106,8 +106,33 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  neo4j:
+    image: neo4j:5.28.2-community
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH in username/password form}
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/7474 && printf 'GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && IFS=$'\\r' read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 15
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   litellm-data:
   otel-data:
   qdrant-data:
+  neo4j-data:

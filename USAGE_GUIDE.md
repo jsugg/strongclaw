@@ -194,16 +194,18 @@ is written under that run's `audit/` directory.
 Index:
 
 ```bash
-clawops context index \
-  --config platform/configs/context/context-service.yaml \
+clawops context codebase index \
+  --scale small \
+  --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/myrepo
 ```
 
 Query:
 
 ```bash
-clawops context query \
-  --config platform/configs/context/context-service.yaml \
+clawops context codebase query \
+  --scale medium \
+  --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/myrepo \
   --query "JWT validation bug"
 ```
@@ -211,8 +213,9 @@ clawops context query \
 Build a pack:
 
 ```bash
-clawops context pack \
-  --config platform/configs/context/context-service.yaml \
+clawops context codebase pack \
+  --scale medium \
+  --config platform/configs/context/codebase.yaml \
   --repo ~/Projects/myrepo \
   --query "regression around auth middleware" \
   --output /tmp/context-pack.md

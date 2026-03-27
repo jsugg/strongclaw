@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from clawops import observability
-from clawops.context_service import service_from_config
+from clawops.context.codebase.service import service_from_config
 from clawops.policy_engine import PolicyEngine
 from clawops.wrappers.base import WrapperContext
 from clawops.wrappers.webhook import invoke_webhook
@@ -78,11 +78,13 @@ def test_context_index_exports_trace_span(
         files={"auth.py": "def validate_jwt():\n    return True\n"},
     )
 
-    service = service_from_config(config_path, repo)
+    service = service_from_config(config_path, repo, scale="small")
     stats = service.index_with_stats()
     observability.force_flush()
 
-    span = next(span for span in tracing_exporter.spans if span.name == "clawops.context.index")
+    span = next(
+        span for span in tracing_exporter.spans if span.name == "clawops.context.codebase.index"
+    )
     attributes = span.attributes
     assert attributes is not None
     assert stats.indexed_files == 1

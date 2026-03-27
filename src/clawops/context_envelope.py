@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from clawops.app_paths import scoped_state_dir
 from clawops.common import canonical_json, load_json, sha256_hex, write_json, write_text
-from clawops.context_service import ContextService, IndexedFile
+from clawops.context.codebase.service import CodebaseContextService, IndexedFile
 from clawops.orchestration import (
     CONTEXT_ENVELOPE_SCHEMA_VERSION,
     ProjectDescriptor,
@@ -49,6 +49,9 @@ class ContextEnvelopeManifest:
     lane: str
     role: str
     backend: str
+    context_provider: str
+    context_scale: str
+    retrieval_modes: tuple[str, ...]
     query: str
     created_at: str
     producer: str
@@ -74,6 +77,9 @@ class ContextEnvelopeManifest:
             "lane": self.lane,
             "role": self.role,
             "backend": self.backend,
+            "context_provider": self.context_provider,
+            "context_scale": self.context_scale,
+            "retrieval_modes": list(self.retrieval_modes),
             "query": self.query,
             "created_at": self.created_at,
             "producer": self.producer,
@@ -147,6 +153,11 @@ class ContextEnvelopeManifest:
             lane=_required_str("lane"),
             role=_required_str("role"),
             backend=_required_str("backend"),
+            context_provider=_required_str("context_provider"),
+            context_scale=_required_str("context_scale"),
+            retrieval_modes=tuple(
+                as_string_list(payload_mapping.get("retrieval_modes", []), path="retrieval_modes")
+            ),
             query=_required_str("query"),
             created_at=_required_str("created_at"),
             producer=_required_str("producer"),
@@ -237,6 +248,9 @@ def _render_body(
     lines.append(f"- lane: {manifest.lane}")
     lines.append(f"- role: {manifest.role}")
     lines.append(f"- backend: {manifest.backend}")
+    lines.append(f"- context_provider: {manifest.context_provider}")
+    lines.append(f"- context_scale: {manifest.context_scale}")
+    lines.append(f"- retrieval_modes: {', '.join(manifest.retrieval_modes)}")
     lines.append(f"- query: {manifest.query}")
     lines.append("")
     if scm_delta_text:
@@ -298,13 +312,15 @@ class ContextEnvelopeBuilder:
 
     def __init__(
         self,
-        service: ContextService,
+        service: CodebaseContextService,
         *,
         project: ProjectDescriptor,
         workspace: WorkspaceDescriptor,
         lane: str,
         role: str,
         backend: str,
+        provider: str,
+        scale: str,
     ) -> None:
         self.service = service
         self.project = project
@@ -312,6 +328,8 @@ class ContextEnvelopeBuilder:
         self.lane = lane
         self.role = role
         self.backend = backend
+        self.provider = provider
+        self.scale = scale
 
     def _scm_delta(self, previous_manifest: ContextEnvelopeManifest | None) -> tuple[str, str, str]:
         """Return the SCM delta kind, text, and hash."""
@@ -361,6 +379,9 @@ class ContextEnvelopeBuilder:
                     "lane": self.lane,
                     "role": self.role,
                     "backend": self.backend,
+                    "context_provider": self.provider,
+                    "context_scale": self.scale,
+                    "retrieval_modes": list(self.service.backend_modes()),
                     "query": query,
                     "index_snapshot_id": index_snapshot_id,
                     "source_state_hash": source_state_hash,
@@ -382,6 +403,9 @@ class ContextEnvelopeBuilder:
             lane=self.lane,
             role=self.role,
             backend=self.backend,
+            context_provider=self.provider,
+            context_scale=self.scale,
+            retrieval_modes=self.service.backend_modes(),
             query=query,
             created_at=_timestamp_text(),
             producer="clawops.context_envelope",
@@ -448,7 +472,7 @@ class ContextEnvelopeBuilder:
 def validate_context_envelope(
     envelope: ContextEnvelope,
     *,
-    service: ContextService | None = None,
+    service: CodebaseContextService | None = None,
     workspace: WorkspaceDescriptor | None = None,
 ) -> None:
     """Validate one materialized context envelope."""

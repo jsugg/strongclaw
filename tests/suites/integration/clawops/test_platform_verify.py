@@ -28,6 +28,8 @@ def _write_sidecars_compose(
     otlp: Endpoint,
     metrics: Endpoint,
     qdrant: Endpoint,
+    neo4j_http: Endpoint,
+    neo4j_bolt: Endpoint,
 ) -> None:
     write_yaml(
         compose_path,
@@ -49,6 +51,13 @@ def _write_sidecars_compose(
                 },
                 "qdrant": {
                     "ports": [_port_mapping(qdrant, 6333)],
+                    "healthcheck": {"test": ["CMD", "true"]},
+                },
+                "neo4j": {
+                    "ports": [
+                        _port_mapping(neo4j_http, 7474),
+                        _port_mapping(neo4j_bolt, 7687),
+                    ],
                     "healthcheck": {"test": ["CMD", "true"]},
                 },
             }
@@ -103,6 +112,8 @@ def test_verify_sidecars_supports_runtime_probes(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.http_listener(b"ok\n"),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -121,6 +132,8 @@ def test_verify_sidecars_reports_http_disconnects_without_crashing(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.http_listener(b"ok\n"),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -142,6 +155,8 @@ def test_verify_sidecars_reports_qdrant_runtime_failures(
         otlp=network_runtime.tcp_listener(),
         metrics=network_runtime.http_listener(b"otel metrics\n"),
         qdrant=network_runtime.disconnecting_listener(),
+        neo4j_http=network_runtime.http_listener(b"neo4j\n"),
+        neo4j_bolt=network_runtime.tcp_listener(),
     )
 
     report = verify_sidecars(compose_path=compose_path, skip_runtime=False)
@@ -217,8 +232,11 @@ def test_repo_aux_stack_healthchecks_use_binaries_available_in_the_pinned_images
 
     litellm_test = compose["services"]["litellm"]["healthcheck"]["test"]
     qdrant_test = compose["services"]["qdrant"]["healthcheck"]["test"]
+    neo4j_test = compose["services"]["neo4j"]["healthcheck"]["test"]
 
     assert litellm_test[:2] == ["CMD", "/usr/bin/python3"]
     assert "urllib.request.urlopen" in litellm_test[3]
     assert qdrant_test[:3] == ["CMD", "bash", "-lc"]
     assert "/dev/tcp/127.0.0.1/6333" in qdrant_test[3]
+    assert neo4j_test[:3] == ["CMD", "bash", "-lc"]
+    assert "/dev/tcp/127.0.0.1/7474" in neo4j_test[3]

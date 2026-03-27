@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-from clawops.context_service import load_config
+from clawops.context.codebase.service import load_config
 from tests.utils.helpers.repo import REPO_ROOT
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -41,7 +41,7 @@ def test_markdown_relative_links_resolve() -> None:
 
 
 def test_shipped_context_config_loads() -> None:
-    config = load_config(REPO_ROOT / "platform/configs/context/context-service.yaml")
+    config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
     assert config.include_globs
     assert config.exclude_globs
     assert "platform/plugins/memory-lancedb-pro/**" in config.exclude_globs

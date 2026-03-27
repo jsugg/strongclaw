@@ -70,7 +70,7 @@ def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
     (repo / "module.py").write_text("def run_review():\n    return 'ok'\n", encoding="utf-8")
 
     policy_path = repo / "platform" / "configs" / "policy" / "policy.yaml"
-    config_path = repo / "platform" / "configs" / "context" / "context-service.yaml"
+    config_path = repo / "platform" / "configs" / "context" / "codebase.yaml"
     workflow_path = tmp_path / "workflows" / "code-review.yaml"
 
     write_yaml(
@@ -110,7 +110,9 @@ def test_workflow_runner_resolves_workflow_base_dir_relative_to_workflow_file(
                 {
                     "name": "context",
                     "kind": "context_pack",
-                    "config": "platform/configs/context/context-service.yaml",
+                    "provider": "codebase",
+                    "scale": "small",
+                    "config": "platform/configs/context/codebase.yaml",
                     "repo": ".",
                     "query": "run_review",
                 },

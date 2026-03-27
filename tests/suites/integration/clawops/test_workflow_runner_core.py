@@ -52,3 +52,23 @@ def test_workflow_runner_rejects_implicit_shell_for_string_commands() -> None:
     )
     with pytest.raises(ValueError, match="string commands require shell=True"):
         runner.run()
+
+
+def test_workflow_runner_requires_explicit_context_provider_and_scale() -> None:
+    runner = WorkflowRunner(
+        {
+            "steps": [
+                {
+                    "name": "context",
+                    "kind": "context_pack",
+                    "config": "context.yaml",
+                    "repo": ".",
+                    "query": "review auth",
+                }
+            ]
+        },
+        dry_run=True,
+    )
+
+    with pytest.raises(TypeError, match="context_pack.provider must be a string"):
+        runner.run()

@@ -17,6 +17,8 @@ steps:
 
   - name: dry context pack
     kind: context_pack
-    config: platform/configs/context/context-service.yaml
+    provider: codebase
+    scale: small
+    config: platform/configs/context/codebase.yaml
     repo: .
     query: "review recent auth changes"
