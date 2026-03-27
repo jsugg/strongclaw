@@ -1,21 +1,40 @@
-"""Canonical storage service for StrongClaw hypermemory.
-
-This service owns canonical Markdown mutation and lifecycle maintenance.
-
-Implementation started as a thin wrapper around `_engine/storage.py`, then was
-incrementally internalized to make composition boundaries explicit and to
-shrink `HypermemoryEngine`.
-"""
+"""Canonical storage service for StrongClaw hypermemory."""
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from typing import Any, Literal, Protocol, cast
 
-from clawops.hypermemory._engine import storage as storage_impl
+from clawops.hypermemory.canonical_store_helpers import (
+    allows_memory_pro_export_path,
+    append_unique_entry,
+    build_proposal,
+    document_header,
+    entry_hash_prefix,
+    entry_identity,
+    fact_category,
+    format_entry_line,
+    format_proposal_line,
+    infer_fact_key,
+    infer_query_fact_key,
+    is_noise_entry,
+    load_entities_json,
+    load_evidence_json,
+    memory_pro_importance,
+    memory_pro_timestamp_ms,
+    normalize_tier,
+    passes_admission,
+    proposal_kind,
+    resolve_writable_path,
+    search_hit_text,
+    store_target,
+    typed_entry_text,
+)
 from clawops.hypermemory.capture import (
     CaptureCandidate,
     extract_candidates_llm,
@@ -23,6 +42,14 @@ from clawops.hypermemory.capture import (
     resolve_capture_api_key,
 )
 from clawops.hypermemory.config import HypermemoryConfig, resolve_under_workspace
+from clawops.hypermemory.contracts import (
+    BenchmarkCaseResult,
+    BenchmarkResult,
+    FlushMetadataResult,
+    MemoryProImportResult,
+    MemoryProRecord,
+    MemoryProRecordMetadata,
+)
 from clawops.hypermemory.defaults import MEMORY_PRO_CATEGORY_MAP, WRITABLE_PREFIXES
 from clawops.hypermemory.governance import ensure_writable_scope, validate_scope
 from clawops.hypermemory.lifecycle import TierManager, compute_decay_score
@@ -37,7 +64,7 @@ from clawops.hypermemory.models import (
     SearchMode,
     Tier,
 )
-from clawops.hypermemory.parser import iter_retained_notes
+from clawops.hypermemory.parser import iter_retained_notes, parse_typed_entry
 from clawops.hypermemory.search_hit_mapper import row_to_search_hit as row_to_search_hit_impl
 from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log
@@ -86,7 +113,7 @@ class CanonicalStoreService:
         self.config: HypermemoryConfig = config
         self._deps = deps
 
-    # ---- engine-facing callables expected by storage_impl ----
+    # ---- engine-facing callables consumed by the public canonical store ----
 
     def connect(self) -> sqlite3.Connection:
         return self._deps.connect()
@@ -236,9 +263,9 @@ class CanonicalStoreService:
                 )
             return payload
 
-    def benchmark_cases(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    def benchmark_cases(self, cases: list[dict[str, Any]]) -> BenchmarkResult:
         """Run simple benchmark cases against the current engine."""
-        results: list[dict[str, Any]] = []
+        results: list[BenchmarkCaseResult] = []
         passed = 0
         for case in cases:
             name = str(case["name"])
@@ -262,12 +289,13 @@ class CanonicalStoreService:
                     "passed": hit,
                 }
             )
-        return {
+        payload: BenchmarkResult = {
             "provider": "strongclaw-hypermemory",
             "cases": results,
             "passed": passed,
             "total": len(results),
         }
+        return payload
 
     def export_memory_pro_import(
         self,
@@ -275,11 +303,11 @@ class CanonicalStoreService:
         scope: str | None = None,
         include_daily: bool = False,
         auto_index: bool = True,
-    ) -> dict[str, Any]:
+    ) -> MemoryProImportResult:
         resolved_scope = validate_scope(scope or self.config.governance.default_scope)
         if auto_index and self.is_dirty():
             self.reindex()
-        memories: list[dict[str, Any]] = []
+        memories: list[MemoryProRecord] = []
         with self.connect() as conn:
             for row in self._memory_pro_export_rows(conn, scope=resolved_scope):
                 rel_path = str(row["rel_path"])
@@ -299,7 +327,7 @@ class CanonicalStoreService:
                 source_fingerprint = (
                     f"{item_type}:{resolved_scope}:{rel_path}:{start_line}:{end_line}:{text}"
                 )
-                metadata: dict[str, Any] = {
+                metadata: MemoryProRecordMetadata = {
                     "source": "strongclaw-hypermemory",
                     "hypermemory": {
                         "itemType": item_type,
@@ -325,12 +353,13 @@ class CanonicalStoreService:
                         "metadata": metadata,
                     }
                 )
-        return {
+        payload: MemoryProImportResult = {
             "provider": "strongclaw-hypermemory",
             "scope": resolved_scope,
             "includeDaily": include_daily,
             "memories": memories,
         }
+        return payload
 
     def store(
         self,
@@ -705,7 +734,7 @@ class CanonicalStoreService:
         """Record that recalled items were contradicted or unhelpful."""
         return self._increment_feedback_counts(item_ids=item_ids, column="bad_recall_count")
 
-    def flush_metadata(self) -> dict[str, Any]:
+    def flush_metadata(self) -> FlushMetadataResult:
         if not self.config.db_path.exists():
             return {"ok": True, "updatedFiles": 0, "updatedEntries": 0}
         updated_files = 0
@@ -807,40 +836,341 @@ class CanonicalStoreService:
         flush_payload = self.flush_metadata()
         return {"ok": True, "evaluated": evaluated, "changed": changed, "flush": flush_payload}
 
-    # ---- internal/test seam bindings reused by storage_impl ----
+    def _is_noise(self, text: str) -> bool:
+        return is_noise_entry(text, config=self.config)
 
-    _is_noise = storage_impl._is_noise
-    _passes_admission = storage_impl._passes_admission
-    _normalize_tier = storage_impl._normalize_tier
-    _infer_fact_key = storage_impl._infer_fact_key
-    _infer_query_fact_key = storage_impl._infer_query_fact_key
-    _fact_category = storage_impl._fact_category
-    _entry_hash_prefix = storage_impl._entry_hash_prefix
-    _search_hit_text = storage_impl._search_hit_text
-    _typed_entry_text = storage_impl._typed_entry_text
-    _resolve_entry_reference = storage_impl._resolve_entry_reference
-    _entry_reference_from_item_id = storage_impl._entry_reference_from_item_id
-    _entry_reference_from_text = storage_impl._entry_reference_from_text
-    _apply_forget = storage_impl._apply_forget
-    _invalidated_line = storage_impl._invalidated_line
-    _synced_line_from_row = storage_impl._synced_line_from_row
-    _row_to_search_hit = row_to_search_hit_impl
-    _is_semantically_duplicate = storage_impl._is_semantically_duplicate
-    _increment_feedback_counts = storage_impl._increment_feedback_counts
-    _age_days = storage_impl._age_days
-    _memory_pro_export_rows = storage_impl._memory_pro_export_rows
-    _allows_memory_pro_export_path = storage_impl._allows_memory_pro_export_path
-    _load_entities_json = storage_impl._load_entities_json
-    _load_evidence_json = storage_impl._load_evidence_json
-    _memory_pro_importance = storage_impl._memory_pro_importance
-    _memory_pro_timestamp_ms = storage_impl._memory_pro_timestamp_ms
-    _resolve_read_path = storage_impl._resolve_read_path
-    _resolve_writable_path = storage_impl._resolve_writable_path
-    _store_target = storage_impl._store_target
-    _format_entry_line = storage_impl._format_entry_line
-    _append_unique_entry = storage_impl._append_unique_entry
-    _document_header = storage_impl._document_header
-    _entry_identity = storage_impl._entry_identity
-    _build_proposal = storage_impl._build_proposal
-    _format_proposal_line = storage_impl._format_proposal_line
-    _proposal_kind = storage_impl._proposal_kind
+    def _passes_admission(self, candidate: CaptureCandidate) -> bool:
+        return passes_admission(candidate, config=self.config)
+
+    def _normalize_tier(self, value: str | Tier | None) -> Tier:
+        return normalize_tier(value)
+
+    def _infer_fact_key(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        text: str,
+    ) -> str | None:
+        return infer_fact_key(kind=kind, text=text)
+
+    def _infer_query_fact_key(self, query: str) -> str | None:
+        return infer_query_fact_key(query)
+
+    def _fact_category(self, fact_key: str):
+        return fact_category(fact_key)
+
+    def _entry_hash_prefix(self, entry_line: str) -> str:
+        return entry_hash_prefix(entry_line)
+
+    def _search_hit_text(self, hit: SearchHit) -> str:
+        return search_hit_text(hit)
+
+    def _typed_entry_text(self, entry_line: str) -> str:
+        return typed_entry_text(entry_line)
+
+    def _resolve_entry_reference(
+        self,
+        *,
+        item_id: int | None = None,
+        query: str | None = None,
+        path: str | None = None,
+        entry_text: str | None = None,
+    ) -> dict[str, Any] | None:
+        if item_id is not None:
+            with self.connect() as conn:
+                return self._entry_reference_from_item_id(conn, item_id=item_id)
+        if query:
+            hits = self.search(query, max_results=1, lane="memory")
+            if hits and hits[0].score >= 0.9 and hits[0].item_id is not None:
+                with self.connect() as conn:
+                    return self._entry_reference_from_item_id(conn, item_id=hits[0].item_id)
+        if path and entry_text:
+            return self._entry_reference_from_text(path=path, entry_text=entry_text)
+        if entry_text:
+            writable_paths: list[str] = []
+            bank_dir = self.config.workspace_root / self.config.bank_dir
+            if bank_dir.exists():
+                writable_paths.extend(
+                    resolve_under_workspace(self.config.workspace_root, candidate)
+                    for candidate in sorted(bank_dir.rglob("*.md"))
+                )
+            for rel_path in writable_paths:
+                target = self._entry_reference_from_text(path=rel_path, entry_text=entry_text)
+                if target is not None:
+                    return target
+        return None
+
+    def _entry_reference_from_item_id(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        item_id: int,
+    ) -> dict[str, Any] | None:
+        row = conn.execute(
+            """
+                SELECT id, rel_path, start_line, snippet, scope
+                FROM search_items
+                WHERE id = ?
+                """,
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "item_id": int(row["id"]),
+            "rel_path": str(row["rel_path"]),
+            "start_line": int(row["start_line"]),
+            "entry_line": str(row["snippet"]),
+            "scope": str(row["scope"]),
+        }
+
+    def _entry_reference_from_text(self, *, path: str, entry_text: str) -> dict[str, Any] | None:
+        target = self._resolve_writable_path(path)
+        if not target.exists():
+            return None
+        for line_number, raw_line in enumerate(
+            target.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            bullet_match = re.match(r"^(?P<prefix>\s*[-*]\s+)(?P<body>.+?)\s*$", raw_line)
+            if bullet_match is None:
+                continue
+            body = bullet_match.group("body").strip()
+            if self._typed_entry_text(body).casefold() != entry_text.strip().casefold():
+                continue
+            parsed = parse_typed_entry(body, default_scope=self.config.governance.default_scope)
+            if parsed is None:
+                continue
+            return {
+                "rel_path": path,
+                "start_line": line_number,
+                "entry_line": body,
+                "scope": parsed.scope,
+            }
+        return None
+
+    def _apply_forget(self, *, rel_path: str, start_line: int, hard_delete: bool = False) -> None:
+        path = self._resolve_writable_path(rel_path)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        line_index = start_line - 1
+        if line_index < 0 or line_index >= len(lines):
+            raise IndexError(f"{rel_path}:{start_line} is outside the file")
+        if hard_delete:
+            del lines[line_index]
+        else:
+            updated_line = self._invalidated_line(lines[line_index])
+            if updated_line is None:
+                raise ValueError(f"{rel_path}:{start_line} is not a typed durable entry")
+            lines[line_index] = updated_line
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _invalidated_line(self, current_line: str) -> str | None:
+        match = re.match(r"^(?P<prefix>\s*[-*]\s+)(?P<body>.+?)\s*$", current_line)
+        if match is None:
+            return None
+        body = match.group("body").strip()
+        parsed = parse_typed_entry(body, default_scope=self.config.governance.default_scope)
+        if parsed is None or parsed.item_type not in {"fact", "reflection", "opinion", "entity"}:
+            return None
+        entity = next(iter(parsed.entities), None) if parsed.item_type == "entity" else None
+        updated = self._format_entry_line(
+            kind=cast(Literal["fact", "reflection", "opinion", "entity"], parsed.item_type),
+            text=self._typed_entry_text(body),
+            entity=entity,
+            confidence=parsed.confidence,
+            scope=parsed.scope,
+            fact_key=parsed.fact_key,
+            importance=parsed.importance,
+            tier=parsed.tier,
+            access_count=parsed.access_count,
+            last_access_date=parsed.last_access_date,
+            injected_count=parsed.injected_count,
+            confirmed_count=parsed.confirmed_count,
+            bad_recall_count=parsed.bad_recall_count,
+            invalidated_at=date.today().isoformat(),
+            supersedes=parsed.supersedes,
+            evidence=parsed.evidence,
+            contradicts=parsed.contradicts,
+        )
+        return f"{match.group('prefix')}{updated}"
+
+    def _synced_line_from_row(self, current_line: str, *, row: sqlite3.Row) -> str | None:
+        match = re.match(r"^(?P<prefix>\s*[-*]\s+)(?P<body>.+?)\s*$", current_line)
+        if match is None:
+            return None
+        body = match.group("body").strip()
+        parsed = parse_typed_entry(body, default_scope=self.config.governance.default_scope)
+        if parsed is None:
+            return None
+        if parsed.item_type not in {"fact", "reflection", "opinion", "entity"}:
+            return None
+        entity = next(iter(parsed.entities), None) if parsed.item_type == "entity" else None
+        updated = self._format_entry_line(
+            kind=cast(Literal["fact", "reflection", "opinion", "entity"], parsed.item_type),
+            text=self._typed_entry_text(body),
+            entity=entity,
+            confidence=None if row["confidence"] is None else float(row["confidence"]),
+            scope=str(row["scope"]),
+            fact_key=None if row["fact_key"] is None else str(row["fact_key"]),
+            importance=None if row["importance"] is None else float(row["importance"]),
+            tier=self._normalize_tier(str(row["tier"])),
+            access_count=int(row["access_count"] or 0),
+            last_access_date=(
+                None if row["last_access_date"] is None else str(row["last_access_date"])
+            ),
+            injected_count=int(row["injected_count"] or 0),
+            confirmed_count=int(row["confirmed_count"] or 0),
+            bad_recall_count=int(row["bad_recall_count"] or 0),
+            invalidated_at=(None if row["invalidated_at"] is None else str(row["invalidated_at"])),
+            supersedes=None if row["supersedes"] is None else str(row["supersedes"]),
+            evidence=parsed.evidence,
+            contradicts=parsed.contradicts,
+        )
+        return f"{match.group('prefix')}{updated}"
+
+    def _row_to_search_hit(self, row: sqlite3.Row) -> SearchHit:
+        return row_to_search_hit_impl(self, row)
+
+    def _is_semantically_duplicate(
+        self,
+        *,
+        kind: str,
+        text: str,
+        scope: str,
+        threshold: float,
+    ) -> tuple[bool, SearchHit | None]:
+        if not self.config.embedding.enabled:
+            return False, None
+        hits = self.search(
+            text,
+            max_results=1,
+            lane="memory",
+            scope=None if self.config.dedup.check_cross_scope else scope,
+            auto_index=False,
+        )
+        if not hits:
+            return False, None
+        top_hit = hits[0]
+        if top_hit.score >= threshold and top_hit.item_type == kind:
+            return True, top_hit
+        return False, None
+
+    def _increment_feedback_counts(
+        self,
+        *,
+        item_ids: Sequence[int],
+        column: str,
+        date_column: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_ids = sorted({int(item_id) for item_id in item_ids if int(item_id) > 0})
+        if not normalized_ids:
+            return {"ok": True, "updated": 0}
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        with self.connect() as conn:
+            params: list[Any] = [date.today().isoformat()] if date_column is not None else []
+            params.extend(normalized_ids)
+            set_clause = f"{column} = {column} + 1"
+            if date_column is not None:
+                set_clause += f", {date_column} = ?"
+            before = conn.total_changes
+            conn.execute(
+                f"""
+                    UPDATE search_items
+                    SET {set_clause}
+                    WHERE id IN ({placeholders})
+                      AND lane = 'memory'
+                      AND item_type IN ('fact', 'reflection', 'opinion', 'entity')
+                    """,
+                params,
+            )
+            conn.commit()
+            updated = conn.total_changes - before
+        return {"ok": True, "updated": updated}
+
+    def _age_days(self, modified_at: str) -> float:
+        try:
+            timestamp = datetime.fromisoformat(modified_at)
+        except ValueError:
+            return 0.0
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        return max((datetime.now(tz=UTC) - timestamp).total_seconds() / 86400.0, 0.0)
+
+    def _memory_pro_export_rows(self, conn: sqlite3.Connection, *, scope: str):
+        specs = (
+            ("fact", "facts"),
+            ("reflection", "reflections"),
+            ("opinion", "opinions"),
+            ("entity", "entities"),
+        )
+        for item_type, table_name in specs:
+            yield from conn.execute(
+                f"""
+                    SELECT
+                        ? AS item_type,
+                        search_items.rel_path,
+                        search_items.start_line,
+                        search_items.end_line,
+                        search_items.modified_at,
+                        search_items.confidence,
+                        search_items.entities_json,
+                        search_items.evidence_json,
+                        {table_name}.text
+                    FROM {table_name}
+                    JOIN search_items ON search_items.id = {table_name}.item_id
+                    WHERE search_items.scope = ?
+                      AND search_items.invalidated_at IS NULL
+                    ORDER BY search_items.rel_path, search_items.start_line
+                    """,
+                (item_type, scope),
+            )
+
+    def _allows_memory_pro_export_path(self, *, rel_path: str, include_daily: bool) -> bool:
+        return allows_memory_pro_export_path(
+            self.config,
+            rel_path=rel_path,
+            include_daily=include_daily,
+        )
+
+    def _load_entities_json(self, raw_value: object) -> list[str]:
+        return load_entities_json(raw_value)
+
+    def _load_evidence_json(self, raw_value: object) -> list[dict[str, object]]:
+        return load_evidence_json(raw_value)
+
+    def _memory_pro_importance(self, *, item_type: str, confidence: float | None) -> float:
+        return memory_pro_importance(item_type=item_type, confidence=confidence)
+
+    def _memory_pro_timestamp_ms(self, value: str) -> int:
+        return memory_pro_timestamp_ms(value)
+
+    def _resolve_writable_path(self, rel_path: str):
+        return resolve_writable_path(self.config, rel_path)
+
+    def _store_target(
+        self,
+        *,
+        kind: Literal["fact", "reflection", "opinion", "entity"],
+        entity: str | None = None,
+    ):
+        return store_target(self.config, kind=kind, entity=entity)
+
+    def _format_entry_line(self, **kwargs: Any) -> str:
+        return format_entry_line(**kwargs)
+
+    def _append_unique_entry(self, path, *, kind: str, entry_line: str) -> bool:
+        return append_unique_entry(self.config, path, kind=kind, entry_line=entry_line)
+
+    def _document_header(self, path, kind: str) -> str:
+        return document_header(path, kind=kind)
+
+    def _entry_identity(self, entry_line: str):
+        return entry_identity(entry_line, config=self.config)
+
+    def _build_proposal(self, **kwargs: Any):
+        return build_proposal(self.config, **kwargs)
+
+    def _format_proposal_line(self, proposal):
+        return format_proposal_line(proposal)
+
+    def _proposal_kind(self, entry_line: str):
+        return proposal_kind(entry_line, config=self.config)

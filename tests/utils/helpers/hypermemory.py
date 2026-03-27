@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from clawops.hypermemory import DenseSearchCandidate, RerankResponse, SparseSearchCandidate
+from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
 from clawops.hypermemory.models import RerankProviderKind, SearchMode
 
 type HypermemoryWorkspaceFactory = Callable[[], pathlib.Path]
@@ -114,7 +115,7 @@ class FakeQdrantBackend:
 
     def __init__(self) -> None:
         self.ensure_calls: list[int] = []
-        self.upsert_calls: list[list[dict[str, Any]]] = []
+        self.upsert_calls: list[list[VectorPoint]] = []
         self.delete_calls: list[list[str]] = []
         self.dense_limits: list[int] = []
         self.sparse_limits: list[int] = []
@@ -146,7 +147,7 @@ class FakeQdrantBackend:
         if self.raise_on_ensure_collection:
             raise RuntimeError("qdrant collection warmup timed out")
 
-    def upsert_points(self, points: Sequence[dict[str, Any]]) -> None:
+    def upsert_points(self, points: Sequence[VectorPoint]) -> None:
         self.upsert_calls.append(list(points))
         if self.raise_on_upsert:
             raise RuntimeError("qdrant upsert failed")
@@ -166,7 +167,7 @@ class FakeQdrantBackend:
     def search_sparse(
         self,
         *,
-        vector: dict[str, list[int] | list[float]],
+        vector: SparseVectorPayload,
         limit: int,
         mode: SearchMode,
         scope: str | None,

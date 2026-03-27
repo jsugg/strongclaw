@@ -138,7 +138,18 @@ def test_qdrant_backend_uses_expected_rest_payloads() -> None:
                     "dense": [1.0, 0.0, 0.0],
                     "sparse": {"indices": [0, 3], "values": [0.7, 0.2]},
                 },
-                "payload": {"item_id": 42},
+                "payload": {
+                    "item_id": 42,
+                    "rel_path": "docs/runbook.md",
+                    "lane": "corpus",
+                    "source_name": "docs",
+                    "item_type": "paragraph",
+                    "scope": "project:strongclaw",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "modified_at": "2026-03-26T00:00:00+00:00",
+                    "confidence": None,
+                },
             }
         ]
     )
@@ -245,3 +256,38 @@ def test_qdrant_backend_shapes_sparse_query_payloads() -> None:
     }
     assert fake_session.post_calls[-1]["json"]["using"] == "sparse"
     assert hits[0].item_id == 42
+
+
+def test_qdrant_backend_retries_point_upserts_after_transient_server_errors() -> None:
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
+    )
+    fake_session = _FakeSession()
+    fake_session.put_outcomes = [
+        _FakeResponse(status_code=500),
+        _FakeResponse(),
+    ]
+    backend._session = fake_session  # type: ignore[assignment]
+
+    backend.upsert_points(
+        [
+            {
+                "id": "point-1",
+                "vector": {"dense": [1.0, 0.0, 0.0]},
+                "payload": {
+                    "item_id": 42,
+                    "rel_path": "docs/runbook.md",
+                    "lane": "corpus",
+                    "source_name": "docs",
+                    "item_type": "paragraph",
+                    "scope": "project:strongclaw",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "modified_at": "2026-03-26T00:00:00+00:00",
+                    "confidence": None,
+                },
+            }
+        ]
+    )
+
+    assert len(fake_session.put_calls) == 2

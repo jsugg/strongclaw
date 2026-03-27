@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 from dataclasses import replace
+from typing import cast
 
 import pytest
 
@@ -15,6 +16,7 @@ from clawops.hypermemory import (
     SparseSearchCandidate,
     load_config,
 )
+from clawops.hypermemory.providers import RerankProvider
 from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
     FakeEmbeddingProvider,
@@ -57,7 +59,7 @@ def _configure_engine(tmp_path: pathlib.Path) -> tuple[HypermemoryEngine, FakeQd
 def _configure_rerank_engine(
     tmp_path: pathlib.Path,
     *,
-    rerank_provider: object | None = None,
+    rerank_provider: RerankProvider | None = None,
 ) -> tuple[HypermemoryEngine, FakeQdrantBackend]:
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
@@ -151,8 +153,9 @@ def test_hypermemory_search_exports_trace_spans(
     search_span = next(
         span for span in tracing_exporter.spans if span.name == "clawops.hypermemory.search"
     )
+    assert search_span.attributes is not None
     assert search_span.attributes["resolvedBackend"] == "qdrant_dense_hybrid"
-    assert search_span.attributes["results"] >= 1
+    assert cast(int | float, search_span.attributes["results"]) >= 1
 
 
 def test_hypermemory_logs_fallback_activation(
@@ -314,4 +317,5 @@ def test_hypermemory_emits_rerank_error_logs_and_spans_on_fail_open(
     rerank_span = next(
         span for span in tracing_exporter.spans if span.name == "clawops.hypermemory.rerank"
     )
-    assert rerank_span.attributes["candidateCount"] >= 1
+    assert rerank_span.attributes is not None
+    assert cast(int | float, rerank_span.attributes["candidateCount"]) >= 1

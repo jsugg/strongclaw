@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -75,7 +75,7 @@ def test_compatible_http_embedding_provider_normalizes_vectors() -> None:
             ]
         }
     )
-    provider._session = fake_session
+    provider._session = cast(Any, fake_session)
 
     vectors = provider.embed_texts(["first", "second"])
 
@@ -102,7 +102,7 @@ def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order
             ]
         }
     )
-    provider._session = fake_session
+    provider._session = cast(Any, fake_session)
 
     scores = provider.score_documents("gateway token", ["alpha", "beta"])
 
@@ -133,7 +133,7 @@ def test_compatible_http_rerank_provider_accepts_tei_style_payload() -> None:
             {"index": 1, "score": 0.51},
         ]
     )
-    provider._session = fake_session
+    provider._session = cast(Any, fake_session)
 
     scores = provider.score_documents("gateway token", ["alpha", "beta"])
 
