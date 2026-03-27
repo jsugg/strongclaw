@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 
 import pytest
 
+from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.utils.helpers import fresh_host, hosted_docker
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
@@ -141,6 +142,64 @@ def test_ensure_images_noops_when_context_disables_image_warming(
     assert report.images == []
     assert report.pull_attempt_count == 0
     assert context.image_report_path is None
+
+
+def test_ensure_images_inherits_repo_local_varlock_assignments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image resolution should honor repo-local Varlock compose secrets."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+
+    local_env_file = varlock_local_env_file(workspace)
+    local_env_file.parent.mkdir(parents=True, exist_ok=True)
+    write_env_assignments(
+        local_env_file,
+        {
+            "NEO4J_USERNAME": "neo4j",
+            "NEO4J_PASSWORD": "sidecar-secret",
+        },
+    )
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert timeout_seconds == 120
+        assert cwd == workspace.resolve()
+        assert env["NEO4J_USERNAME"] == "neo4j"
+        assert env["NEO4J_PASSWORD"] == "sidecar-secret"
+        assert env["STRONGCLAW_COMPOSE_VARIANT"] == "ci-hosted-macos"
+        assert env["STRONGCLAW_COMPOSE_STATE_DIR"].endswith("/compose-prepull")
+        return subprocess.CompletedProcess(command, 0, stdout="postgres:16\n", stderr="")
+
+    def fake_list_local_images(images: list[str]) -> list[str]:
+        return list(images)
+
+    monkeypatch.setattr(hosted_docker_images, "run_checked", fake_run_checked)
+    monkeypatch.setattr(hosted_docker_images, "list_local_images", fake_list_local_images)
+
+    report = hosted_docker.ensure_images(Path(context.context_path))
+
+    assert report.images == ["postgres:16"]
+    assert report.missing_before_pull == []
+    assert report.pull_attempt_count == 0
 
 
 def test_wait_for_docker_ready_retries_after_probe_timeout(

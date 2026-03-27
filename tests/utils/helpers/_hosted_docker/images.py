@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
+from clawops.strongclaw_runtime import load_env_assignments, varlock_local_env_file
 from tests.utils.helpers._fresh_host.models import FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
@@ -165,6 +166,9 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
     compose_state_dir = Path(context.tmp_root).resolve() / "compose-prepull"
     compose_state_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
+        if value and not env.get(key, "").strip():
+            env[key] = value
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(compose_state_dir)
     if context.compose_variant is not None:
         env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
