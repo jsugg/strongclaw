@@ -137,7 +137,7 @@ Scale behavior is explicit per invocation:
 
 - `small` keeps the file-level lexical path and avoids graph expansion
 - `medium` uses chunk retrieval, hybrid lexical+dense+sparse fusion when the shared embedding and Qdrant sidecars are healthy, and graph expansion that prefers Neo4j with SQLite fallback when allowed
-- `large` keeps hybrid and graph expansion enabled and expects the graph backend to stay healthy
+- `large` keeps hybrid and graph expansion enabled and fails closed when Neo4j is unhealthy
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
