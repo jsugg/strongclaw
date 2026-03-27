@@ -19,6 +19,26 @@ import requests
 
 from clawops.common import canonical_json, expand, load_yaml, sha256_hex, utc_now_ms, write_text
 from clawops.context.contracts import ContextScale, validate_context_scale
+from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
+from clawops.hypermemory.models import (
+    DenseSearchCandidate,
+    EmbeddingConfig,
+    EmbeddingProviderKind,
+    FusionMode,
+    HybridConfig,
+    QdrantConfig,
+    RerankConfig,
+    RerankProviderKind,
+    SparseSearchCandidate,
+)
+from clawops.hypermemory.providers import (
+    EmbeddingProvider,
+    RerankProvider,
+    create_embedding_provider,
+    create_rerank_provider,
+)
+from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
+from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
 from clawops.observability import emit_structured_log, observed_span
 
 DEFAULT_TEXT_EXTENSIONS = {
@@ -48,6 +68,7 @@ DEFAULT_TEXT_EXTENSIONS = {
     ".hpp",
 }
 CHUNKER_VERSION = 1
+DEFAULT_CODEBASE_QDRANT_COLLECTION = "strongclaw-codebase-context"
 
 SYMBOL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "python": [
@@ -387,6 +408,39 @@ def _as_string(name: str, value: object, *, default: str) -> str:
     return value
 
 
+def _resolve_env_reference(value: object) -> object:
+    """Resolve `os.environ/KEY` references inside string config values."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped.startswith("os.environ/"):
+        return stripped
+    env_key = stripped.removeprefix("os.environ/").strip()
+    if not env_key:
+        raise ValueError("environment-backed config reference must name a variable")
+    return os.environ.get(env_key, "").strip()
+
+
+def _as_env_string(name: str, value: object, *, default: str) -> str:
+    """Validate a string config value and expand environment references."""
+    resolved = _resolve_env_reference(value)
+    if resolved in {None, ""}:
+        return default
+    if not isinstance(resolved, str):
+        raise TypeError(f"{name} must be a string")
+    return resolved
+
+
+def _as_optional_env_string(name: str, value: object) -> str | None:
+    """Validate an optional string config value and expand environment references."""
+    resolved = _resolve_env_reference(value)
+    if resolved in {None, ""}:
+        return None
+    if not isinstance(resolved, str):
+        raise TypeError(f"{name} must be a string")
+    return resolved
+
+
 def _as_string_list(name: str, value: object) -> list[str]:
     """Validate a list of string config values."""
     if value is None:
@@ -419,6 +473,26 @@ def _as_positive_int(name: str, value: object, *, default: int) -> int:
     return value
 
 
+def _as_optional_positive_int(name: str, value: object) -> int | None:
+    """Validate an optional positive integer config value."""
+    if value in {None, ""}:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _as_float(name: str, value: object, *, default: float) -> float:
+    """Validate a floating-point config value."""
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be numeric")
+    return float(value)
+
+
 def _as_graph_backend(name: str, value: object, *, default: GraphBackendName) -> GraphBackendName:
     """Validate the configured graph backend."""
     if value is None:
@@ -439,6 +513,79 @@ def _as_symlink_policy(name: str, value: object, *, default: SymlinkPolicy) -> S
     if value not in {"follow", "in_repo_only", "never"}:
         raise ValueError(f"{name} must be one of: follow, in_repo_only, never")
     return cast(SymlinkPolicy, value)
+
+
+def _as_embedding_provider(
+    name: str, value: object, *, default: EmbeddingProviderKind
+) -> EmbeddingProviderKind:
+    """Validate the configured embedding provider kind."""
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    if value not in {"disabled", "compatible-http"}:
+        raise ValueError(f"{name} must be one of: compatible-http, disabled")
+    return cast(EmbeddingProviderKind, value)
+
+
+def _as_rerank_provider(
+    name: str, value: object, *, default: RerankProviderKind
+) -> RerankProviderKind:
+    """Validate the configured rerank provider kind."""
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    if value not in {"none", "local-sentence-transformers", "compatible-http"}:
+        raise ValueError(
+            f"{name} must be one of: compatible-http, local-sentence-transformers, none"
+        )
+    return cast(RerankProviderKind, value)
+
+
+def _as_fusion_mode(name: str, value: object, *, default: FusionMode) -> FusionMode:
+    """Validate the configured hybrid fusion mode."""
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    if value not in {"rrf", "weighted"}:
+        raise ValueError(f"{name} must be one of: rrf, weighted")
+    return cast(FusionMode, value)
+
+
+def _chunk_item_id(chunk_id: str) -> int:
+    """Return a deterministic positive integer ID for one chunk."""
+    return int(chunk_id[:15], 16)
+
+
+def _contextualized_chunk_text(
+    *,
+    path: str,
+    language: str,
+    kind: str,
+    symbol: str | None,
+    content: str,
+) -> str:
+    """Return the retrieval text used for vector and rerank lanes."""
+    parts = [path, language, kind]
+    if symbol:
+        parts.append(symbol)
+    parts.append(content)
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _iter_batches[T](items: Sequence[T], batch_size: int) -> Iterable[Sequence[T]]:
+    """Yield stable batches from *items*."""
+    for start in range(0, len(items), batch_size):
+        yield items[start : start + batch_size]
+
+
+def _rank_contribution(*, rank: int, weight: float, hybrid: HybridConfig) -> float:
+    """Return one lane contribution for the fused hybrid score."""
+    if hybrid.fusion == "rrf":
+        return weight * (1.0 / float(hybrid.rrf_k + rank))
+    return weight * (1.0 / float(rank))
 
 
 SCHEMA = """
@@ -499,6 +646,23 @@ CREATE TABLE IF NOT EXISTS index_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chunk_vectors (
+    chunk_id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    item_id INTEGER NOT NULL UNIQUE,
+    point_id TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
+    indexed_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_vectors_path ON chunk_vectors(path);
+
+CREATE TABLE IF NOT EXISTS sparse_terms (
+    term TEXT PRIMARY KEY,
+    term_id INTEGER NOT NULL UNIQUE,
+    document_freq INTEGER NOT NULL
+);
 """
 
 MIGRATION_COLUMNS = {
@@ -536,6 +700,14 @@ class SearchHit:
     end_line: int
     kind: str = "file"
     chunk_id: str | None = None
+
+
+@dataclasses.dataclass(slots=True)
+class HybridRankedChunk:
+    """One merged hybrid candidate with its backing row."""
+
+    row: sqlite3.Row
+    score: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -612,6 +784,23 @@ class CodebaseContextConfig:
     include_hidden: bool = False
     symlink_policy: SymlinkPolicy = "in_repo_only"
     graph: GraphConfig = dataclasses.field(default_factory=GraphConfig)
+    embedding: EmbeddingConfig = dataclasses.field(
+        default_factory=lambda: EmbeddingConfig(enabled=False, provider="disabled")
+    )
+    rerank: RerankConfig = dataclasses.field(
+        default_factory=lambda: RerankConfig(
+            enabled=False,
+            provider="none",
+            fallback_provider="none",
+        )
+    )
+    hybrid: HybridConfig = dataclasses.field(default_factory=HybridConfig)
+    qdrant: QdrantConfig = dataclasses.field(
+        default_factory=lambda: QdrantConfig(
+            enabled=False,
+            collection=DEFAULT_CODEBASE_QDRANT_COLLECTION,
+        )
+    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -621,7 +810,9 @@ class CodebaseContextFeatures:
     scale: ContextScale
     backend_modes: tuple[str, ...]
     graph_backend: GraphBackendName
+    hybrid_backend: Literal["none", "qdrant"] = "none"
     degraded_graph: bool = False
+    degraded_hybrid: bool = False
 
 
 class GraphBackend(Protocol):
@@ -913,6 +1104,24 @@ class CodebaseContextService:
         self.db_path = config.db_path.expanduser().resolve()
         self._sqlite_graph_backend = SqliteGraphBackend(self.connect)
         self._neo4j_graph_backend = Neo4jGraphBackend(config.graph)
+        self._embedding_provider: EmbeddingProvider = create_embedding_provider(config.embedding)
+        self._rerank_provider: RerankProvider = create_rerank_provider(config.rerank)
+        self._vector_backend: VectorBackend = QdrantBackend(config.qdrant)
+
+    def override_runtime_deps(
+        self,
+        *,
+        embedding_provider: EmbeddingProvider | None = None,
+        rerank_provider: RerankProvider | None = None,
+        vector_backend: VectorBackend | None = None,
+    ) -> None:
+        """Override runtime dependencies for controlled tests and harnesses."""
+        if embedding_provider is not None:
+            self._embedding_provider = embedding_provider
+        if rerank_provider is not None:
+            self._rerank_provider = rerank_provider
+        if vector_backend is not None:
+            self._vector_backend = vector_backend
 
     def connect(self) -> sqlite3.Connection:
         """Open the SQLite database."""
@@ -933,23 +1142,62 @@ class CodebaseContextService:
             conn.execute(f"ALTER TABLE files ADD COLUMN {column} {definition}")
         conn.commit()
 
-    def _graph_features(self) -> CodebaseContextFeatures:
+    def _hybrid_requested(self) -> bool:
+        """Return whether the current scale and config request hybrid retrieval."""
+        return (
+            self.scale != "small" and self.config.embedding.enabled and self.config.qdrant.enabled
+        )
+
+    def _hybrid_state_ready(self) -> bool:
+        """Return whether local vector state matches the indexed chunk corpus."""
+        with self.connect() as conn:
+            chunk_count = int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+            vector_count = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
+            sparse_term_count = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
+        if chunk_count == 0:
+            return False
+        return vector_count == chunk_count and sparse_term_count > 0
+
+    def _hybrid_features(self) -> tuple[bool, bool]:
+        """Return whether hybrid retrieval is active and whether it is degraded."""
+        if not self._hybrid_requested():
+            return False, False
+        if not self.config.embedding.model or not self.config.embedding.base_url:
+            return False, True
+        health = self._vector_backend.health()
+        if not bool(health.get("healthy", False)):
+            return False, True
+        if not self._hybrid_state_ready():
+            return False, True
+        return True, False
+
+    def _runtime_features(self) -> CodebaseContextFeatures:
         """Resolve the active runtime feature set."""
+        modes: list[str] = ["lexical"]
+        hybrid_enabled, degraded_hybrid = self._hybrid_features()
+        if hybrid_enabled:
+            modes.append("hybrid")
+
         if self.scale == "small" or not self.config.graph.enabled:
             return CodebaseContextFeatures(
                 scale=self.scale,
-                backend_modes=("lexical",),
+                backend_modes=tuple(modes),
                 graph_backend="sqlite",
+                hybrid_backend="qdrant" if hybrid_enabled else "none",
                 degraded_graph=False,
+                degraded_hybrid=degraded_hybrid,
             )
         if self.config.graph.backend == "neo4j":
             health = self._neo4j_graph_backend.health()
             if bool(health.get("healthy", False)):
+                modes.append("graph")
                 return CodebaseContextFeatures(
                     scale=self.scale,
-                    backend_modes=("lexical", "graph"),
+                    backend_modes=tuple(modes),
                     graph_backend="neo4j",
+                    hybrid_backend="qdrant" if hybrid_enabled else "none",
                     degraded_graph=False,
+                    degraded_hybrid=degraded_hybrid,
                 )
             if self.scale == "large" and not self.config.graph.allow_degraded_fallback:
                 raise RuntimeError("large codebase context requires a healthy neo4j graph backend")
@@ -963,25 +1211,31 @@ class CodebaseContextService:
                     "reason": str(health.get("reason", "neo4j unavailable")),
                 },
             )
+            modes.append("graph")
             return CodebaseContextFeatures(
                 scale=self.scale,
-                backend_modes=("lexical", "graph"),
+                backend_modes=tuple(modes),
                 graph_backend="sqlite",
+                hybrid_backend="qdrant" if hybrid_enabled else "none",
                 degraded_graph=True,
+                degraded_hybrid=degraded_hybrid,
             )
+        modes.append("graph")
         return CodebaseContextFeatures(
             scale=self.scale,
-            backend_modes=("lexical", "graph"),
+            backend_modes=tuple(modes),
             graph_backend="sqlite",
+            hybrid_backend="qdrant" if hybrid_enabled else "none",
             degraded_graph=False,
+            degraded_hybrid=degraded_hybrid,
         )
 
     def backend_modes(self) -> tuple[str, ...]:
         """Return the active retrieval mode names."""
-        return self._graph_features().backend_modes
+        return self._runtime_features().backend_modes
 
     def _active_graph_backend(self) -> GraphBackend:
-        features = self._graph_features()
+        features = self._runtime_features()
         if features.graph_backend == "neo4j":
             return self._neo4j_graph_backend
         return self._sqlite_graph_backend
@@ -1058,9 +1312,16 @@ class CodebaseContextService:
         symbols: Sequence[str],
         content: str,
         all_paths: set[str],
-    ) -> None:
+    ) -> list[str]:
         """Persist file, chunk, and edge state for one changed file."""
         symbols_text = "\n".join(symbols)
+        stale_point_ids = [
+            str(row["point_id"])
+            for row in conn.execute(
+                "SELECT point_id FROM chunk_vectors WHERE path = ? ORDER BY point_id ASC",
+                (rel_path,),
+            ).fetchall()
+        ]
         conn.execute(
             """
             INSERT INTO files(path, sha256, language, mtime_ns, size_bytes, symbols, content)
@@ -1082,6 +1343,7 @@ class CodebaseContextService:
         )
         conn.execute("DELETE FROM chunks WHERE path = ?", (rel_path,))
         conn.execute("DELETE FROM chunks_fts WHERE path = ?", (rel_path,))
+        conn.execute("DELETE FROM chunk_vectors WHERE path = ?", (rel_path,))
         conn.execute("DELETE FROM edges WHERE path = ?", (rel_path,))
 
         chunk_records = build_chunks(rel_path, content, language=language)
@@ -1153,11 +1415,193 @@ class CodebaseContextService:
                     for edge in edges
                 ],
             )
+        return stale_point_ids
+
+    def _clear_hybrid_state(self, conn: sqlite3.Connection) -> None:
+        """Delete persisted hybrid state after a failed or disabled sync."""
+        conn.execute("DELETE FROM chunk_vectors")
+        conn.execute("DELETE FROM sparse_terms")
+        conn.executemany(
+            "DELETE FROM index_state WHERE key = ?",
+            (("sparse_fingerprint",), ("sparse_doc_count",), ("sparse_avg_doc_length",)),
+        )
+
+    def _persist_sparse_encoder(self, conn: sqlite3.Connection, encoder: SparseEncoder) -> None:
+        """Persist the deterministic sparse vocabulary state."""
+        conn.execute("DELETE FROM sparse_terms")
+        conn.executemany(
+            """
+            INSERT INTO sparse_terms(term, term_id, document_freq)
+            VALUES (?, ?, ?)
+            """,
+            [
+                (term, term_id, int(encoder.document_frequency.get(term, 0)))
+                for term, term_id in sorted(encoder.term_to_id.items(), key=lambda item: item[1])
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO index_state(key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            [
+                ("sparse_fingerprint", encoder.fingerprint),
+                ("sparse_doc_count", str(encoder.document_count)),
+                ("sparse_avg_doc_length", f"{encoder.average_document_length:.8f}"),
+            ],
+        )
+
+    def _load_sparse_encoder(self, conn: sqlite3.Connection) -> SparseEncoder | None:
+        """Load the persisted sparse encoder when available."""
+        rows = conn.execute(
+            "SELECT term, term_id, document_freq FROM sparse_terms ORDER BY term_id ASC"
+        ).fetchall()
+        if not rows:
+            return None
+        state = self._load_index_state(conn)
+        document_count = int(state.get("sparse_doc_count", "0"))
+        average_document_length = float(state.get("sparse_avg_doc_length", "0") or "0")
+        fingerprint = state.get("sparse_fingerprint", "")
+        if document_count <= 0 or not fingerprint:
+            return None
+        term_to_id = {str(row["term"]): int(row["term_id"]) for row in rows}
+        document_frequency = {str(row["term"]): int(row["document_freq"]) for row in rows}
+        return SparseEncoder(
+            term_to_id=term_to_id,
+            document_frequency=document_frequency,
+            document_count=document_count,
+            average_document_length=average_document_length,
+            fingerprint=fingerprint,
+        )
+
+    def _sync_hybrid_index(self, *, stale_point_ids: Sequence[str]) -> None:
+        """Synchronize chunk embeddings and sparse vectors into the Qdrant lane."""
+        with self.connect() as conn:
+            if not self._hybrid_requested():
+                self._clear_hybrid_state(conn)
+                conn.commit()
+                return
+            rows = conn.execute("""
+                SELECT chunk_id, path, language, kind, start_line, end_line, symbol, content, content_hash,
+                       updated_at_ms
+                FROM chunks
+                ORDER BY path ASC, start_line ASC, chunk_id ASC
+                """).fetchall()
+        if not rows:
+            with self.connect() as conn:
+                self._clear_hybrid_state(conn)
+                conn.commit()
+            if stale_point_ids:
+                try:
+                    self._vector_backend.delete_points(sorted(set(stale_point_ids)))
+                except requests.RequestException:
+                    pass
+            return
+        try:
+            health = self._vector_backend.health()
+            if not bool(health.get("healthy", False)):
+                raise RuntimeError(
+                    str(health.get("error") or health.get("reason") or "qdrant unavailable")
+                )
+            if not self.config.embedding.model or not self.config.embedding.base_url:
+                raise RuntimeError("embedding config is incomplete for hybrid retrieval")
+            texts = [
+                _contextualized_chunk_text(
+                    path=str(row["path"]),
+                    language=str(row["language"]),
+                    kind=str(row["kind"]),
+                    symbol=None if row["symbol"] is None else str(row["symbol"]),
+                    content=str(row["content"]),
+                )
+                for row in rows
+            ]
+            sparse_encoder = build_sparse_encoder(texts)
+            dense_vectors: list[list[float]] = []
+            for batch in _iter_batches(texts, max(self.config.embedding.batch_size, 1)):
+                dense_vectors.extend(self._embedding_provider.embed_texts(list(batch)))
+            if len(dense_vectors) != len(rows):
+                raise ValueError("embedded chunk count does not match the indexed chunk count")
+            vector_size = len(dense_vectors[0])
+            self._vector_backend.ensure_collection(vector_size=vector_size, include_sparse=True)
+            points: list[VectorPoint] = []
+            indexed_at_ms = utc_now_ms()
+            for row, dense_vector, text in zip(rows, dense_vectors, texts, strict=True):
+                chunk_id = str(row["chunk_id"])
+                sparse_vector = sparse_encoder.encode_document(text)
+                vector_payload: dict[str, list[float] | SparseVectorPayload] = {
+                    self.config.qdrant.dense_vector_name: dense_vector
+                }
+                if not sparse_vector.is_empty:
+                    vector_payload[self.config.qdrant.sparse_vector_name] = (
+                        sparse_vector.to_qdrant()
+                    )
+                points.append(
+                    VectorPoint(
+                        id=chunk_id,
+                        vector=vector_payload,
+                        payload={
+                            "item_id": _chunk_item_id(chunk_id),
+                            "rel_path": str(row["path"]),
+                            "lane": "corpus",
+                            "source_name": "codebase",
+                            "item_type": str(row["kind"]),
+                            "scope": "global",
+                            "start_line": int(row["start_line"]),
+                            "end_line": int(row["end_line"]),
+                            "modified_at": str(row["updated_at_ms"]),
+                            "confidence": None,
+                        },
+                    )
+                )
+            self._vector_backend.upsert_points(points)
+            stale_ids = sorted(set(stale_point_ids))
+            if stale_ids:
+                self._vector_backend.delete_points(stale_ids)
+            with self.connect() as conn:
+                self._persist_sparse_encoder(conn, sparse_encoder)
+                conn.executemany(
+                    """
+                    INSERT INTO chunk_vectors(chunk_id, path, item_id, point_id, content_hash, indexed_at_ms)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(chunk_id) DO UPDATE SET
+                        path = excluded.path,
+                        item_id = excluded.item_id,
+                        point_id = excluded.point_id,
+                        content_hash = excluded.content_hash,
+                        indexed_at_ms = excluded.indexed_at_ms
+                    """,
+                    [
+                        (
+                            str(row["chunk_id"]),
+                            str(row["path"]),
+                            _chunk_item_id(str(row["chunk_id"])),
+                            str(row["chunk_id"]),
+                            str(row["content_hash"]),
+                            indexed_at_ms,
+                        )
+                        for row in rows
+                    ],
+                )
+                conn.commit()
+        except (requests.RequestException, RuntimeError, ValueError) as err:
+            emit_structured_log(
+                "clawops.context.codebase.hybrid.degraded",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "reason": str(err),
+                },
+            )
+            with self.connect() as conn:
+                self._clear_hybrid_state(conn)
+                conn.commit()
 
     def index_with_stats(self) -> IndexStats:
         """Index repository contents into the lexical and graph stores."""
         indexed_files = 0
         skipped_files = 0
+        stale_point_ids: list[str] = []
         changed_rows: list[tuple[str, str, str, int, int, list[str], str]] = []
         seen_paths: set[str] = set()
         started_at = time.perf_counter()
@@ -1204,6 +1648,18 @@ class CodebaseContextService:
 
                 stale_paths = set(existing_metadata) - seen_paths
                 if stale_paths:
+                    stale_point_ids.extend(
+                        str(row["point_id"])
+                        for row in conn.execute(
+                            f"""
+                            SELECT point_id
+                            FROM chunk_vectors
+                            WHERE path IN ({", ".join("?" for _ in stale_paths)})
+                            ORDER BY point_id ASC
+                            """,
+                            tuple(sorted(stale_paths)),
+                        ).fetchall()
+                    )
                     conn.executemany(
                         "DELETE FROM files WHERE path = ?", ((path,) for path in stale_paths)
                     )
@@ -1217,20 +1673,26 @@ class CodebaseContextService:
                         "DELETE FROM chunks_fts WHERE path = ?", ((path,) for path in stale_paths)
                     )
                     conn.executemany(
+                        "DELETE FROM chunk_vectors WHERE path = ?",
+                        ((path,) for path in stale_paths),
+                    )
+                    conn.executemany(
                         "DELETE FROM edges WHERE path = ?", ((path,) for path in stale_paths)
                     )
 
                 for rel, language, sha256, mtime_ns, size_bytes, symbols, text in changed_rows:
-                    self._store_changed_file(
-                        conn,
-                        rel_path=rel,
-                        language=language,
-                        sha256=sha256,
-                        mtime_ns=mtime_ns,
-                        size_bytes=size_bytes,
-                        symbols=symbols,
-                        content=text,
-                        all_paths=seen_paths,
+                    stale_point_ids.extend(
+                        self._store_changed_file(
+                            conn,
+                            rel_path=rel,
+                            language=language,
+                            sha256=sha256,
+                            mtime_ns=mtime_ns,
+                            size_bytes=size_bytes,
+                            symbols=symbols,
+                            content=text,
+                            all_paths=seen_paths,
+                        )
                     )
 
                 stats = IndexStats(
@@ -1256,7 +1718,7 @@ class CodebaseContextService:
                 )
                 conn.commit()
 
-                features = self._graph_features()
+                features = self._runtime_features()
                 if "graph" in features.backend_modes:
                     graph_backend = self._active_graph_backend()
                     graph_backend.upsert(
@@ -1264,6 +1726,8 @@ class CodebaseContextService:
                         edges=self._load_graph_edges(conn),
                         snapshot_id=snapshot_id,
                     )
+
+            self._sync_hybrid_index(stale_point_ids=stale_point_ids)
 
             observation: dict[str, bool | int | str] = {
                 "repo": self.repo.as_posix(),
@@ -1381,8 +1845,22 @@ class CodebaseContextService:
             for row in rows
         ]
 
-    def _query_chunks(self, query: str, *, limit: int) -> list[SearchHit]:
-        """Run a lexical chunk-level query."""
+    def _build_chunk_hit(self, row: sqlite3.Row, *, query: str) -> SearchHit:
+        """Build one chunk search hit from a SQLite row."""
+        symbol = "" if row["symbol"] is None else str(row["symbol"])
+        return self._build_search_hit(
+            path=str(row["path"]),
+            content=str(row["content"]),
+            symbols_text=symbol,
+            query=query,
+            kind=str(row["kind"]),
+            chunk_id=str(row["chunk_id"]),
+            start_line=int(row["start_line"]),
+            end_line=int(row["end_line"]),
+        )
+
+    def _query_chunk_rows(self, query: str, *, limit: int) -> list[sqlite3.Row]:
+        """Return lexical chunk matches as raw SQLite rows."""
         with self.connect() as conn:
             try:
                 rows = conn.execute(
@@ -1407,27 +1885,204 @@ class CodebaseContextService:
                     """,
                     (f"%{query}%", limit),
                 ).fetchall()
-        hits: list[SearchHit] = []
-        for row in rows:
-            symbol = "" if row["symbol"] is None else str(row["symbol"])
-            hits.append(
-                self._build_search_hit(
-                    path=str(row["path"]),
-                    content=str(row["content"]),
-                    symbols_text=symbol,
-                    query=query,
-                    kind=str(row["kind"]),
-                    chunk_id=str(row["chunk_id"]),
-                    start_line=int(row["start_line"]),
-                    end_line=int(row["end_line"]),
-                )
+        return list(rows)
+
+    def _query_chunks(self, query: str, *, limit: int) -> list[SearchHit]:
+        """Run a lexical chunk-level query."""
+        return [
+            self._build_chunk_hit(row, query=query)
+            for row in self._query_chunk_rows(query, limit=limit)
+        ]
+
+    def _load_chunk_rows_by_item_ids(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        item_ids: Sequence[int],
+    ) -> dict[int, sqlite3.Row]:
+        """Load chunk rows keyed by their deterministic vector item IDs."""
+        if not item_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in item_ids)
+        rows = conn.execute(
+            f"""
+            SELECT chunk_vectors.item_id, chunks.chunk_id, chunks.path, chunks.language, chunks.kind,
+                   chunks.start_line, chunks.end_line, chunks.symbol, chunks.content, chunks.content_hash
+            FROM chunk_vectors
+            JOIN chunks USING(chunk_id)
+            WHERE chunk_vectors.item_id IN ({placeholders})
+            """,
+            tuple(item_ids),
+        ).fetchall()
+        return {int(row["item_id"]): row for row in rows}
+
+    def _dense_chunk_candidates(self, query: str) -> list[DenseSearchCandidate]:
+        """Return dense vector candidates for *query* when hybrid mode is healthy."""
+        if not self.config.embedding.model or not self.config.embedding.base_url:
+            return []
+        query_text = query.strip()
+        if not query_text:
+            return []
+        try:
+            query_vectors = self._embedding_provider.embed_texts([query_text])
+        except Exception as err:
+            emit_structured_log(
+                "clawops.context.codebase.hybrid.query.degraded",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "lane": "dense",
+                    "reason": str(err),
+                },
             )
-        return hits
+            return []
+        if not query_vectors:
+            return []
+        try:
+            return self._vector_backend.search_dense(
+                vector=query_vectors[0],
+                limit=max(self.config.hybrid.dense_candidate_pool, 1),
+                mode="all",
+                scope=None,
+            )
+        except requests.RequestException as err:
+            emit_structured_log(
+                "clawops.context.codebase.hybrid.query.degraded",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "lane": "dense",
+                    "reason": str(err),
+                },
+            )
+            return []
+
+    def _sparse_chunk_candidates(self, query: str) -> list[SparseSearchCandidate]:
+        """Return sparse vector candidates for *query* when hybrid mode is healthy."""
+        query_text = query.strip()
+        if not query_text:
+            return []
+        with self.connect() as conn:
+            encoder = self._load_sparse_encoder(conn)
+        if encoder is None:
+            return []
+        sparse_vector = encoder.encode_query(query_text)
+        if sparse_vector.is_empty:
+            return []
+        try:
+            return self._vector_backend.search_sparse(
+                vector=sparse_vector.to_qdrant(),
+                limit=max(self.config.hybrid.sparse_candidate_pool, 1),
+                mode="all",
+                scope=None,
+            )
+        except requests.RequestException as err:
+            emit_structured_log(
+                "clawops.context.codebase.hybrid.query.degraded",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "lane": "sparse",
+                    "reason": str(err),
+                },
+            )
+            return []
+
+    def _rerank_chunk_hits(self, query: str, hits: list[SearchHit]) -> list[SearchHit]:
+        """Apply optional reranking to the leading chunk hits."""
+        if not self.config.rerank.enabled or not hits:
+            return hits
+        candidate_pool = min(max(self.config.hybrid.rerank_candidate_pool, 0), len(hits))
+        if candidate_pool <= 0:
+            return hits
+        documents = [f"{hit.path}\n{hit.snippet}" for hit in hits[:candidate_pool]]
+        try:
+            response = self._rerank_provider.score(query, documents)
+        except Exception as err:
+            if not self.config.rerank.fail_open:
+                raise
+            emit_structured_log(
+                "clawops.context.codebase.rerank.fail_open",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "reason": str(err),
+                },
+            )
+            return hits
+        if not response.applied:
+            return hits
+        if len(response.scores) != candidate_pool:
+            raise ValueError("rerank response count does not match the candidate pool size")
+        reranked = list(zip(hits[:candidate_pool], response.scores, strict=True))
+        reranked.sort(key=lambda item: item[1], reverse=True)
+        return [item[0] for item in reranked] + hits[candidate_pool:]
+
+    def _query_chunks_hybrid(self, query: str, *, limit: int) -> list[SearchHit]:
+        """Run hybrid chunk retrieval for medium and large scales."""
+        lexical_pool = max(limit, self.config.hybrid.sparse_candidate_pool, 1)
+        lexical_rows = self._query_chunk_rows(query, limit=lexical_pool)
+        dense_candidates = self._dense_chunk_candidates(query)
+        sparse_candidates = self._sparse_chunk_candidates(query)
+        item_ids = [
+            *(candidate.item_id for candidate in dense_candidates),
+            *(candidate.item_id for candidate in sparse_candidates),
+        ]
+        with self.connect() as conn:
+            rows_by_item_id = self._load_chunk_rows_by_item_ids(conn, item_ids=item_ids)
+
+        merged: dict[str, HybridRankedChunk] = {}
+        lexical_weight = self.config.hybrid.text_weight / 2.0
+        sparse_weight = self.config.hybrid.text_weight / 2.0
+        dense_weight = self.config.hybrid.vector_weight
+
+        for rank, row in enumerate(lexical_rows, start=1):
+            chunk_id = str(row["chunk_id"])
+            entry = merged.setdefault(chunk_id, HybridRankedChunk(row=row))
+            entry.score += _rank_contribution(
+                rank=rank,
+                weight=lexical_weight,
+                hybrid=self.config.hybrid,
+            )
+
+        for rank, dense_candidate in enumerate(dense_candidates, start=1):
+            dense_row = rows_by_item_id.get(dense_candidate.item_id)
+            if dense_row is None:
+                continue
+            chunk_id = str(dense_row["chunk_id"])
+            entry = merged.setdefault(chunk_id, HybridRankedChunk(row=dense_row))
+            entry.score += _rank_contribution(
+                rank=rank,
+                weight=dense_weight,
+                hybrid=self.config.hybrid,
+            )
+
+        for rank, sparse_candidate in enumerate(sparse_candidates, start=1):
+            sparse_row = rows_by_item_id.get(sparse_candidate.item_id)
+            if sparse_row is None:
+                continue
+            chunk_id = str(sparse_row["chunk_id"])
+            entry = merged.setdefault(chunk_id, HybridRankedChunk(row=sparse_row))
+            entry.score += _rank_contribution(
+                rank=rank,
+                weight=sparse_weight,
+                hybrid=self.config.hybrid,
+            )
+
+        ranked_rows = sorted(
+            merged.values(),
+            key=lambda item: (-item.score, str(item.row["path"])),
+        )
+        hits = [self._build_chunk_hit(item.row, query=query) for item in ranked_rows]
+        reranked_hits = self._rerank_chunk_hits(query, hits)
+        return reranked_hits[:limit]
 
     def query(self, query: str, *, limit: int = 8) -> list[SearchHit]:
-        """Run a scale-aware lexical query."""
+        """Run a scale-aware query."""
         if self.scale == "small":
             return self._query_files(query, limit=limit)
+        if "hybrid" in self.backend_modes():
+            return self._query_chunks_hybrid(query, limit=limit)
         return self._query_chunks(query, limit=limit)
 
     def load_file_records(self, paths: Sequence[str]) -> list[IndexedFile]:
@@ -1540,7 +2195,7 @@ class CodebaseContextService:
 
     def _dependency_expansion(self, paths: Sequence[str]) -> list[str]:
         """Return related dependency paths for the current query result."""
-        features = self._graph_features()
+        features = self._runtime_features()
         if "graph" not in features.backend_modes:
             return []
         backend = self._active_graph_backend()
@@ -1634,11 +2289,21 @@ def load_config(path: pathlib.Path) -> CodebaseContextConfig:
     index = _as_mapping("index", config.get("index"))
     paths = _as_mapping("paths", config.get("paths"))
     graph = _as_mapping("graph", config.get("graph"))
+    embedding = _as_mapping("embedding", config.get("embedding"))
+    rerank = _as_mapping("rerank", config.get("rerank"))
+    rerank_local = _as_mapping("rerank.local", rerank.get("local"))
+    rerank_http = _as_mapping("rerank.compatible_http", rerank.get("compatible_http"))
+    hybrid = _as_mapping("hybrid", config.get("hybrid"))
+    qdrant = _as_mapping("qdrant", config.get("qdrant"))
     db_path = index.get("db_path", ".clawops/context.sqlite")
     if not isinstance(db_path, str):
         raise TypeError("index.db_path must be a string")
     include = _as_string_list("paths.include", paths.get("include"))
     exclude = _as_string_list("paths.exclude", paths.get("exclude"))
+    default_embedding = EmbeddingConfig(enabled=False, provider="disabled")
+    default_rerank = RerankConfig(enabled=False, provider="none", fallback_provider="none")
+    default_hybrid = HybridConfig()
+    default_qdrant = QdrantConfig(enabled=False, collection=DEFAULT_CODEBASE_QDRANT_COLLECTION)
     return CodebaseContextConfig(
         db_path=pathlib.Path(db_path),
         include_globs=tuple(include),
@@ -1684,6 +2349,160 @@ def load_config(path: pathlib.Path) -> CodebaseContextConfig:
             database=_as_string("graph.database", graph.get("database"), default="neo4j"),
             depth=_as_positive_int("graph.depth", graph.get("depth"), default=1),
             limit=_as_positive_int("graph.limit", graph.get("limit"), default=12),
+        ),
+        embedding=EmbeddingConfig(
+            enabled=_as_bool("embedding.enabled", embedding.get("enabled"), default=False),
+            provider=_as_embedding_provider(
+                "embedding.provider",
+                embedding.get("provider"),
+                default=default_embedding.provider,
+            ),
+            model=_as_env_string("embedding.model", embedding.get("model"), default=""),
+            base_url=_as_env_string("embedding.base_url", embedding.get("base_url"), default=""),
+            api_key_env=_as_optional_env_string(
+                "embedding.api_key_env", embedding.get("api_key_env")
+            ),
+            api_key=_as_optional_env_string("embedding.api_key", embedding.get("api_key")),
+            dimensions=_as_optional_positive_int(
+                "embedding.dimensions", embedding.get("dimensions")
+            ),
+            batch_size=_as_positive_int(
+                "embedding.batch_size",
+                embedding.get("batch_size"),
+                default=default_embedding.batch_size,
+            ),
+            timeout_ms=_as_positive_int(
+                "embedding.timeout_ms",
+                embedding.get("timeout_ms"),
+                default=default_embedding.timeout_ms,
+            ),
+        ),
+        rerank=RerankConfig(
+            enabled=_as_bool("rerank.enabled", rerank.get("enabled"), default=False),
+            provider=_as_rerank_provider(
+                "rerank.provider",
+                rerank.get("provider"),
+                default=default_rerank.provider,
+            ),
+            fallback_provider=_as_rerank_provider(
+                "rerank.fallback_provider",
+                rerank.get("fallback_provider"),
+                default=default_rerank.fallback_provider,
+            ),
+            fail_open=_as_bool(
+                "rerank.fail_open",
+                rerank.get("fail_open"),
+                default=default_rerank.fail_open,
+            ),
+            normalize_scores=_as_bool(
+                "rerank.normalize_scores",
+                rerank.get("normalize_scores"),
+                default=default_rerank.normalize_scores,
+            ),
+            local=dataclasses.replace(
+                default_rerank.local,
+                model=_as_env_string("rerank.local.model", rerank_local.get("model"), default=""),
+                batch_size=_as_positive_int(
+                    "rerank.local.batch_size",
+                    rerank_local.get("batch_size"),
+                    default=default_rerank.local.batch_size,
+                ),
+                max_length=_as_positive_int(
+                    "rerank.local.max_length",
+                    rerank_local.get("max_length"),
+                    default=default_rerank.local.max_length,
+                ),
+                device=_as_env_string(
+                    "rerank.local.device",
+                    rerank_local.get("device"),
+                    default=default_rerank.local.device,
+                ),
+            ),
+            compatible_http=dataclasses.replace(
+                default_rerank.compatible_http,
+                model=_as_env_string(
+                    "rerank.compatible_http.model",
+                    rerank_http.get("model"),
+                    default="",
+                ),
+                base_url=_as_env_string(
+                    "rerank.compatible_http.base_url",
+                    rerank_http.get("base_url"),
+                    default="",
+                ),
+                api_key_env=_as_optional_env_string(
+                    "rerank.compatible_http.api_key_env",
+                    rerank_http.get("api_key_env"),
+                ),
+                api_key=_as_optional_env_string(
+                    "rerank.compatible_http.api_key",
+                    rerank_http.get("api_key"),
+                ),
+                timeout_ms=_as_positive_int(
+                    "rerank.compatible_http.timeout_ms",
+                    rerank_http.get("timeout_ms"),
+                    default=default_rerank.compatible_http.timeout_ms,
+                ),
+            ),
+        ),
+        hybrid=HybridConfig(
+            dense_candidate_pool=_as_positive_int(
+                "hybrid.dense_candidate_pool",
+                hybrid.get("dense_candidate_pool"),
+                default=default_hybrid.dense_candidate_pool,
+            ),
+            sparse_candidate_pool=_as_positive_int(
+                "hybrid.sparse_candidate_pool",
+                hybrid.get("sparse_candidate_pool"),
+                default=default_hybrid.sparse_candidate_pool,
+            ),
+            vector_weight=_as_float(
+                "hybrid.vector_weight",
+                hybrid.get("vector_weight"),
+                default=default_hybrid.vector_weight,
+            ),
+            text_weight=_as_float(
+                "hybrid.text_weight",
+                hybrid.get("text_weight"),
+                default=default_hybrid.text_weight,
+            ),
+            fusion=_as_fusion_mode(
+                "hybrid.fusion", hybrid.get("fusion"), default=default_hybrid.fusion
+            ),
+            rrf_k=_as_positive_int(
+                "hybrid.rrf_k", hybrid.get("rrf_k"), default=default_hybrid.rrf_k
+            ),
+            rerank_candidate_pool=_as_positive_int(
+                "hybrid.rerank_candidate_pool",
+                hybrid.get("rerank_candidate_pool"),
+                default=default_hybrid.rerank_candidate_pool,
+            ),
+        ),
+        qdrant=QdrantConfig(
+            enabled=_as_bool("qdrant.enabled", qdrant.get("enabled"), default=False),
+            url=_as_env_string("qdrant.url", qdrant.get("url"), default=default_qdrant.url),
+            collection=_as_env_string(
+                "qdrant.collection",
+                qdrant.get("collection"),
+                default=DEFAULT_CODEBASE_QDRANT_COLLECTION,
+            ),
+            dense_vector_name=_as_env_string(
+                "qdrant.dense_vector_name",
+                qdrant.get("dense_vector_name"),
+                default=default_qdrant.dense_vector_name,
+            ),
+            sparse_vector_name=_as_env_string(
+                "qdrant.sparse_vector_name",
+                qdrant.get("sparse_vector_name"),
+                default=default_qdrant.sparse_vector_name,
+            ),
+            timeout_ms=_as_positive_int(
+                "qdrant.timeout_ms",
+                qdrant.get("timeout_ms"),
+                default=default_qdrant.timeout_ms,
+            ),
+            api_key_env=_as_optional_env_string("qdrant.api_key_env", qdrant.get("api_key_env")),
+            api_key=_as_optional_env_string("qdrant.api_key", qdrant.get("api_key")),
         ),
     )
 

@@ -17,13 +17,14 @@ Risky work is moved out of the control plane:
 - sandboxed OpenClaw coding sessions
 - ACP/acpx coding workers
 - repository worktrees
-- `clawops context codebase` indexing, chunk retrieval, and context-pack assembly
+- `clawops context codebase` indexing, hybrid retrieval, graph expansion, and context-pack assembly
 - optional browser-lab runners
 
 ## Operations plane
 
 Sidecars and platform helpers:
 - LiteLLM + Postgres
+- Qdrant for codebase and hypermemory vector retrieval
 - Neo4j CE for codebase graph expansion
 - OTel Collector
 - backup / retention
