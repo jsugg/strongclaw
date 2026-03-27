@@ -23,6 +23,14 @@ def _noop_wait(url: str) -> None:
     del url
 
 
+def test_default_qdrant_image_uses_pinned_ghcr_mirror() -> None:
+    """The managed fallback image should use the official pinned GHCR mirror."""
+    assert DEFAULT_QDRANT_IMAGE == (
+        "ghcr.io/qdrant/qdrant/qdrant:v1.15.5@sha256:"
+        "21934642fbdc0010b3df46ab214a755fda7a4631a58beec89b050baca4c78311"
+    )
+
+
 def test_require_live_url_uses_repo_pinned_image_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

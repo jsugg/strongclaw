@@ -63,6 +63,24 @@ def test_security_workflow_verifies_downloaded_tool_archives() -> None:
     assert workflow.count("sha256sum -c -") >= 2
 
 
+def test_security_workflow_uses_cli_semgrep_instead_of_docker_action() -> None:
+    workflow = _workflow_text("security.yml")
+
+    assert "returntocorp/semgrep-action" not in workflow
+    assert 'python3 -m pip install --disable-pip-version-check "semgrep==1.156.0"' in workflow
+    assert "semgrep scan --config security/semgrep/semgrep.yml --error ." in workflow
+
+
+def test_memory_plugin_qdrant_workflow_uses_pinned_ghcr_service_image() -> None:
+    workflow = _workflow_text("memory-plugin-verification.yml")
+
+    assert "image: qdrant/qdrant" not in workflow
+    assert (
+        "ghcr.io/qdrant/qdrant/qdrant:v1.15.5@sha256:"
+        "21934642fbdc0010b3df46ab214a755fda7a4631a58beec89b050baca4c78311"
+    ) in workflow
+
+
 def test_all_workflow_actions_are_sha_pinned_and_version_tagged() -> None:
     pins = list_workflow_action_pins(REPO_ROOT)
 

@@ -97,6 +97,9 @@ in `.github/workflows/memory-plugin-verification.yml`.
 - Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
   before invoking the shared gate, and the repo's `pre-commit` hook now uses
   that system binary instead of a Docker-backed hook.
+- `.github/workflows/security.yml` installs a pinned `semgrep` CLI directly
+  instead of relying on the Docker-backed Semgrep action, which keeps the lane
+  off Docker Hub.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
   tarball SHA-256 digests before extracting the binaries.
 - `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds
@@ -106,6 +109,9 @@ in `.github/workflows/memory-plugin-verification.yml`.
   for both build provenance and the generated SBOM.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
   plus nightly validation steps after an upstream merge lands in the fork.
+- `.github/workflows/memory-plugin-verification.yml` runs the dedicated
+  hypermemory Qdrant checks against the official pinned Qdrant GHCR image
+  instead of Docker Hub.
 - `.github/workflows/devflow-contract.yml` syncs the locked environment,
   compile-checks the repo, runs targeted devflow tests, and validates
   `clawops devflow plan --repo-root . --goal "contract smoke"` without live ACP
