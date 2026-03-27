@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from clawops.approvals import main
 from clawops.op_journal import OperationJournal
 from tests.utils.helpers.journal import JournalFactory
@@ -32,7 +34,10 @@ def _seed_pending_operation(journal_factory: JournalFactory) -> tuple[OperationJ
     return journal, pending.op_id
 
 
-def test_approvals_cli_queue_and_show(capsys: object, journal_factory: JournalFactory) -> None:
+def test_approvals_cli_queue_and_show(
+    capsys: pytest.CaptureFixture[str],
+    journal_factory: JournalFactory,
+) -> None:
     journal, op_id = _seed_pending_operation(journal_factory)
 
     exit_code = main(["queue", "--db", str(journal.db_path)])
@@ -52,7 +57,7 @@ def test_approvals_cli_queue_and_show(capsys: object, journal_factory: JournalFa
 
 
 def test_approvals_cli_delegate_then_ingest_review(
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
     journal_factory: JournalFactory,
     tmp_path: pathlib.Path,
 ) -> None:

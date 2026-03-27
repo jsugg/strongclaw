@@ -7,6 +7,8 @@ import pathlib
 import shutil
 import subprocess
 
+import pytest
+
 from clawops.repo_tools import repo_main, worktree_main
 
 
@@ -37,7 +39,7 @@ def _init_repo_contract(tmp_path: pathlib.Path) -> pathlib.Path:
 
 def test_repo_doctor_reports_healthy_repo_contract(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = _init_repo_contract(tmp_path)
 
@@ -52,7 +54,7 @@ def test_repo_doctor_reports_healthy_repo_contract(
 
 def test_worktree_new_list_and_prune_manage_the_repo_contract(
     tmp_path: pathlib.Path,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = _init_repo_contract(tmp_path)
 

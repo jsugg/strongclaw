@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from clawops.cli import main
 
 
-def test_root_help_is_available(capsys: object) -> None:
+def test_root_help_is_available(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["--help"])
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -20,14 +22,14 @@ def test_root_help_is_available(capsys: object) -> None:
     assert "varlock-env" in captured.out
 
 
-def test_root_without_args_prints_usage(capsys: object) -> None:
+def test_root_without_args_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main([])
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Companion ops, policy, context, and harness tooling" in captured.out
 
 
-def test_unknown_root_command_returns_error(capsys: object) -> None:
+def test_unknown_root_command_returns_error(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["nope"])
     captured = capsys.readouterr()
     assert exit_code == 2

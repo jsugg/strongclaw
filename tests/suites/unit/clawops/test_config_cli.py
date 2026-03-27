@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from clawops import config_cli
 
 
-def test_memory_config_list_profiles_json(capsys: object) -> None:
+def test_memory_config_list_profiles_json(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = config_cli.main(["memory", "--list-profiles", "--json"])
     payload = json.loads(capsys.readouterr().out)
 
@@ -23,8 +25,8 @@ def test_memory_config_list_profiles_json(capsys: object) -> None:
 
 def test_memory_config_set_profile_installs_assets_and_renders(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
-    capsys: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     output_path = tmp_path / "openclaw.json"
     installed_calls: list[str] = []
@@ -62,8 +64,8 @@ def test_memory_config_set_profile_installs_assets_and_renders(
 
 def test_memory_config_set_profile_skip_assets_only_renders(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
-    capsys: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     output_path = tmp_path / "openclaw.json"
     monkeypatch.setattr(

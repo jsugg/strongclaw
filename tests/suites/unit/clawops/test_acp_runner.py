@@ -7,6 +7,8 @@ import json
 import pathlib
 import subprocess
 
+import pytest
+
 from clawops.acp_runner import _lock_name, _resolve_session_spec
 from clawops.acp_runner import main as acp_runner_main
 from clawops.acp_runner import parse_args
@@ -36,7 +38,7 @@ def test_acp_runner_writes_summary_and_logs(
     tmp_path: pathlib.Path,
     cli_bin_dir: pathlib.Path,
     prepend_path: PathPrepender,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = tmp_path / "repo-root"
     worktree = repo_root / "repo" / "upstream"
@@ -93,8 +95,8 @@ def test_acp_runner_writes_summary_and_logs(
 def test_acp_runner_fails_preflight_when_acpx_is_missing(
     tmp_path: pathlib.Path,
     cli_bin_dir: pathlib.Path,
-    monkeypatch: object,
-    capsys: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = tmp_path / "repo-root"
     worktree = repo_root / "repo" / "upstream"
@@ -135,7 +137,7 @@ def test_acp_runner_detects_lock_conflicts(
     tmp_path: pathlib.Path,
     cli_bin_dir: pathlib.Path,
     prepend_path: PathPrepender,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = tmp_path / "repo-root"
     worktree = repo_root / "repo" / "upstream"
@@ -200,7 +202,7 @@ def test_acp_runner_supports_non_git_local_dir_without_branch(
     tmp_path: pathlib.Path,
     cli_bin_dir: pathlib.Path,
     prepend_path: PathPrepender,
-    capsys: object,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()

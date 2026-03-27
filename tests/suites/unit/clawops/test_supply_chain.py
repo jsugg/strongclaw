@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from clawops.process_runner import CommandResult
 from clawops.supply_chain import (
     inventory_pins,
@@ -63,7 +65,7 @@ def test_inventory_collects_workflow_and_compose_pins(tmp_path: pathlib.Path) ->
 
 def test_refresh_workflow_action_pins_rewrites_outdated_sha(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
     workflow_dir = repo_root / ".github" / "workflows"
@@ -97,7 +99,7 @@ def test_refresh_workflow_action_pins_rewrites_outdated_sha(
 
 def test_refresh_compose_image_digests_rewrites_outdated_digest(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
     compose_dir = repo_root / "platform" / "compose"
@@ -136,7 +138,7 @@ def test_refresh_compose_image_digests_rewrites_outdated_digest(
 
 def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
     tmp_path: pathlib.Path,
-    monkeypatch: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
