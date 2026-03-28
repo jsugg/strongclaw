@@ -1,0 +1,18 @@
+cases:
+  - id: policy-deny-webhook-outside-allowlist
+    kind: policy
+    policy: platform/configs/policy/policy.yaml
+    input: platform/configs/harness/fixtures/policy_webhook_deny.json
+    expect_decision: deny
+
+  - id: policy-approval-github-comment
+    kind: policy
+    policy: platform/configs/policy/policy.yaml
+    input: platform/configs/harness/fixtures/policy_github_approval.json
+    expect_decision: require_approval
+
+  - id: policy-deny-browser-on-main-host
+    kind: policy
+    policy: platform/configs/policy/policy.yaml
+    input: platform/configs/harness/fixtures/policy_browser_deny.json
+    expect_decision: deny

@@ -10,6 +10,7 @@ import pytest
 
 from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.utils.helpers import fresh_host, hosted_docker
+from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
@@ -213,6 +214,7 @@ def test_ensure_images_uses_compose_resolution_placeholders_before_setup(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("VARLOCK_LOCAL_ENV_FILE", str(tmp_path / "missing.env"))
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -323,20 +325,24 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
     workspace.mkdir()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
 
-    local_env_file = varlock_local_env_file(workspace)
-    local_env_file.parent.mkdir(parents=True, exist_ok=True)
-    write_env_assignments(
-        local_env_file,
-        {
-            "NEO4J_PASSWORD": "runtime-secret",
-        },
-    )
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
         repo_root=workspace,
         runner_temp=runner_temp,
         workspace=workspace,
         github_env_file=github_env,
+    )
+    local_env_file = varlock_local_env_file(
+        workspace,
+        home_dir=Path(context.app_home),
+        environ=phase_env(context),
+    )
+    local_env_file.parent.mkdir(parents=True, exist_ok=True)
+    write_env_assignments(
+        local_env_file,
+        {
+            "NEO4J_PASSWORD": "runtime-secret",
+        },
     )
     commands: list[tuple[list[str], dict[str, str]]] = []
 

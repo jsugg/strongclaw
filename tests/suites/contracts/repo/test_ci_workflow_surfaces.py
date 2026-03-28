@@ -212,3 +212,10 @@ def test_security_harness_tracks_the_context_provider_namespace() -> None:
     assert "id: context-cli-smoke" in text
     assert 'python", "-m", "clawops", "context", "--help"' in text
     assert 'stdout_contains: ["codebase"]' in text
+
+
+def test_codeql_config_ignores_packaged_runtime_asset_mirror() -> None:
+    """CodeQL should scan the maintained source tree, not the packaged asset mirror."""
+    text = (REPO_ROOT / "security/codeql/codeql-config.yml").read_text(encoding="utf-8")
+
+    assert "src/clawops/assets" in text

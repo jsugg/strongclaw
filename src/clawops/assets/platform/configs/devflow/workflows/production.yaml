@@ -1,0 +1,9 @@
+schema_version: 1
+run_profile: production
+stage_order:
+  - architect
+  - developer
+  - sdet
+  - qa
+  - reviewer
+  - lead

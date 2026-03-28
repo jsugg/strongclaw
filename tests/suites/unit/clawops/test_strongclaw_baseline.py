@@ -28,6 +28,17 @@ class _FakeOpenClawResult:
     stderr = ""
 
 
+def _init_source_checkout(repo_root: pathlib.Path) -> pathlib.Path:
+    """Create the minimal StrongClaw marker set for source-checkout validation."""
+    repo_root.mkdir(parents=True)
+    (repo_root / "pyproject.toml").write_text(
+        "[project]\nname = 'strongclaw-test'\n", encoding="utf-8"
+    )
+    (repo_root / "platform").mkdir(parents=True, exist_ok=True)
+    (repo_root / "src" / "clawops").mkdir(parents=True, exist_ok=True)
+    return repo_root
+
+
 def _rendered_openclaw_uses_hypermemory(_path: pathlib.Path) -> bool:
     """Return a deterministic non-hypermemory value for baseline tests."""
 
@@ -42,8 +53,7 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
     commands: list[list[str]] = []
@@ -127,8 +137,7 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
 

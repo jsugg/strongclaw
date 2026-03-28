@@ -7,12 +7,21 @@ import pathlib
 from clawops.app_paths import (
     scoped_state_dir,
     strongclaw_compose_state_dir,
+    strongclaw_config_dir,
     strongclaw_data_dir,
     strongclaw_log_dir,
     strongclaw_lossless_claw_dir,
+    strongclaw_memory_config_dir,
+    strongclaw_plugin_dir,
+    strongclaw_plugins_dir,
     strongclaw_qmd_install_dir,
+    strongclaw_repo_dir,
     strongclaw_runs_dir,
     strongclaw_state_dir,
+    strongclaw_upstream_repo_dir,
+    strongclaw_varlock_dir,
+    strongclaw_workspace_dir,
+    strongclaw_worktrees_dir,
 )
 
 
@@ -42,28 +51,44 @@ def test_linux_defaults_follow_xdg_conventions(tmp_path: pathlib.Path) -> None:
 
 def test_macos_defaults_use_application_support_and_logs(tmp_path: pathlib.Path) -> None:
     home_dir = tmp_path / "home"
+    env: dict[str, str] = {}
 
-    assert strongclaw_data_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_config_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
+        home_dir / "Library" / "Application Support" / "StrongClaw" / "config"
+    )
+    assert strongclaw_data_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Application Support" / "StrongClaw"
     )
-    assert strongclaw_state_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_state_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Application Support" / "StrongClaw" / "state"
     )
-    assert strongclaw_log_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_log_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Logs" / "StrongClaw"
     )
 
 
 def test_override_paths_apply_to_lossless_and_qmd_installs(tmp_path: pathlib.Path) -> None:
     env = {
+        "STRONGCLAW_CONFIG_DIR": str(tmp_path / "config-root"),
         "STRONGCLAW_DATA_DIR": str(tmp_path / "data-root"),
         "STRONGCLAW_STATE_DIR": str(tmp_path / "state-root"),
     }
 
+    assert strongclaw_config_dir(environ=env) == tmp_path / "config-root"
     assert strongclaw_lossless_claw_dir(environ=env) == (
         tmp_path / "data-root" / "plugins" / "lossless-claw"
     )
+    assert strongclaw_plugins_dir(environ=env) == tmp_path / "data-root" / "plugins"
+    assert strongclaw_plugin_dir("memory-lancedb-pro", environ=env) == (
+        tmp_path / "data-root" / "plugins" / "memory-lancedb-pro"
+    )
     assert strongclaw_qmd_install_dir(environ=env) == tmp_path / "data-root" / "qmd"
+    assert strongclaw_workspace_dir(environ=env) == tmp_path / "data-root" / "workspace"
+    assert strongclaw_repo_dir(environ=env) == tmp_path / "data-root" / "repo"
+    assert strongclaw_upstream_repo_dir(environ=env) == tmp_path / "data-root" / "repo" / "upstream"
+    assert strongclaw_worktrees_dir(environ=env) == tmp_path / "data-root" / "repo" / "worktrees"
+    assert strongclaw_varlock_dir(environ=env) == tmp_path / "config-root" / "varlock"
+    assert strongclaw_memory_config_dir(environ=env) == tmp_path / "config-root" / "memory"
     scoped_dir = scoped_state_dir(tmp_path / "repo", category="acp", environ=env)
     assert scoped_dir.parent.parent == tmp_path / "state-root" / "workspaces"
     assert scoped_dir.parent.name.startswith("repo-")

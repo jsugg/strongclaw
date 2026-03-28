@@ -3,5 +3,6 @@ paths:
   - src
   - platform/plugins
 paths-ignore:
+  - src/clawops/assets
   - platform/compose/state
   - platform/skills/quarantine

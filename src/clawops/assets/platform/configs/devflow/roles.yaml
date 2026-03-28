@@ -1,0 +1,79 @@
+schema_version: 1
+default_run_profile: production
+roles:
+  architect:
+    worker_prompt: platform/workers/acpx/architect-system.md
+    default_backend: claude
+    permissions_mode: approve-reads
+    required_auth_mode: subscription
+    workspace_mode: verify_only
+    mutable_tracked_files: false
+    expected_artifacts:
+      - name: design
+        path: artifacts/architect/design.md
+        required: true
+      - name: task_plan
+        path: artifacts/architect/tasks.yaml
+        required: true
+  developer:
+    worker_prompt: platform/workers/acpx/coder-system.md
+    default_backend: codex
+    permissions_mode: approve-all
+    required_auth_mode: subscription
+    workspace_mode: mutable_primary
+    mutable_tracked_files: true
+    expected_artifacts:
+      - name: summary
+        path: artifacts/developer/summary.md
+        required: true
+  sdet:
+    worker_prompt: platform/workers/acpx/sdet-system.md
+    default_backend: codex
+    permissions_mode: approve-all
+    required_auth_mode: subscription
+    workspace_mode: mutable_test
+    mutable_tracked_files: true
+    expected_artifacts:
+      - name: test_plan
+        path: artifacts/sdet/test-plan.md
+        required: true
+  qa:
+    worker_prompt: platform/workers/acpx/qa-system.md
+    default_backend: claude
+    permissions_mode: approve-all
+    required_auth_mode: subscription
+    workspace_mode: verify_only
+    mutable_tracked_files: false
+    expected_artifacts:
+      - name: report
+        path: artifacts/qa/report.json
+        required: true
+      - name: notes
+        path: artifacts/qa/notes.md
+        required: true
+  reviewer:
+    worker_prompt: platform/workers/acpx/reviewer-system.md
+    default_backend: claude
+    permissions_mode: approve-reads
+    required_auth_mode: subscription
+    workspace_mode: verify_only
+    mutable_tracked_files: false
+    expected_artifacts:
+      - name: review
+        path: artifacts/reviewer/review.md
+        required: true
+  lead:
+    worker_prompt: platform/workers/acpx/lead-system.md
+    default_backend: claude
+    permissions_mode: approve-reads
+    required_auth_mode: subscription
+    workspace_mode: verify_only
+    mutable_tracked_files: false
+    approval_required: true
+    expected_artifacts:
+      - name: decision
+        path: artifacts/lead/decision.md
+        required: true
+      - name: side_effects
+        path: artifacts/lead/side-effects.md
+        required: true

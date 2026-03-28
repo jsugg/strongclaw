@@ -14,18 +14,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
-from typing import Final, cast
+from typing import cast
 
 from clawops.allowlist_sync import load_source, render_fragment
 from clawops.common import dump_json, load_text, load_yaml
 from clawops.process_runner import run_command
-from clawops.root_detection import (
-    DEFAULT_SOURCE_REPO_ROOT,
-    resolve_strongclaw_repo_root,
-)
+from clawops.runtime_assets import resolve_asset_path, resolve_asset_root
 from clawops.typed_values import as_mapping
-
-DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_SOURCE_REPO_ROOT
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -724,14 +719,16 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(getattr(args, "subcommand_repo_root", None), pathlib.Path)
         else args.repo_root
     )
-    repo_root = resolve_strongclaw_repo_root(repo_root_argument, fallback=DEFAULT_REPO_ROOT)
+    repo_root = resolve_asset_root(repo_root_argument)
 
     if args.target == "sidecars":
         report = verify_sidecars(
             compose_path=(
                 args.compose_file.resolve()
                 if args.compose_file is not None
-                else repo_root / "platform/compose/docker-compose.aux-stack.yaml"
+                else resolve_asset_path(
+                    "platform/compose/docker-compose.aux-stack.yaml", repo_root=repo_root
+                )
             ),
             skip_runtime=bool(args.skip_runtime),
         )
@@ -740,12 +737,16 @@ def main(argv: list[str] | None = None) -> int:
             overlay_path=(
                 args.overlay.resolve()
                 if args.overlay is not None
-                else repo_root / "platform/configs/openclaw/50-observability.json5"
+                else resolve_asset_path(
+                    "platform/configs/openclaw/50-observability.json5", repo_root=repo_root
+                )
             ),
             compose_path=(
                 args.compose_file.resolve()
                 if args.compose_file is not None
-                else repo_root / "platform/compose/docker-compose.aux-stack.yaml"
+                else resolve_asset_path(
+                    "platform/compose/docker-compose.aux-stack.yaml", repo_root=repo_root
+                )
             ),
             skip_runtime=bool(args.skip_runtime),
         )
@@ -754,27 +755,31 @@ def main(argv: list[str] | None = None) -> int:
             overlay_path=(
                 args.overlay.resolve()
                 if args.overlay is not None
-                else repo_root / "platform/configs/openclaw/30-channels.json5"
+                else resolve_asset_path(
+                    "platform/configs/openclaw/30-channels.json5", repo_root=repo_root
+                )
             ),
             channels_doc_path=(
                 args.doc.resolve()
                 if args.doc is not None
-                else repo_root / "platform/docs/CHANNELS.md"
+                else resolve_asset_path("platform/docs/CHANNELS.md", repo_root=repo_root)
             ),
             telegram_guidance_path=(
                 args.telegram_guidance.resolve()
                 if args.telegram_guidance is not None
-                else repo_root / "platform/docs/channels/telegram.md"
+                else resolve_asset_path("platform/docs/channels/telegram.md", repo_root=repo_root)
             ),
             whatsapp_guidance_path=(
                 args.whatsapp_guidance.resolve()
                 if args.whatsapp_guidance is not None
-                else repo_root / "platform/docs/channels/whatsapp.md"
+                else resolve_asset_path("platform/docs/channels/whatsapp.md", repo_root=repo_root)
             ),
             allowlist_source_path=(
                 args.allowlist_source.resolve()
                 if args.allowlist_source is not None
-                else repo_root / "platform/configs/source-allowlists.example.yaml"
+                else resolve_asset_path(
+                    "platform/configs/source-allowlists.example.yaml", repo_root=repo_root
+                )
             ),
         )
 

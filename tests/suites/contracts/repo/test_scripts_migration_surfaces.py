@@ -35,9 +35,9 @@ def test_service_templates_call_repo_venv_python() -> None:
 
     assert "scripts/ops/" not in gateway
     assert "scripts/ops/" not in sidecars
-    assert "__REPO_ROOT__/.venv/bin/python -m clawops" in gateway
-    assert "__REPO_ROOT__/.venv/bin/python -m clawops" in sidecars
-    assert "__REPO_ROOT__/.venv/bin/python" in launchd_gateway
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in gateway
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in sidecars
+    assert "__PYTHON_EXECUTABLE__" in launchd_gateway
     assert (
         "Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         in gateway

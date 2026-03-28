@@ -9,7 +9,11 @@ import pathlib
 from collections.abc import Mapping
 
 from clawops.common import write_json
-from clawops.openclaw_config import DEFAULT_OPENCLAW_CONFIG_OUTPUT, render_openclaw_profile
+from clawops.openclaw_config import (
+    DEFAULT_OPENCLAW_CONFIG_OUTPUT,
+    materialize_runtime_memory_configs,
+    render_openclaw_profile,
+)
 from clawops.strongclaw_bootstrap import install_profile_assets
 from clawops.strongclaw_runtime import resolve_home_dir, resolve_repo_root
 
@@ -91,6 +95,7 @@ def _set_memory_profile(
         repo_root=repo_root,
         home_dir=home_dir,
     )
+    materialize_runtime_memory_configs(repo_root=repo_root, home_dir=home_dir)
     resolved_output = output_path.expanduser().resolve()
     write_json(resolved_output, rendered)
     return {

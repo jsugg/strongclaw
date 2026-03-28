@@ -61,6 +61,21 @@ def test_memory_config_set_profile_installs_assets_and_renders(
         _render_openclaw_profile,
     )
 
+    def _test_materialize_runtime_memory_configs(
+        *,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path,
+        user_timezone: str | None = None,
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        del repo_root, home_dir, user_timezone
+        return tmp_path / "hypermemory.yaml", tmp_path / "hypermemory.sqlite.yaml"
+
+    monkeypatch.setattr(
+        config_cli,
+        "materialize_runtime_memory_configs",
+        _test_materialize_runtime_memory_configs,
+    )
+
     exit_code = config_cli.main(
         [
             "--repo-root",
@@ -101,6 +116,21 @@ def test_memory_config_set_profile_skip_assets_only_renders(
         config_cli,
         "render_openclaw_profile",
         _render_openclaw_profile,
+    )
+
+    def _test_materialize_runtime_memory_configs(
+        *,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path,
+        user_timezone: str | None = None,
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        del repo_root, home_dir, user_timezone
+        return tmp_path / "hypermemory.yaml", tmp_path / "hypermemory.sqlite.yaml"
+
+    monkeypatch.setattr(
+        config_cli,
+        "materialize_runtime_memory_configs",
+        _test_materialize_runtime_memory_configs,
     )
 
     exit_code = config_cli.main(

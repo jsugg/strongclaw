@@ -6,6 +6,7 @@ import argparse
 import json
 import pathlib
 
+from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
     CommandError,
@@ -32,7 +33,7 @@ def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
             repo_root,
             "harness",
             "--suite",
-            str(repo_root / "platform" / "configs" / "harness" / suite_name),
+            str(resolve_asset_path(f"platform/configs/harness/{suite_name}", repo_root=repo_root)),
             "--output",
             str(runs_dir / output_name),
         )
@@ -63,6 +64,11 @@ def verify_baseline(
     runs_dir: pathlib.Path,
 ) -> dict[str, object]:
     """Run the baseline verification flow."""
+    layout = resolve_runtime_layout(repo_root=repo_root)
+    if layout.source_checkout_root is None:
+        raise CommandError(
+            "baseline verify requires a StrongClaw source checkout because it runs repository tests."
+        )
     require_openclaw("Baseline verification runs OpenClaw diagnostics and audits.")
     config_path = resolve_openclaw_config_path(repo_root)
     if not config_path.exists():
@@ -138,15 +144,15 @@ def verify_baseline(
             "uv",
             "run",
             "--project",
-            str(repo_root),
+            str(layout.source_checkout_root),
             "--locked",
             "--group",
             "dev",
             "pytest",
             "-q",
-            str(repo_root / "tests"),
+            str(layout.source_checkout_root / "tests"),
         ],
-        cwd=repo_root,
+        cwd=layout.source_checkout_root,
         timeout_seconds=3600,
     )
     if not tests_result.ok:

@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "description": "Allow bounded test and lint commands inside the repo workspace only.",
+      "id": "workspace-tests",
+      "match": {
+        "cwdPrefixes": [
+          "__REPO_ROOT__",
+          "__UPSTREAM_REPO_ROOT__"
+        ],
+        "executables": [
+          "python3",
+          "pytest",
+          "npm",
+          "pnpm",
+          "ruff",
+          "mypy",
+          "node"
+        ]
+      },
+      "policy": {
+        "allowArgsRegex": [
+          "(^| )-m pytest( |$)",
+          "(^| )pytest( |$)",
+          "(^| )ruff( |$)",
+          "(^| )mypy( |$)",
+          "(^| )test( |$)",
+          "(^| )lint( |$)"
+        ],
+        "denyArgsRegex": [
+          "(^| )rm\\s+-rf( |$)",
+          "(^| )curl( |$)",
+          "(^| )wget( |$)"
+        ]
+      }
+    }
+  ],
+  "version": 1
+}

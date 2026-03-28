@@ -1,0 +1,10 @@
+services:
+  ollama:
+    image: ollama/ollama:0.11.11@sha256:24d41d792306fc3221de215bb6f225faf981712d1f38083d8c61301dfa2b69b3
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR before starting compose}/ollama:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

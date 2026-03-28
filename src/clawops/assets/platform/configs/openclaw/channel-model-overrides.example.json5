@@ -1,0 +1,13 @@
+{
+  "channels": {
+    "modelByChannel": {
+      "telegram": {
+        "-1001234567890": "readerfast",
+        "-1001234567890:topic:99": "reviewermid"
+      },
+      "whatsapp": {
+        "+5511999999999": "messaging"
+      }
+    }
+  }
+}

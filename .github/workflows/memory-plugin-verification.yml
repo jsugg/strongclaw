@@ -42,6 +42,7 @@ jobs:
           npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@2026.3.13"
           export PATH="$tool_dir/node_modules/.bin:$PATH"
           cd platform/plugins/memory-lancedb-pro
+          npm ci --no-fund --no-audit
           env \
             -u AWS_PROFILE \
             -u AWS_ACCESS_KEY_ID \

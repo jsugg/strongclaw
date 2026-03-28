@@ -10,6 +10,7 @@ from clawops.acpx_adapter import AcpxPermissionMode
 from clawops.backend_registry import resolve_backend
 from clawops.common import load_yaml
 from clawops.orchestration import AUTH_MODES, ROLE_NAMES, AuthMode
+from clawops.runtime_assets import resolve_asset_path, resolve_asset_root
 from clawops.typed_values import as_bool, as_mapping, as_mapping_list, as_string
 
 type WorkspaceMode = Literal["mutable_primary", "mutable_test", "verify_only", "read_only"]
@@ -18,8 +19,8 @@ WORKSPACE_MODES: Final[frozenset[str]] = frozenset(
     {"mutable_primary", "mutable_test", "verify_only", "read_only"}
 )
 PERMISSION_MODES: Final[frozenset[str]] = frozenset({"approve-all", "approve-reads", "deny-all"})
-DEFAULT_ROLE_CATALOG_PATH: Final[pathlib.Path] = (
-    pathlib.Path(__file__).resolve().parents[2] / "platform/configs/devflow/roles.yaml"
+DEFAULT_ROLE_CATALOG_PATH: Final[pathlib.Path] = resolve_asset_path(
+    "platform/configs/devflow/roles.yaml"
 )
 
 
@@ -97,8 +98,8 @@ class RoleCatalog:
 
 
 def _repo_root() -> pathlib.Path:
-    """Return the repository root from the installed source tree."""
-    return pathlib.Path(__file__).resolve().parents[2]
+    """Return the effective StrongClaw asset root."""
+    return resolve_asset_root()
 
 
 def _validate_artifacts(

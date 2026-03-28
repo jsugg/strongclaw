@@ -1,0 +1,9 @@
+{
+  "trust_zone": "automation",
+  "action": "webhook.post",
+  "category": "external_write",
+  "target_kind": "webhook_url",
+  "target": "https://evil.invalid",
+  "environment": "prod",
+  "host_boundary": "main-control-plane"
+}

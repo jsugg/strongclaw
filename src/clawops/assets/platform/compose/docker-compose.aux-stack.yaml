@@ -1,0 +1,133 @@
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:20edbde7749f822887a1a022ad526fde0a47d6b2be9a8364433605cf65099416
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops sidecars up}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # `clawops ops sidecars up` runs LiteLLM schema bootstrap explicitly before
+  # starting the runtime proxy. Keep runtime schema mutation disabled here so
+  # the long Prisma bootstrap never sits inside the health window.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable@sha256:690bcb7a5dd11dffc24d7444a35b28723652443a9ab0608a46c05beba91a2193
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DISABLE_SCHEMA_UPDATE: "true"
+      HYPERMEMORY_EMBEDDING_MODEL: ${HYPERMEMORY_EMBEDDING_MODEL}
+      HYPERMEMORY_EMBEDDING_API_BASE: ${HYPERMEMORY_EMBEDDING_API_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ZAI_API_KEY: ${ZAI_API_KEY}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ../configs/litellm/config.yaml:/app/config.yaml:ro
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops sidecars up}/litellm:/app/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/usr/bin/python3",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      LANGFUSE_OTEL_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT}
+      LANGFUSE_OTEL_BASIC_AUTH: ${LANGFUSE_OTEL_BASIC_AUTH}
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:9464:9464"
+    volumes:
+      - ../configs/otel/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops sidecars up}/otel:/var/lib/otel
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.5@sha256:0fb8897412abc81d1c0430a899b9a81eb8328aa634e7242d1bc804c1fe8fe863
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops sidecars up}/qdrant:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && IFS=$'\\r' read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.26.23-community@sha256:40bf5ae9282213087e4d6036aab3ec443fe9c974d3dd4f14a11892c63157238f
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - ${STRONGCLAW_COMPOSE_STATE_DIR:?Set STRONGCLAW_COMPOSE_STATE_DIR or use clawops ops sidecars up}/neo4j:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "exec 3<>/dev/tcp/127.0.0.1/7474 && printf 'GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && IFS=$'\\r' read -r line <&3 && [[ \"$$line\" == *\"200\"* ]]",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 15
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

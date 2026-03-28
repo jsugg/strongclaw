@@ -1,0 +1,9 @@
+{
+  "trust_zone": "coder",
+  "action": "browser.navigate",
+  "category": "irreversible",
+  "target_kind": "webhook_url",
+  "target": "https://github.com",
+  "environment": "prod",
+  "host_boundary": "main-control-plane"
+}

@@ -9,8 +9,9 @@ import pathlib
 from collections.abc import Callable
 
 from clawops.common import write_json
-from clawops.openclaw_config import render_openclaw_profile
+from clawops.openclaw_config import materialize_runtime_memory_configs, render_openclaw_profile
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
+from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_baseline import verify_baseline
 from clawops.strongclaw_bootstrap import bootstrap_host, install_profile_assets
 from clawops.strongclaw_model_auth import ensure_model_auth
@@ -52,6 +53,7 @@ def _render_openclaw_config(
         repo_root=repo_root,
         home_dir=home_dir,
     )
+    materialize_runtime_memory_configs(repo_root=repo_root, home_dir=home_dir)
     write_json(output_path, rendered)
     return output_path
 
@@ -384,7 +386,10 @@ def doctor_main(argv: list[str] | None = None) -> int:
             ),
         )
     sidecars_report = verify_sidecars(
-        compose_path=repo_root / "platform" / "compose" / "docker-compose.aux-stack.yaml",
+        compose_path=resolve_asset_path(
+            "platform/compose/docker-compose.aux-stack.yaml",
+            repo_root=repo_root,
+        ),
         skip_runtime=bool(args.skip_runtime),
     )
     checks.append(
@@ -396,8 +401,14 @@ def doctor_main(argv: list[str] | None = None) -> int:
         }
     )
     observability_report = verify_observability(
-        overlay_path=repo_root / "platform" / "configs" / "openclaw" / "50-observability.json5",
-        compose_path=repo_root / "platform" / "compose" / "docker-compose.aux-stack.yaml",
+        overlay_path=resolve_asset_path(
+            "platform/configs/openclaw/50-observability.json5",
+            repo_root=repo_root,
+        ),
+        compose_path=resolve_asset_path(
+            "platform/compose/docker-compose.aux-stack.yaml",
+            repo_root=repo_root,
+        ),
         skip_runtime=bool(args.skip_runtime),
     )
     checks.append(
@@ -409,11 +420,23 @@ def doctor_main(argv: list[str] | None = None) -> int:
         }
     )
     channels_report = verify_channels(
-        overlay_path=repo_root / "platform" / "configs" / "openclaw" / "30-channels.json5",
-        channels_doc_path=repo_root / "platform" / "docs" / "CHANNELS.md",
-        telegram_guidance_path=repo_root / "platform" / "docs" / "channels" / "telegram.md",
-        whatsapp_guidance_path=repo_root / "platform" / "docs" / "channels" / "whatsapp.md",
-        allowlist_source_path=repo_root / "platform" / "configs" / "source-allowlists.example.yaml",
+        overlay_path=resolve_asset_path(
+            "platform/configs/openclaw/30-channels.json5",
+            repo_root=repo_root,
+        ),
+        channels_doc_path=resolve_asset_path("platform/docs/CHANNELS.md", repo_root=repo_root),
+        telegram_guidance_path=resolve_asset_path(
+            "platform/docs/channels/telegram.md",
+            repo_root=repo_root,
+        ),
+        whatsapp_guidance_path=resolve_asset_path(
+            "platform/docs/channels/whatsapp.md",
+            repo_root=repo_root,
+        ),
+        allowlist_source_path=resolve_asset_path(
+            "platform/configs/source-allowlists.example.yaml",
+            repo_root=repo_root,
+        ),
     )
     checks.append(
         {

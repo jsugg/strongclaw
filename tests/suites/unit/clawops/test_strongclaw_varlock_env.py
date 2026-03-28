@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from clawops.strongclaw_runtime import (
     load_env_assignments,
     varlock_env_template_file,
-    varlock_local_env_file,
 )
 from clawops.strongclaw_varlock_env import configure_varlock_env
 from tests.plugins.infrastructure.context import TestContext
@@ -43,7 +44,10 @@ def _varlock_validation_success(
 def test_ensure_required_defaults_generates_neo4j_credentials(
     tmp_path: pathlib.Path,
     test_context: TestContext,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    local_env_file = tmp_path / ".env.local"
+    monkeypatch.setenv("VARLOCK_LOCAL_ENV_FILE", str(local_env_file))
     secrets = iter(
         (
             "gateway-secret-value",
@@ -80,6 +84,6 @@ def test_ensure_required_defaults_generates_neo4j_credentials(
     assert isinstance(autofilled_values, int)
     assert autofilled_values > 0
 
-    values = load_env_assignments(varlock_local_env_file(tmp_path))
+    values = load_env_assignments(local_env_file)
     assert values["NEO4J_USERNAME"] == "neo4j"
     assert values["NEO4J_PASSWORD"] == "neo4j-password-secret"

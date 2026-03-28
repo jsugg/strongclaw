@@ -77,6 +77,8 @@ from clawops.hypermemory.models import (
     RetrievalExtensionsConfig,
     SearchBackend,
 )
+from clawops.openclaw_config import materialize_runtime_memory_configs
+from clawops.runtime_assets import resolve_runtime_layout
 
 
 def _as_mapping(name: str, value: object) -> Mapping[str, object]:
@@ -256,8 +258,13 @@ def matches_glob(path_text: str, pattern: str) -> bool:
 
 def default_config_path() -> pathlib.Path:
     """Return the shipped default hypermemory config path."""
-    repo_root = pathlib.Path(__file__).resolve().parents[3]
-    return repo_root / "platform/configs/memory/hypermemory.sqlite.yaml"
+    layout = resolve_runtime_layout()
+    materialize_runtime_memory_configs(
+        repo_root=layout.asset_root,
+        home_dir=layout.home_dir,
+        user_timezone="UTC",
+    )
+    return layout.hypermemory_sqlite_config_path
 
 
 def _load_governance(root: Mapping[str, object]) -> GovernanceConfig:

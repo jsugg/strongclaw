@@ -1,0 +1,24 @@
+name: code-review
+base_dir: ../../..
+steps:
+  - name: init journal
+    kind: journal_init
+    db: ./.clawops/op_journal.sqlite
+
+  - name: policy preflight
+    kind: policy_check
+    policy: platform/configs/policy/policy.yaml
+    payload:
+      trust_zone: coder
+      action: github.comment.create
+      category: external_write
+      target_kind: github_repo
+      target: your-org/openclaw-platform
+
+  - name: dry context pack
+    kind: context_pack
+    provider: codebase
+    scale: small
+    config: platform/configs/context/codebase.yaml
+    repo: .
+    query: "review recent auth changes"
