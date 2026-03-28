@@ -5,10 +5,10 @@
 - Full suite: `uv run pytest -q`
 - Unit lane: `uv run pytest -q -m unit`
 - Integration lane: `uv run pytest -q -m integration`
+- E2E lane: `uv run pytest -q -m e2e`
 - Contract lane: `uv run pytest -q -m contract`
 - Framework lane only:
   `uv run pytest -q -m framework tests/suites/contracts/testing/framework`
-- E2E lane: `uv run pytest -q -m e2e`
 - Hypermemory lane: `uv run pytest -q -m hypermemory`
 - Qdrant lane: `uv run pytest -q -m "hypermemory and qdrant"`
 
@@ -38,5 +38,6 @@
 - If docs or links move, rerun the repository docs contracts so relative-link
   and layout drift is caught early.
 - If a test needs reusable setup by fixture injection, add or extend a fixture.
-  If it needs reusable non-fixture logic, move that code into
-  `tests/utils/helpers/`.
+- If it needs reusable non-fixture logic, move that code into
+`tests/utils/helpers/` or `tests/utils/<some dir>/<some file>`. Depending on the nature of the util's logic you need/if it's more than a helper, put it somewhere else under the `tests/utils/` tree where it fits best (e.g., factories, builders, scripts, validators, data seeders, logging utils, polling code, etc, shouldn't live in `tests/utils/helpers/`. Use your common sense and follow best practices.
+- Note: If the code is **not** a util but more like a framework core functionality instead, it might need to go under other folder under `tests/`. E.g., test data (for instance, DB dumps), settings (framework-wide settings), etc.
