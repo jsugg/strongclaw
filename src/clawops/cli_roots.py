@@ -8,7 +8,7 @@ import sys
 from typing import Final
 
 from clawops.root_detection import resolve_project_root, resolve_strongclaw_repo_root
-from clawops.runtime_assets import resolve_asset_root
+from clawops.runtime_assets import require_asset_root, resolve_asset_root
 
 DEPRECATED_REPO_ROOT_FLAG: Final[str] = "--repo-root"
 
@@ -101,6 +101,8 @@ def resolve_asset_root_argument(
         command_name=command_name,
         canonical_flag="--asset-root",
     )
+    if candidate is not None:
+        return require_asset_root(candidate)
     return resolve_asset_root(candidate)
 
 

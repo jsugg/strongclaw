@@ -79,6 +79,15 @@ Boundary override flags are now literal:
 - use `--source-root` for source-tree-only verification such as `clawops baseline`
 - use `--repo-root` only for repo-contract tooling such as `clawops repo`, `clawops worktree`, and `clawops supply-chain`
 
+Package-safe runtime commands now default to the packaged asset bundle even when you run them from inside a StrongClaw source checkout. To opt into repo-backed assets for local development, export `STRONGCLAW_ASSET_ROOT` or use the repo-local developer flow:
+
+```bash
+source scripts/dev-env.sh
+clawops-dev render-openclaw-config
+```
+
+`make dev-shell` opens an interactive shell with the same repo-backed asset override and managed virtualenv activated.
+
 By default, StrongClaw now renders and provisions the `hypermemory` stack. Set one embedding model name before you run the no-arg setup path:
 
 ```bash
