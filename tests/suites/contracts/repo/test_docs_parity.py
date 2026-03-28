@@ -18,12 +18,17 @@ def _official_markdown_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
         repo_root / "SETUP_GUIDE.md",
         repo_root / "USAGE_GUIDE.md",
     ]
+    docs_markdown = (
+        [path for path in (repo_root / "docs").rglob("*.md") if path.is_file()]
+        if (repo_root / "docs").exists()
+        else []
+    )
     platform_markdown = [
         path
         for path in (repo_root / "platform").rglob("*.md")
         if "platform/plugins/" not in path.as_posix()
     ]
-    return root_markdown + platform_markdown
+    return root_markdown + docs_markdown + platform_markdown
 
 
 def test_markdown_relative_links_resolve() -> None:

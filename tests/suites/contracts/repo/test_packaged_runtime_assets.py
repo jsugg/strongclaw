@@ -9,7 +9,7 @@ from tests.utils.helpers.repo import REPO_ROOT
 
 
 def _tracked_relative_files(root: pathlib.Path) -> set[pathlib.Path]:
-    """Return git-tracked files under one repo-relative root."""
+    """Return existing git-tracked files under one repo-relative root."""
     repo_relative_root = root.resolve().relative_to(REPO_ROOT)
     result = subprocess.run(
         [
@@ -29,7 +29,9 @@ def _tracked_relative_files(root: pathlib.Path) -> set[pathlib.Path]:
         if not raw_path:
             continue
         tracked_path = pathlib.Path(raw_path.decode("utf-8"))
-        files.add(tracked_path.relative_to(repo_relative_root))
+        relative_path = tracked_path.relative_to(repo_relative_root)
+        if (root / relative_path).is_file():
+            files.add(relative_path)
     return files
 
 
