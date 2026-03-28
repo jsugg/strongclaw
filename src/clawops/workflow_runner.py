@@ -39,6 +39,7 @@ from clawops.orchestration import (
 )
 from clawops.policy_engine import PolicyEngine
 from clawops.process_runner import run_command
+from clawops.root_detection import DEFAULT_SOURCE_REPO_ROOT
 from clawops.runtime_assets import resolve_asset_path
 from clawops.typed_values import (
     as_bool,
@@ -105,9 +106,11 @@ def _default_context_pack_output(*, base_dir: pathlib.Path, step_name: str) -> p
     return scoped_state_dir(base_dir, category="context-packs") / f"{_safe_step_slug(step_name)}.md"
 
 
-TRUSTED_WORKFLOW_ROOTS: tuple[pathlib.Path, ...] = (
-    resolve_asset_path("platform/configs/workflows"),
-)
+_trusted_workflow_roots: list[pathlib.Path] = [resolve_asset_path("platform/configs/workflows")]
+_source_workflow_root = (DEFAULT_SOURCE_REPO_ROOT / "platform" / "configs" / "workflows").resolve()
+if _source_workflow_root.is_dir():
+    _trusted_workflow_roots.append(_source_workflow_root)
+TRUSTED_WORKFLOW_ROOTS: tuple[pathlib.Path, ...] = tuple(dict.fromkeys(_trusted_workflow_roots))
 
 ALLOWED_WORKFLOW_KINDS = frozenset(
     {
