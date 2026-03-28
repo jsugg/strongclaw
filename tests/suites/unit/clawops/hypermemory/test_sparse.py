@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from clawops.hypermemory.sparse import build_sparse_encoder
+from clawops.hypermemory.sparse import (
+    build_sparse_encoder,
+    build_sparse_encoder_from_documents,
+    prepare_sparse_document,
+)
 
 
 def test_sparse_encoder_is_deterministic_for_the_same_corpus() -> None:
@@ -43,3 +47,20 @@ def test_sparse_encoder_query_and_document_paths_share_normalization_rules() -> 
     assert set(document_vector.indices) == set(query_vector.indices)
     assert document_vector.is_empty is False
     assert query_vector.is_empty is False
+
+
+def test_sparse_encoder_prepared_documents_preserve_fingerprint_and_document_vectors() -> None:
+    texts = [
+        "Gateway token rollover requires a checklist.",
+        "Alice owns the gateway deployment checklist.",
+    ]
+
+    baseline = build_sparse_encoder(texts)
+    prepared_documents = [prepare_sparse_document(text) for text in texts]
+    reused = build_sparse_encoder_from_documents(prepared_documents)
+
+    assert reused.fingerprint == baseline.fingerprint
+    assert reused.term_to_id == baseline.term_to_id
+    assert reused.encode_document_tokens(prepared_documents[0].tokens) == baseline.encode_document(
+        texts[0]
+    )
