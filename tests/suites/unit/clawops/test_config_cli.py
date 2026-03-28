@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 from clawops import config_cli
+from tests.utils.helpers.assets import make_asset_root
 
 
 def test_memory_config_list_profiles_json(capsys: pytest.CaptureFixture[str]) -> None:
@@ -28,6 +29,7 @@ def test_memory_config_set_profile_installs_assets_and_renders(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
     output_path = tmp_path / "openclaw.json"
     installed_calls: list[str] = []
 
@@ -79,7 +81,7 @@ def test_memory_config_set_profile_installs_assets_and_renders(
     exit_code = config_cli.main(
         [
             "--asset-root",
-            str(tmp_path),
+            str(asset_root),
             "memory",
             "--set-profile",
             "openclaw-qmd",
@@ -101,6 +103,7 @@ def test_memory_config_set_profile_skip_assets_only_renders(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
     output_path = tmp_path / "openclaw.json"
 
     def _render_openclaw_profile(
@@ -136,7 +139,7 @@ def test_memory_config_set_profile_skip_assets_only_renders(
     exit_code = config_cli.main(
         [
             "--asset-root",
-            str(tmp_path),
+            str(asset_root),
             "memory",
             "--set-profile",
             "hypermemory",

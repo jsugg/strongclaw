@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pathlib
 
-from clawops.runtime_assets import PACKAGED_ASSET_ROOT, resolve_asset_path, resolve_runtime_layout
+import pytest
+
+from clawops.runtime_assets import (
+    ASSET_ROOT_ENV_VAR,
+    PACKAGED_ASSET_ROOT,
+    resolve_asset_path,
+    resolve_runtime_layout,
+)
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -29,6 +36,40 @@ def test_runtime_layout_uses_source_checkout_when_explicit() -> None:
     assert layout.asset_root == REPO_ROOT
     assert layout.source_checkout_root == REPO_ROOT
     assert layout.uses_packaged_assets is False
+
+
+def test_runtime_layout_uses_packaged_assets_inside_source_checkout_by_default(
+    test_context: TestContext,
+) -> None:
+    test_context.chdir(REPO_ROOT / "platform")
+
+    layout = resolve_runtime_layout(home_dir=pathlib.Path.home())
+
+    assert layout.asset_root == PACKAGED_ASSET_ROOT
+    assert layout.source_checkout_root is None
+    assert layout.uses_packaged_assets is True
+
+
+def test_runtime_layout_uses_source_checkout_when_env_override_is_set(
+    test_context: TestContext,
+) -> None:
+    test_context.env.set(ASSET_ROOT_ENV_VAR, str(REPO_ROOT))
+
+    layout = resolve_runtime_layout(home_dir=pathlib.Path.home())
+
+    assert layout.asset_root == REPO_ROOT
+    assert layout.source_checkout_root == REPO_ROOT
+    assert layout.uses_packaged_assets is False
+
+
+def test_runtime_layout_rejects_invalid_env_asset_root_override(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    test_context.env.set(ASSET_ROOT_ENV_VAR, str(tmp_path / "invalid-assets"))
+
+    with pytest.raises(FileNotFoundError, match="StrongClaw asset root must contain platform/:"):
+        resolve_runtime_layout(home_dir=tmp_path / "home")
 
 
 def test_resolve_asset_path_accepts_explicit_asset_root(tmp_path: pathlib.Path) -> None:

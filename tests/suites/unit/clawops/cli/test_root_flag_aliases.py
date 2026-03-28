@@ -33,13 +33,15 @@ def test_asset_root_legacy_repo_root_alias_warns(
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    asset_root = tmp_path / "assets"
+    (asset_root / "platform").mkdir(parents=True)
     parser = argparse.ArgumentParser()
     add_asset_root_argument(parser)
 
-    args = parser.parse_args(["--repo-root", str(tmp_path)])
+    args = parser.parse_args(["--repo-root", str(asset_root)])
     resolved = resolve_asset_root_argument(args, command_name="clawops config")
 
-    assert resolved == tmp_path.resolve()
+    assert resolved == asset_root.resolve()
     assert (
         capsys.readouterr().err.strip()
         == "warning: --repo-root is deprecated for clawops config; use --asset-root."
