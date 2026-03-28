@@ -33,6 +33,9 @@ clawops context codebase worker --scale medium --config platform/configs/context
 clawops context codebase benchmark --scale medium --config platform/configs/context/codebase.yaml --repo . --fixtures platform/configs/context/benchmarks/codebase.yaml --json
 ```
 
+The shipped config keeps default indexing focused on repo-authored material by
+excluding large vendored trees and the benchmark fixture directory.
+
 ## Included integrations
 
 - provider implementation in `src/clawops/context/codebase/service.py`
@@ -147,6 +150,10 @@ Hybrid runtime artifacts are intentionally deferred for medium and large reindex
 - `worker` reconciles pending Qdrant point deletions and chunk-vector upserts in the background
 - `query` and `pack` transparently fall back to lexical chunk retrieval until the worker finishes a healthy hybrid sync
 
+Successful hybrid batches now persist incrementally, so a late local embedding
+timeout leaves the worker degraded but does not discard already indexed chunk
+vectors. The next worker or benchmark pass resumes from the remaining chunks.
+
 The Neo4j lane now uses the official Python driver over the Bolt protocol and
 keeps the SQLite graph fallback aligned by materializing symbol-aware
 `DEFINES`, `CALLS`, and `REFERENCES` edges alongside file import edges.
@@ -156,6 +163,8 @@ keeps the SQLite graph fallback aligned by materializing symbol-aware
 Use `clawops context codebase benchmark` to measure Recall@k and MRR against a
 curated fixture file. The command reindexes the repo, consolidates runtime
 artifacts, and then evaluates each case against the current provider scale.
+When the fixture file lives under the repo root, the benchmark command excludes
+that exact file from indexing so the query set cannot self-match.
 
 Fixture files live under `platform/configs/context/benchmarks/` and accept:
 
@@ -172,6 +181,7 @@ Benchmark authoring guidance:
 - For `small`, benchmark cases should use exact lexical or symbol-oriented queries.
 - semantic or paraphrase-oriented benchmark cases should target `medium` or `large`.
 - Keep the shipped benchmark CLI example on `--scale medium` when validating hybrid recall expectations.
+- The shipped local medium config keeps embedding batches conservative and allows longer HTTP timeouts because LiteLLM+Ollama can exceed optimistic defaults on singleton retries.
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
