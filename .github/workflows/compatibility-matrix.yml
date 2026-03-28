@@ -59,6 +59,7 @@ jobs:
           HOME_DIR="${SETUP_COMPAT_HOME:-$TMP_ROOT/home}"
           mkdir -p "$HOME_DIR"
           export HOME="$HOME_DIR"
+          export STRONGCLAW_CONFIG_DIR="${STRONGCLAW_CONFIG_DIR:-$TMP_ROOT/config}"
           export STRONGCLAW_DATA_DIR="${STRONGCLAW_DATA_DIR:-$TMP_ROOT/data}"
           export STRONGCLAW_STATE_DIR="${STRONGCLAW_STATE_DIR:-$TMP_ROOT/state}"
           export TMP_ROOT
@@ -88,7 +89,9 @@ jobs:
       - run: |
           TMP_PARENT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
           TMP_ROOT="${SETUP_COMPAT_ROOT:-$TMP_PARENT/strongclaw-setup-compat}"
+          STRONGCLAW_CONFIG_DIR="${STRONGCLAW_CONFIG_DIR:-$TMP_ROOT/config}"
           export TMP_ROOT
+          export STRONGCLAW_CONFIG_DIR
           python - <<'PY'
           import json
           import os
@@ -96,6 +99,11 @@ jobs:
 
           payload = json.loads((pathlib.Path(os.environ["TMP_ROOT"]) / "openclaw.json").read_text(encoding="utf-8"))
           plugin_config = payload["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
-          assert plugin_config["configPath"].endswith("platform/configs/memory/hypermemory.yaml")
+          expected_config_path = (
+              pathlib.Path(os.environ["STRONGCLAW_CONFIG_DIR"]).expanduser().resolve()
+              / "memory"
+              / "hypermemory.yaml"
+          )
+          assert plugin_config["configPath"] == expected_config_path.as_posix()
           assert plugin_config["autoRecall"] is True
           PY
