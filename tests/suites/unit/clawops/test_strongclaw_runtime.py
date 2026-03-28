@@ -8,6 +8,7 @@ import pytest
 import clawops.strongclaw_runtime as runtime
 from clawops.app_paths import strongclaw_varlock_dir
 from clawops.strongclaw_runtime import CommandError, ExecResult, write_env_assignments
+from tests.plugins.infrastructure.context import TestContext
 
 
 def test_write_env_assignments_uses_owner_only_permissions(tmp_path: pathlib.Path) -> None:
@@ -21,7 +22,7 @@ def test_write_env_assignments_uses_owner_only_permissions(tmp_path: pathlib.Pat
 
 
 def test_docker_backend_diagnostics_capture_runtime_context(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     def _fake_run_command(argv: list[str], timeout_seconds: int = 15) -> ExecResult:
         if argv == ["docker", "context", "show"]:
@@ -36,11 +37,15 @@ def test_docker_backend_diagnostics_capture_runtime_context(
             )
         raise AssertionError(argv)
 
-    monkeypatch.setattr(runtime, "docker_cli_installed", lambda: True)
-    monkeypatch.setattr(runtime, "docker_compose_available", lambda: True)
-    monkeypatch.setattr(runtime, "detect_docker_runtime_provider", lambda: "OrbStack")
-    monkeypatch.setattr(runtime, "run_command", _fake_run_command)
-    monkeypatch.setenv("DOCKER_HOST", "unix:///Users/test/.orbstack/run/docker.sock")
+    test_context.patch.patch_object(runtime, "docker_cli_installed", new=lambda: True)
+    test_context.patch.patch_object(runtime, "docker_compose_available", new=lambda: True)
+    test_context.patch.patch_object(
+        runtime,
+        "detect_docker_runtime_provider",
+        new=lambda: "OrbStack",
+    )
+    test_context.patch.patch_object(runtime, "run_command", new=_fake_run_command)
+    test_context.env.set("DOCKER_HOST", "unix:///Users/test/.orbstack/run/docker.sock")
 
     diagnostics = runtime.docker_backend_diagnostics()
 
@@ -52,7 +57,7 @@ def test_docker_backend_diagnostics_capture_runtime_context(
 
 
 def test_ensure_docker_backend_ready_surfaces_runtime_details(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     def _fake_run_command(argv: list[str], timeout_seconds: int = 15) -> ExecResult:
         if argv == ["docker", "context", "show"]:
@@ -67,12 +72,16 @@ def test_ensure_docker_backend_ready_surfaces_runtime_details(
             )
         raise AssertionError(argv)
 
-    monkeypatch.setattr(runtime, "docker_cli_installed", lambda: True)
-    monkeypatch.setattr(runtime, "docker_compose_available", lambda: True)
-    monkeypatch.setattr(runtime, "detect_docker_runtime_provider", lambda: "OrbStack")
-    monkeypatch.setattr(runtime, "run_command", _fake_run_command)
-    monkeypatch.setattr(runtime, "load_docker_refresh_state", lambda: None)
-    monkeypatch.setenv("DOCKER_HOST", "unix:///Users/test/.orbstack/run/docker.sock")
+    test_context.patch.patch_object(runtime, "docker_cli_installed", new=lambda: True)
+    test_context.patch.patch_object(runtime, "docker_compose_available", new=lambda: True)
+    test_context.patch.patch_object(
+        runtime,
+        "detect_docker_runtime_provider",
+        new=lambda: "OrbStack",
+    )
+    test_context.patch.patch_object(runtime, "run_command", new=_fake_run_command)
+    test_context.patch.patch_object(runtime, "load_docker_refresh_state", new=lambda: None)
+    test_context.env.set("DOCKER_HOST", "unix:///Users/test/.orbstack/run/docker.sock")
 
     with pytest.raises(CommandError) as exc_info:
         runtime.ensure_docker_backend_ready()
@@ -85,7 +94,7 @@ def test_ensure_docker_backend_ready_surfaces_runtime_details(
 
 def test_varlock_env_dir_defaults_to_managed_config_root(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     repo_root = tmp_path / "assets"
     asset_dir = repo_root / "platform" / "configs" / "varlock"
@@ -95,7 +104,7 @@ def test_varlock_env_dir_defaults_to_managed_config_root(
     (asset_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
     (asset_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
     managed_root = tmp_path / "config-root"
-    monkeypatch.setenv("STRONGCLAW_CONFIG_DIR", str(managed_root))
+    test_context.env.set("STRONGCLAW_CONFIG_DIR", str(managed_root))
     legacy_dir = repo_root / "platform" / "configs" / "varlock"
 
     expected = runtime.varlock_env_dir(repo_root)

@@ -11,6 +11,7 @@ import pytest
 from clawops.devflow import main
 from clawops.devflow_roles import WorkspaceMode
 from clawops.devflow_workspaces import DevflowWorkspacePlanner, PlannedWorkspace
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.cli import PathPrepender
 from tests.utils.helpers.devflow import (
     init_git_repo,
@@ -70,7 +71,7 @@ def test_devflow_workspace_failure_marks_run_failed_and_audit_still_works(
     tmp_path: pathlib.Path,
     prepend_path: PathPrepender,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -100,7 +101,7 @@ def test_devflow_workspace_failure_marks_run_failed_and_audit_still_works(
             source_root=source_root,
         )
 
-    monkeypatch.setattr(DevflowWorkspacePlanner, "prepare", _flaky_prepare)
+    test_context.patch.patch_object(DevflowWorkspacePlanner, "prepare", new=_flaky_prepare)
 
     exit_code = main(["run", "--project-root", str(repo_root), "--goal", "workspace recovery"])
     payload = json.loads(capsys.readouterr().out)

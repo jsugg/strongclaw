@@ -42,6 +42,7 @@ def test_test_context_fixture_is_accessed_from_stash(
 def test_test_context_always_exposes_env_and_patch_runtime(test_context: TestContext) -> None:
     assert test_context.env is not None
     assert test_context.patch is not None
+    assert callable(test_context.chdir)
 
 
 def test_fixture_registry_no_longer_loads_legacy_test_context_plugin() -> None:

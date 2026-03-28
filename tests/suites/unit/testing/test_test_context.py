@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import pathlib
 
 import pytest
 
@@ -185,3 +187,21 @@ def test_notes_dict_available_for_diagnostics() -> None:
     ctx = TestContext()
     ctx.notes["scope"] = "diagnostic"
     assert ctx.notes["scope"] == "diagnostic"
+
+
+def test_chdir_restores_original_working_directory(tmp_path: pathlib.Path) -> None:
+    ctx = TestContext()
+    original = pathlib.Path.cwd()
+    target = tmp_path / "workspace"
+    target.mkdir()
+
+    try:
+        ctx.chdir(target)
+
+        assert pathlib.Path.cwd() == target
+
+        ctx.cleanup_all()
+
+        assert pathlib.Path.cwd() == original
+    finally:
+        os.chdir(original)

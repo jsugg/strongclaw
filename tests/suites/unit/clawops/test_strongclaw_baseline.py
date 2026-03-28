@@ -9,6 +9,7 @@ import pytest
 
 from clawops import strongclaw_baseline
 from clawops.strongclaw_runtime import CommandError
+from tests.plugins.infrastructure.context import TestContext
 
 
 class _FakeCommandResult:
@@ -50,8 +51,8 @@ def _noop_harness_smoke(_repo: pathlib.Path, _runs_dir: pathlib.Path) -> None:
 
 
 def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
+    test_context: TestContext,
 ) -> None:
     repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
@@ -99,29 +100,31 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         assert repo == repo_root
         assert runs_dir == tmp_path / "runs"
 
-    monkeypatch.setattr(strongclaw_baseline, "require_openclaw", _require_openclaw)
-    monkeypatch.setattr(
+    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "resolve_openclaw_config_path",
-        _resolve_openclaw_config_path,
+        new=_resolve_openclaw_config_path,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "run_openclaw_command",
-        _run_openclaw_command,
+        new=_run_openclaw_command,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "ensure_model_auth",
-        _ensure_model_auth,
+        new=_ensure_model_auth,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "rendered_openclaw_uses_hypermemory",
-        _rendered_openclaw_uses_hypermemory,
+        new=_rendered_openclaw_uses_hypermemory,
     )
-    monkeypatch.setattr(strongclaw_baseline, "run_command", _run_command)
-    monkeypatch.setattr(strongclaw_baseline, "run_harness_smoke", _run_harness_smoke)
+    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
+    test_context.patch.patch_object(
+        strongclaw_baseline, "run_harness_smoke", new=_run_harness_smoke
+    )
 
     payload = strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")
 
@@ -134,8 +137,8 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
 
 
 def test_verify_baseline_surfaces_repo_test_failure_detail(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
+    test_context: TestContext,
 ) -> None:
     repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
@@ -178,29 +181,31 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
             return _FakeCommandResult(ok=False, stderr="repo tests failed")
         return _FakeCommandResult(ok=True)
 
-    monkeypatch.setattr(strongclaw_baseline, "require_openclaw", _require_openclaw)
-    monkeypatch.setattr(
+    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "resolve_openclaw_config_path",
-        _resolve_openclaw_config_path,
+        new=_resolve_openclaw_config_path,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "run_openclaw_command",
-        _run_openclaw_command,
+        new=_run_openclaw_command,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "ensure_model_auth",
-        _ensure_model_auth,
+        new=_ensure_model_auth,
     )
-    monkeypatch.setattr(
+    test_context.patch.patch_object(
         strongclaw_baseline,
         "rendered_openclaw_uses_hypermemory",
-        _rendered_openclaw_uses_hypermemory,
+        new=_rendered_openclaw_uses_hypermemory,
     )
-    monkeypatch.setattr(strongclaw_baseline, "run_command", _run_command)
-    monkeypatch.setattr(strongclaw_baseline, "run_harness_smoke", _noop_harness_smoke)
+    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
+    test_context.patch.patch_object(
+        strongclaw_baseline, "run_harness_smoke", new=_noop_harness_smoke
+    )
 
     with pytest.raises(CommandError, match="repo tests failed"):
         strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")

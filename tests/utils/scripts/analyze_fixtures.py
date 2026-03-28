@@ -38,7 +38,7 @@ def _test_source_files(repo_root: Path) -> list[Path]:
 def _is_direct_monkeypatch_call(node: ast.Call) -> bool:
     if not isinstance(node.func, ast.Attribute):
         return False
-    if node.func.attr not in {"delenv", "setattr", "setenv"}:
+    if node.func.attr not in {"chdir", "delenv", "setattr", "setenv"}:
         return False
     return isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch"
 

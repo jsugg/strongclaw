@@ -6,6 +6,7 @@ import subprocess
 
 import pytest
 
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.qdrant_runtime import (
     DEFAULT_QDRANT_IMAGE,
     QDRANT_IMAGE_ENV,
@@ -32,7 +33,7 @@ def test_default_qdrant_image_uses_pinned_ghcr_mirror() -> None:
 
 
 def test_require_live_url_uses_repo_pinned_image_by_default(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Real-mode runtimes should default to the repo-pinned Qdrant image."""
     commands: list[list[str]] = []
@@ -48,10 +49,13 @@ def test_require_live_url_uses_repo_pinned_image_by_default(
         commands.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="container-id", stderr="")
 
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.shutil.which", _docker_path)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._reserve_local_port", lambda: 46333)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._wait_for_qdrant", _noop_wait)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.subprocess.run", _fake_run)
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.shutil.which", new=_docker_path)
+    test_context.patch.patch(
+        "tests.utils.helpers.qdrant_runtime._reserve_local_port",
+        new=lambda: 46333,
+    )
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime._wait_for_qdrant", new=_noop_wait)
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.subprocess.run", new=_fake_run)
 
     runtime = QdrantRuntime(context=None, mode="real")
     live_url = runtime.require_live_url()
@@ -63,7 +67,7 @@ def test_require_live_url_uses_repo_pinned_image_by_default(
 
 
 def test_require_live_url_honors_configured_image_override(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Real-mode runtimes should honor an explicit image override."""
     commands: list[list[str]] = []
@@ -79,11 +83,14 @@ def test_require_live_url_honors_configured_image_override(
         commands.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="container-id", stderr="")
 
-    monkeypatch.setenv(QDRANT_IMAGE_ENV, "ghcr.io/example/qdrant:test")
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.shutil.which", _docker_path)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._reserve_local_port", lambda: 46333)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._wait_for_qdrant", _noop_wait)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.subprocess.run", _fake_run)
+    test_context.env.set(QDRANT_IMAGE_ENV, "ghcr.io/example/qdrant:test")
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.shutil.which", new=_docker_path)
+    test_context.patch.patch(
+        "tests.utils.helpers.qdrant_runtime._reserve_local_port",
+        new=lambda: 46333,
+    )
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime._wait_for_qdrant", new=_noop_wait)
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.subprocess.run", new=_fake_run)
 
     runtime = QdrantRuntime(context=None, mode="real")
     runtime.require_live_url()
@@ -93,7 +100,7 @@ def test_require_live_url_honors_configured_image_override(
 
 
 def test_require_live_url_skips_when_registry_access_fails(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Real-mode runtimes should skip when the registry is temporarily unavailable."""
 
@@ -116,9 +123,12 @@ def test_require_live_url_skips_when_registry_access_fails(
             ),
         )
 
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.shutil.which", _docker_path)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._reserve_local_port", lambda: 46333)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.subprocess.run", _fake_run)
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.shutil.which", new=_docker_path)
+    test_context.patch.patch(
+        "tests.utils.helpers.qdrant_runtime._reserve_local_port",
+        new=lambda: 46333,
+    )
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.subprocess.run", new=_fake_run)
 
     runtime = QdrantRuntime(context=None, mode="real")
 
@@ -127,7 +137,7 @@ def test_require_live_url_skips_when_registry_access_fails(
 
 
 def test_require_live_url_fails_on_non_registry_docker_errors(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     """Real-mode runtimes should still fail for ordinary docker runtime errors."""
 
@@ -146,9 +156,12 @@ def test_require_live_url_fails_on_non_registry_docker_errors(
             stderr="docker: Error response from daemon: driver failed programming external connectivity",
         )
 
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.shutil.which", _docker_path)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime._reserve_local_port", lambda: 46333)
-    monkeypatch.setattr("tests.utils.helpers.qdrant_runtime.subprocess.run", _fake_run)
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.shutil.which", new=_docker_path)
+    test_context.patch.patch(
+        "tests.utils.helpers.qdrant_runtime._reserve_local_port",
+        new=lambda: 46333,
+    )
+    test_context.patch.patch("tests.utils.helpers.qdrant_runtime.subprocess.run", new=_fake_run)
 
     runtime = QdrantRuntime(context=None, mode="real")
 

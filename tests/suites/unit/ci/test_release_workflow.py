@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import ci_workflows
 from tests.utils.helpers._ci_workflows import release as release_helpers
@@ -28,7 +26,7 @@ def test_clean_artifact_directories_removes_paths(tmp_path: Path) -> None:
 
 
 def test_verify_release_artifacts_runs_twine_and_smoke_tests(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     tmp_path: Path,
 ) -> None:
     """Release verification should check artifacts and install both wheel and sdist."""
@@ -52,7 +50,7 @@ def test_verify_release_artifacts_runs_twine_and_smoke_tests(
         seen_commands.append(command)
         return None
 
-    monkeypatch.setattr(release_helpers, "run_checked", fake_run_checked)
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
 
     ci_workflows.verify_release_artifacts(dist_dir)
 
@@ -66,7 +64,7 @@ def test_verify_release_artifacts_runs_twine_and_smoke_tests(
 
 
 def test_publish_github_release_creates_when_missing(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     tmp_path: Path,
 ) -> None:
     """Release publishing should create the release when it does not exist yet."""
@@ -91,7 +89,7 @@ def test_publish_github_release_creates_when_missing(
             raise ci_workflows.CiWorkflowError("missing release")
         return None
 
-    monkeypatch.setattr(release_helpers, "run_checked", fake_run_checked)
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
 
     ci_workflows.publish_github_release("v1.0.0", dist_dir, sbom_path)
 

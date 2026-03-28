@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast, runtime_checkable
@@ -93,6 +94,7 @@ class TestContext:
     _cleaned: bool = False
     _environment: EnvironmentManager | None = field(default=None, init=False, repr=False)
     _patch_manager: PatchManager | None = field(default=None, init=False, repr=False)
+    _cwd_snapshot: str | None = field(default=None, init=False, repr=False)
 
     def attach_environment(self, manager: EnvironmentManager) -> None:
         """Bind the framework-managed environment runtime to this context."""
@@ -119,6 +121,13 @@ class TestContext:
     def apply_profiles(self, *names: str) -> None:
         """Apply one or more named runtime profiles to the current test."""
         self.env.apply_profiles(*names)
+
+    def chdir(self, path: str | os.PathLike[str]) -> None:
+        """Change the current working directory and restore it during cleanup."""
+        if self._cwd_snapshot is None:
+            self._cwd_snapshot = os.getcwd()
+            self.register_cleanup("cwd", self._restore_cwd)
+        os.chdir(path)
 
     def register_resource(
         self,
@@ -191,6 +200,12 @@ class TestContext:
                 _logger.error("Cleanup failed for %s in %s: %s", name, self.tid, exc)
                 errors.append((name, exc))
         return errors
+
+    def _restore_cwd(self) -> None:
+        if self._cwd_snapshot is None:
+            return
+        os.chdir(self._cwd_snapshot)
+        self._cwd_snapshot = None
 
 
 CONTEXT_KEY = pytest.StashKey[TestContext]()

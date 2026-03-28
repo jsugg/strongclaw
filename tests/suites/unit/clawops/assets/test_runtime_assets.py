@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
-
 from clawops.runtime_assets import PACKAGED_ASSET_ROOT, resolve_asset_path, resolve_runtime_layout
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_runtime_layout_uses_packaged_assets_outside_source_checkout(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
+    test_context.chdir(tmp_path)
 
     layout = resolve_runtime_layout(home_dir=tmp_path / "home")
 

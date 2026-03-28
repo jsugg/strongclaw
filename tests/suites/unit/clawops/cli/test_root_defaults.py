@@ -13,6 +13,7 @@ import clawops.acp_runner as acp_runner
 import clawops.openclaw_config as openclaw_config
 import clawops.strongclaw_baseline as strongclaw_baseline
 from clawops.root_detection import resolve_project_root, resolve_strongclaw_repo_root
+from tests.plugins.infrastructure.context import TestContext
 
 
 def _init_strongclaw_repo(repo_root: pathlib.Path) -> pathlib.Path:
@@ -51,8 +52,8 @@ def test_resolve_project_root_prefers_the_nearest_git_ancestor(tmp_path: pathlib
 
 def test_render_openclaw_config_main_infers_repo_root_from_cwd(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
 ) -> None:
     repo_root = _init_strongclaw_repo(tmp_path / "repo")
     nested = repo_root / "platform" / "docs"
@@ -82,12 +83,16 @@ def test_render_openclaw_config_main_infers_repo_root_from_cwd(
         del home_dir, user_timezone
         return repo_root / "managed-memory.yaml", repo_root / "managed-memory.sqlite.yaml"
 
-    monkeypatch.chdir(nested)
-    monkeypatch.setattr(openclaw_config, "render_openclaw_profile", _render_openclaw_profile)
-    monkeypatch.setattr(
+    test_context.chdir(nested)
+    test_context.patch.patch_object(
+        openclaw_config,
+        "render_openclaw_profile",
+        new=_render_openclaw_profile,
+    )
+    test_context.patch.patch_object(
         openclaw_config,
         "materialize_runtime_memory_configs",
-        _materialize_runtime_memory_configs,
+        new=_materialize_runtime_memory_configs,
     )
 
     exit_code = openclaw_config.main(["--profile", "hypermemory", "--output", str(output_path)])
@@ -100,8 +105,8 @@ def test_render_openclaw_config_main_infers_repo_root_from_cwd(
 
 def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
 ) -> None:
     repo_root = _init_strongclaw_repo(tmp_path / "repo")
     nested = repo_root / "src" / "clawops"
@@ -117,8 +122,8 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
         recorded_runs_dir = runs_dir
         return {"ok": True, "runsDir": str(runs_dir)}
 
-    monkeypatch.chdir(nested)
-    monkeypatch.setattr(strongclaw_baseline, "verify_baseline", _verify_baseline)
+    test_context.chdir(nested)
+    test_context.patch.patch_object(strongclaw_baseline, "verify_baseline", new=_verify_baseline)
 
     exit_code = strongclaw_baseline.main(["verify"])
 
@@ -130,7 +135,7 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
 
 def test_acp_runner_infers_project_root_without_explicit_flag(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     project_root = tmp_path / "project"
     (project_root / ".git").mkdir(parents=True)
@@ -140,7 +145,7 @@ def test_acp_runner_infers_project_root_without_explicit_flag(
     workspace.mkdir()
     state_dir = tmp_path / "state"
 
-    monkeypatch.chdir(nested)
+    test_context.chdir(nested)
 
     args = acp_runner.parse_args(
         [

@@ -17,6 +17,7 @@ from clawops.cli_roots import (
     resolve_source_root_argument,
     warn_ignored_repo_root_argument,
 )
+from tests.plugins.infrastructure.context import TestContext
 
 
 def _init_source_checkout(root: pathlib.Path) -> pathlib.Path:
@@ -64,11 +65,11 @@ def test_project_root_legacy_repo_root_alias_warns(
 
 def test_source_root_requires_source_root_guidance_when_not_discoverable(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     parser = argparse.ArgumentParser()
     add_source_root_argument(parser)
-    monkeypatch.chdir(tmp_path)
+    test_context.chdir(tmp_path)
 
     with pytest.raises(FileNotFoundError, match="pass --source-root explicitly\\."):
         resolve_source_root_argument(parser.parse_args([]), command_name="clawops baseline")
