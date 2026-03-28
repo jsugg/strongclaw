@@ -82,6 +82,9 @@ configures OpenClaw model/provider auth, activates services, and runs the
 baseline verification gate. The lower-level CLI entrypoint remains available
 at `clawops setup` for manual or partial bring-up, and you can
 call the CLI directly with `uv run --project . clawops setup`.
+For a render-only pass that does not activate services yet, use
+`clawops setup --no-activate-services`; that path now defers model/provider
+auth until you are ready to start the gateway.
 
 By default, StrongClaw now renders and provisions the
 `hypermemory` stack. Set one embedding model name before you run

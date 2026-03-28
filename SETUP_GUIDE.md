@@ -130,6 +130,10 @@ OpenClaw model/provider auth, renders or refreshes the host service
 definitions, activates the gateway plus sidecars, and runs the baseline
 verification gate.
 
+For a render-only pass, use `clawops setup --no-activate-services`. That path
+still repairs the host/env/config state but now defers model/provider auth until
+you are ready to activate the gateway.
+
 The bootstrap flow verifies or installs:
 
 - `openclaw`

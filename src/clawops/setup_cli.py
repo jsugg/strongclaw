@@ -182,11 +182,34 @@ def _run_check(
     checks.append({"name": label, "ok": True, "message": "ok", "remediation": remediation})
 
 
+def _record_skipped_check(
+    label: str,
+    remediation: str,
+    checks: list[dict[str, object]],
+    *,
+    reason: str,
+) -> None:
+    """Record an intentionally skipped readiness check."""
+    checks.append(
+        {"name": label, "ok": True, "message": f"skipped: {reason}", "remediation": remediation}
+    )
+
+
 def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
     """Raise when the model-auth check payload reports failure."""
     payload = ensure_model_auth(repo_root, check_only=True, probe=probe)
     if not bool(payload.get("ok")):
         raise CommandError(str(payload.get("guidance", "OpenClaw model readiness failed.")))
+
+
+def _setup_requires_model_auth(*, activate_services_enabled: bool) -> bool:
+    """Return whether setup must validate model auth before continuing."""
+    return activate_services_enabled
+
+
+def _bounded_local_doctor(args: argparse.Namespace) -> bool:
+    """Return whether doctor should stay on local, non-runtime checks only."""
+    return bool(args.skip_runtime and args.no_model_probe)
 
 
 def setup_main(argv: list[str] | None = None) -> int:
@@ -212,17 +235,21 @@ def setup_main(argv: list[str] | None = None) -> int:
     if args.profile or skip_bootstrap:
         _render_openclaw_config(repo_root, home_dir=home_dir, profile=profile)
         _doctor_host_payload(repo_root, home_dir=home_dir)
-    model_payload = ensure_model_auth(
-        repo_root,
-        check_only=False,
-        probe=not bool(args.non_interactive),
-    )
-    if not bool(model_payload.get("ok")):
-        raise CommandError(str(model_payload.get("guidance", "OpenClaw model auth failed.")))
     activate_services_enabled = not bool(args.no_activate_services)
     verify_enabled = not bool(args.no_verify)
     if not activate_services_enabled:
         verify_enabled = False
+    model_auth_deferred = not _setup_requires_model_auth(
+        activate_services_enabled=activate_services_enabled
+    )
+    if not model_auth_deferred:
+        model_payload = ensure_model_auth(
+            repo_root,
+            check_only=False,
+            probe=not bool(args.non_interactive),
+        )
+        if not bool(model_payload.get("ok")):
+            raise CommandError(str(model_payload.get("guidance", "OpenClaw model auth failed.")))
     if (
         activate_services_enabled
         and os.uname().sysname == "Linux"
@@ -238,12 +265,16 @@ def setup_main(argv: list[str] | None = None) -> int:
         render_service_files(repo_root)
     if verify_enabled:
         verify_baseline(repo_root, runs_dir=repo_root / ".tmp" / "harness")
-    print(
-        "StrongClaw setup completed.\n\n"
-        "Next steps:\n"
-        "- Control UI: http://127.0.0.1:18789/\n"
-        "- Deep health scan: clawops doctor\n"
-    )
+    next_steps = [
+        "- Control UI: http://127.0.0.1:18789/",
+        "- Deep health scan: clawops doctor",
+    ]
+    if model_auth_deferred:
+        next_steps.append(
+            "- Model/provider auth was deferred because services were not activated; "
+            "run `clawops model-auth ensure` before starting the gateway."
+        )
+    print("StrongClaw setup completed.\n\n" "Next steps:\n" f"{'\n'.join(next_steps)}\n")
     return 0
 
 
@@ -276,39 +307,66 @@ def doctor_main(argv: list[str] | None = None) -> int:
                 else _pause_for_linux_docker_refresh(repo_root)
             ),
         )
-    _run_check(
-        "OpenClaw model readiness",
-        "clawops model-auth ensure",
-        checks,
-        lambda: _require_model_check_ok(
-            repo_root,
-            probe=not bool(args.skip_runtime or args.no_model_probe),
-        ),
-    )
-    _run_check(
-        "OpenClaw doctor",
-        "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
-        checks,
-        lambda: run_openclaw_command(
-            repo_root, ["doctor", "--non-interactive"], timeout_seconds=300, check=True
-        ),
-    )
-    _run_check(
-        "OpenClaw security audit",
-        "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
-        checks,
-        lambda: run_openclaw_command(
-            repo_root, ["security", "audit", "--deep"], timeout_seconds=300, check=True
-        ),
-    )
-    _run_check(
-        "OpenClaw secrets audit",
-        "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
-        checks,
-        lambda: run_openclaw_command(
-            repo_root, ["secrets", "audit", "--check"], timeout_seconds=300, check=True
-        ),
-    )
+    if _bounded_local_doctor(args):
+        skip_reason = "--skip-runtime and --no-model-probe requested a bounded local doctor"
+        _record_skipped_check(
+            "OpenClaw model readiness",
+            "clawops model-auth ensure",
+            checks,
+            reason=skip_reason,
+        )
+        _record_skipped_check(
+            "OpenClaw doctor",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
+            checks,
+            reason=skip_reason,
+        )
+        _record_skipped_check(
+            "OpenClaw security audit",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
+            checks,
+            reason=skip_reason,
+        )
+        _record_skipped_check(
+            "OpenClaw secrets audit",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
+            checks,
+            reason=skip_reason,
+        )
+    else:
+        _run_check(
+            "OpenClaw model readiness",
+            "clawops model-auth ensure",
+            checks,
+            lambda: _require_model_check_ok(
+                repo_root,
+                probe=not bool(args.skip_runtime or args.no_model_probe),
+            ),
+        )
+        _run_check(
+            "OpenClaw doctor",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
+            checks,
+            lambda: run_openclaw_command(
+                repo_root, ["doctor", "--non-interactive"], timeout_seconds=300, check=True
+            ),
+        )
+        _run_check(
+            "OpenClaw security audit",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
+            checks,
+            lambda: run_openclaw_command(
+                repo_root, ["security", "audit", "--deep"], timeout_seconds=300, check=True
+            ),
+        )
+        _run_check(
+            "OpenClaw secrets audit",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
+            checks,
+            lambda: run_openclaw_command(
+                repo_root, ["secrets", "audit", "--check"], timeout_seconds=300, check=True
+            ),
+        )
     if not args.skip_runtime:
         _run_check(
             "OpenClaw gateway status",
