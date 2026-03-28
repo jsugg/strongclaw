@@ -165,7 +165,7 @@ auto-detected and skipped.
 ## 4. Rerender the OpenClaw config when you change profiles
 
 ```bash
-clawops render-openclaw-config --repo-root .
+clawops render-openclaw-config
 ```
 
 This now renders the default StrongClaw profile, `hypermemory`,
@@ -184,11 +184,11 @@ For placeholder-backed variants, rerender by profile instead of merging raw
 JSON5 overlays:
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile openclaw-default
-clawops render-openclaw-config --repo-root . --profile openclaw-qmd
-clawops render-openclaw-config --repo-root . --profile acp
-clawops render-openclaw-config --repo-root . --profile hypermemory
-clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
+clawops render-openclaw-config --profile openclaw-default
+clawops render-openclaw-config --profile openclaw-qmd
+clawops render-openclaw-config --profile acp
+clawops render-openclaw-config --profile hypermemory
+clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
 The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
@@ -224,11 +224,11 @@ It runs:
 Plan and execute the Strongclaw devflow surface from the repo root:
 
 ```bash
-clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
-clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
-clawops devflow status --repo-root . --run-id <run-id>
-clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
-clawops devflow audit --repo-root . --run-id <run-id>
+clawops devflow plan --goal "Fix regression and add coverage"
+clawops devflow run --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --run-id <run-id>
+clawops devflow resume --run-id <run-id> --approved-by operator
+clawops devflow audit --run-id <run-id>
 ```
 
 See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run
@@ -249,7 +249,7 @@ make doctor
 
 Add these only in order:
 
-1. ACP workers: `clawops render-openclaw-config --repo-root . --profile acp`
+1. ACP workers: `clawops render-openclaw-config --profile acp`
 2. Repo codebase context: `clawops context codebase index --scale small --config platform/configs/context/codebase.yaml --repo .`
 3. QMD prewarm: `qmd status`
 4. Built-in OpenClaw memory fallback:
@@ -257,7 +257,7 @@ Add these only in order:
 5. Built-in OpenClaw plus experimental QMD:
    `clawops setup --profile openclaw-qmd`
 6. Opt-in local LanceDB durable memory with Ollama-backed smart extraction by rerendering
-   `clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro`
+   `clawops render-openclaw-config --profile memory-lancedb-pro`
 7. Migration-only standalone overlay reference:
    `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
 8. Telegram: `platform/docs/channels/telegram.md`

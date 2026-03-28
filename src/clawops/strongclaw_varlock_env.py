@@ -10,7 +10,6 @@ import sys
 from typing import Final
 
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     CommandError,
     clear_env_assignment,
     generate_secret_value,
@@ -594,7 +593,7 @@ def configure_varlock_env(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the varlock-env CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     configure_parser = subparsers.add_parser("configure")
     configure_parser.add_argument("--non-interactive", action="store_true")

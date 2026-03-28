@@ -13,7 +13,6 @@ from xml.sax.saxutils import escape
 from clawops.common import load_text, write_text
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     ensure_docker_backend_ready,
     resolve_openclaw_state_dir,
     resolve_repo_root,
@@ -307,7 +306,7 @@ def activate_services(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the services CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--state-dir", type=pathlib.Path, default=None)
     parser.add_argument("--service-manager", choices=("launchd", "systemd"))
     subparsers = parser.add_subparsers(dest="command", required=True)

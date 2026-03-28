@@ -83,7 +83,7 @@ Regardless of host OS, the baseline flow is:
 7. run `clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify` after hypermemory setup or rerenders
 8. if Linux bootstrap just granted Docker access, open a fresh login shell and rerun the same `make setup` / `clawops setup` command; completed bootstrap work is auto-detected and skipped
 9. contributors can additionally install `uv` and use `make dev && make test`; for shorter interactive-shell commands, `uv sync --locked && source .venv/bin/activate` enables plain `pytest -q` and `clawops ...`; baseline companion-tool tests run through `uv run`, and bootstrap installs `uv` if the host does not already provide it
-10. or run the lower-level steps explicitly with `clawops bootstrap`, `clawops varlock-env configure`, `clawops render-openclaw-config --repo-root .`, `clawops services install --activate`, and `clawops baseline verify`
+10. or run the lower-level steps explicitly with `clawops bootstrap`, `clawops varlock-env configure`, `clawops render-openclaw-config`, `clawops services install --activate`, and `clawops baseline verify`
 
 ## macOS host notes
 

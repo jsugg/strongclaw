@@ -16,7 +16,6 @@ from typing import cast
 
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     CommandError,
     ensure_docker_backend_ready,
     load_env_assignments,
@@ -509,7 +508,7 @@ def prune_qdrant_test_collections(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for operational commands."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     gateway = subparsers.add_parser("gateway")

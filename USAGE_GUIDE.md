@@ -76,7 +76,6 @@ Keep browser-lab ports local to the hardened session. Do not tunnel `9222` or
 
 ```bash
 clawops render-openclaw-config \
-  --repo-root "$(pwd)" \
   --profile acp
 ```
 
@@ -85,7 +84,6 @@ overlay, append it explicitly so each fragment is rendered before merge:
 
 ```bash
 clawops render-openclaw-config \
-  --repo-root "$(pwd)" \
   --profile memory-lancedb-pro \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```
@@ -94,7 +92,6 @@ Optional: render the companion exec approvals file with repo-local prefixes:
 
 ```bash
 clawops render-openclaw-config \
-  --repo-root "$(pwd)" \
   --profile hypermemory \
   --exec-approvals-output ~/.openclaw/exec-approvals.json
 ```
@@ -177,13 +174,13 @@ Use the public devflow surface for staged planning, execution, recovery, and
 audit:
 
 ```bash
-clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
-clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
-clawops devflow status --repo-root . --run-id <run-id>
-clawops devflow status --repo-root . --stuck-only
-clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
-clawops devflow cancel --repo-root . --run-id <run-id> --requested-by operator
-clawops devflow audit --repo-root . --run-id <run-id>
+clawops devflow plan --goal "Fix regression and add coverage"
+clawops devflow run --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --run-id <run-id>
+clawops devflow status --stuck-only
+clawops devflow resume --run-id <run-id> --approved-by operator
+clawops devflow cancel --run-id <run-id> --requested-by operator
+clawops devflow audit --run-id <run-id>
 ```
 
 Run-local state lands under `.clawops/devflow/<run-id>/` and the audit bundle
@@ -294,15 +291,15 @@ search results.
 Validate the repo layout that ACP workers and rendered overlays expect:
 
 ```bash
-clawops repo --repo-root "$(pwd)" doctor
+clawops repo doctor
 ```
 
 List, create, and prune managed git worktrees under `repo/worktrees`:
 
 ```bash
-clawops worktree --repo-root "$(pwd)" list
-clawops worktree --repo-root "$(pwd)" new --branch feature/review-lane
-clawops worktree --repo-root "$(pwd)" prune
+clawops worktree list
+clawops worktree new --branch feature/review-lane
+clawops worktree prune
 ```
 
 ## Skill intake

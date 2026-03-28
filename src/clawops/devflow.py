@@ -39,6 +39,7 @@ from clawops.devflow_state import (
     resume_run,
 )
 from clawops.devflow_workspaces import DevflowWorkspacePlanner
+from clawops.root_detection import resolve_strongclaw_repo_root
 from clawops.workflow_runner import WorkflowRunner
 
 
@@ -47,9 +48,9 @@ def _default_requested_by() -> str:
     return os.environ.get("USER", "operator")
 
 
-def _repo_root(path: str) -> pathlib.Path:
+def _repo_root(path: str | pathlib.Path | None) -> pathlib.Path:
     """Resolve one repository root argument."""
-    return pathlib.Path(path).expanduser().resolve()
+    return resolve_strongclaw_repo_root(path)
 
 
 def _journal_db(repo_root: pathlib.Path) -> pathlib.Path:
@@ -647,7 +648,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     def _add_common_flags(target: argparse.ArgumentParser) -> None:
         target.add_argument(
-            "--repo-root", default=".", help="Repository root for devflow state and planning."
+            "--repo-root",
+            default=None,
+            help="Repository root for devflow state and planning.",
         )
         target.add_argument("--lane", default="default", help="Lane identifier for the run.")
 

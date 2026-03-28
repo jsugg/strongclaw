@@ -16,6 +16,7 @@ import requests
 
 from clawops.common import ResultSummary
 from clawops.process_runner import CommandResult, run_command
+from clawops.root_detection import resolve_strongclaw_repo_root
 from clawops.typed_values import ObjectMapping, as_mapping_list
 
 ACTION_USE_RE = re.compile(
@@ -96,9 +97,9 @@ class ComposeImagePin:
         return f"{self.prefix}{self.image}@{digest}{self.suffix}"
 
 
-def _resolve_repo_root(repo_root: pathlib.Path) -> pathlib.Path:
+def _resolve_repo_root(repo_root: pathlib.Path | None) -> pathlib.Path:
     """Resolve the repository root."""
-    return repo_root.expanduser().resolve()
+    return resolve_strongclaw_repo_root(repo_root)
 
 
 def _workflow_files(repo_root: pathlib.Path) -> list[pathlib.Path]:
@@ -526,7 +527,7 @@ def propose_refresh(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the supply-chain CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=pathlib.Path("."))
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inventory", help="List workflow action pins and compose image digests.")

@@ -10,7 +10,6 @@ import tarfile
 import time
 
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     CommandError,
     resolve_home_dir,
     run_command,
@@ -139,7 +138,7 @@ def rotation_guidance() -> dict[str, object]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for recovery commands."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("backup-create")

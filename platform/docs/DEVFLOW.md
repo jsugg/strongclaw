@@ -16,14 +16,13 @@ clawops devflow audit
 Plan a run:
 
 ```bash
-clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
+clawops devflow plan --goal "Fix regression and add coverage"
 ```
 
 Execute the run:
 
 ```bash
 clawops devflow run \
-  --repo-root . \
   --goal "Fix regression and add coverage" \
   --approved-by operator
 ```
@@ -31,14 +30,13 @@ clawops devflow run \
 Inspect one run:
 
 ```bash
-clawops devflow status --repo-root . --run-id <run-id>
+clawops devflow status --run-id <run-id>
 ```
 
 Resume a failed or approval-blocked run:
 
 ```bash
 clawops devflow resume \
-  --repo-root . \
   --run-id <run-id> \
   --approved-by operator
 ```
@@ -46,13 +44,13 @@ clawops devflow resume \
 Cancel a non-terminal run:
 
 ```bash
-clawops devflow cancel --repo-root . --run-id <run-id> --requested-by operator
+clawops devflow cancel --run-id <run-id> --requested-by operator
 ```
 
 Build the audit bundle:
 
 ```bash
-clawops devflow audit --repo-root . --run-id <run-id>
+clawops devflow audit --run-id <run-id>
 ```
 
 ## Run Layout

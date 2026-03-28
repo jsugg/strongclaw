@@ -179,12 +179,12 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
 
     assert "clawops memory migrate-hypermemory-to-pro" in usage
     assert "clawops memory verify-pro-parity" in usage
-    assert "clawops repo --repo-root" in usage
-    assert "clawops worktree --repo-root" in usage
+    assert "clawops repo doctor" in usage
+    assert "clawops worktree list" in usage
     assert "clawops skills scan" in usage
     assert "clawops skills promote" in usage
-    assert "clawops repo --repo-root" in repo_doc
-    assert "clawops worktree --repo-root" in repo_doc
+    assert "clawops repo doctor" in repo_doc
+    assert "clawops worktree list" in repo_doc
     assert "dependency-submission.yml" in ci_doc
     assert "memory-plugin-verification.yml" in ci_doc
 

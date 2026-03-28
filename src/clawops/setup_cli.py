@@ -15,7 +15,6 @@ from clawops.strongclaw_baseline import verify_baseline
 from clawops.strongclaw_bootstrap import bootstrap_host, install_profile_assets
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     CommandError,
     bootstrap_state_ready,
     clear_docker_shell_refresh_required,
@@ -69,7 +68,7 @@ def _pause_for_linux_docker_refresh(repo_root: pathlib.Path) -> None:
 def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse setup arguments."""
     parser = argparse.ArgumentParser(description="Run the guided StrongClaw setup workflow.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--profile")
     parser.add_argument("--skip-bootstrap", action="store_true")
@@ -83,7 +82,7 @@ def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
 def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse doctor arguments."""
     parser = argparse.ArgumentParser(description="Run a deep StrongClaw readiness scan.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--skip-runtime", action="store_true")
     parser.add_argument("--no-model-probe", action="store_true")
@@ -93,7 +92,7 @@ def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
 def _doctor_host_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse doctor-host arguments."""
     parser = argparse.ArgumentParser(description="Run the host-only StrongClaw readiness scan.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     return parser.parse_args(argv)
 
