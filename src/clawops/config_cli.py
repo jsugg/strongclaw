@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from clawops.common import write_json
 from clawops.openclaw_config import DEFAULT_OPENCLAW_CONFIG_OUTPUT, render_openclaw_profile
 from clawops.strongclaw_bootstrap import install_profile_assets
-from clawops.strongclaw_runtime import DEFAULT_REPO_ROOT, resolve_home_dir, resolve_repo_root
+from clawops.strongclaw_runtime import resolve_home_dir, resolve_repo_root
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -106,7 +106,7 @@ def _set_memory_profile(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for StrongClaw config management."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
 

@@ -19,9 +19,13 @@ from typing import Final, cast
 from clawops.allowlist_sync import load_source, render_fragment
 from clawops.common import dump_json, load_text, load_yaml
 from clawops.process_runner import run_command
+from clawops.root_detection import (
+    DEFAULT_SOURCE_REPO_ROOT,
+    resolve_strongclaw_repo_root,
+)
 from clawops.typed_values import as_mapping
 
-DEFAULT_REPO_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
+DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_SOURCE_REPO_ROOT
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -678,7 +682,7 @@ def verify_channels(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for platform verification."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="target", required=True)
 
     sidecars = subparsers.add_parser("sidecars")
@@ -720,11 +724,7 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(getattr(args, "subcommand_repo_root", None), pathlib.Path)
         else args.repo_root
     )
-    repo_root = (
-        repo_root_argument.resolve()
-        if repo_root_argument is not None
-        else DEFAULT_REPO_ROOT.resolve()
-    )
+    repo_root = resolve_strongclaw_repo_root(repo_root_argument, fallback=DEFAULT_REPO_ROOT)
 
     if args.target == "sidecars":
         report = verify_sidecars(

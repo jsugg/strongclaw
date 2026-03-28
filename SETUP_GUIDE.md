@@ -191,7 +191,7 @@ Then validate the env contract and render the OpenClaw config:
 
 ```bash
 clawops varlock-env configure
-clawops render-openclaw-config --repo-root .
+clawops render-openclaw-config
 ```
 
 This writes the merged config to `~/.openclaw/openclaw.json`.
@@ -224,11 +224,11 @@ repo-local memory corpus paths for:
 Use profile rerenders for placeholder-backed variants:
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile openclaw-default
-clawops render-openclaw-config --repo-root . --profile openclaw-qmd
-clawops render-openclaw-config --repo-root . --profile acp
-clawops render-openclaw-config --repo-root . --profile hypermemory
-clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
+clawops render-openclaw-config --profile openclaw-default
+clawops render-openclaw-config --profile openclaw-qmd
+clawops render-openclaw-config --profile acp
+clawops render-openclaw-config --profile hypermemory
+clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
 The default `hypermemory` profile renders a self-contained
@@ -289,7 +289,7 @@ clawops doctor
 ## 8. Enable ACP workers
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile acp
+clawops render-openclaw-config --profile acp
 ```
 
 This installs the acpx config templates and writes the ACP worker overlay.
@@ -297,7 +297,7 @@ This installs the acpx config templates and writes the ACP worker overlay.
 Then rerender the OpenClaw config with the ACP worker profile:
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile acp
+clawops render-openclaw-config --profile acp
 ```
 
 Smoke test:
@@ -340,7 +340,7 @@ QMD-backed retrieval rollout, rerender with the Ollama-backed smart extraction
 profile:
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
+clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
 This StrongClaw-managed profile uses Ollama-backed smart extraction, but it
@@ -352,7 +352,6 @@ the extra overlay explicitly so every selected fragment is rendered first:
 
 ```bash
 clawops render-openclaw-config \
-  --repo-root "$(pwd)" \
   --profile memory-lancedb-pro \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```

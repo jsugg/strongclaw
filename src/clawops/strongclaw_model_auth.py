@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from typing import cast
 
 from clawops.strongclaw_runtime import (
-    DEFAULT_REPO_ROOT,
     CommandError,
     load_env_assignments,
     resolve_openclaw_config_path,
@@ -351,7 +350,7 @@ def ensure_model_auth(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the model-auth CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ensure_parser = subparsers.add_parser("ensure")

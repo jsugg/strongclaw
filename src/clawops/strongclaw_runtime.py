@@ -33,8 +33,12 @@ from clawops.platform_compat import (
     detect_host_platform,
     resolve_memory_plugin_lancedb_version,
 )
+from clawops.root_detection import (
+    DEFAULT_SOURCE_REPO_ROOT,
+    resolve_strongclaw_repo_root,
+)
 
-DEFAULT_REPO_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
+DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_SOURCE_REPO_ROOT
 DEFAULT_PROFILE_NAME = "hypermemory"
 DEFAULT_UV_VERSION = "0.10.9"
 DEFAULT_VARLOCK_VERSION = "0.5.0"
@@ -119,9 +123,7 @@ class DockerBackendDiagnostics:
 
 def resolve_repo_root(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:
     """Return the effective repository root."""
-    if repo_root is None:
-        return DEFAULT_REPO_ROOT
-    return pathlib.Path(repo_root).expanduser().resolve()
+    return resolve_strongclaw_repo_root(repo_root, fallback=DEFAULT_REPO_ROOT)
 
 
 def resolve_home_dir(home_dir: pathlib.Path | str | None = None) -> pathlib.Path:

@@ -150,9 +150,9 @@ For placeholder-backed variants, rerender through the profile-aware entrypoint
 instead of merging raw overlays:
 
 ```bash
-clawops render-openclaw-config --repo-root . --profile acp
-clawops render-openclaw-config --repo-root . --profile hypermemory
-clawops render-openclaw-config --repo-root . --profile memory-lancedb-pro
+clawops render-openclaw-config --profile acp
+clawops render-openclaw-config --profile hypermemory
+clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
 The StrongClaw-managed `memory-lancedb-pro` profile keeps smart extraction on,
@@ -244,9 +244,9 @@ The repository now exposes a production devflow surface for multi-stage
 planning, execution, recovery, and audit:
 
 ```bash
-clawops devflow plan --repo-root . --goal "Fix regression and add coverage"
-clawops devflow run --repo-root . --goal "Fix regression and add coverage" --approved-by operator
-clawops devflow status --repo-root . --run-id <run-id>
-clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
-clawops devflow audit --repo-root . --run-id <run-id>
+clawops devflow plan --goal "Fix regression and add coverage"
+clawops devflow run --goal "Fix regression and add coverage" --approved-by operator
+clawops devflow status --run-id <run-id>
+clawops devflow resume --run-id <run-id> --approved-by operator
+clawops devflow audit --run-id <run-id>
 ```

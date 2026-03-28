@@ -149,8 +149,8 @@ The production devflow surface reuses the same SQLite audit spine in
 tables. Operators inspect and recover that workflow state through:
 
 ```bash
-clawops devflow status --repo-root . --run-id <run-id>
-clawops devflow status --repo-root . --stuck-only
-clawops devflow resume --repo-root . --run-id <run-id> --approved-by operator
-clawops devflow audit --repo-root . --run-id <run-id>
+clawops devflow status --run-id <run-id>
+clawops devflow status --stuck-only
+clawops devflow resume --run-id <run-id> --approved-by operator
+clawops devflow audit --run-id <run-id>
 ```

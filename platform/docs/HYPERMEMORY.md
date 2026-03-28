@@ -151,7 +151,6 @@ clawops config memory --set-profile hypermemory
 ```bash
 uv run clawops render-openclaw-config \
   --template platform/configs/openclaw/75-strongclaw-hypermemory.example.json5 \
-  --repo-root "$(pwd)" \
   --output /tmp/strongclaw-hypermemory.json
 ```
 
@@ -171,7 +170,6 @@ For the combined context-engine + memory stack, use the integrated overlay:
 ```bash
 uv run clawops render-openclaw-config \
   --template platform/configs/openclaw/77-hypermemory.example.json5 \
-  --repo-root "$(pwd)" \
   --output /tmp/strongclaw-hypermemory-stack.json
 ```
 

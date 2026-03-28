@@ -114,7 +114,7 @@ in `.github/workflows/memory-plugin-verification.yml`.
   instead of Docker Hub.
 - `.github/workflows/devflow-contract.yml` syncs the locked environment,
   compile-checks the repo, runs targeted devflow tests, and validates
-  `clawops devflow plan --repo-root . --goal "contract smoke"` without live ACP
+  `clawops devflow plan --goal "contract smoke"` without live ACP
   providers.
 - Operators can verify published provenance with GitHub's attestation tooling
   after a tagged release lands.

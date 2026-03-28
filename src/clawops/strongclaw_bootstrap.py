@@ -18,7 +18,6 @@ from clawops.strongclaw_runtime import (
     DEFAULT_LOSSLESS_CLAW_REPO,
     DEFAULT_OPENCLAW_VERSION,
     DEFAULT_QMD_VERSION,
-    DEFAULT_REPO_ROOT,
     DEFAULT_UV_VERSION,
     DEFAULT_VARLOCK_VERSION,
     CommandError,
@@ -582,7 +581,7 @@ def bootstrap_host(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for host bootstrap."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=DEFAULT_REPO_ROOT)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--profile", default=None)
     return parser.parse_args(argv)

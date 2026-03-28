@@ -10,7 +10,6 @@ import shutil
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Final
 
 from clawops.acpx_adapter import (
     AcpxAdapter,
@@ -31,9 +30,7 @@ from clawops.orchestration import (
     build_lock_identity,
     build_session_identity,
 )
-
-DEFAULT_PROJECT_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parents[2]
-DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_PROJECT_ROOT
+from clawops.root_detection import resolve_project_root
 
 
 class SessionLockError(RuntimeError):
@@ -587,7 +584,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repo-root",
         dest="project_root",
         type=pathlib.Path,
-        default=DEFAULT_PROJECT_ROOT,
+        default=None,
     )
     parser.add_argument("--project-id")
     parser.add_argument(
@@ -614,7 +611,7 @@ def _resolve_session_spec(args: argparse.Namespace) -> SessionSpec:
     """Resolve CLI arguments into a typed session spec."""
     role = args.role or args.session_type or "developer"
     project = ProjectDescriptor.resolve(
-        args.project_root,
+        resolve_project_root(args.project_root),
         project_id=args.project_id,
         trusted_roots=tuple(args.allowed_workspace_root),
     )

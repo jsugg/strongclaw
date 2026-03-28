@@ -12,6 +12,7 @@ from typing import Any, cast
 from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
+from clawops.root_detection import resolve_strongclaw_repo_root
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
 HOME_PLACEHOLDER = "__HOME__"
@@ -330,7 +331,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=pathlib.Path,
         help="Additional overlay template to render and merge on top of the selected profile.",
     )
-    parser.add_argument("--repo-root", required=True, type=pathlib.Path)
+    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
     parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OPENCLAW_CONFIG_OUTPUT)
     parser.add_argument(
         "--exec-approvals-output",
@@ -357,17 +358,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Render a placeholder-backed OpenClaw overlay to JSON."""
     args = parse_args(argv)
+    repo_root = resolve_strongclaw_repo_root(args.repo_root)
     if args.template is not None:
         rendered = render_openclaw_overlay(
-            template_path=_resolve_repo_relative_path(repo_root=args.repo_root, path=args.template),
-            repo_root=args.repo_root,
+            template_path=_resolve_repo_relative_path(repo_root=repo_root, path=args.template),
+            repo_root=repo_root,
             home_dir=args.home_dir,
             user_timezone=args.user_timezone,
         )
     else:
         rendered = render_openclaw_profile(
             profile_name=args.profile,
-            repo_root=args.repo_root,
+            repo_root=repo_root,
             home_dir=args.home_dir,
             user_timezone=args.user_timezone,
             extra_overlays=tuple(args.overlay),
@@ -377,9 +379,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.exec_approvals_output is not None:
         approvals = render_openclaw_overlay(
             template_path=_resolve_repo_relative_path(
-                repo_root=args.repo_root, path=args.exec_approvals_template
+                repo_root=repo_root, path=args.exec_approvals_template
             ),
-            repo_root=args.repo_root,
+            repo_root=repo_root,
             home_dir=args.home_dir,
             user_timezone=args.user_timezone,
         )
