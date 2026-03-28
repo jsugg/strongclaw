@@ -157,6 +157,12 @@ Successful hybrid batches now persist incrementally, so a late local embedding
 timeout leaves the worker degraded but does not discard already indexed chunk
 vectors. The next worker or benchmark pass resumes from the remaining chunks.
 
+When chunk hashes and pending deletions already match the indexed corpus, the
+worker reuses the persisted sparse metadata and skips both sparse rebuild and
+dense re-embedding work. On cold syncs, the sparse lane now normalizes each
+chunk once and reuses that token stream for both corpus statistics and the
+persisted sparse vector payloads.
+
 The Neo4j lane now uses the official Python driver over the Bolt protocol and
 keeps the SQLite graph fallback aligned by materializing symbol-aware
 `DEFINES`, `CALLS`, and `REFERENCES` edges alongside file import edges.
@@ -185,7 +191,7 @@ Benchmark authoring guidance:
 - For `small`, benchmark cases should use exact lexical or symbol-oriented queries.
 - semantic or paraphrase-oriented benchmark cases should target `medium` or `large`.
 - Keep the shipped benchmark CLI example on `--scale medium` when validating hybrid recall expectations.
-- The shipped local medium config keeps embedding batches conservative and allows longer HTTP timeouts because LiteLLM+Ollama can exceed optimistic defaults on singleton retries.
+- The shipped local medium config keeps embedding batches conservative and allows longer HTTP timeouts because direct Ollama embedding can still exceed optimistic defaults on singleton retries.
 
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
@@ -193,9 +199,14 @@ contract now carries those keys directly, and the compose stack derives the
 container's `NEO4J_AUTH` value from the same pair so fresh-host bring-up and
 graph-backed retrieval stay aligned.
 
-The shipped hybrid lane reuses the same LiteLLM/Qdrant operator contract that backs hypermemory:
+The shipped local medium lane uses direct Ollama embeddings plus the shared
+Qdrant and rerank contract:
 
-- `HYPERMEMORY_EMBEDDING_MODEL`
-- `HYPERMEMORY_EMBEDDING_BASE_URL`
+- `HYPERMEMORY_EMBEDDING_MODEL` with a pulled local Ollama embedding model such as `ollama/nomic-embed-text`
+- direct Ollama on `http://127.0.0.1:11434`
 - `HYPERMEMORY_QDRANT_URL`
 - optional rerank fallback keys `HYPERMEMORY_RERANK_BASE_URL`, `HYPERMEMORY_RERANK_MODEL`, and `HYPERMEMORY_RERANK_API_KEY`
+
+If you want the codebase provider to route embeddings through LiteLLM or a
+remote OpenAI-compatible gateway instead, switch `embedding.provider` back to
+`compatible-http` and point `embedding.base_url` at that endpoint.

@@ -53,7 +53,12 @@ from clawops.hypermemory.providers import (
     create_rerank_provider,
 )
 from clawops.hypermemory.qdrant_backend import QdrantBackend, VectorBackend
-from clawops.hypermemory.sparse import SparseEncoder, build_sparse_encoder
+from clawops.hypermemory.sparse import (
+    PreparedSparseDocument,
+    SparseEncoder,
+    build_sparse_encoder_from_documents,
+    prepare_sparse_document,
+)
 from clawops.observability import emit_structured_log, observed_span
 
 DEFAULT_TEXT_EXTENSIONS = {
@@ -917,8 +922,8 @@ def _as_embedding_provider(
         return default
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
-    if value not in {"disabled", "compatible-http"}:
-        raise ValueError(f"{name} must be one of: compatible-http, disabled")
+    if value not in {"disabled", "compatible-http", "ollama-http"}:
+        raise ValueError(f"{name} must be one of: compatible-http, disabled, ollama-http")
     return cast(EmbeddingProviderKind, value)
 
 
@@ -1111,6 +1116,15 @@ class HybridRankedChunk:
 
     row: sqlite3.Row
     score: float = 0.0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HybridChunkDocument:
+    """One indexed chunk prepared for hybrid sparse+dense synchronization."""
+
+    row: sqlite3.Row
+    text: str
+    sparse_document: PreparedSparseDocument
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -2044,6 +2058,28 @@ class CodebaseContextService:
                 *self._embed_hybrid_batch(texts[midpoint:], timeout_ms=request_timeout_ms),
             ]
 
+    def _prepare_hybrid_chunk_documents(
+        self, rows: Sequence[sqlite3.Row]
+    ) -> list[HybridChunkDocument]:
+        """Build contextualized texts and reusable sparse tokens for *rows*."""
+        documents: list[HybridChunkDocument] = []
+        for row in rows:
+            text = _contextualized_chunk_text(
+                path=str(row["path"]),
+                language=str(row["language"]),
+                kind=str(row["kind"]),
+                symbol=None if row["symbol"] is None else str(row["symbol"]),
+                content=str(row["content"]),
+            )
+            documents.append(
+                HybridChunkDocument(
+                    row=row,
+                    text=text,
+                    sparse_document=prepare_sparse_document(text),
+                )
+            )
+        return documents
+
     def _sync_hybrid_index(self) -> None:
         """Synchronize chunk embeddings and sparse vectors into the Qdrant lane."""
         with self.connect() as conn:
@@ -2084,24 +2120,6 @@ class CodebaseContextService:
                     conn.commit()
             return
         try:
-            health = self._vector_backend.health()
-            if not bool(health.get("healthy", False)):
-                raise RuntimeError(
-                    str(health.get("error") or health.get("reason") or "qdrant unavailable")
-                )
-            if not self.config.embedding.model or not self.config.embedding.base_url:
-                raise RuntimeError("embedding config is incomplete for hybrid retrieval")
-            texts = [
-                _contextualized_chunk_text(
-                    path=str(row["path"]),
-                    language=str(row["language"]),
-                    kind=str(row["kind"]),
-                    symbol=None if row["symbol"] is None else str(row["symbol"]),
-                    content=str(row["content"]),
-                )
-                for row in rows
-            ]
-            sparse_encoder = build_sparse_encoder(texts)
             with self.connect() as metadata_conn:
                 existing_vector_hashes = {
                     str(row["chunk_id"]): str(row["content_hash"])
@@ -2109,19 +2127,58 @@ class CodebaseContextService:
                         "SELECT chunk_id, content_hash FROM chunk_vectors"
                     ).fetchall()
                 }
-                self._persist_sparse_encoder(metadata_conn, sparse_encoder)
-                metadata_conn.commit()
                 rows_to_sync = [
-                    (row, text)
-                    for row, text in zip(rows, texts, strict=True)
+                    row
+                    for row in rows
                     if existing_vector_hashes.get(str(row["chunk_id"])) != str(row["content_hash"])
                 ]
-                collection_ensured = not rows_to_sync
-                for batch in _iter_batches(rows_to_sync, max(self.config.embedding.batch_size, 1)):
-                    batch_rows = [row for row, _ in batch]
-                    batch_texts = [text for _, text in batch]
+                stale_ids = sorted(set(stale_point_ids))
+                sparse_encoder = self._load_sparse_encoder(metadata_conn)
+                if not rows_to_sync and sparse_encoder is not None:
+                    if stale_ids:
+                        health = self._vector_backend.health()
+                        if not bool(health.get("healthy", False)):
+                            raise RuntimeError(
+                                str(
+                                    health.get("error")
+                                    or health.get("reason")
+                                    or "qdrant unavailable"
+                                )
+                            )
+                        self._vector_backend.delete_points(stale_ids)
+                        self._clear_pending_hybrid_deletions(
+                            metadata_conn,
+                            point_ids=stale_ids,
+                        )
+                        metadata_conn.commit()
+                    return
+                health = self._vector_backend.health()
+                if not bool(health.get("healthy", False)):
+                    raise RuntimeError(
+                        str(health.get("error") or health.get("reason") or "qdrant unavailable")
+                    )
+                if not self.config.embedding.model or not self.config.embedding.base_url:
+                    raise RuntimeError("embedding config is incomplete for hybrid retrieval")
+                documents = self._prepare_hybrid_chunk_documents(rows)
+                sparse_encoder = build_sparse_encoder_from_documents(
+                    [document.sparse_document for document in documents]
+                )
+                self._persist_sparse_encoder(metadata_conn, sparse_encoder)
+                metadata_conn.commit()
+                documents_by_chunk_id = {
+                    str(document.row["chunk_id"]): document for document in documents
+                }
+                documents_to_sync = [
+                    documents_by_chunk_id[str(row["chunk_id"])] for row in rows_to_sync
+                ]
+                collection_ensured = not documents_to_sync
+                for batch in _iter_batches(
+                    documents_to_sync,
+                    max(self.config.embedding.batch_size, 1),
+                ):
+                    batch_texts = [document.text for document in batch]
                     dense_vectors = self._embed_hybrid_batch(tuple(batch_texts))
-                    if len(dense_vectors) != len(batch_rows):
+                    if len(dense_vectors) != len(batch):
                         raise ValueError(
                             "embedded chunk count does not match the indexed chunk count"
                         )
@@ -2134,15 +2191,17 @@ class CodebaseContextService:
                     points: list[VectorPoint] = []
                     persisted_rows: list[tuple[str, str, int, str, str, int]] = []
                     indexed_at_ms = utc_now_ms()
-                    for row, dense_vector, text in zip(
-                        batch_rows,
+                    for document, dense_vector in zip(
+                        batch,
                         dense_vectors,
-                        batch_texts,
                         strict=True,
                     ):
+                        row = document.row
                         chunk_id = str(row["chunk_id"])
                         point_id = _chunk_point_id(chunk_id)
-                        sparse_vector = sparse_encoder.encode_document(text)
+                        sparse_vector = sparse_encoder.encode_document_tokens(
+                            document.sparse_document.tokens
+                        )
                         vector_payload: dict[str, list[float] | SparseVectorPayload] = {
                             self.config.qdrant.dense_vector_name: dense_vector
                         }
@@ -2193,7 +2252,6 @@ class CodebaseContextService:
                         persisted_rows,
                     )
                     metadata_conn.commit()
-                stale_ids = sorted(set(stale_point_ids))
                 if stale_ids:
                     self._vector_backend.delete_points(stale_ids)
                 self._clear_pending_hybrid_deletions(metadata_conn, point_ids=stale_ids)

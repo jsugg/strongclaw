@@ -34,6 +34,14 @@ class SparseVector:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class PreparedSparseDocument:
+    """One retrieval document with reusable normalized sparse tokens."""
+
+    text: str
+    tokens: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class SparseEncoder:
     """Corpus-aware sparse encoder with deterministic term IDs."""
 
@@ -50,14 +58,21 @@ class SparseEncoder:
 
     def encode_document(self, text: str) -> SparseVector:
         """Encode indexed content using BM25-style document weights."""
-        return self._encode(text, is_document=True)
+        return self.encode_document_tokens(normalize_text_tokens(text))
 
     def encode_query(self, text: str) -> SparseVector:
         """Encode a query using the persisted sparse vocabulary."""
-        return self._encode(text, is_document=False)
+        return self.encode_query_tokens(normalize_text_tokens(text))
 
-    def _encode(self, text: str, *, is_document: bool) -> SparseVector:
-        tokens = normalize_text_tokens(text)
+    def encode_document_tokens(self, tokens: Sequence[str]) -> SparseVector:
+        """Encode indexed content from an already-normalized token stream."""
+        return self._encode_tokens(tokens, is_document=True)
+
+    def encode_query_tokens(self, tokens: Sequence[str]) -> SparseVector:
+        """Encode a query from an already-normalized token stream."""
+        return self._encode_tokens(tokens, is_document=False)
+
+    def _encode_tokens(self, tokens: Sequence[str], *, is_document: bool) -> SparseVector:
         if not tokens or self.document_count <= 0 or not self.term_to_id:
             return SparseVector(indices=(), values=())
         counts = Counter(token for token in tokens if token in self.term_to_id)
@@ -108,11 +123,23 @@ class SparseEncoder:
 
 def build_sparse_encoder(texts: Sequence[str]) -> SparseEncoder:
     """Build a deterministic sparse encoder from normalized retrieval texts."""
+    return build_sparse_encoder_from_documents([prepare_sparse_document(text) for text in texts])
+
+
+def prepare_sparse_document(text: str) -> PreparedSparseDocument:
+    """Normalize *text* once for sparse encoder build and document encoding."""
+    return PreparedSparseDocument(text=text, tokens=tuple(normalize_text_tokens(text)))
+
+
+def build_sparse_encoder_from_documents(
+    documents: Sequence[PreparedSparseDocument],
+) -> SparseEncoder:
+    """Build a deterministic sparse encoder from prepared sparse documents."""
     document_frequency: Counter[str] = Counter()
     total_terms = 0
     document_count = 0
-    for text in texts:
-        tokens = normalize_text_tokens(text)
+    for document in documents:
+        tokens = document.tokens
         if not tokens:
             continue
         document_count += 1

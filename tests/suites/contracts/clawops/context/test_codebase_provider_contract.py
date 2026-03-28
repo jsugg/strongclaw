@@ -15,6 +15,8 @@ def test_shipped_codebase_provider_enables_hybrid_lane() -> None:
     config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
 
     assert config.embedding.enabled is True
+    assert config.embedding.provider == "ollama-http"
+    assert config.embedding.base_url == "http://127.0.0.1:11434"
     assert config.graph.backend == "neo4j"
     assert config.graph.neo4j_url == "bolt://127.0.0.1:7687"
     assert config.qdrant.enabled is True
@@ -69,3 +71,6 @@ def test_shipped_codebase_benchmark_examples_route_semantic_expectations_to_medi
     assert "src/clawops/assets/**" in docs
     assert "keeps embedding batches conservative and allows longer HTTP timeouts" in docs
     assert "resumes from the remaining chunks" in docs
+    assert "skips both sparse rebuild" in docs
+    assert "dense re-embedding work" in docs
+    assert "uses direct Ollama embeddings" in docs
