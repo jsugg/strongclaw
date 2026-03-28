@@ -10,7 +10,7 @@ import pytest
 
 from clawops.devflow import main
 from clawops.devflow_roles import WorkspaceMode
-from clawops.devflow_workspaces import DevflowWorkspacePlanner
+from clawops.devflow_workspaces import DevflowWorkspacePlanner, PlannedWorkspace
 from tests.utils.helpers.cli import PathPrepender
 from tests.utils.helpers.devflow import (
     init_git_repo,
@@ -89,7 +89,7 @@ def test_devflow_workspace_failure_marks_run_failed_and_audit_still_works(
         stage_name: str,
         workspace_mode: WorkspaceMode,
         source_root: pathlib.Path,
-    ):
+    ) -> PlannedWorkspace:
         if stage_name == "reviewer" and failure_budget["reviewer"] > 0:
             failure_budget["reviewer"] -= 1
             raise OSError(errno.ENOSPC, "no space left on device")

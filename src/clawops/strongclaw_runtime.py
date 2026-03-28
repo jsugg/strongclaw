@@ -758,7 +758,9 @@ def docker_backend_diagnostics() -> DockerBackendDiagnostics:
     info_result = (
         run_command(["docker", "info"], timeout_seconds=15)
         if cli_installed and compose_installed
-        else ExecResult(argv=("docker", "info"), returncode=None, stdout="", stderr="", duration_ms=0)
+        else ExecResult(
+            argv=("docker", "info"), returncode=None, stdout="", stderr="", duration_ms=0
+        )
     )
     provider = _infer_docker_provider(
         host_os=platform.system(),
@@ -863,8 +865,7 @@ def ensure_docker_backend_ready() -> None:
     if diagnostics.provider is not None:
         details.append(docker_runtime_enable_guidance(diagnostics.provider))
     raise CommandError(
-        "Docker is installed but the backend is not reachable from this shell. "
-        + " ".join(details)
+        "Docker is installed but the backend is not reachable from this shell. " + " ".join(details)
     )
 
 

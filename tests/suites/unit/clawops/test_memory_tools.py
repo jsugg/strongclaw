@@ -180,7 +180,7 @@ def test_memory_import_pro_snapshot_invokes_openclaw_cli_and_writes_report(
             snapshot_path.resolve().as_posix(),
             "--scope",
             "project:strongclaw",
-        ]
+        ],
     ]
     assert summary["ok"] is True
     assert summary["response"] == {"imported": 2, "scope": "project:strongclaw"}
@@ -245,7 +245,7 @@ def test_memory_import_pro_snapshot_supports_scope_override_and_dry_run(
             "--scope",
             "global",
             "--dry-run",
-        ]
+        ],
     ]
     assert summary["dryRun"] is True
     assert summary["scope"] == "global"

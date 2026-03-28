@@ -194,7 +194,7 @@ def import_pro_snapshot(
     )
     capability_ok, probe_result, probe_command = _probe_memory_pro_import_support(openclaw_bin)
     if not capability_ok:
-        summary: dict[str, Any] = {
+        probe_summary: dict[str, Any] = {
             "ok": False,
             "version": MIGRATION_REPORT_VERSION,
             "scope": resolved_scope,
@@ -210,13 +210,15 @@ def import_pro_snapshot(
         stdout = probe_result.stdout.strip()
         stderr = probe_result.stderr.strip()
         if stdout:
-            summary["stdoutExcerpt"] = stdout[:1000]
+            probe_summary["stdoutExcerpt"] = stdout[:1000]
         if stderr:
-            summary["stderrExcerpt"] = stderr[:1000]
+            probe_summary["stderrExcerpt"] = stderr[:1000]
         if not probe_result.failed_to_start and not probe_result.timed_out:
-            summary["capabilityError"] = "openclaw binary does not support `memory-pro import`"
-        write_json(report_output, summary)
-        return summary
+            probe_summary["capabilityError"] = (
+                "openclaw binary does not support `memory-pro import`"
+            )
+        write_json(report_output, probe_summary)
+        return probe_summary
 
     command = [
         openclaw_bin,
