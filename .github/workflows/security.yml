@@ -2,8 +2,34 @@ name: Repository Security Analysis
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "**/*.rst"
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.jpeg"
+      - "**/*.gif"
+      - "**/*.svg"
+      - "**/*.webp"
+      - "**/*.ico"
+      - "**/*.pdf"
+      - "LICENSE*"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "**/*.rst"
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.jpeg"
+      - "**/*.gif"
+      - "**/*.svg"
+      - "**/*.webp"
+      - "**/*.ico"
+      - "**/*.pdf"
+      - "LICENSE*"
 
 permissions:
   actions: read

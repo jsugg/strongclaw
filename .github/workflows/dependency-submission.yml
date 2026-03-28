@@ -3,6 +3,19 @@ name: Repository Dependency Snapshot
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "**/*.rst"
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.jpeg"
+      - "**/*.gif"
+      - "**/*.svg"
+      - "**/*.webp"
+      - "**/*.ico"
+      - "**/*.pdf"
+      - "LICENSE*"
   workflow_dispatch:
 
 permissions:

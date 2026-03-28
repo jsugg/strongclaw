@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import yaml
+
 from clawops.supply_chain import list_workflow_action_pins
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -47,6 +49,16 @@ def test_pre_commit_shellcheck_uses_system_binary() -> None:
     assert "https://github.com/koalaman/shellcheck-precommit" not in pre_commit_config
     assert "entry: shellcheck" in pre_commit_config
     assert "language: system" in pre_commit_config
+
+
+def test_pre_commit_python_type_hooks_only_run_for_python_changes() -> None:
+    payload = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    local_repo = next(repo for repo in payload["repos"] if repo["repo"] == "local")
+    hooks = {hook["id"]: hook for hook in local_repo["hooks"]}
+
+    for hook_id in ("pyright", "mypy"):
+        assert hooks[hook_id]["pass_filenames"] is False
+        assert hooks[hook_id]["types_or"] == ["python", "pyi"]
 
 
 def test_security_workflow_verifies_downloaded_tool_archives() -> None:

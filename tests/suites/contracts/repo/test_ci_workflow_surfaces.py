@@ -15,6 +15,20 @@ _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
     r"(?P<prefix>(?:^|[\s;])(?:(?:uv\s+run\s+)?python3?\s+)?)"
     r"(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
 )
+_NON_IMPACTFUL_PATH_FILTER_MARKERS = (
+    '"**/*.md"',
+    '"**/*.txt"',
+    '"**/*.rst"',
+    '"**/*.png"',
+    '"**/*.jpg"',
+    '"**/*.jpeg"',
+    '"**/*.gif"',
+    '"**/*.svg"',
+    '"**/*.webp"',
+    '"**/*.ico"',
+    '"**/*.pdf"',
+    '"LICENSE*"',
+)
 
 
 def _workflow_text(workflow_name: str) -> str:
@@ -87,10 +101,34 @@ def test_fresh_host_acceptance_workflow_routes_to_reusable_core() -> None:
     """The trigger workflow should delegate execution to the reusable core workflow."""
     text = _workflow_text("fresh-host-acceptance.yml")
 
-    assert "pull_request:" in text
+    assert "pull_request:\n    paths:" in text
     assert "workflow_dispatch:" in text
     assert "push:" not in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
+
+
+def test_fresh_host_acceptance_workflow_limits_pull_request_paths_to_runtime_surfaces() -> None:
+    """Fresh-host acceptance should only trigger for runtime-affecting pull-request changes."""
+    text = _workflow_text("fresh-host-acceptance.yml")
+
+    for marker in (
+        '".github/workflows/fresh-host-acceptance.yml"',
+        '".github/workflows/fresh-host-cache-warm.yml"',
+        '".github/workflows/fresh-host-core.yml"',
+        '"platform/compose/**"',
+        '"platform/configs/**"',
+        '"platform/plugins/**"',
+        '"platform/workers/**"',
+        '"platform/workspace/**"',
+        '"scripts/**"',
+        '"src/**"',
+        '"tests/scripts/**"',
+        '"tests/utils/helpers/**"',
+        '"pyproject.toml"',
+        '"uv.lock"',
+    ):
+        assert marker in text
+    assert "platform/docs/**" not in text
 
 
 def test_fresh_host_core_workflow_uses_semantic_test_scripts() -> None:
@@ -230,12 +268,28 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     assert "./tests/scripts/release_workflow.py publish-github-release" in release
 
 
+def test_selected_workflows_ignore_docs_and_static_only_changes() -> None:
+    """General CI pull-request and push lanes should skip docs-only and static-only changes."""
+    for workflow_name in (
+        "compatibility-matrix.yml",
+        "dependency-submission.yml",
+        "harness.yml",
+        "memory-plugin-verification.yml",
+        "security.yml",
+    ):
+        text = _workflow_text(workflow_name)
+        assert "paths-ignore:" in text, workflow_name
+        for marker in _NON_IMPACTFUL_PATH_FILTER_MARKERS:
+            assert marker in text, workflow_name
+
+
 def test_devflow_contract_workflow_surfaces_public_devflow_lane() -> None:
     text = _workflow_text("devflow-contract.yml")
 
     assert "uv sync --locked" in text
     assert "uv run python -m compileall -q src tests" in text
     assert 'uv run clawops devflow plan --project-root . --goal "contract smoke"' in text
+    assert '"platform/docs/DEVFLOW.md"' not in text
 
 
 def test_security_harness_tracks_the_context_provider_namespace() -> None:
