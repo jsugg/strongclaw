@@ -6,7 +6,7 @@ Strongclaw uses four primary default pytest lanes:
 
 - `unit`: isolated behavior and small-surface regression checks
 - `integration`: cross-module or service-shaped behavior
-- `contracts`: repository policies, docs parity, and CI/test-governance rules
+- `contracts`: repository policies, and CI/test-governance rules
 - `e2e`: black-box CLI and workflow-shaped orchestration coverage
 
 The repository also maintains an explicit `framework` lane for pytest-framework
