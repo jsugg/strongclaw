@@ -39,6 +39,8 @@ class CodebaseBenchmarkCaseResult(TypedDict):
     expectedChunkIds: list[str]
     matchedPaths: list[str]
     matchedChunkIds: list[str]
+    directRetrievedPaths: list[str]
+    dependencyPaths: list[str]
     retrievedPaths: list[str]
     retrievedChunkIds: list[str]
     recallAtK: float
