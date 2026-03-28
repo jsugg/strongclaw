@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import memory_plugin_verification as memory_plugin_script
 from tests.utils.helpers import ci_workflows
@@ -14,7 +12,7 @@ from tests.utils.helpers._ci_workflows import memory_plugin as memory_plugin_hel
 
 
 def test_run_vendored_host_checks_installs_cli_and_clears_aws_env(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
     tmp_path: Path,
 ) -> None:
     """Vendored host checks should prefix PATH and clear ambient AWS variables."""
@@ -35,10 +33,10 @@ def test_run_vendored_host_checks_installs_cli_and_clears_aws_env(
         seen_calls.append((command, cwd, env))
         return None
 
-    monkeypatch.setattr(memory_plugin_helpers, "run_checked", fake_run_checked)
-    monkeypatch.setenv("PATH", "/usr/bin")
-    monkeypatch.setenv("AWS_PROFILE", "default")
-    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    test_context.patch.patch_object(memory_plugin_helpers, "run_checked", new=fake_run_checked)
+    test_context.env.set("PATH", "/usr/bin")
+    test_context.env.set("AWS_PROFILE", "default")
+    test_context.env.set("AWS_REGION", "us-east-1")
 
     ci_workflows.run_vendored_host_checks(repo_root)
 
@@ -55,7 +53,7 @@ def test_run_vendored_host_checks_installs_cli_and_clears_aws_env(
     assert npm_ci_env["PATH"].startswith(str(Path(install_command[3]) / "node_modules" / ".bin"))
 
 
-def test_wait_for_qdrant_retries_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_qdrant_retries_until_ready(test_context: TestContext) -> None:
     """Qdrant readiness should retry transient probe failures."""
     attempts: list[str] = []
     sleeps: list[float] = []
@@ -77,8 +75,12 @@ def test_wait_for_qdrant_retries_until_ready(monkeypatch: pytest.MonkeyPatch) ->
             raise OSError("not ready")
         return _Response()
 
-    monkeypatch.setattr(memory_plugin_helpers.urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setattr(memory_plugin_helpers.time, "sleep", sleeps.append)
+    test_context.patch.patch_object(
+        memory_plugin_helpers.urllib.request,
+        "urlopen",
+        new=fake_urlopen,
+    )
+    test_context.patch.patch_object(memory_plugin_helpers.time, "sleep", new=sleeps.append)
 
     ci_workflows.wait_for_qdrant("http://127.0.0.1:6333/healthz", attempts=4, sleep_seconds=1.5)
 
