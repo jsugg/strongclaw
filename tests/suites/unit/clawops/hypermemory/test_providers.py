@@ -18,6 +18,8 @@ from clawops.hypermemory.providers import (
     CompatibleHttpEmbeddingProvider,
     CompatibleHttpRerankProvider,
     LocalSentenceTransformersRerankProvider,
+    OllamaHttpEmbeddingProvider,
+    create_embedding_provider,
     create_rerank_provider,
 )
 
@@ -90,6 +92,54 @@ def test_compatible_http_embedding_provider_normalizes_vectors(
     assert fake_session.calls[0]["json"]["model"] == "dense-test"
     assert vectors[0] == [0.6, 0.8]
     assert vectors[1] == [5.0 / 13.0, 12.0 / 13.0]
+
+
+def test_ollama_http_embedding_provider_normalizes_vectors_and_strips_model_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = EmbeddingConfig(
+        enabled=True,
+        provider="ollama-http",
+        model="ollama/nomic-embed-text",
+        base_url="http://127.0.0.1:11434",
+        dimensions=2,
+    )
+    fake_session = _FakeSession({"embeddings": [[3.0, 4.0], [5.0, 12.0]]})
+
+    def _fake_session_factory() -> _FakeSession:
+        return fake_session
+
+    monkeypatch.setattr("requests.Session", _fake_session_factory)
+    provider = OllamaHttpEmbeddingProvider(config)
+
+    vectors = provider.embed_texts(["first", "second"])
+
+    assert fake_session.calls == [
+        {
+            "url": "http://127.0.0.1:11434/api/embed",
+            "json": {
+                "input": ["first", "second"],
+                "model": "nomic-embed-text",
+            },
+            "headers": {"Content-Type": "application/json"},
+            "timeout": 15.0,
+        }
+    ]
+    assert vectors[0] == [0.6, 0.8]
+    assert vectors[1] == [5.0 / 13.0, 12.0 / 13.0]
+
+
+def test_create_embedding_provider_supports_ollama_http() -> None:
+    provider = create_embedding_provider(
+        EmbeddingConfig(
+            enabled=True,
+            provider="ollama-http",
+            model="nomic-embed-text",
+            base_url="http://127.0.0.1:11434",
+        )
+    )
+
+    assert isinstance(provider, OllamaHttpEmbeddingProvider)
 
 
 def test_compatible_http_rerank_provider_posts_texts_payload_and_preserves_order(

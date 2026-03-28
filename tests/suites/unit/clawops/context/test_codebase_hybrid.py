@@ -6,6 +6,7 @@ import pathlib
 import uuid
 from collections.abc import Sequence
 
+import pytest
 import requests
 
 from clawops.common import write_yaml
@@ -253,6 +254,45 @@ def test_medium_scale_worker_syncs_chunk_vectors_when_hybrid_enabled(
         sparse_terms = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
     assert vector_rows >= 2
     assert sparse_terms > 0
+
+
+def test_medium_scale_worker_skips_sparse_rebuild_for_unchanged_warm_consolidation(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, service = _build_service(tmp_path)
+    (repo / "auth.py").write_text(
+        "def token_guard():\n    return 'auth'\n",
+        encoding="utf-8",
+    )
+
+    fake_embedder = _FakeEmbeddingProvider()
+    fake_backend = _FakeVectorBackend()
+    service.override_runtime_deps(
+        embedding_provider=fake_embedder,
+        vector_backend=fake_backend,
+    )
+
+    service.index()
+    service.consolidate_runtime_artifacts()
+
+    initial_upserts = len(fake_backend.upserted)
+    initial_calls = len(fake_embedder.calls)
+
+    def _unexpected_sparse_rebuild(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("warm consolidation should reuse the persisted sparse state")
+
+    monkeypatch.setattr(
+        "clawops.context.codebase.service.build_sparse_encoder_from_documents",
+        _unexpected_sparse_rebuild,
+    )
+
+    service.consolidate_runtime_artifacts()
+
+    assert len(fake_backend.upserted) == initial_upserts
+    assert len(fake_embedder.calls) == initial_calls
+    assert service.backend_modes() == ("lexical", "hybrid")
 
 
 def test_medium_scale_worker_splits_embedding_batches_after_read_timeout(

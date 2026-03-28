@@ -396,8 +396,8 @@ def _as_embedding_provider(
 ) -> EmbeddingProviderKind:
     """Validate an embedding provider identifier."""
     provider = _as_string(name, value, default=default)
-    if provider not in {"disabled", "compatible-http"}:
-        raise ValueError(f"{name} must be disabled or compatible-http")
+    if provider not in {"disabled", "compatible-http", "ollama-http"}:
+        raise ValueError(f"{name} must be disabled, compatible-http, or ollama-http")
     return cast(EmbeddingProviderKind, provider)
 
 

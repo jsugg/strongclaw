@@ -15,10 +15,9 @@ graph:
 
 embedding:
   enabled: true
-  provider: compatible-http
+  provider: ollama-http
   model: os.environ/HYPERMEMORY_EMBEDDING_MODEL
-  base_url: os.environ/HYPERMEMORY_EMBEDDING_BASE_URL
-  api_key_env: LITELLM_MASTER_KEY
+  base_url: http://127.0.0.1:11434
   batch_size: 8
   timeout_ms: 30000
 

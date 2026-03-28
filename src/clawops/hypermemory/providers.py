@@ -8,6 +8,7 @@ import os
 import platform
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, cast
+from urllib.parse import urlparse
 
 import requests
 
@@ -94,33 +95,67 @@ class CompatibleHttpEmbeddingProvider:
             as_mapping_list(body.get("data"), path="embedding response.data"),
             key=lambda item: as_int(item.get("index", 0), path="embedding response.data[].index"),
         )
-        vectors: list[list[float]] = []
-        for index, item in enumerate(ordered):
-            raw_vector = item.get("embedding")
-            if not isinstance(raw_vector, list) or not raw_vector:
-                raise TypeError(f"embedding response item {index} is missing an embedding vector")
-            vector: list[float] = []
-            for value_offset, value in enumerate(cast(Sequence[object], raw_vector)):
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise TypeError(
-                        f"embedding response item {index} value {value_offset} must be numeric"
-                    )
-                vector.append(float(value))
-            if self._config.dimensions is not None and len(vector) != self._config.dimensions:
-                raise ValueError(
-                    f"embedding vector dimension {len(vector)} does not match configured "
-                    f"dimensions {self._config.dimensions}"
-                )
-            vectors.append(_normalize_vector(vector))
-        if len(vectors) != len(texts):
-            raise ValueError("embedding response count does not match the request size")
-        return vectors
+        return _coerce_embedding_vectors(
+            [item.get("embedding") for item in ordered],
+            expected_count=len(texts),
+            dimensions=self._config.dimensions,
+            source="embedding response",
+        )
 
     def _headers(self) -> dict[str, str]:
         """Return request headers for the embedding call."""
         headers = {"Content-Type": "application/json"}
         api_key = _resolve_api_key(
             api_key_env=self._config.api_key_env, api_key=self._config.api_key
+        )
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
+
+
+class OllamaHttpEmbeddingProvider:
+    """Embedding provider for direct Ollama `/api/embed` requests."""
+
+    def __init__(self, config: EmbeddingConfig) -> None:
+        self._config = config
+        self._session = requests.Session()
+
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        """Embed *texts* through the configured direct Ollama endpoint."""
+        if not self._config.enabled:
+            raise RuntimeError("embedding provider is disabled")
+        if self._config.provider != "ollama-http":
+            raise RuntimeError(f"unsupported embedding provider: {self._config.provider}")
+        if not self._config.base_url:
+            raise ValueError("embedding.base_url is required when embeddings are enabled")
+        if not self._config.model:
+            raise ValueError("embedding.model is required when embeddings are enabled")
+        response = self._session.post(
+            _resolve_ollama_embed_endpoint(self._config.base_url),
+            json={
+                "input": list(texts),
+                "model": _normalize_ollama_model_name(self._config.model),
+            },
+            headers=self._headers(),
+            timeout=(self._config.timeout_ms if timeout_ms is None else timeout_ms) / 1000.0,
+        )
+        response.raise_for_status()
+        body = as_mapping(response.json(), path="ollama embedding response")
+        return _coerce_embedding_vectors(
+            body.get("embeddings"),
+            expected_count=len(texts),
+            dimensions=self._config.dimensions,
+            source="ollama embedding response",
+        )
+
+    def _headers(self) -> dict[str, str]:
+        """Return request headers for the direct Ollama embedding call."""
+        headers = {"Content-Type": "application/json"}
+        api_key = _resolve_api_key(
+            api_key_env=self._config.api_key_env,
+            api_key=self._config.api_key,
         )
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -380,6 +415,8 @@ def create_embedding_provider(config: EmbeddingConfig) -> EmbeddingProvider:
         return DisabledEmbeddingProvider()
     if config.provider == "compatible-http":
         return CompatibleHttpEmbeddingProvider(config)
+    if config.provider == "ollama-http":
+        return OllamaHttpEmbeddingProvider(config)
     raise RuntimeError(f"unsupported embedding provider: {config.provider}")
 
 
@@ -479,6 +516,36 @@ def _coerce_score_sequence(
     return scores
 
 
+def _coerce_embedding_vectors(
+    raw_vectors: object,
+    *,
+    expected_count: int,
+    dimensions: int | None,
+    source: str,
+) -> list[list[float]]:
+    """Normalize one embedding payload into a list of unit vectors."""
+    if not isinstance(raw_vectors, list):
+        raise TypeError(f"{source} is missing an embeddings list")
+    vectors: list[list[float]] = []
+    for index, raw_vector in enumerate(cast(Sequence[object], raw_vectors)):
+        if not isinstance(raw_vector, list) or not raw_vector:
+            raise TypeError(f"{source} item {index} is missing an embedding vector")
+        vector: list[float] = []
+        for value_offset, value in enumerate(cast(Sequence[object], raw_vector)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{source} item {index} value {value_offset} must be numeric")
+            vector.append(float(value))
+        if dimensions is not None and len(vector) != dimensions:
+            raise ValueError(
+                f"embedding vector dimension {len(vector)} does not match configured "
+                f"dimensions {dimensions}"
+            )
+        vectors.append(_normalize_vector(vector))
+    if len(vectors) != expected_count:
+        raise ValueError(f"{source} count does not match the request size")
+    return vectors
+
+
 def _normalize_rerank_scores(scores: Sequence[float]) -> list[float]:
     """Normalize rerank scores into the closed unit interval."""
     if not scores:
@@ -505,3 +572,26 @@ def _normalize_vector(vector: Sequence[float]) -> list[float]:
     if norm <= 0.0:
         raise ValueError("embedding vector norm must be positive")
     return [value / norm for value in vector]
+
+
+def _normalize_ollama_model_name(model: str) -> str:
+    """Strip the compatibility prefix used in operator-facing Ollama model refs."""
+    normalized = model.strip()
+    if normalized.startswith("ollama/"):
+        return normalized.removeprefix("ollama/")
+    return normalized
+
+
+def _resolve_ollama_embed_endpoint(base_url: str) -> str:
+    """Resolve the direct Ollama embed endpoint for *base_url*."""
+    normalized = base_url.rstrip("/")
+    if not normalized:
+        raise ValueError("embedding.base_url is required when embeddings are enabled")
+    if normalized.endswith("/api/embed"):
+        return normalized
+    if normalized.endswith("/api"):
+        return f"{normalized}/embed"
+    parsed = urlparse(normalized)
+    if parsed.path.endswith("/v1"):
+        normalized = normalized[: -len("/v1")]
+    return f"{normalized}/api/embed"
