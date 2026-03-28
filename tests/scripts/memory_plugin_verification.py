@@ -13,9 +13,9 @@ for import_root in (SRC_ROOT, REPO_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from tests.utils.helpers.ci_workflows import (  # noqa: E402
+from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E402
+from tests.utils.helpers._ci_workflows.memory_plugin import (  # noqa: E402
     DEFAULT_OPENCLAW_PACKAGE_SPEC,
-    CiWorkflowError,
     run_vendored_host_checks,
     wait_for_qdrant,
 )

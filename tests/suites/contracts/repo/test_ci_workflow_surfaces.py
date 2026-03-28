@@ -12,7 +12,8 @@ import yaml
 from tests.utils.helpers.repo import REPO_ROOT
 
 _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
-    r"(?P<prefix>(?:^|[\s;])python3?\s+)?(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
+    r"(?P<prefix>(?:^|[\s;])(?:(?:uv\s+run\s+)?python3?\s+)?)"
+    r"(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
 )
 
 
@@ -77,7 +78,8 @@ def _iter_workflow_python_script_invocations() -> Iterator[tuple[str, str, Path,
                     for match in _PYTHON_SCRIPT_INVOCATION_PATTERN.finditer(stripped_line):
                         script_token = match.group("script")
                         script_path = REPO_ROOT / script_token.removeprefix("./")
-                        uses_python = match.group("prefix") is not None
+                        prefix = match.group("prefix") or ""
+                        uses_python = "python" in prefix
                         yield workflow_path.name, step_name, script_path, uses_python
 
 

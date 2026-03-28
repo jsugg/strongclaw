@@ -53,6 +53,6 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: python3 ./tests/scripts/compatibility_matrix.py prepare-setup-smoke --repo-root . --runner-temp "${RUNNER_TEMP}" --github-env-file "${GITHUB_ENV}"
-      - run: python3 ./tests/scripts/compatibility_matrix.py assert-lossless-claw --tmp-root "${SETUP_COMPAT_ROOT}"
-      - run: python3 ./tests/scripts/compatibility_matrix.py assert-hypermemory-config --tmp-root "${SETUP_COMPAT_ROOT}"
+      - run: uv run python ./tests/scripts/compatibility_matrix.py prepare-setup-smoke --repo-root . --runner-temp "${RUNNER_TEMP}" --github-env-file "${GITHUB_ENV}"
+      - run: uv run python ./tests/scripts/compatibility_matrix.py assert-lossless-claw --tmp-root "${SETUP_COMPAT_ROOT}"
+      - run: uv run python ./tests/scripts/compatibility_matrix.py assert-hypermemory-config --tmp-root "${SETUP_COMPAT_ROOT}"

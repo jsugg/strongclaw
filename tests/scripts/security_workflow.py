@@ -13,8 +13,8 @@ for import_root in (SRC_ROOT, REPO_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from tests.utils.helpers.ci_workflows import (  # noqa: E402
-    CiWorkflowError,
+from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E402
+from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     append_coverage_summary,
     install_gitleaks,
     install_syft,
