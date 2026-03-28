@@ -451,14 +451,14 @@ def varlock_env_dir(repo_root: pathlib.Path) -> pathlib.Path:
     layout = resolve_runtime_layout(repo_root=repo_root)
     managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir)
     legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
-    if (managed_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
-        managed_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
-    ).exists():
-        return managed_dir
     if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
         legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
     ).exists():
         return legacy_dir
+    if (managed_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
+        managed_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
+    ).exists():
+        return managed_dir
     return managed_dir
 
 

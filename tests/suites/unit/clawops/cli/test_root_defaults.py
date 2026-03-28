@@ -73,8 +73,22 @@ def test_render_openclaw_config_main_infers_repo_root_from_cwd(
         captured_repo_root = repo_root
         return {"ok": True}
 
+    def _materialize_runtime_memory_configs(
+        *,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path,
+        user_timezone: str | None = None,
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        del home_dir, user_timezone
+        return repo_root / "managed-memory.yaml", repo_root / "managed-memory.sqlite.yaml"
+
     monkeypatch.chdir(nested)
     monkeypatch.setattr(openclaw_config, "render_openclaw_profile", _render_openclaw_profile)
+    monkeypatch.setattr(
+        openclaw_config,
+        "materialize_runtime_memory_configs",
+        _materialize_runtime_memory_configs,
+    )
 
     exit_code = openclaw_config.main(["--profile", "hypermemory", "--output", str(output_path)])
 

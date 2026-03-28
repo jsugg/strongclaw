@@ -51,17 +51,18 @@ def test_linux_defaults_follow_xdg_conventions(tmp_path: pathlib.Path) -> None:
 
 def test_macos_defaults_use_application_support_and_logs(tmp_path: pathlib.Path) -> None:
     home_dir = tmp_path / "home"
+    env: dict[str, str] = {}
 
-    assert strongclaw_config_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_config_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Application Support" / "StrongClaw" / "config"
     )
-    assert strongclaw_data_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_data_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Application Support" / "StrongClaw"
     )
-    assert strongclaw_state_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_state_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Application Support" / "StrongClaw" / "state"
     )
-    assert strongclaw_log_dir(home_dir=home_dir, os_name="Darwin") == (
+    assert strongclaw_log_dir(home_dir=home_dir, environ=env, os_name="Darwin") == (
         home_dir / "Library" / "Logs" / "StrongClaw"
     )
 

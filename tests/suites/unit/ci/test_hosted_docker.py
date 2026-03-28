@@ -213,6 +213,7 @@ def test_ensure_images_uses_compose_resolution_placeholders_before_setup(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("VARLOCK_LOCAL_ENV_FILE", str(tmp_path / "missing.env"))
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",

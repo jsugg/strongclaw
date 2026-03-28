@@ -26,9 +26,13 @@ def test_compose_probe_env_inherits_repo_local_varlock_assignments(tmp_path: pat
     local_env_file.write_text(
         "NEO4J_PASSWORD=probe-secret\nNEO4J_USERNAME=neo4j\n", encoding="utf-8"
     )
+    env_overrides = {
+        "HOME": str(home_dir),
+        "STRONGCLAW_CONFIG_DIR": str(tmp_path / "managed-config"),
+    }
 
     env = _compose_probe_env(
-        {"HOME": str(home_dir)},
+        env_overrides,
         repo_root_path=repo_root,
         compose_name="docker-compose.aux-stack.yaml",
         repo_local_state=True,

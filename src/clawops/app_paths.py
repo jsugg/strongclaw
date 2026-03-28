@@ -52,11 +52,11 @@ def strongclaw_data_dir(
     override = _resolve_override_path("STRONGCLAW_DATA_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    if _resolve_os_name(os_name) == "darwin":
+        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS
     xdg_data_home = env.get("XDG_DATA_HOME")
     if xdg_data_home:
         return pathlib.Path(xdg_data_home).expanduser().resolve() / APP_DIR_LINUX
-    if _resolve_os_name(os_name) == "darwin":
-        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS
     return resolved_home / ".local" / "share" / APP_DIR_LINUX
 
 
@@ -72,11 +72,11 @@ def strongclaw_config_dir(
     override = _resolve_override_path("STRONGCLAW_CONFIG_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    if _resolve_os_name(os_name) == "darwin":
+        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "config"
     xdg_config_home = env.get("XDG_CONFIG_HOME")
     if xdg_config_home:
         return pathlib.Path(xdg_config_home).expanduser().resolve() / APP_DIR_LINUX
-    if _resolve_os_name(os_name) == "darwin":
-        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "config"
     return resolved_home / ".config" / APP_DIR_LINUX
 
 
@@ -92,11 +92,11 @@ def strongclaw_state_dir(
     override = _resolve_override_path("STRONGCLAW_STATE_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    if _resolve_os_name(os_name) == "darwin":
+        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "state"
     xdg_state_home = env.get("XDG_STATE_HOME")
     if xdg_state_home:
         return pathlib.Path(xdg_state_home).expanduser().resolve() / APP_DIR_LINUX
-    if _resolve_os_name(os_name) == "darwin":
-        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "state"
     return resolved_home / ".local" / "state" / APP_DIR_LINUX
 
 

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import zipfile
 
+from clawops.app_paths import strongclaw_memory_config_dir, strongclaw_workspace_dir
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -80,10 +81,13 @@ def test_installed_package_can_render_openclaw_config_outside_source_checkout(
     admin = next(agent for agent in payload["agents"]["list"] if agent["id"] == "admin")
     hypermemory_config = payload["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     plugin_paths = payload["plugins"]["load"]["paths"]
-    generated_memory_config = xdg_config_home / "strongclaw" / "memory" / "hypermemory.yaml"
+    generated_memory_config = (
+        strongclaw_memory_config_dir(home_dir=home_dir, environ=env) / "hypermemory.yaml"
+    )
+    admin_workspace = strongclaw_workspace_dir(home_dir=home_dir, environ=env) / "admin"
 
     assert "Rendered" in result.stdout
-    assert admin["workspace"] == str(xdg_data_home / "strongclaw" / "workspace" / "admin")
+    assert admin["workspace"] == str(admin_workspace)
     assert hypermemory_config["configPath"] == str(generated_memory_config)
     assert generated_memory_config.exists()
     assert any(

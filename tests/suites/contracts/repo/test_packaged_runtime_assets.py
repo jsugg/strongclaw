@@ -12,7 +12,10 @@ def _relative_files(root: pathlib.Path) -> set[pathlib.Path]:
     return {
         path.relative_to(root)
         for path in root.rglob("*")
-        if path.is_file() and path.name != ".DS_Store" and "__pycache__" not in path.parts
+        if path.is_file()
+        and path.name != ".DS_Store"
+        and "__pycache__" not in path.parts
+        and "node_modules" not in path.parts
     }
 
 
