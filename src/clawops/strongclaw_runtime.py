@@ -450,13 +450,19 @@ def generate_secret_value() -> str:
     return secrets.token_urlsafe(32)
 
 
-def varlock_env_dir(repo_root: pathlib.Path) -> pathlib.Path:
+def varlock_env_dir(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the Varlock env directory."""
-    override = os.environ.get("OPENCLAW_VARLOCK_ENV_PATH") or os.environ.get("VARLOCK_ENV_DIR")
+    env = os.environ if environ is None else environ
+    override = env.get("OPENCLAW_VARLOCK_ENV_PATH") or env.get("VARLOCK_ENV_DIR")
     if override:
-        return expand_user_path(override)
-    layout = resolve_runtime_layout(repo_root=repo_root)
-    managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir)
+        return expand_user_path(override, home_dir=home_dir)
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir, environ=env)
     legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
     if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
         legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
@@ -470,28 +476,50 @@ def varlock_env_dir(repo_root: pathlib.Path) -> pathlib.Path:
     return managed_dir
 
 
-def varlock_local_env_file(repo_root: pathlib.Path) -> pathlib.Path:
+def varlock_local_env_file(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the local Varlock env file path."""
-    override = os.environ.get("VARLOCK_LOCAL_ENV_FILE")
+    env = os.environ if environ is None else environ
+    override = env.get("VARLOCK_LOCAL_ENV_FILE")
     if override:
-        return expand_user_path(override)
-    return varlock_env_dir(repo_root) / DEFAULT_VARLOCK_LOCAL_ENV_NAME
+        return expand_user_path(override, home_dir=home_dir)
+    return (
+        varlock_env_dir(repo_root, home_dir=home_dir, environ=environ)
+        / DEFAULT_VARLOCK_LOCAL_ENV_NAME
+    )
 
 
-def varlock_plugin_env_file(repo_root: pathlib.Path) -> pathlib.Path:
+def varlock_plugin_env_file(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the plugin-backed Varlock env overlay path."""
-    override = os.environ.get("VARLOCK_PLUGIN_ENV_FILE")
+    env = os.environ if environ is None else environ
+    override = env.get("VARLOCK_PLUGIN_ENV_FILE")
     if override:
-        return expand_user_path(override)
-    return varlock_env_dir(repo_root) / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
+        return expand_user_path(override, home_dir=home_dir)
+    return (
+        varlock_env_dir(repo_root, home_dir=home_dir, environ=environ)
+        / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
+    )
 
 
-def varlock_env_template_file(repo_root: pathlib.Path) -> pathlib.Path:
+def varlock_env_template_file(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
     """Return the shipped local env template path."""
     override = os.environ.get("VARLOCK_ENV_TEMPLATE")
     if override:
-        return expand_user_path(override)
-    layout = resolve_runtime_layout(repo_root=repo_root)
+        return expand_user_path(override, home_dir=home_dir)
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
     return layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE / DEFAULT_VARLOCK_ENV_TEMPLATE_NAME
 
 

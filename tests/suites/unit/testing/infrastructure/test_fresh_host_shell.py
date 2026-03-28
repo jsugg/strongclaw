@@ -70,3 +70,38 @@ def test_compose_probe_env_helper_uses_context_repo_local_state(tmp_path: pathli
 
     assert env["STRONGCLAW_COMPOSE_STATE_DIR"].endswith("/.openclaw/repo-local-compose")
     assert "COMPOSE_PROJECT_NAME" in env
+
+
+def test_compose_probe_env_uses_scenario_home_for_managed_varlock_assignments(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Fresh-host compose probes should resolve managed Varlock envs from the scenario home."""
+    repo_root = tmp_path / "repo"
+    asset_dir = repo_root / "platform" / "configs" / "varlock"
+    asset_dir.mkdir(parents=True)
+    (asset_dir / ".env.local.example").write_text("APP_ENV=local\n", encoding="utf-8")
+    (asset_dir / ".env.schema").write_text("APP_ENV=\n", encoding="utf-8")
+    (asset_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
+    (asset_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
+    home_dir = tmp_path / "scenario-home"
+    managed_config_dir = tmp_path / "managed-config"
+    managed_env_file = managed_config_dir / "varlock" / ".env.local"
+    managed_env_file.parent.mkdir(parents=True, exist_ok=True)
+    managed_env_file.write_text(
+        "NEO4J_PASSWORD=managed-secret\nNEO4J_USERNAME=neo4j\n",
+        encoding="utf-8",
+    )
+
+    env = _compose_probe_env(
+        {
+            "HOME": str(home_dir),
+            "XDG_CONFIG_HOME": str(home_dir / ".config"),
+            "STRONGCLAW_CONFIG_DIR": str(managed_config_dir),
+        },
+        repo_root_path=repo_root,
+        compose_name="docker-compose.aux-stack.yaml",
+        repo_local_state=False,
+    )
+
+    assert env["NEO4J_PASSWORD"] == "managed-secret"
+    assert env["NEO4J_USERNAME"] == "neo4j"
