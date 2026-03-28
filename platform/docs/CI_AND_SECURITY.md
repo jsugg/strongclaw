@@ -15,6 +15,13 @@ The repository includes:
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
 - Upstream Integration Validation
 
+Workflow policy:
+
+- GitHub Actions workflows stay thin. Multi-step operational logic lives in
+  semantic helper entrypoints under `tests/scripts/`, with unit coverage in
+  `tests/suites/unit/ci/` and repo contract coverage under
+  `tests/suites/contracts/repo/`.
+
 ## Fresh-host acceptance
 
 `.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap,
@@ -59,7 +66,9 @@ GitHub Actions in `.github/workflows/memory-plugin-verification.yml`.
 - That flow reuses `clawops config memory --set-profile memory-lancedb-pro`, which
   auto-detects the host and installs the default LanceDB dependency on
   supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
-- The script then installs the pinned `openclaw@2026.3.13` CLI into a
+- The workflow delegates the host-functional orchestration to
+  `tests/scripts/memory_plugin_verification.py`, which installs the pinned
+  `openclaw@2026.3.13` CLI into a
   temporary tool directory and runs the host-functional
   `npm run test:openclaw-host` suite.
 - The host-functional step clears ambient AWS credential env vars first so
@@ -94,6 +103,10 @@ in `.github/workflows/memory-plugin-verification.yml`.
   `.github/workflows/release.yml` all call the centralized
   `clawops supply-chain quality-gate` surface so linting, typing, tests,
   coverage, and compile checks stay aligned.
+- The compatibility matrix, memory-plugin verification, security, and release
+  workflows delegate their nontrivial operational steps to `tests/scripts/`
+  helper CLIs instead of embedding shell blobs or Python heredocs directly in
+  YAML.
 - Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
   before invoking the shared gate, and the repo's `pre-commit` hook now uses
   that system binary instead of a Docker-backed hook.
@@ -101,12 +114,14 @@ in `.github/workflows/memory-plugin-verification.yml`.
   instead of relying on the Docker-backed Semgrep action, which keeps the lane
   off Docker Hub.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
-  tarball SHA-256 digests before extracting the binaries.
+  tarball SHA-256 digests before extracting the binaries through the dedicated
+  helper script.
 - `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds
   the Python sdist/wheel only after the repository quality gate passes, verifies
-  each artifact with `twine check` plus fresh install smoke tests, publishes
-  the release assets with `gh release create`, and emits GitHub attestations
-  for both build provenance and the generated SBOM.
+  each artifact with `twine check` plus fresh install smoke tests through the
+  dedicated release helper script, publishes or updates the GitHub release with
+  `gh`, and emits GitHub attestations for both build provenance and the
+  generated SBOM.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
   plus nightly validation steps after an upstream merge lands in the fork.
 - `.github/workflows/memory-plugin-verification.yml` runs the dedicated

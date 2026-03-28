@@ -29,50 +29,16 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes shellcheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
       - name: Run repository quality gate
         run: uv run python -m clawops supply-chain --repo-root . quality-gate
+      - name: Clean release artifact directories
+        run: python3 ./tests/scripts/release_workflow.py clean-artifacts --path build --path dist
       - name: Build release artifacts
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import shutil
-
-          for path in (Path("build"), Path("dist")):
-              shutil.rmtree(path, ignore_errors=True)
-          PY
-          uv run python -m build
+        run: uv run python -m build
       - name: Verify release artifacts
-        run: |
-          uv run twine check dist/*
-          wheel_path="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          sdist_path="$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)"
-          test -n "$wheel_path"
-          test -n "$sdist_path"
-          tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-release-verify.XXXXXX")"
-          python3 -m venv "$tmp_dir/wheel-env"
-          "$tmp_dir/wheel-env/bin/python" -m pip install --upgrade pip
-          "$tmp_dir/wheel-env/bin/python" -m pip install "$wheel_path"
-          "$tmp_dir/wheel-env/bin/python" - <<'PY'
-          import importlib.metadata as metadata
-          import clawops
-
-          assert metadata.version("clawops")
-          assert clawops.__file__
-          PY
-          python3 -m venv "$tmp_dir/sdist-env"
-          "$tmp_dir/sdist-env/bin/python" -m pip install --upgrade pip
-          "$tmp_dir/sdist-env/bin/python" -m pip install "$sdist_path"
-          "$tmp_dir/sdist-env/bin/python" - <<'PY'
-          import importlib.metadata as metadata
-          import clawops
-
-          assert metadata.version("clawops")
-          assert clawops.__file__
-          PY
+        run: python3 ./tests/scripts/release_workflow.py verify-artifacts --dist-dir dist
       - uses: anchore/sbom-action@57aae528053a48a3f6235f2d9461b05fbcb7366d # v0.23.1
         with:
           path: dist
@@ -90,12 +56,7 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --verify-tag --generate-notes
-          fi
+        run: python3 ./tests/scripts/release_workflow.py publish-github-release --tag "${GITHUB_REF_NAME}" --dist-dir dist --sbom-path sbom.spdx.json
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: |

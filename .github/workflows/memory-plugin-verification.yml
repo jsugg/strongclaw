@@ -37,20 +37,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: PYTHONPATH=src uv run python -m clawops config --repo-root . memory --set-profile memory-lancedb-pro --output "$RUNNER_TEMP/openclaw.json"
-      - run: |
-          tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/strongclaw-openclaw-cli.XXXXXX")"
-          npm install --prefix "$tool_dir" --no-fund --no-audit "openclaw@2026.3.13"
-          export PATH="$tool_dir/node_modules/.bin:$PATH"
-          cd platform/plugins/memory-lancedb-pro
-          npm ci --no-fund --no-audit
-          env \
-            -u AWS_PROFILE \
-            -u AWS_ACCESS_KEY_ID \
-            -u AWS_SECRET_ACCESS_KEY \
-            -u AWS_SESSION_TOKEN \
-            -u AWS_DEFAULT_REGION \
-            -u AWS_REGION \
-            npm run test:openclaw-host
+      - run: python3 ./tests/scripts/memory_plugin_verification.py run-vendored-host-checks --repo-root . --package-spec "openclaw@2026.3.13"
   verify-hypermemory-qdrant:
     name: Run Hypermemory Qdrant Checks
     runs-on: ubuntu-latest
@@ -70,15 +57,7 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: |
-          for _ in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:6333/healthz >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Qdrant failed to become ready" >&2
-          exit 1
+      - run: python3 ./tests/scripts/memory_plugin_verification.py wait-for-qdrant --url http://127.0.0.1:6333/healthz --attempts 30 --sleep-seconds 2.0
       - run: uv run pytest -q -m "hypermemory and qdrant"
         env:
           QDRANT_TEST_MODE: real
@@ -100,4 +79,4 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: uv sync --locked
-      - run: cd platform/plugins/strongclaw-hypermemory && npm run test:openclaw-host
+      - run: npm --prefix platform/plugins/strongclaw-hypermemory run test:openclaw-host
