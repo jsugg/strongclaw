@@ -88,7 +88,12 @@ def test_varlock_env_dir_defaults_to_managed_config_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "assets"
-    (repo_root / "platform" / "configs" / "varlock").mkdir(parents=True)
+    asset_dir = repo_root / "platform" / "configs" / "varlock"
+    asset_dir.mkdir(parents=True)
+    (asset_dir / ".env.local.example").write_text("APP_ENV=local\n", encoding="utf-8")
+    (asset_dir / ".env.schema").write_text("APP_ENV=\n", encoding="utf-8")
+    (asset_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
+    (asset_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
     managed_root = tmp_path / "config-root"
     monkeypatch.setenv("STRONGCLAW_CONFIG_DIR", str(managed_root))
     legacy_dir = repo_root / "platform" / "configs" / "varlock"
@@ -97,6 +102,8 @@ def test_varlock_env_dir_defaults_to_managed_config_root(
 
     assert expected == strongclaw_varlock_dir()
     assert expected != legacy_dir
+    assert (expected / ".env.schema").read_text(encoding="utf-8") == "APP_ENV=\n"
+    assert (expected / ".env.local.example").read_text(encoding="utf-8") == "APP_ENV=local\n"
 
 
 def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path) -> None:

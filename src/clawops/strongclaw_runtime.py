@@ -41,7 +41,7 @@ from clawops.platform_compat import (
     resolve_memory_plugin_lancedb_version,
 )
 from clawops.root_detection import DEFAULT_SOURCE_REPO_ROOT
-from clawops.runtime_assets import resolve_runtime_layout
+from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 
 DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_SOURCE_REPO_ROOT
 DEFAULT_PROFILE_NAME = "hypermemory"
@@ -52,6 +52,13 @@ DEFAULT_VARLOCK_ENV_RELATIVE = pathlib.Path("platform/configs/varlock")
 DEFAULT_VARLOCK_LOCAL_ENV_NAME = ".env.local"
 DEFAULT_VARLOCK_PLUGIN_ENV_NAME = ".env.plugins"
 DEFAULT_VARLOCK_ENV_TEMPLATE_NAME = ".env.local.example"
+DEFAULT_VARLOCK_SCHEMA_NAME = ".env.schema"
+DEFAULT_VARLOCK_EXAMPLE_NAMES = (
+    DEFAULT_VARLOCK_ENV_TEMPLATE_NAME,
+    ".env.ci.example",
+    ".env.prod.example",
+    DEFAULT_VARLOCK_SCHEMA_NAME,
+)
 DEFAULT_SETUP_STATE_DIR_NAME = "setup"
 DEFAULT_BOOTSTRAP_STATE_NAME = "bootstrap.env"
 DEFAULT_DOCKER_REFRESH_STATE_NAME = "docker-refresh.env"
@@ -455,6 +462,7 @@ def varlock_env_dir(repo_root: pathlib.Path) -> pathlib.Path:
         legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
     ).exists():
         return legacy_dir
+    materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
     if (managed_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
         managed_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
     ).exists():
@@ -485,6 +493,27 @@ def varlock_env_template_file(repo_root: pathlib.Path) -> pathlib.Path:
         return expand_user_path(override)
     layout = resolve_runtime_layout(repo_root=repo_root)
     return layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE / DEFAULT_VARLOCK_ENV_TEMPLATE_NAME
+
+
+def materialize_runtime_varlock_assets(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Mirror the shipped Varlock schema/examples into the managed config directory."""
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir)
+    template_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
+    if not all((template_dir / file_name).is_file() for file_name in DEFAULT_VARLOCK_EXAMPLE_NAMES):
+        template_dir = resolve_asset_path(DEFAULT_VARLOCK_ENV_RELATIVE)
+    managed_dir.mkdir(parents=True, exist_ok=True)
+    for file_name in DEFAULT_VARLOCK_EXAMPLE_NAMES:
+        source_path = template_dir / file_name
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Missing shipped Varlock asset: {source_path}")
+        target_path = managed_dir / file_name
+        shutil.copy2(source_path, target_path)
+    return managed_dir
 
 
 def load_env_assignments(path: pathlib.Path) -> dict[str, str]:
