@@ -12,7 +12,8 @@ import yaml
 from tests.utils.helpers.repo import REPO_ROOT
 
 _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
-    r"(?P<prefix>(?:^|[\s;])python3?\s+)?(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
+    r"(?P<prefix>(?:^|[\s;])(?:(?:uv\s+run\s+)?python3?\s+)?)"
+    r"(?P<script>\./tests/scripts/[A-Za-z0-9_./-]+\.py)\b"
 )
 
 
@@ -77,7 +78,8 @@ def _iter_workflow_python_script_invocations() -> Iterator[tuple[str, str, Path,
                     for match in _PYTHON_SCRIPT_INVOCATION_PATTERN.finditer(stripped_line):
                         script_token = match.group("script")
                         script_path = REPO_ROOT / script_token.removeprefix("./")
-                        uses_python = match.group("prefix") is not None
+                        prefix = match.group("prefix") or ""
+                        uses_python = "python" in prefix
                         yield workflow_path.name, step_name, script_path, uses_python
 
 
@@ -173,6 +175,17 @@ def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
     assert "Warm macOS Fresh Host Caches" in text
 
 
+def test_repo_workflows_do_not_embed_shell_blobs_or_python_heredocs() -> None:
+    """Workflow run steps should stay thin across the repository."""
+    workflows_root = REPO_ROOT / ".github" / "workflows"
+
+    for workflow_path in workflows_root.glob("*.yml"):
+        text = workflow_path.read_text(encoding="utf-8")
+        assert "python - <<'PY'" not in text, workflow_path.as_posix()
+        assert "python3 - <<'PY'" not in text, workflow_path.as_posix()
+        assert "run: |" not in text, workflow_path.as_posix()
+
+
 def test_workflow_python_script_invocations_are_executable_safe() -> None:
     """Workflow shell steps must not directly invoke non-executable Python helpers."""
     for (
@@ -194,6 +207,27 @@ def test_nightly_workflow_warms_caches_before_running_fresh_host_core() -> None:
     assert "uses: ./.github/workflows/fresh-host-cache-warm.yml" in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
     assert "needs: warm-fresh-host-caches" in text
+
+
+def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
+    """Refactored workflow lanes should route operational logic through semantic scripts."""
+    compatibility = _workflow_text("compatibility-matrix.yml")
+    memory_plugin = _workflow_text("memory-plugin-verification.yml")
+    security = _workflow_text("security.yml")
+    release = _workflow_text("release.yml")
+
+    assert "./tests/scripts/compatibility_matrix.py prepare-setup-smoke" in compatibility
+    assert "./tests/scripts/compatibility_matrix.py assert-lossless-claw" in compatibility
+    assert "./tests/scripts/compatibility_matrix.py assert-hypermemory-config" in compatibility
+    assert "./tests/scripts/memory_plugin_verification.py run-vendored-host-checks" in memory_plugin
+    assert "./tests/scripts/memory_plugin_verification.py wait-for-qdrant" in memory_plugin
+    assert "./tests/scripts/security_workflow.py write-coverage-summary" in security
+    assert "./tests/scripts/security_workflow.py install-gitleaks" in security
+    assert "./tests/scripts/security_workflow.py install-syft" in security
+    assert "./tests/scripts/security_workflow.py write-empty-sarif" in security
+    assert "./tests/scripts/release_workflow.py clean-artifacts" in release
+    assert "./tests/scripts/release_workflow.py verify-artifacts" in release
+    assert "./tests/scripts/release_workflow.py publish-github-release" in release
 
 
 def test_devflow_contract_workflow_surfaces_public_devflow_lane() -> None:
