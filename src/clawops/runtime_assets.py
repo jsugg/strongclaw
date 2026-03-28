@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import pathlib
 import shutil
 from typing import Final
@@ -16,12 +17,10 @@ from clawops.app_paths import (
     strongclaw_workspace_dir,
     strongclaw_worktrees_dir,
 )
-from clawops.root_detection import (
-    STRONGCLAW_REPO_MARKERS,
-    discover_strongclaw_repo_root,
-)
+from clawops.root_detection import STRONGCLAW_REPO_MARKERS
 
 PACKAGED_ASSET_ROOT: Final[pathlib.Path] = pathlib.Path(__file__).resolve().parent / "assets"
+ASSET_ROOT_ENV_VAR: Final[str] = "STRONGCLAW_ASSET_ROOT"
 PLATFORM_DIR_NAME: Final[str] = "platform"
 MEMORY_CONFIG_RELATIVE_DIR: Final[pathlib.Path] = pathlib.Path("platform/configs/memory")
 VARLOCK_CONFIG_RELATIVE_DIR: Final[pathlib.Path] = pathlib.Path("platform/configs/varlock")
@@ -48,7 +47,7 @@ class RuntimeLayout:
     @property
     def uses_packaged_assets(self) -> bool:
         """Return whether runtime assets come from the installed package bundle."""
-        return self.source_checkout_root is None
+        return self.asset_root == PACKAGED_ASSET_ROOT
 
 
 def _resolve_path(value: pathlib.Path | str) -> pathlib.Path:
@@ -70,26 +69,36 @@ def _matches_source_checkout(root: pathlib.Path) -> bool:
     return all((root / marker).exists() for marker in STRONGCLAW_REPO_MARKERS)
 
 
+def _configured_asset_root_override(
+    repo_root: pathlib.Path | str | None = None,
+) -> pathlib.Path | None:
+    """Return the explicit asset-root override when one was supplied."""
+    if repo_root is not None:
+        return _require_platform_root(_resolve_path(repo_root))
+    configured = os.environ.get(ASSET_ROOT_ENV_VAR, "").strip()
+    if not configured:
+        return None
+    return _require_platform_root(_resolve_path(configured))
+
+
 def resolve_asset_root(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:
     """Return the effective runtime asset root."""
-    if repo_root is not None:
-        return _resolve_path(repo_root)
-    source_root = discover_strongclaw_repo_root()
-    if source_root is not None:
-        return _require_platform_root(source_root)
+    override = _configured_asset_root_override(repo_root)
+    if override is not None:
+        return override
     return _require_platform_root(PACKAGED_ASSET_ROOT)
 
 
 def resolve_source_checkout_root(
     repo_root: pathlib.Path | str | None = None,
 ) -> pathlib.Path | None:
-    """Return the active StrongClaw source checkout when one exists."""
-    if repo_root is not None:
-        candidate = _resolve_path(repo_root)
-        if _matches_source_checkout(candidate):
-            return candidate
+    """Return the active explicit StrongClaw source checkout when one exists."""
+    override = _configured_asset_root_override(repo_root)
+    if override is None:
         return None
-    return discover_strongclaw_repo_root()
+    if _matches_source_checkout(override):
+        return override
+    return None
 
 
 def resolve_runtime_layout(

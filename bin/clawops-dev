@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+
+if [ ! -f "$repo_root/pyproject.toml" ] || [ ! -d "$repo_root/src/clawops" ]; then
+  printf '%s\n' "clawops-dev must live inside a StrongClaw source checkout." >&2
+  exit 1
+fi
+
+export STRONGCLAW_ASSET_ROOT="${STRONGCLAW_ASSET_ROOT:-$repo_root}"
+
+exec uv run --project "$repo_root" clawops "$@"

@@ -31,6 +31,15 @@
 - Safe timeout wrapper:
   `uv run python -m tests.utils.scripts.pytest_safe --timeout 600 -q -m integration`
 
+## Contributor Dev Shell
+
+- Source the repo-local developer environment:
+  `source scripts/dev-env.sh`
+- Or open a prepared shell in one step:
+  `make dev-shell`
+- After either flow, use `clawops-dev ...` to run the repo checkout against
+  repo-backed assets without changing the default installed/runtime behavior.
+
 ## Common Triage
 
 - If the monkeypatch governance contract fails, migrate the test to

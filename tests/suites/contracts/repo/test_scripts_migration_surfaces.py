@@ -9,13 +9,26 @@ def test_makefile_uses_python_native_operational_targets() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
     assert "preferred_python.sh" not in makefile
-    assert "./scripts/" not in makefile
+    assert "scripts/ops/" not in makefile
     assert "PYTHONPATH=src" not in makefile
     assert "--extra dev" not in makefile
     assert "$(UV) run --locked pytest" in makefile
+    assert "dev-shell: install" in makefile
     assert "$(RUN) clawops ops sidecars up" in makefile
     assert "$(RUN) clawops baseline verify" in makefile
     assert "$(RUN) clawops recovery backup-create" in makefile
+    assert "$(RUN) clawops render-openclaw-config --asset-root ." in makefile
+
+
+def test_repo_dev_entrypoints_enable_explicit_repo_asset_mode() -> None:
+    dev_env = (REPO_ROOT / "scripts" / "dev-env.sh").read_text(encoding="utf-8")
+    wrapper = (REPO_ROOT / "bin" / "clawops-dev").read_text(encoding="utf-8")
+
+    assert 'export STRONGCLAW_ASSET_ROOT="$repo_root"' in dev_env
+    assert 'PATH="$repo_root/bin:$PATH"' in dev_env
+    assert '. "$venv_activate"' in dev_env
+    assert 'export STRONGCLAW_ASSET_ROOT="${STRONGCLAW_ASSET_ROOT:-$repo_root}"' in wrapper
+    assert 'exec uv run --project "$repo_root" clawops "$@"' in wrapper
 
 
 def test_service_templates_call_repo_venv_python() -> None:
