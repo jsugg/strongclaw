@@ -10,7 +10,7 @@
       <string>-m</string>
       <string>clawops</string>
       <string>ops</string>
-      <string>--repo-root</string>
+      <string>--asset-root</string>
       <string>__REPO_ROOT__</string>
       <string>gateway</string>
       <string>start</string>

@@ -19,6 +19,7 @@ from clawops.acpx_adapter import (
 )
 from clawops.app_paths import scoped_state_dir
 from clawops.backend_registry import BackendDefinition, resolve_backend
+from clawops.cli_roots import add_project_root_argument, resolve_project_root_argument
 from clawops.common import dump_json, sha256_hex, write_json, write_text
 from clawops.credential_broker import CredentialBroker, CredentialStatus
 from clawops.op_journal import LeaseConflictError, OperationJournal
@@ -30,7 +31,6 @@ from clawops.orchestration import (
     build_lock_identity,
     build_session_identity,
 )
-from clawops.root_detection import resolve_project_root
 
 
 class SessionLockError(RuntimeError):
@@ -579,12 +579,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--role", default=None)
     parser.add_argument("--lane", default="default")
     parser.add_argument("--operation-kind", default="worker_dispatch")
-    parser.add_argument(
-        "--project-root",
-        "--repo-root",
-        dest="project_root",
-        type=pathlib.Path,
-        default=None,
+    add_project_root_argument(
+        parser,
+        help_text="Control project root for ACP state, journals, and derived worktrees.",
     )
     parser.add_argument("--project-id")
     parser.add_argument(
@@ -611,7 +608,7 @@ def _resolve_session_spec(args: argparse.Namespace) -> SessionSpec:
     """Resolve CLI arguments into a typed session spec."""
     role = args.role or args.session_type or "developer"
     project = ProjectDescriptor.resolve(
-        resolve_project_root(args.project_root),
+        resolve_project_root_argument(args, command_name="clawops acp-runner"),
         project_id=args.project_id,
         trusted_roots=tuple(args.allowed_workspace_root),
     )

@@ -8,6 +8,7 @@ import os
 import pathlib
 from collections.abc import Callable
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
 from clawops.openclaw_config import materialize_runtime_memory_configs, render_openclaw_profile
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
@@ -32,7 +33,6 @@ from clawops.strongclaw_runtime import (
     resolve_home_dir,
     resolve_openclaw_config_path,
     resolve_profile,
-    resolve_repo_root,
     resolve_runtime_user,
     resolve_varlock_bin,
     run_command,
@@ -70,7 +70,7 @@ def _pause_for_linux_docker_refresh(repo_root: pathlib.Path) -> None:
 def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse setup arguments."""
     parser = argparse.ArgumentParser(description="Run the guided StrongClaw setup workflow.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--profile")
     parser.add_argument("--skip-bootstrap", action="store_true")
@@ -84,7 +84,7 @@ def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
 def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse doctor arguments."""
     parser = argparse.ArgumentParser(description="Run a deep StrongClaw readiness scan.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--skip-runtime", action="store_true")
     parser.add_argument("--no-model-probe", action="store_true")
@@ -94,7 +94,7 @@ def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
 def _doctor_host_parser(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse doctor-host arguments."""
     parser = argparse.ArgumentParser(description="Run the host-only StrongClaw readiness scan.")
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     return parser.parse_args(argv)
 
@@ -161,7 +161,7 @@ def doctor_host_main(argv: list[str] | None = None) -> int:
     """Run the host-only StrongClaw doctor."""
     args = _doctor_host_parser(argv)
     payload = _doctor_host_payload(
-        resolve_repo_root(args.repo_root),
+        resolve_asset_root_argument(args, command_name="clawops doctor-host"),
         home_dir=resolve_home_dir(args.home_dir),
     )
     print(json.dumps(payload, indent=2, sort_keys=True))
@@ -216,7 +216,7 @@ def _bounded_local_doctor(args: argparse.Namespace) -> bool:
 def setup_main(argv: list[str] | None = None) -> int:
     """Run the guided StrongClaw setup workflow."""
     args = _setup_parser(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops setup")
     home_dir = resolve_home_dir(args.home_dir)
     profile = resolve_profile(args.profile)
     if args.skip_bootstrap and args.force_bootstrap:
@@ -282,7 +282,7 @@ def setup_main(argv: list[str] | None = None) -> int:
 def doctor_main(argv: list[str] | None = None) -> int:
     """Run the deep StrongClaw readiness scan."""
     args = _doctor_parser(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops doctor")
     home_dir = resolve_home_dir(args.home_dir)
     checks: list[dict[str, object]] = []
     _run_check(

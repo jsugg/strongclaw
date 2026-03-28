@@ -45,7 +45,7 @@ def test_devflow_qualifies_sample_repositories(
     exit_code = main(
         [
             "run",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--goal",
             f"qualify {fixture_name}",

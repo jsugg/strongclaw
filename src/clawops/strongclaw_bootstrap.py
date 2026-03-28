@@ -12,6 +12,7 @@ import sys
 import time
 from collections.abc import Sequence
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.platform_compat import detect_host_platform, resolve_memory_plugin_lancedb_version
 from clawops.runtime_assets import (
     mirror_asset_tree,
@@ -42,7 +43,6 @@ from clawops.strongclaw_runtime import (
     repair_linux_runtime_user_docker_access,
     resolve_home_dir,
     resolve_profile,
-    resolve_repo_root,
     resolve_runtime_user,
     resolve_varlock_bin,
     run_command,
@@ -490,7 +490,7 @@ def _render_post_bootstrap_config(
     command = managed_clawops_command(
         repo_root,
         "render-openclaw-config",
-        "--repo-root",
+        "--asset-root",
         str(repo_root),
         "--home-dir",
         str(home_dir),
@@ -597,7 +597,7 @@ def bootstrap_host(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for host bootstrap."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     parser.add_argument("--profile", default=None)
     return parser.parse_args(argv)
@@ -606,7 +606,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for StrongClaw host bootstrap."""
     args = parse_args(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops bootstrap")
     home_dir = resolve_home_dir(args.home_dir)
     profile = resolve_profile(args.profile)
     payload = bootstrap_host(repo_root, profile=profile, home_dir=home_dir)

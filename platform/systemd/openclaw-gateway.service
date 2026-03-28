@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=__REPO_ROOT__
 Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
 Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-ExecStart=__PYTHON_EXECUTABLE__ -m clawops ops --repo-root __REPO_ROOT__ gateway start
+ExecStart=__PYTHON_EXECUTABLE__ -m clawops ops --asset-root __REPO_ROOT__ gateway start
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

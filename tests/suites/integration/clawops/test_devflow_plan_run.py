@@ -34,7 +34,7 @@ def test_devflow_run_creates_run_state_and_manifest(
     exit_code = main(
         [
             "run",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--goal",
             "integration smoke",
@@ -96,7 +96,7 @@ def test_devflow_run_fails_when_required_artifacts_are_missing(
     exit_code = main(
         [
             "run",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--goal",
             "artifact regression",

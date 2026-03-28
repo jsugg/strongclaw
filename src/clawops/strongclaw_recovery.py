@@ -9,6 +9,7 @@ import shutil
 import tarfile
 import time
 
+from clawops.cli_roots import add_ignored_repo_root_alias, warn_ignored_repo_root_argument
 from clawops.strongclaw_runtime import (
     CommandError,
     resolve_home_dir,
@@ -138,7 +139,7 @@ def rotation_guidance() -> dict[str, object]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for recovery commands."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_ignored_repo_root_alias(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("backup-create")
@@ -155,6 +156,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for recovery commands."""
     args = parse_args(argv)
+    warn_ignored_repo_root_argument(
+        args,
+        command_name="clawops recovery",
+        guidance="use --home-dir to target an alternate OpenClaw home.",
+    )
     home_dir = resolve_home_dir(args.home_dir)
     if args.command == "backup-create":
         payload = {"ok": True, "archive": str(create_backup(home_dir=home_dir))}

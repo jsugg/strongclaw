@@ -235,7 +235,7 @@ def test_devflow_contract_workflow_surfaces_public_devflow_lane() -> None:
 
     assert "uv sync --locked" in text
     assert "uv run python -m compileall -q src tests" in text
-    assert 'uv run clawops devflow plan --repo-root . --goal "contract smoke"' in text
+    assert 'uv run clawops devflow plan --project-root . --goal "contract smoke"' in text
 
 
 def test_security_harness_tracks_the_context_provider_namespace() -> None:

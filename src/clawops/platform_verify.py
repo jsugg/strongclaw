@@ -17,9 +17,10 @@ from collections.abc import Mapping, Sequence
 from typing import cast
 
 from clawops.allowlist_sync import load_source, render_fragment
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import dump_json, load_text, load_yaml
 from clawops.process_runner import run_command
-from clawops.runtime_assets import resolve_asset_path, resolve_asset_root
+from clawops.runtime_assets import resolve_asset_path
 from clawops.typed_values import as_mapping
 
 
@@ -677,31 +678,22 @@ def verify_channels(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for platform verification."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     subparsers = parser.add_subparsers(dest="target", required=True)
 
     sidecars = subparsers.add_parser("sidecars")
-    sidecars.add_argument(
-        "--repo-root", dest="subcommand_repo_root", type=pathlib.Path, default=None
-    )
+    add_asset_root_argument(sidecars)
     sidecars.add_argument("--compose-file", type=pathlib.Path, default=None)
     sidecars.add_argument("--skip-runtime", action="store_true")
 
     observability = subparsers.add_parser("observability")
-    observability.add_argument(
-        "--repo-root",
-        dest="subcommand_repo_root",
-        type=pathlib.Path,
-        default=None,
-    )
+    add_asset_root_argument(observability)
     observability.add_argument("--overlay", type=pathlib.Path, default=None)
     observability.add_argument("--compose-file", type=pathlib.Path, default=None)
     observability.add_argument("--skip-runtime", action="store_true")
 
     channels = subparsers.add_parser("channels")
-    channels.add_argument(
-        "--repo-root", dest="subcommand_repo_root", type=pathlib.Path, default=None
-    )
+    add_asset_root_argument(channels)
     channels.add_argument("--overlay", type=pathlib.Path, default=None)
     channels.add_argument("--doc", type=pathlib.Path, default=None)
     channels.add_argument("--telegram-guidance", type=pathlib.Path, default=None)
@@ -714,12 +706,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the selected platform verification target."""
     args = parse_args(argv)
-    repo_root_argument = (
-        args.subcommand_repo_root
-        if isinstance(getattr(args, "subcommand_repo_root", None), pathlib.Path)
-        else args.repo_root
-    )
-    repo_root = resolve_asset_root(repo_root_argument)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops verify-platform")
 
     if args.target == "sidecars":
         report = verify_sidecars(
