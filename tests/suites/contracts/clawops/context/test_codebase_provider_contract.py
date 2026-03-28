@@ -11,6 +11,8 @@ def test_shipped_codebase_provider_enables_hybrid_lane() -> None:
     config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
 
     assert config.embedding.enabled is True
+    assert config.graph.backend == "neo4j"
+    assert config.graph.neo4j_url == "bolt://127.0.0.1:7687"
     assert config.qdrant.enabled is True
     assert config.qdrant.collection == "strongclaw-codebase-context"
     assert config.hybrid.fusion == "rrf"

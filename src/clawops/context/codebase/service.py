@@ -15,11 +15,13 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, LiteralString, Protocol, cast
+from urllib.parse import urlparse
 
 import requests
 
 if TYPE_CHECKING:
+    from neo4j import Driver as Neo4jDriver
     from tree_sitter import Language as TreeSitterLanguage
     from tree_sitter import Node as TreeSitterNode
 
@@ -124,6 +126,8 @@ IMPORT_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r'^\s*require\(["\']([^"\']+)["\']\)', re.MULTILINE),
     ],
 }
+IDENTIFIER_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
+CALL_REFERENCE_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 type SymlinkPolicy = Literal["follow", "in_repo_only", "never"]
 type GraphBackendName = Literal["sqlite", "neo4j"]
@@ -723,6 +727,50 @@ def extract_import_edges(
     return edges
 
 
+def _normalized_symbol_lines(value: str) -> tuple[str, ...]:
+    """Split one persisted symbol blob into stable unique symbol names."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for line in value.splitlines():
+        symbol = line.strip()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        normalized.append(symbol)
+    return tuple(normalized)
+
+
+def _symbol_node_id(symbol: str) -> str:
+    """Return the graph node identifier for one symbol."""
+    return f"symbol:{symbol}"
+
+
+def _symbol_mentions(text: str) -> set[str]:
+    """Return identifier-like symbol mentions from one source blob."""
+    return {match.group(1) for match in IDENTIFIER_PATTERN.finditer(text)}
+
+
+def _symbol_calls(text: str) -> set[str]:
+    """Return function-style symbol invocations from one source blob."""
+    return {match.group(1) for match in CALL_REFERENCE_PATTERN.finditer(text)}
+
+
+def normalize_neo4j_driver_url(url: str) -> str:
+    """Normalize one configured Neo4j endpoint into a driver URI."""
+    parsed = urlparse(url.strip())
+    if parsed.scheme in {"neo4j", "bolt", "neo4j+s", "bolt+s"}:
+        return url.strip()
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("graph.neo4j_url must use neo4j://, bolt://, http://, or https://")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("graph.neo4j_url must include a hostname")
+    default_port = 7687
+    port = default_port if parsed.port in {None, 7473, 7474} else parsed.port
+    scheme = "neo4j+s" if parsed.scheme == "https" else "bolt"
+    return f"{scheme}://{host}:{port}"
+
+
 def _as_mapping(name: str, value: object) -> dict[str, object]:
     """Validate a mapping-shaped config section."""
     if value is None:
@@ -1102,7 +1150,7 @@ class GraphConfig:
     enabled: bool = True
     backend: GraphBackendName = "neo4j"
     allow_degraded_fallback: bool = True
-    neo4j_url: str = "http://127.0.0.1:7474"
+    neo4j_url: str = "bolt://127.0.0.1:7687"
     neo4j_username_env: str = "NEO4J_USERNAME"
     neo4j_password_env: str = "NEO4J_PASSWORD"
     database: str = "neo4j"
@@ -1260,13 +1308,13 @@ class SqliteGraphBackend:
 
 
 class Neo4jGraphBackend:
-    """Neo4j graph backend using the transactional HTTP endpoint."""
+    """Neo4j graph backend using the official driver."""
 
     enabled = True
 
     def __init__(self, config: GraphConfig) -> None:
         self._config = config
-        self._session = requests.Session()
+        self._driver: Neo4jDriver | None = None
 
     def _auth(self) -> tuple[str, str] | None:
         username = os.environ.get(self._config.neo4j_username_env)
@@ -1275,41 +1323,48 @@ class Neo4jGraphBackend:
             return None
         return username, password
 
-    def _endpoint(self) -> str:
-        return f"{self._config.neo4j_url.rstrip('/')}/db/{self._config.database}/tx/commit"
-
-    def _statement_result(
-        self, statement: str, *, parameters: Mapping[str, object] | None = None
-    ) -> dict[str, object]:
+    def _get_driver(self) -> Neo4jDriver:
+        """Create or return the cached Neo4j driver."""
         auth = self._auth()
         if auth is None:
-            return {"enabled": True, "healthy": False, "backend": "neo4j", "reason": "missing auth"}
-        response = self._session.post(
-            self._endpoint(),
-            json={"statements": [{"statement": statement, "parameters": dict(parameters or {})}]},
+            raise RuntimeError("missing auth")
+        if self._driver is not None:
+            return self._driver
+        try:
+            from neo4j import GraphDatabase
+        except ImportError as err:
+            raise RuntimeError("neo4j driver is not installed") from err
+        self._driver = GraphDatabase.driver(
+            normalize_neo4j_driver_url(self._config.neo4j_url),
             auth=auth,
-            headers={"Accept": "application/json;charset=UTF-8"},
-            timeout=5.0,
         )
-        response.raise_for_status()
-        payload = cast(dict[str, object], response.json())
-        errors = payload.get("errors", [])
-        if isinstance(errors, list) and errors:
-            message = cast(dict[str, object], errors[0]).get("message", "neo4j query failed")
-            raise RuntimeError(str(message))
-        results = payload.get("results", [])
-        if not isinstance(results, list) or not results:
-            return {}
-        return cast(dict[str, object], results[0])
+        return self._driver
+
+    def _run_query(
+        self,
+        statement: str,
+        *,
+        parameters: Mapping[str, object] | None = None,
+    ) -> list[dict[str, object]]:
+        """Run one Cypher query and return record dictionaries."""
+        driver = self._get_driver()
+        from neo4j import Query
+
+        with driver.session(database=self._config.database) as session:
+            # NOTE: Cypher here is always defined in-module, never from user input.
+            result = session.run(
+                Query(cast(LiteralString, statement)), parameters=dict(parameters or {})
+            )
+            records = [cast(dict[str, object], record.data()) for record in result]
+            result.consume()
+        return records
 
     def health(self) -> dict[str, object]:
         """Return a machine-readable health payload."""
-        auth = self._auth()
-        if auth is None:
-            return {"enabled": True, "healthy": False, "backend": "neo4j", "reason": "missing auth"}
         try:
-            self._statement_result("RETURN 1 AS ok")
-        except (RuntimeError, requests.RequestException) as err:
+            driver = self._get_driver()
+            driver.verify_connectivity()
+        except Exception as err:
             return {
                 "enabled": True,
                 "healthy": False,
@@ -1319,7 +1374,7 @@ class Neo4jGraphBackend:
         return {"enabled": True, "healthy": True, "backend": "neo4j"}
 
     def _ensure_constraints(self) -> None:
-        self._statement_result(
+        self._run_query(
             "CREATE CONSTRAINT code_node_id IF NOT EXISTS FOR (n:CodeNode) REQUIRE n.id IS UNIQUE"
         )
 
@@ -1355,7 +1410,7 @@ class Neo4jGraphBackend:
             }
             for edge in edges
         ]
-        self._statement_result(
+        self._run_query(
             """
             UNWIND $nodes AS node
             MERGE (n:CodeNode {id: node.id})
@@ -1367,19 +1422,19 @@ class Neo4jGraphBackend:
             parameters={"nodes": node_payload},
         )
         if edge_payload:
-            self._statement_result(
+            self._run_query(
                 """
                 UNWIND $edges AS edge
                 MATCH (src:CodeNode {id: edge.src_id})
                 MATCH (dst:CodeNode {id: edge.dst_id})
-                MERGE (src)-[rel:IMPORTS {edge_type: edge.edge_type}]->(dst)
+                MERGE (src)-[rel:CODE_EDGE {edge_type: edge.edge_type}]->(dst)
                 SET rel.path = edge.path,
                     rel.weight = edge.weight,
                     rel.snapshot_id = edge.snapshot_id
                 """,
                 parameters={"edges": edge_payload},
             )
-        self._statement_result(
+        self._run_query(
             """
             MATCH (n:CodeNode)
             WHERE n.snapshot_id <> $snapshot_id
@@ -1399,9 +1454,9 @@ class Neo4jGraphBackend:
         """Return neighboring node IDs from Neo4j."""
         if not edge_types:
             return []
-        result = self._statement_result(
+        records = self._run_query(
             """
-            MATCH (source:CodeNode {id: $node_id})-[rel*1..$depth]->(neighbor:CodeNode)
+            MATCH (source:CodeNode {id: $node_id})-[rel:CODE_EDGE*1..$depth]->(neighbor:CodeNode)
             WHERE ALL(item IN rel WHERE item.edge_type IN $edge_types)
             RETURN DISTINCT neighbor.id AS id
             LIMIT $limit
@@ -1413,19 +1468,12 @@ class Neo4jGraphBackend:
                 "limit": limit,
             },
         )
-        data = result.get("data", [])
-        if not isinstance(data, list):
-            return []
         neighbors: list[str] = []
-        for item_value in cast(list[object], data):
-            if not isinstance(item_value, dict):
+        for record in records:
+            value = record.get("id")
+            if value is None:
                 continue
-            row = cast(dict[str, object], item_value).get("row", [])
-            if not isinstance(row, list) or not row:
-                continue
-            row_values = cast(list[object], row)
-            row_value = row_values[0]
-            neighbors.append("" if row_value is None else str(row_value))
+            neighbors.append(str(value))
         return neighbors
 
 
@@ -1761,6 +1809,52 @@ class CodebaseContextService:
                 ],
             )
         return stale_point_ids
+
+    def _refresh_symbol_graph_edges(self, conn: sqlite3.Connection) -> None:
+        """Refresh symbol-derived graph edges from the indexed file state."""
+        rows = conn.execute("""
+            SELECT path, language, symbols, content
+            FROM files
+            ORDER BY path ASC
+            """).fetchall()
+        file_rows = [
+            (
+                str(row["path"]),
+                str(row["language"]),
+                _normalized_symbol_lines(str(row["symbols"])),
+                str(row["content"]),
+            )
+            for row in rows
+        ]
+        conn.execute("DELETE FROM edges WHERE edge_type IN ('DEFINES', 'CALLS', 'REFERENCES')")
+        repo_symbols = {symbol for _, _, symbols, _ in file_rows for symbol in symbols}
+        if not repo_symbols:
+            return
+        edge_rows: list[tuple[str, str, str, str, int]] = []
+        for path, _language, symbols, content in file_rows:
+            defined_symbols = set(symbols)
+            called_symbols = (_symbol_calls(content) & repo_symbols) - defined_symbols
+            referenced_symbols = (_symbol_mentions(content) & repo_symbols) - defined_symbols
+            referenced_symbols.difference_update(called_symbols)
+            connected_symbols = defined_symbols | called_symbols | referenced_symbols
+            for symbol in sorted(defined_symbols):
+                edge_rows.append((f"path:{path}", _symbol_node_id(symbol), "DEFINES", path, 1))
+            for symbol in sorted(called_symbols):
+                edge_rows.append((f"path:{path}", _symbol_node_id(symbol), "CALLS", path, 1))
+            for symbol in sorted(referenced_symbols):
+                edge_rows.append((f"path:{path}", _symbol_node_id(symbol), "REFERENCES", path, 1))
+            for symbol in sorted(connected_symbols):
+                edge_rows.append((_symbol_node_id(symbol), f"path:{path}", "REFERENCES", path, 1))
+        conn.executemany(
+            """
+            INSERT INTO edges(src_id, dst_id, edge_type, path, weight)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(src_id, dst_id, edge_type) DO UPDATE SET
+                path = excluded.path,
+                weight = excluded.weight
+            """,
+            edge_rows,
+        )
 
     def _clear_hybrid_state(self, conn: sqlite3.Connection) -> None:
         """Delete persisted hybrid state after a failed or disabled sync."""
@@ -2098,6 +2192,7 @@ class CodebaseContextService:
                             all_paths=seen_paths,
                         ),
                     )
+                self._refresh_symbol_graph_edges(conn)
 
                 stats = IndexStats(
                     total_files=len(seen_paths),
@@ -2638,7 +2733,7 @@ class CodebaseContextService:
     def _load_graph_nodes(self, conn: sqlite3.Connection) -> list[GraphNode]:
         """Load graph nodes from indexed files."""
         rows = conn.execute("SELECT path, language FROM files ORDER BY path ASC").fetchall()
-        return [
+        nodes = [
             GraphNode(
                 node_id=f"path:{str(row['path'])}",
                 path=str(row["path"]),
@@ -2647,6 +2742,23 @@ class CodebaseContextService:
             )
             for row in rows
         ]
+        symbol_rows = conn.execute("""
+            SELECT symbol, MIN(language) AS language
+            FROM chunks
+            WHERE symbol IS NOT NULL AND symbol != ''
+            GROUP BY symbol
+            ORDER BY symbol ASC
+            """).fetchall()
+        nodes.extend(
+            GraphNode(
+                node_id=_symbol_node_id(str(row["symbol"])),
+                path=str(row["symbol"]),
+                language=str(row["language"]),
+                kind="symbol",
+            )
+            for row in symbol_rows
+        )
+        return nodes
 
     def _load_graph_edges(self, conn: sqlite3.Connection) -> list[EdgeRecord]:
         """Load graph edges from SQLite."""
@@ -2675,13 +2787,33 @@ class CodebaseContextService:
         expanded: list[str] = []
         seen: set[str] = set(paths)
         for path in paths:
-            neighbors = backend.neighbors(
+            import_neighbors = backend.neighbors(
                 node_id=f"path:{path}",
                 edge_types=("IMPORTS",),
                 depth=self.config.graph.depth,
                 limit=self.config.graph.limit,
             )
+            symbol_neighbors = backend.neighbors(
+                node_id=f"path:{path}",
+                edge_types=("DEFINES", "CALLS", "REFERENCES"),
+                depth=1,
+                limit=self.config.graph.limit,
+            )
+            neighbors = [*import_neighbors]
+            for symbol_neighbor in symbol_neighbors:
+                if not symbol_neighbor.startswith("symbol:"):
+                    continue
+                neighbors.extend(
+                    backend.neighbors(
+                        node_id=symbol_neighbor,
+                        edge_types=("REFERENCES",),
+                        depth=1,
+                        limit=self.config.graph.limit,
+                    )
+                )
             for neighbor in neighbors:
+                if not neighbor.startswith("path:"):
+                    continue
                 rel_path = neighbor.removeprefix("path:")
                 if rel_path in seen:
                     continue
@@ -2823,7 +2955,7 @@ def load_config(path: pathlib.Path) -> CodebaseContextConfig:
             neo4j_url=_as_string(
                 "graph.neo4j_url",
                 graph.get("neo4j_url"),
-                default="http://127.0.0.1:7474",
+                default="bolt://127.0.0.1:7687",
             ),
             neo4j_username_env=_as_string(
                 "graph.neo4j_username_env",
