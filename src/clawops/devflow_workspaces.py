@@ -15,6 +15,22 @@ PRIMARY_MUTABLE_MODE: Final[WorkspaceMode] = "mutable_primary"
 TEST_MUTABLE_MODE: Final[WorkspaceMode] = "mutable_test"
 VERIFY_ONLY_MODE: Final[WorkspaceMode] = "verify_only"
 READ_ONLY_MODE: Final[WorkspaceMode] = "read_only"
+IGNORED_SYNC_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        ".venv",
+        ".venv312",
+        ".venv313",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        "node_modules",
+        "dist",
+        "build",
+        "coverage",
+        "htmlcov",
+    }
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -71,7 +87,7 @@ def _copy_tree_contents(source: pathlib.Path, destination: pathlib.Path) -> None
     """Synchronize workspace contents, excluding git metadata."""
     _clear_workspace_content(destination)
     for child in source.iterdir():
-        if child.name in {".git", ".clawops"}:
+        if child.name in {".git", ".clawops"} or child.name in IGNORED_SYNC_NAMES:
             continue
         target = destination / child.name
         if child.is_dir() and not child.is_symlink():
@@ -133,6 +149,10 @@ class DevflowWorkspacePlanner:
     def _workspace_path(self, stage_name: str, workspace_mode: WorkspaceMode) -> pathlib.Path:
         """Return the stable on-disk workspace path for one stage."""
         return self.workspaces_root / f"{stage_name}-{workspace_mode}"
+
+    def planned_root(self, *, stage_name: str, workspace_mode: WorkspaceMode) -> pathlib.Path:
+        """Return the planned workspace root for one stage."""
+        return self._workspace_path(stage_name, workspace_mode)
 
     def prepare(
         self,

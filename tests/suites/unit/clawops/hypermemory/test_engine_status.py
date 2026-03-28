@@ -10,6 +10,7 @@ from clawops.hypermemory import HypermemoryEngine, load_config
 from clawops.typed_values import as_mapping
 from tests.utils.helpers.hypermemory import (
     FailingRerankProvider,
+    FakeEmbeddingProvider,
     FakeQdrantBackend,
     StaticRerankProvider,
     build_rerank_workspace,
@@ -254,3 +255,38 @@ def test_hypermemory_reindex_soft_fails_missing_required_corpus_path(
     ]
     assert verification["ok"] is False
     assert "required corpus paths are missing: upstream" in verification["errors"]
+
+
+def test_hypermemory_status_reports_deferred_vector_sync(tmp_path: pathlib.Path) -> None:
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
+    )
+    fake_qdrant = FakeQdrantBackend()
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=FakeEmbeddingProvider([1.0, 0.0, 0.0]),
+        vector_backend=fake_qdrant,
+    )
+    engine.reindex()
+    fake_qdrant.raise_on_ensure_collection = True
+
+    payload = engine.store(kind="fact", text="Deferred sync still preserves local recall.")
+    status = engine.status()
+
+    assert payload["vectorSyncDeferred"] is True
+    assert status["vectorSyncDeferred"] is True
+    assert status["lastVectorSyncError"] == "qdrant collection warmup timed out"

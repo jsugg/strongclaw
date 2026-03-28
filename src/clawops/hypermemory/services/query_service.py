@@ -139,6 +139,7 @@ class QueryService:
                 "qdrant": dict(qdrant_health),
                 "lastVectorSyncAt": last_sync_at,
                 "lastVectorSyncError": last_sync_error,
+                "vectorSyncDeferred": bool(last_sync_error),
                 "sparseFingerprint": sparse_fingerprint,
                 "sparseFingerprintDirty": (
                     sparse_fingerprint_current is not None
@@ -262,6 +263,13 @@ class QueryService:
                                 max_multiplier=self._config.retrieval.adaptive_pool_max_multiplier,
                             ),
                         )
+                    if (
+                        resolved_backend in {"qdrant_dense_hybrid", "qdrant_sparse_dense_hybrid"}
+                        and self._config.backend.fallback == "sqlite_fts"
+                        and self._index.backend_state_value(conn, "last_sync_error")
+                    ):
+                        resolved_backend = self._config.backend.fallback
+                        fallback_activated = True
                     if resolved_backend in {
                         "qdrant_dense_hybrid",
                         "qdrant_sparse_dense_hybrid",

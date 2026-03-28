@@ -1454,9 +1454,11 @@ class Neo4jGraphBackend:
         """Return neighboring node IDs from Neo4j."""
         if not edge_types:
             return []
+        if depth <= 0 or depth > 32:
+            raise ValueError("depth must be between 1 and 32")
         records = self._run_query(
-            """
-            MATCH (source:CodeNode {id: $node_id})-[rel:CODE_EDGE*1..$depth]->(neighbor:CodeNode)
+            f"""
+            MATCH (source:CodeNode {{id: $node_id}})-[rel:CODE_EDGE*1..{depth}]->(neighbor:CodeNode)
             WHERE ALL(item IN rel WHERE item.edge_type IN $edge_types)
             RETURN DISTINCT neighbor.id AS id
             LIMIT $limit
@@ -1464,7 +1466,6 @@ class Neo4jGraphBackend:
             parameters={
                 "node_id": node_id,
                 "edge_types": list(edge_types),
-                "depth": depth,
                 "limit": limit,
             },
         )

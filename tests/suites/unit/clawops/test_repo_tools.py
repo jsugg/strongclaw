@@ -82,3 +82,27 @@ def test_worktree_new_list_and_prune_manage_the_repo_contract(
 
     assert prune_exit == 0
     assert not any(entry["path"] == created_path.as_posix() for entry in prune_payload["worktrees"])
+
+
+def test_repo_contract_errors_include_upstream_remediation(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "strongclaw"
+    (repo_root / "repo" / "worktrees").mkdir(parents=True)
+
+    doctor_exit = repo_main(["--repo-root", str(repo_root), "doctor"])
+    doctor_payload = json.loads(capsys.readouterr().out)
+
+    assert doctor_exit == 1
+    assert any("clawops repo --repo-root" in error for error in doctor_payload["errors"])
+    assert any("repo/upstream" in error for error in doctor_payload["errors"])
+
+    create_exit = worktree_main(
+        ["--repo-root", str(repo_root), "new", "--branch", "feature/review-lane"]
+    )
+    create_payload = json.loads(capsys.readouterr().out)
+
+    assert create_exit == 1
+    assert "repo/upstream" in create_payload["message"]
+    assert "clawops repo --repo-root" in create_payload["message"]

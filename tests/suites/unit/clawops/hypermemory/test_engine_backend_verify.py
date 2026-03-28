@@ -286,7 +286,7 @@ def test_hypermemory_verify_fails_when_vector_sync_error_is_present(
     verification = engine.verify()
 
     assert verification["ok"] is False
-    assert "vector sync error: dense lane drift" in verification["errors"]
+    assert "vector sync deferred: dense lane drift" in verification["errors"]
 
 
 def test_hypermemory_reindex_surfaces_vector_sync_errors(tmp_path: pathlib.Path) -> None:
