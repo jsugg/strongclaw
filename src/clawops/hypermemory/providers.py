@@ -26,7 +26,9 @@ from clawops.typed_values import as_int, as_mapping, as_mapping_list
 class EmbeddingProvider(Protocol):
     """Contract for embedding text batches."""
 
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
         """Return one embedding vector per input text."""
         ...
 
@@ -52,8 +54,11 @@ class _RerankBackend(Protocol):
 class DisabledEmbeddingProvider:
     """Provider used when dense retrieval is disabled."""
 
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
         """Reject embedding calls when the feature is disabled."""
+        del timeout_ms
         raise RuntimeError("embedding provider is disabled")
 
 
@@ -64,7 +69,9 @@ class CompatibleHttpEmbeddingProvider:
         self._config = config
         self._session = requests.Session()
 
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
         """Embed *texts* through the configured HTTP endpoint."""
         if not self._config.enabled:
             raise RuntimeError("embedding provider is disabled")
@@ -79,7 +86,7 @@ class CompatibleHttpEmbeddingProvider:
             f"{self._config.base_url.rstrip('/')}/embeddings",
             json=payload,
             headers=self._headers(),
-            timeout=self._config.timeout_ms / 1000.0,
+            timeout=(self._config.timeout_ms if timeout_ms is None else timeout_ms) / 1000.0,
         )
         response.raise_for_status()
         body = as_mapping(response.json(), path="embedding response")
