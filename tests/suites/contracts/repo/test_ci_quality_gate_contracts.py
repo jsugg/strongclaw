@@ -60,7 +60,8 @@ def test_security_workflow_verifies_downloaded_tool_archives() -> None:
         'SYFT_SHA256: "1d3cc98b13ce3dfb6083ef42f64f1033e40d7dea292e8ea85ed1cf88efb2f542"'
         in workflow
     )
-    assert workflow.count("sha256sum -c -") >= 2
+    assert "./tests/scripts/security_workflow.py install-gitleaks" in workflow
+    assert "./tests/scripts/security_workflow.py install-syft" in workflow
 
 
 def test_security_workflow_uses_cli_semgrep_instead_of_docker_action() -> None:
