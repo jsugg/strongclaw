@@ -40,4 +40,4 @@ jobs:
       - run: uv sync --locked
       - run: uv run python -m compileall -q src tests
       - run: uv run --locked pytest -q -m devflow
-      - run: uv run clawops devflow plan --repo-root . --goal "contract smoke"
+      - run: uv run clawops devflow plan --project-root . --goal "contract smoke"

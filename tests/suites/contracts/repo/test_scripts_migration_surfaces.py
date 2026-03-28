@@ -20,6 +20,9 @@ def test_makefile_uses_python_native_operational_targets() -> None:
 
 def test_service_templates_call_repo_venv_python() -> None:
     gateway = (REPO_ROOT / "platform/systemd/openclaw-gateway.service").read_text(encoding="utf-8")
+    browserlab = (REPO_ROOT / "platform/systemd/openclaw-browserlab.service").read_text(
+        encoding="utf-8"
+    )
     sidecars = (REPO_ROOT / "platform/systemd/openclaw-sidecars.service").read_text(
         encoding="utf-8"
     )
@@ -36,6 +39,7 @@ def test_service_templates_call_repo_venv_python() -> None:
     assert "scripts/ops/" not in gateway
     assert "scripts/ops/" not in sidecars
     assert "__PYTHON_EXECUTABLE__ -m clawops" in gateway
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in browserlab
     assert "__PYTHON_EXECUTABLE__ -m clawops" in sidecars
     assert "__PYTHON_EXECUTABLE__" in launchd_gateway
     assert (
@@ -48,9 +52,9 @@ def test_service_templates_call_repo_venv_python() -> None:
     )
     assert "<key>PATH</key>" in launchd_gateway
     assert "<key>KeepAlive</key>\n    <false/>" in launchd_sidecars
-    assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_gateway
-    assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_sidecars
-    assert "<string>ops</string>\n      <string>--repo-root</string>" in launchd_browserlab
+    assert "<string>ops</string>\n      <string>--asset-root</string>" in launchd_gateway
+    assert "<string>ops</string>\n      <string>--asset-root</string>" in launchd_sidecars
+    assert "<string>ops</string>\n      <string>--asset-root</string>" in launchd_browserlab
 
 
 def test_ci_workflows_do_not_call_root_scripts_directory() -> None:

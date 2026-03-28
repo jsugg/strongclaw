@@ -90,6 +90,13 @@ The wheel now ships the runtime `platform` asset bundle, so package-safe
 commands such as `clawops render-openclaw-config`, `clawops setup`, and
 `clawops verify-platform ...` work outside a cloned StrongClaw checkout.
 
+Boundary override flags are now literal:
+
+- use `--asset-root` only to override the packaged/source runtime asset bundle
+- use `--project-root` for orchestration state surfaces such as `clawops devflow`
+- use `--source-root` for source-tree-only verification such as `clawops baseline`
+- use `--repo-root` only for repo-contract tooling such as `clawops repo`, `clawops worktree`, and `clawops supply-chain`
+
 By default, StrongClaw now renders and provisions the
 `hypermemory` stack. Set one embedding model name before you run
 the no-arg setup path:

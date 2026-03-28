@@ -8,6 +8,7 @@ import json
 import pathlib
 from collections.abc import Mapping
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
 from clawops.openclaw_config import (
     DEFAULT_OPENCLAW_CONFIG_OUTPUT,
@@ -15,7 +16,7 @@ from clawops.openclaw_config import (
     render_openclaw_profile,
 )
 from clawops.strongclaw_bootstrap import install_profile_assets
-from clawops.strongclaw_runtime import resolve_home_dir, resolve_repo_root
+from clawops.strongclaw_runtime import resolve_home_dir
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -111,7 +112,7 @@ def _set_memory_profile(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for StrongClaw config management."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -144,7 +145,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the StrongClaw config manager."""
     args = parse_args(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops config")
     home_dir = resolve_home_dir(args.home_dir)
     if args.command != "memory":
         raise SystemExit(f"unsupported config command: {args.command}")

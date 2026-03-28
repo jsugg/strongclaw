@@ -20,11 +20,11 @@ def test_devflow_plan_is_deterministic(
     repo_root.mkdir()
     write_strongclaw_shaped_repo(repo_root)
 
-    exit_code = main(["plan", "--repo-root", str(repo_root), "--goal", "ship"])
+    exit_code = main(["plan", "--project-root", str(repo_root), "--goal", "ship"])
     captured_first = json.loads(capsys.readouterr().out)
     assert exit_code == 0
 
-    exit_code = main(["plan", "--repo-root", str(repo_root), "--goal", "ship"])
+    exit_code = main(["plan", "--project-root", str(repo_root), "--goal", "ship"])
     captured_second = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
@@ -37,7 +37,7 @@ def test_devflow_status_errors_on_unknown_run_id(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    exit_code = main(["status", "--repo-root", str(repo_root), "--run-id", "missing"])
+    exit_code = main(["status", "--project-root", str(repo_root), "--run-id", "missing"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 2
@@ -67,7 +67,7 @@ def test_devflow_cancel_marks_non_terminal_runs(
         requested_by="tester",
     )
 
-    exit_code = main(["cancel", "--repo-root", str(repo_root), "--run-id", "df_cancel"])
+    exit_code = main(["cancel", "--project-root", str(repo_root), "--run-id", "df_cancel"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0

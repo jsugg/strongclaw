@@ -6,6 +6,7 @@ import argparse
 import json
 import pathlib
 
+from clawops.cli_roots import add_source_root_argument, resolve_source_root_argument
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
@@ -15,7 +16,6 @@ from clawops.strongclaw_runtime import (
     rendered_openclaw_uses_hypermemory,
     require_openclaw,
     resolve_openclaw_config_path,
-    resolve_repo_root,
     run_command,
     run_openclaw_command,
 )
@@ -191,7 +191,7 @@ def verify_baseline(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the baseline CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_source_root_argument(parser)
     parser.add_argument("--runs-dir", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("verify")
@@ -202,7 +202,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for baseline verification."""
     args = parse_args(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_source_root_argument(args, command_name="clawops baseline")
     runs_dir = repo_root / ".tmp" / "harness" if args.runs_dir is None else args.runs_dir
     if args.command == "harness-smoke":
         run_harness_smoke(repo_root, runs_dir)

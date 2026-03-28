@@ -82,7 +82,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
     monkeypatch.setattr(setup_cli, "ensure_model_auth", _ensure_model_auth)
     monkeypatch.setattr(setup_cli, "render_service_files", _render_service_files)
 
-    exit_code = root_cli.main(["setup", "--repo-root", str(tmp_path), "--no-activate-services"])
+    exit_code = root_cli.main(["setup", "--asset-root", str(tmp_path), "--no-activate-services"])
 
     assert exit_code == 0
     assert calls == [
@@ -162,7 +162,7 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
     monkeypatch.setattr(setup_cli, "verify_channels", _verify_channels)
 
     exit_code = root_cli.main(
-        ["doctor", "--repo-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]
+        ["doctor", "--asset-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]
     )
     output = capsys.readouterr().out
 

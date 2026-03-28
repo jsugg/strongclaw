@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import requests
 
+from clawops.cli_roots import add_repo_root_argument
 from clawops.common import ResultSummary
 from clawops.process_runner import CommandResult, run_command
 from clawops.root_detection import resolve_strongclaw_repo_root
@@ -527,7 +528,7 @@ def propose_refresh(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the supply-chain CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_repo_root_argument(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("inventory", help="List workflow action pins and compose image digests.")

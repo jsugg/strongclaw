@@ -57,7 +57,7 @@ def macos_setup(context: FreshHostContext) -> list[str]:
     command = venv_clawops_command(
         context,
         "setup",
-        "--repo-root",
+        "--asset-root",
         ".",
         "--home-dir",
         context.app_home,
@@ -114,12 +114,12 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
     )
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
-        context, "ops", "--repo-root", ".", component, "up", "--repo-local-state"
+        context, "ops", "--asset-root", ".", component, "up", "--repo-local-state"
     )
     down_command = venv_clawops_command(
         context,
         "ops",
-        "--repo-root",
+        "--asset-root",
         ".",
         component,
         "down",
@@ -169,8 +169,8 @@ def deactivate_macos_host_services(context: FreshHostContext) -> list[str]:
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.gateway.plist")],
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.sidecars.plist")],
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
-        venv_clawops_command(context, "ops", "--repo-root", ".", "sidecars", "down"),
-        venv_clawops_command(context, "ops", "--repo-root", ".", "browser-lab", "down"),
+        venv_clawops_command(context, "ops", "--asset-root", ".", "sidecars", "down"),
+        venv_clawops_command(context, "ops", "--asset-root", ".", "browser-lab", "down"),
     ]
     for command in commands:
         warning = best_effort(command, cwd=repo_root, env=env)
@@ -193,13 +193,13 @@ def cleanup_macos(context: FreshHostContext) -> list[str]:
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.gateway.plist")],
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.sidecars.plist")],
         ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
-        venv_clawops_command(context, "ops", "--repo-root", ".", "sidecars", "down"),
-        venv_clawops_command(context, "ops", "--repo-root", ".", "browser-lab", "down"),
+        venv_clawops_command(context, "ops", "--asset-root", ".", "sidecars", "down"),
+        venv_clawops_command(context, "ops", "--asset-root", ".", "browser-lab", "down"),
         venv_clawops_command(
-            context, "ops", "--repo-root", ".", "sidecars", "down", "--repo-local-state"
+            context, "ops", "--asset-root", ".", "sidecars", "down", "--repo-local-state"
         ),
         venv_clawops_command(
-            context, "ops", "--repo-root", ".", "browser-lab", "down", "--repo-local-state"
+            context, "ops", "--asset-root", ".", "browser-lab", "down", "--repo-local-state"
         ),
     ]
     for command in commands:

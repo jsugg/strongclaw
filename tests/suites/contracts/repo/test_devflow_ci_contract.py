@@ -18,7 +18,7 @@ def test_devflow_ci_workflow_exists_and_uses_uv_without_shell_blobs() -> None:
     assert "uv sync --locked" in workflow
     assert "uv run python -m compileall -q src tests" in workflow
     assert "uv run --locked pytest -q -m devflow" in workflow
-    assert 'uv run clawops devflow plan --repo-root . --goal "contract smoke"' in workflow
+    assert 'uv run clawops devflow plan --project-root . --goal "contract smoke"' in workflow
     assert "@v4" not in workflow
     assert "@v6" not in workflow
     assert "python - <<'PY'" not in workflow

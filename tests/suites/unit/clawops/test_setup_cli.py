@@ -104,7 +104,7 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
         _render_service_files,
     )
 
-    exit_code = setup_cli.setup_main(["--repo-root", str(tmp_path), "--no-activate-services"])
+    exit_code = setup_cli.setup_main(["--asset-root", str(tmp_path), "--no-activate-services"])
 
     assert exit_code == 0
     assert calls == [
@@ -191,7 +191,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
     monkeypatch.setattr(setup_cli, "activate_services", _activate_services)
     monkeypatch.setattr(setup_cli, "verify_baseline", _verify_baseline)
 
-    exit_code = setup_cli.setup_main(["--repo-root", str(tmp_path), "--non-interactive"])
+    exit_code = setup_cli.setup_main(["--asset-root", str(tmp_path), "--non-interactive"])
 
     assert exit_code == 0
     assert calls == [
@@ -295,7 +295,7 @@ def test_doctor_cli_reports_failures_without_raising(
         _verify_channels,
     )
 
-    exit_code = setup_cli.doctor_main(["--repo-root", str(tmp_path), "--skip-runtime"])
+    exit_code = setup_cli.doctor_main(["--asset-root", str(tmp_path), "--skip-runtime"])
     payload = capsys.readouterr().out
 
     assert exit_code == 1
@@ -368,7 +368,7 @@ def test_doctor_cli_skips_openclaw_runtime_audits_for_bounded_local_scan(
     monkeypatch.setattr(setup_cli, "verify_channels", _verify_channels)
 
     exit_code = setup_cli.doctor_main(
-        ["--repo-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]
+        ["--asset-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]
     )
     payload = capsys.readouterr().out
 

@@ -29,7 +29,7 @@ def test_devflow_resume_skips_completed_stages_and_finishes_next_incomplete_stag
     install_fake_devflow_backends(bin_dir)
     prepend_path(bin_dir)
 
-    exit_code = main(["run", "--repo-root", str(repo_root), "--goal", "resume smoke"])
+    exit_code = main(["run", "--project-root", str(repo_root), "--goal", "resume smoke"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 1
@@ -38,7 +38,7 @@ def test_devflow_resume_skips_completed_stages_and_finishes_next_incomplete_stag
     exit_code = main(
         [
             "resume",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--run-id",
             payload["run_id"],

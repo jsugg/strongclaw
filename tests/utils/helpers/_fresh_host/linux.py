@@ -29,7 +29,7 @@ def run_clawops_bootstrap(
     full_command = [
         *command,
         "bootstrap",
-        "--repo-root",
+        "--asset-root",
         ".",
         "--home-dir",
         context.app_home,
@@ -56,7 +56,7 @@ def linux_setup(context: FreshHostContext) -> list[str]:
     command = venv_clawops_command(
         context,
         "setup",
-        "--repo-root",
+        "--asset-root",
         ".",
         "--home-dir",
         context.app_home,
@@ -88,12 +88,12 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     compose_file = compose_file_for_component(context, "sidecars")
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
-        context, "ops", "--repo-root", ".", "sidecars", "up", "--repo-local-state"
+        context, "ops", "--asset-root", ".", "sidecars", "up", "--repo-local-state"
     )
     down_command = venv_clawops_command(
         context,
         "ops",
-        "--repo-root",
+        "--asset-root",
         ".",
         "sidecars",
         "down",
@@ -120,7 +120,7 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
     up_command = venv_clawops_command(
         context,
         "ops",
-        "--repo-root",
+        "--asset-root",
         ".",
         "browser-lab",
         "up",
@@ -129,7 +129,7 @@ def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
     down_command = venv_clawops_command(
         context,
         "ops",
-        "--repo-root",
+        "--asset-root",
         ".",
         "browser-lab",
         "down",
