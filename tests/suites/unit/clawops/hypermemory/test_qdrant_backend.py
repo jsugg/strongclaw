@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 import requests
 
+from clawops.hypermemory.contracts import VectorPoint
 from clawops.hypermemory.models import QdrantConfig
 from clawops.hypermemory.qdrant_backend import QdrantBackend
 
@@ -32,7 +33,9 @@ class _FakeSession:
         self.put_calls: list[dict[str, object]] = []
         self.post_calls: list[dict[str, object]] = []
         self.get_calls: list[dict[str, object]] = []
+        self.upserted_point_ids: list[str] = []
         self.conflict_on_collection = False
+        self.max_upsert_batch_size: int | None = None
         self.put_outcomes: list[_FakeResponse | Exception] = []
         self.post_outcomes: list[_FakeResponse | Exception] = []
         self.get_outcomes: list[_FakeResponse | Exception] = []
@@ -75,6 +78,13 @@ class _FakeSession:
         )
         if self.conflict_on_collection and url.endswith("/collections/hypermemory-test"):
             return _FakeResponse(status_code=409)
+        if url.endswith("/points") and self.max_upsert_batch_size is not None:
+            raw_points = cast(list[object], json["points"])
+            if len(raw_points) > self.max_upsert_batch_size:
+                raise requests.ReadTimeout("timed out")
+            self.upserted_point_ids.extend(
+                cast(str, cast(dict[str, object], point)["id"]) for point in raw_points
+            )
         return self._resolve_outcome(self.put_outcomes, default=_FakeResponse())
 
     def post(
@@ -305,3 +315,77 @@ def test_qdrant_backend_retries_point_upserts_after_transient_server_errors() ->
     )
 
     assert len(fake_session.put_calls) == 2
+
+
+def test_qdrant_backend_batches_large_point_upserts() -> None:
+    fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
+    )
+    cast(Any, backend)._session = fake_session
+    points: list[VectorPoint] = [
+        {
+            "id": f"point-{index}",
+            "vector": {"dense": [1.0, 0.0, 0.0]},
+            "payload": {
+                "item_id": index,
+                "rel_path": f"docs/runbook-{index}.md",
+                "lane": "corpus",
+                "source_name": "docs",
+                "item_type": "paragraph",
+                "scope": "project:strongclaw",
+                "start_line": 1,
+                "end_line": 1,
+                "modified_at": "2026-03-26T00:00:00+00:00",
+                "confidence": None,
+            },
+        }
+        for index in range(600)
+    ]
+
+    backend.upsert_points(points)
+
+    point_batches = [
+        cast(list[object], cast(dict[str, object], call["json"])["points"])
+        for call in fake_session.put_calls
+        if cast(str, call["url"]).endswith("/points")
+    ]
+
+    assert [len(batch) for batch in point_batches] == [256, 256, 88]
+
+
+def test_qdrant_backend_splits_timed_out_point_upserts() -> None:
+    fake_session = _FakeSession()
+    backend = QdrantBackend(
+        QdrantConfig(enabled=True, url="http://127.0.0.1:6333", collection="hypermemory-test")
+    )
+    cast(Any, backend)._session = fake_session
+    fake_session.max_upsert_batch_size = 2
+    points: list[VectorPoint] = [
+        {
+            "id": f"point-{index}",
+            "vector": {"dense": [1.0, 0.0, 0.0]},
+            "payload": {
+                "item_id": index,
+                "rel_path": f"docs/runbook-{index}.md",
+                "lane": "corpus",
+                "source_name": "docs",
+                "item_type": "paragraph",
+                "scope": "project:strongclaw",
+                "start_line": 1,
+                "end_line": 1,
+                "modified_at": "2026-03-26T00:00:00+00:00",
+                "confidence": None,
+            },
+        }
+        for index in range(5)
+    ]
+
+    backend.upsert_points(points)
+
+    point_put_calls = [
+        call for call in fake_session.put_calls if cast(str, call["url"]).endswith("/points")
+    ]
+
+    assert len(point_put_calls) > 1
+    assert fake_session.upserted_point_ids == [f"point-{index}" for index in range(5)]

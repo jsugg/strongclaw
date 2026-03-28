@@ -25,6 +25,19 @@ def _write_codebase_config(path: pathlib.Path) -> None:
     )
 
 
+def _write_codebase_config_with_yaml(path: pathlib.Path) -> None:
+    write_yaml(
+        path,
+        {
+            "index": {"db_path": ".clawops/context.sqlite"},
+            "graph": {"enabled": False},
+            "embedding": {"enabled": False, "provider": "disabled"},
+            "qdrant": {"enabled": False},
+            "paths": {"include": ["**/*.py", "**/*.yaml"]},
+        },
+    )
+
+
 def test_load_codebase_benchmark_cases_requires_expected_targets(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -137,3 +150,48 @@ def test_codebase_context_cli_benchmark_json(
     assert payload["provider"] == "codebase"
     assert payload["passed"] == 1
     assert payload["cases"][0]["matchedPaths"] == ["auth.py"]
+
+
+def test_codebase_context_cli_benchmark_excludes_fixture_file_from_index(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "auth.py").write_text(
+        "def token_guard():\n    return 'credential rotation'\n",
+        encoding="utf-8",
+    )
+    fixtures_dir = repo / "benchmarks"
+    fixtures_dir.mkdir()
+    fixtures_path = fixtures_dir / "benchmark.yaml"
+    fixtures_path.write_text(
+        "cases:\n"
+        "  - name: auth path\n"
+        "    query: credential rotation\n"
+        "    expectedPaths:\n"
+        "      - auth.py\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "context.yaml"
+    _write_codebase_config_with_yaml(config_path)
+
+    exit_code = main(
+        [
+            "benchmark",
+            "--config",
+            str(config_path),
+            "--repo",
+            str(repo),
+            "--scale",
+            "small",
+            "--fixtures",
+            str(fixtures_path),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["passed"] == 1
+    assert payload["cases"][0]["matchedPaths"] == ["auth.py"]
+    assert "benchmarks/benchmark.yaml" not in payload["cases"][0]["retrievedPaths"]

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import pathlib
+import uuid
 from collections.abc import Sequence
+
+import requests
 
 from clawops.common import write_yaml
 from clawops.context.codebase.service import CodebaseContextService, service_from_config
@@ -17,7 +20,10 @@ class _FakeEmbeddingProvider:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
 
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
         self.calls.append(tuple(texts))
         vectors: list[list[float]] = []
         for text in texts:
@@ -94,6 +100,57 @@ class _FakeRerankProvider:
             provider="compatible-http",
             applied=True,
         )
+
+
+class _TimeoutSplittingEmbeddingProvider(_FakeEmbeddingProvider):
+    """Embedding provider that forces timeout-driven batch splitting."""
+
+    def __init__(self, *, max_batch_size: int) -> None:
+        super().__init__()
+        self._max_batch_size = max_batch_size
+
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
+        if len(texts) > self._max_batch_size:
+            raise requests.ReadTimeout("timed out")
+        return super().embed_texts(texts)
+
+
+class _SingletonTimeoutEscalatingEmbeddingProvider(_FakeEmbeddingProvider):
+    """Embedding provider that requires a larger timeout for singleton retries."""
+
+    def __init__(self, *, minimum_timeout_ms: int) -> None:
+        super().__init__()
+        self.minimum_timeout_ms = minimum_timeout_ms
+        self.timeouts: list[int] = []
+
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        effective_timeout_ms = 0 if timeout_ms is None else timeout_ms
+        self.timeouts.append(effective_timeout_ms)
+        if len(texts) == 1 and effective_timeout_ms < self.minimum_timeout_ms:
+            raise requests.ReadTimeout("timed out")
+        return super().embed_texts(texts, timeout_ms=timeout_ms)
+
+
+class _MarkerTimeoutEmbeddingProvider(_FakeEmbeddingProvider):
+    """Embedding provider that keeps timing out for one marked chunk until unblocked."""
+
+    def __init__(self, *, blocked_marker: str) -> None:
+        super().__init__()
+        self.blocked_marker = blocked_marker
+        self.blocked = True
+
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
+        if self.blocked and any(self.blocked_marker in text for text in texts):
+            raise requests.ReadTimeout("timed out")
+        return super().embed_texts(texts)
 
 
 def _write_hybrid_config(path: pathlib.Path) -> None:
@@ -189,12 +246,137 @@ def test_medium_scale_worker_syncs_chunk_vectors_when_hybrid_enabled(
 
     assert fake_backend.ensured == [(3, True)]
     assert len(fake_backend.upserted) == 1
+    uuid.UUID(str(fake_backend.upserted[0][0]["id"]))
     assert fake_embedder.calls
     with service.connect() as conn:
         vector_rows = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
         sparse_terms = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
     assert vector_rows >= 2
     assert sparse_terms > 0
+
+
+def test_medium_scale_worker_splits_embedding_batches_after_read_timeout(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo, service = _build_service(tmp_path)
+    (repo / "auth.py").write_text(
+        "\n".join(
+            [
+                "def token_guard():",
+                "    return 'auth token rotation'",
+                "",
+                "def rotate_secret():",
+                "    return 'credential rotation'",
+                "",
+                "def audit_log():",
+                "    return 'auth audit'",
+                "",
+                "def review_plan():",
+                "    return 'context pack provider'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    fake_embedder = _TimeoutSplittingEmbeddingProvider(max_batch_size=2)
+    fake_backend = _FakeVectorBackend()
+    service.override_runtime_deps(
+        embedding_provider=fake_embedder,
+        vector_backend=fake_backend,
+    )
+
+    service.index()
+    service.consolidate_runtime_artifacts()
+
+    assert fake_backend.ensured == [(3, True)]
+    assert len(fake_backend.upserted) == 1
+    assert any(len(batch) == 4 for batch in fake_embedder.calls) is False
+    assert any(len(batch) == 2 for batch in fake_embedder.calls)
+    with service.connect() as conn:
+        vector_rows = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
+    assert vector_rows >= 4
+    assert service.backend_modes() == ("lexical", "hybrid")
+
+
+def test_medium_scale_worker_retries_singleton_embeddings_with_longer_timeout(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo, service = _build_service(tmp_path)
+    (repo / "auth.py").write_text(
+        "def token_guard():\n    return 'auth token rotation'\n",
+        encoding="utf-8",
+    )
+    fake_embedder = _SingletonTimeoutEscalatingEmbeddingProvider(minimum_timeout_ms=2_000)
+    fake_backend = _FakeVectorBackend()
+    service.override_runtime_deps(
+        embedding_provider=fake_embedder,
+        vector_backend=fake_backend,
+    )
+
+    service.index()
+    service.consolidate_runtime_artifacts()
+
+    assert len(fake_backend.upserted) == 1
+    assert fake_embedder.timeouts == [500, 1_000, 2_000]
+
+
+def test_medium_scale_worker_persists_completed_batches_before_late_timeout(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo, service = _build_service(tmp_path)
+    (repo / "auth.py").write_text(
+        "\n".join(
+            [
+                "def token_guard():",
+                "    return 'auth token rotation'",
+                "",
+                "def rotate_secret():",
+                "    return 'credential rotation'",
+                "",
+                "def audit_log():",
+                "    return 'auth audit'",
+                "",
+                "def review_plan():",
+                "    return 'context pack provider'",
+                "",
+                "def release_checklist():",
+                "    return 'workflow runner contract'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    fake_embedder = _MarkerTimeoutEmbeddingProvider(blocked_marker="workflow runner contract")
+    fake_backend = _FakeVectorBackend()
+    service.override_runtime_deps(
+        embedding_provider=fake_embedder,
+        vector_backend=fake_backend,
+    )
+
+    service.index()
+    service.consolidate_runtime_artifacts()
+
+    with service.connect() as conn:
+        total_chunks = int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+        vector_rows = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
+        sparse_terms = int(conn.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0])
+
+    assert 0 < vector_rows < total_chunks
+    assert sparse_terms > 0
+    assert service.backend_modes() == ("lexical",)
+    assert len(fake_backend.upserted) == 1
+
+    fake_embedder.blocked = False
+    service.consolidate_runtime_artifacts()
+
+    with service.connect() as conn:
+        vector_rows = int(conn.execute("SELECT COUNT(*) FROM chunk_vectors").fetchone()[0])
+
+    assert vector_rows == total_chunks
+    assert len(fake_backend.upserted) == 2
+    assert service.backend_modes() == ("lexical", "hybrid")
 
 
 def test_medium_scale_query_uses_hybrid_fusion_and_rerank(tmp_path: pathlib.Path) -> None:

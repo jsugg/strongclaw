@@ -22,6 +22,7 @@ _CandidateT = TypeVar("_CandidateT", DenseSearchCandidate, SparseSearchCandidate
 _COLLECTION_RETRY_ATTEMPTS = 4
 _COLLECTION_READY_ATTEMPTS = 8
 _POINTS_WRITE_RETRY_ATTEMPTS = 4
+_POINTS_WRITE_BATCH_SIZE = 256
 
 
 class VectorBackend(Protocol):
@@ -177,6 +178,11 @@ class QdrantBackend:
         """Upsert dense and sparse points into the configured collection."""
         if not self._config.enabled or not points:
             return
+        for start in range(0, len(points), _POINTS_WRITE_BATCH_SIZE):
+            self._upsert_point_batch(points[start : start + _POINTS_WRITE_BATCH_SIZE])
+
+    def _upsert_point_batch(self, points: Sequence[VectorPoint]) -> None:
+        """Upsert one bounded point batch, splitting only when Qdrant times out."""
         url = f"{self._config.url.rstrip('/')}/collections/{self._config.collection}/points"
         last_error: requests.RequestException | None = None
         for attempt in range(_POINTS_WRITE_RETRY_ATTEMPTS):
@@ -189,6 +195,17 @@ class QdrantBackend:
                     timeout=self._config.timeout_ms / 1000.0,
                 )
                 response.raise_for_status()
+                return
+            except requests.ReadTimeout as err:
+                if len(points) == 1:
+                    last_error = err
+                    if attempt == _POINTS_WRITE_RETRY_ATTEMPTS - 1:
+                        raise
+                    time.sleep(0.25 * float(attempt + 1))
+                    continue
+                midpoint = len(points) // 2
+                self._upsert_point_batch(points[:midpoint])
+                self._upsert_point_batch(points[midpoint:])
                 return
             except requests.RequestException as err:
                 last_error = err

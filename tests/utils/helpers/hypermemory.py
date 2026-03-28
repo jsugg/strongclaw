@@ -110,7 +110,10 @@ class FakeEmbeddingProvider:
         self.vector = vector
         self.calls: list[list[str]] = []
 
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
         self.calls.append(list(texts))
         return [list(self.vector) for _ in texts]
 

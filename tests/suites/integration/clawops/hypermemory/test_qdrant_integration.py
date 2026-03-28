@@ -19,7 +19,10 @@ pytestmark = [pytest.mark.qdrant(mode="real"), pytest.mark.network_local]
 
 
 class _DeterministicEmbeddingProvider:
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
         return [self._embed(text) for text in texts]
 
     def _embed(self, text: str) -> list[float]:

@@ -14,6 +14,7 @@ import re
 import sqlite3
 import subprocess
 import time
+import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal, LiteralString, Protocol, cast
 from urllib.parse import urlparse
@@ -147,6 +148,18 @@ def _matches_path_pattern(path_text: str, pattern: str) -> bool:
     """Return True when a repo-relative path matches a configured glob."""
     return fnmatch.fnmatch(path_text, pattern) or (
         pattern.startswith("**/") and fnmatch.fnmatch(path_text, pattern.removeprefix("**/"))
+    )
+
+
+def _matches_path_subtree_pattern(path_text: str, pattern: str) -> bool:
+    """Return True when *path_text* lives inside a subtree matched by *pattern*."""
+    if _matches_path_pattern(path_text, pattern):
+        return True
+    if not pattern.endswith("/**"):
+        return False
+    subtree_root = pattern.removesuffix("/**").rstrip("/")
+    return bool(subtree_root) and (
+        path_text == subtree_root or path_text.startswith(f"{subtree_root}/")
     )
 
 
@@ -940,6 +953,11 @@ def _chunk_item_id(chunk_id: str) -> int:
     return int(chunk_id[:15], 16)
 
 
+def _chunk_point_id(chunk_id: str) -> str:
+    """Return a Qdrant-safe deterministic point identifier for one chunk."""
+    return str(uuid.UUID(hex=chunk_id[:32]))
+
+
 def _contextualized_chunk_text(
     *,
     path: str,
@@ -1664,35 +1682,63 @@ class CodebaseContextService:
         rows = conn.execute("SELECT key, value FROM index_state").fetchall()
         return {str(row["key"]): str(row["value"]) for row in rows}
 
+    def _path_is_hidden(self, rel_path: pathlib.PurePath, *, include_hidden: bool = False) -> bool:
+        """Return whether *rel_path* should be treated as hidden."""
+        if include_hidden or self.config.include_hidden:
+            return False
+        return any(part.startswith(".") for part in rel_path.parts)
+
+    def _should_prune_directory(
+        self, rel_path: pathlib.PurePath, *, include_hidden: bool = False
+    ) -> bool:
+        """Return whether a subtree should be skipped before descending into it."""
+        if self._path_is_hidden(rel_path, include_hidden=include_hidden):
+            return True
+        rel_text = rel_path.as_posix()
+        return any(
+            _matches_path_subtree_pattern(rel_text, pattern)
+            for pattern in self.config.exclude_globs
+        )
+
     def iter_files(self, include_hidden: bool = False) -> Iterable[pathlib.Path]:
         """Yield indexable files from the repository."""
-        for path in self.repo.rglob("*"):
-            if not path.is_file():
-                continue
-            if not self._allows_symlink(path):
-                continue
-            rel_path = path.relative_to(self.repo)
-            rel_text = rel_path.as_posix()
-            if not (include_hidden or self.config.include_hidden) and any(
-                part.startswith(".") for part in rel_path.parts
-            ):
-                continue
-            if path.suffix.lower() not in DEFAULT_TEXT_EXTENSIONS:
-                continue
-            if self.config.include_globs and not any(
-                _matches_path_pattern(rel_text, pattern) for pattern in self.config.include_globs
-            ):
-                continue
-            if self.config.exclude_globs and any(
-                _matches_path_pattern(rel_text, pattern) for pattern in self.config.exclude_globs
-            ):
-                continue
-            try:
-                if path.stat().st_size > self.config.max_file_size_bytes:
+        for root_text, dir_names, file_names in os.walk(self.repo, topdown=True, followlinks=False):
+            root_path = pathlib.Path(root_text)
+            rel_root = root_path.relative_to(self.repo)
+            dir_names[:] = [
+                dir_name
+                for dir_name in sorted(dir_names)
+                if not self._should_prune_directory(
+                    pathlib.PurePosixPath(*rel_root.parts, dir_name),
+                    include_hidden=include_hidden,
+                )
+            ]
+            for file_name in sorted(file_names):
+                path = root_path / file_name
+                rel_path = path.relative_to(self.repo)
+                if self._path_is_hidden(rel_path, include_hidden=include_hidden):
                     continue
-            except OSError:
-                continue
-            yield path
+                if not self._allows_symlink(path):
+                    continue
+                rel_text = rel_path.as_posix()
+                if path.suffix.lower() not in DEFAULT_TEXT_EXTENSIONS:
+                    continue
+                if self.config.include_globs and not any(
+                    _matches_path_pattern(rel_text, pattern)
+                    for pattern in self.config.include_globs
+                ):
+                    continue
+                if self.config.exclude_globs and any(
+                    _matches_path_pattern(rel_text, pattern)
+                    for pattern in self.config.exclude_globs
+                ):
+                    continue
+                try:
+                    if path.stat().st_size > self.config.max_file_size_bytes:
+                        continue
+                except OSError:
+                    continue
+                yield path
 
     def _store_changed_file(
         self,
@@ -1952,6 +1998,52 @@ class CodebaseContextService:
             fingerprint=fingerprint,
         )
 
+    def _embed_hybrid_batch(
+        self,
+        texts: Sequence[str],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[list[float]]:
+        """Embed one hybrid batch, splitting or extending timeouts when the endpoint stalls."""
+        if not texts:
+            return []
+        request_timeout_ms = self.config.embedding.timeout_ms if timeout_ms is None else timeout_ms
+        try:
+            return self._embedding_provider.embed_texts(list(texts), timeout_ms=request_timeout_ms)
+        except requests.ReadTimeout:
+            if len(texts) <= 1:
+                max_timeout_ms = max(self.config.embedding.timeout_ms, 60_000)
+                if request_timeout_ms >= max_timeout_ms:
+                    raise
+                next_timeout_ms = min(max_timeout_ms, request_timeout_ms * 2)
+                emit_structured_log(
+                    "clawops.context.codebase.hybrid.embed.singleton_retry",
+                    {
+                        "repo": self.repo.as_posix(),
+                        "scale": self.scale,
+                        "batch_size": 1,
+                        "timeout_ms": request_timeout_ms,
+                        "retry_timeout_ms": next_timeout_ms,
+                    },
+                )
+                return self._embed_hybrid_batch(texts, timeout_ms=next_timeout_ms)
+            midpoint = len(texts) // 2
+            emit_structured_log(
+                "clawops.context.codebase.hybrid.embed.retry",
+                {
+                    "repo": self.repo.as_posix(),
+                    "scale": self.scale,
+                    "batch_size": len(texts),
+                    "timeout_ms": request_timeout_ms,
+                    "retry_left_batch_size": midpoint,
+                    "retry_right_batch_size": len(texts) - midpoint,
+                },
+            )
+            return [
+                *self._embed_hybrid_batch(texts[:midpoint], timeout_ms=request_timeout_ms),
+                *self._embed_hybrid_batch(texts[midpoint:], timeout_ms=request_timeout_ms),
+            ]
+
     def _sync_hybrid_index(self) -> None:
         """Synchronize chunk embeddings and sparse vectors into the Qdrant lane."""
         with self.connect() as conn:
@@ -2010,74 +2102,102 @@ class CodebaseContextService:
                 for row in rows
             ]
             sparse_encoder = build_sparse_encoder(texts)
-            dense_vectors: list[list[float]] = []
-            for batch in _iter_batches(texts, max(self.config.embedding.batch_size, 1)):
-                dense_vectors.extend(self._embedding_provider.embed_texts(list(batch)))
-            if len(dense_vectors) != len(rows):
-                raise ValueError("embedded chunk count does not match the indexed chunk count")
-            vector_size = len(dense_vectors[0])
-            self._vector_backend.ensure_collection(vector_size=vector_size, include_sparse=True)
-            points: list[VectorPoint] = []
-            indexed_at_ms = utc_now_ms()
-            for row, dense_vector, text in zip(rows, dense_vectors, texts, strict=True):
-                chunk_id = str(row["chunk_id"])
-                sparse_vector = sparse_encoder.encode_document(text)
-                vector_payload: dict[str, list[float] | SparseVectorPayload] = {
-                    self.config.qdrant.dense_vector_name: dense_vector
+            with self.connect() as metadata_conn:
+                existing_vector_hashes = {
+                    str(row["chunk_id"]): str(row["content_hash"])
+                    for row in metadata_conn.execute(
+                        "SELECT chunk_id, content_hash FROM chunk_vectors"
+                    ).fetchall()
                 }
-                if not sparse_vector.is_empty:
-                    vector_payload[self.config.qdrant.sparse_vector_name] = (
-                        sparse_vector.to_qdrant()
-                    )
-                points.append(
-                    VectorPoint(
-                        id=chunk_id,
-                        vector=vector_payload,
-                        payload={
-                            "item_id": _chunk_item_id(chunk_id),
-                            "rel_path": str(row["path"]),
-                            "lane": "corpus",
-                            "source_name": "codebase",
-                            "item_type": str(row["kind"]),
-                            "scope": "global",
-                            "start_line": int(row["start_line"]),
-                            "end_line": int(row["end_line"]),
-                            "modified_at": str(row["updated_at_ms"]),
-                            "confidence": None,
-                        },
-                    )
-                )
-            self._vector_backend.upsert_points(points)
-            stale_ids = sorted(set(stale_point_ids))
-            if stale_ids:
-                self._vector_backend.delete_points(stale_ids)
-            with self.connect() as conn:
-                self._persist_sparse_encoder(conn, sparse_encoder)
-                conn.executemany(
-                    """
-                    INSERT INTO chunk_vectors(chunk_id, path, item_id, point_id, content_hash, indexed_at_ms)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(chunk_id) DO UPDATE SET
-                        path = excluded.path,
-                        item_id = excluded.item_id,
-                        point_id = excluded.point_id,
-                        content_hash = excluded.content_hash,
-                        indexed_at_ms = excluded.indexed_at_ms
-                    """,
-                    [
-                        (
-                            str(row["chunk_id"]),
-                            str(row["path"]),
-                            _chunk_item_id(str(row["chunk_id"])),
-                            str(row["chunk_id"]),
-                            str(row["content_hash"]),
-                            indexed_at_ms,
+                self._persist_sparse_encoder(metadata_conn, sparse_encoder)
+                metadata_conn.commit()
+                rows_to_sync = [
+                    (row, text)
+                    for row, text in zip(rows, texts, strict=True)
+                    if existing_vector_hashes.get(str(row["chunk_id"])) != str(row["content_hash"])
+                ]
+                collection_ensured = not rows_to_sync
+                for batch in _iter_batches(rows_to_sync, max(self.config.embedding.batch_size, 1)):
+                    batch_rows = [row for row, _ in batch]
+                    batch_texts = [text for _, text in batch]
+                    dense_vectors = self._embed_hybrid_batch(tuple(batch_texts))
+                    if len(dense_vectors) != len(batch_rows):
+                        raise ValueError(
+                            "embedded chunk count does not match the indexed chunk count"
                         )
-                        for row in rows
-                    ],
-                )
-                self._clear_pending_hybrid_deletions(conn, point_ids=stale_ids)
-                conn.commit()
+                    if not collection_ensured:
+                        self._vector_backend.ensure_collection(
+                            vector_size=len(dense_vectors[0]),
+                            include_sparse=True,
+                        )
+                        collection_ensured = True
+                    points: list[VectorPoint] = []
+                    persisted_rows: list[tuple[str, str, int, str, str, int]] = []
+                    indexed_at_ms = utc_now_ms()
+                    for row, dense_vector, text in zip(
+                        batch_rows,
+                        dense_vectors,
+                        batch_texts,
+                        strict=True,
+                    ):
+                        chunk_id = str(row["chunk_id"])
+                        point_id = _chunk_point_id(chunk_id)
+                        sparse_vector = sparse_encoder.encode_document(text)
+                        vector_payload: dict[str, list[float] | SparseVectorPayload] = {
+                            self.config.qdrant.dense_vector_name: dense_vector
+                        }
+                        if not sparse_vector.is_empty:
+                            vector_payload[self.config.qdrant.sparse_vector_name] = (
+                                sparse_vector.to_qdrant()
+                            )
+                        points.append(
+                            VectorPoint(
+                                id=point_id,
+                                vector=vector_payload,
+                                payload={
+                                    "item_id": _chunk_item_id(chunk_id),
+                                    "rel_path": str(row["path"]),
+                                    "lane": "corpus",
+                                    "source_name": "codebase",
+                                    "item_type": str(row["kind"]),
+                                    "scope": "global",
+                                    "start_line": int(row["start_line"]),
+                                    "end_line": int(row["end_line"]),
+                                    "modified_at": str(row["updated_at_ms"]),
+                                    "confidence": None,
+                                },
+                            )
+                        )
+                        persisted_rows.append(
+                            (
+                                chunk_id,
+                                str(row["path"]),
+                                _chunk_item_id(chunk_id),
+                                point_id,
+                                str(row["content_hash"]),
+                                indexed_at_ms,
+                            )
+                        )
+                    self._vector_backend.upsert_points(points)
+                    metadata_conn.executemany(
+                        """
+                        INSERT INTO chunk_vectors(chunk_id, path, item_id, point_id, content_hash, indexed_at_ms)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(chunk_id) DO UPDATE SET
+                            path = excluded.path,
+                            item_id = excluded.item_id,
+                            point_id = excluded.point_id,
+                            content_hash = excluded.content_hash,
+                            indexed_at_ms = excluded.indexed_at_ms
+                        """,
+                        persisted_rows,
+                    )
+                    metadata_conn.commit()
+                stale_ids = sorted(set(stale_point_ids))
+                if stale_ids:
+                    self._vector_backend.delete_points(stale_ids)
+                self._clear_pending_hybrid_deletions(metadata_conn, point_ids=stale_ids)
+                metadata_conn.commit()
         except (requests.RequestException, RuntimeError, ValueError) as err:
             emit_structured_log(
                 "clawops.context.codebase.hybrid.degraded",
@@ -2087,9 +2207,6 @@ class CodebaseContextService:
                     "reason": str(err),
                 },
             )
-            with self.connect() as conn:
-                self._clear_hybrid_state(conn)
-                conn.commit()
 
     def consolidate_runtime_artifacts(self) -> None:
         """Synchronize deferred runtime artifacts such as hybrid vectors."""
@@ -3147,6 +3264,28 @@ def service_from_config(
     )
 
 
+def _benchmark_service(
+    service: CodebaseContextService, *, fixtures_path: pathlib.Path
+) -> CodebaseContextService:
+    """Return a benchmark-ready service that excludes local fixture files from indexing."""
+    resolved_fixtures = fixtures_path.expanduser().resolve()
+    try:
+        fixture_rel_path = resolved_fixtures.relative_to(service.repo)
+    except ValueError:
+        return service
+    fixture_glob = fixture_rel_path.as_posix()
+    if fixture_glob in service.config.exclude_globs:
+        return service
+    return CodebaseContextService(
+        service.repo,
+        dataclasses.replace(
+            service.config,
+            exclude_globs=(*service.config.exclude_globs, fixture_glob),
+        ),
+        scale=service.scale,
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse codebase context CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -3218,9 +3357,11 @@ def main(argv: list[str] | None = None) -> int:
         print(args.output)
         return 0
     if args.command == "benchmark":
-        service.index()
-        service.consolidate_runtime_artifacts()
-        payload = service.benchmark_cases(load_benchmark_cases(args.fixtures))
+        fixtures_path = expand(args.fixtures)
+        benchmark_service = _benchmark_service(service, fixtures_path=fixtures_path)
+        benchmark_service.index()
+        benchmark_service.consolidate_runtime_artifacts()
+        payload = benchmark_service.benchmark_cases(load_benchmark_cases(fixtures_path))
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if args.command == "worker":

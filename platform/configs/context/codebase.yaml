@@ -19,8 +19,8 @@ embedding:
   model: os.environ/HYPERMEMORY_EMBEDDING_MODEL
   base_url: os.environ/HYPERMEMORY_EMBEDDING_BASE_URL
   api_key_env: LITELLM_MASTER_KEY
-  batch_size: 32
-  timeout_ms: 15000
+  batch_size: 8
+  timeout_ms: 30000
 
 rerank:
   enabled: true
@@ -76,5 +76,7 @@ paths:
     - ".venv/**"
     - "dist/**"
     - "build/**"
+    - "vendor/**"
     - ".openclaw/**"
     - "platform/plugins/memory-lancedb-pro/**"
+    - "platform/configs/context/benchmarks/**"
