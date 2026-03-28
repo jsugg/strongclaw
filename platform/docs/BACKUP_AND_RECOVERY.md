@@ -17,15 +17,12 @@
 
 ## Development-mode repo-local compose state
 
-If you keep compose state under `platform/compose/state` during development, use
-the explicit dev wrappers instead of relying on implicit leftover mounts:
+If you keep compose state under `platform/compose/state` during development, use the explicit dev wrappers instead of relying on implicit leftover mounts:
 
 - `clawops ops sidecars up --repo-local-state`
 - `clawops ops sidecars down --repo-local-state`
 
-`clawops ops sidecars up` owns the LiteLLM schema bootstrap phase. Bring the
-stack up through the CLI entrypoint instead of raw `docker compose up` when you
-need the supported startup ordering on a cold Postgres state directory.
+`clawops ops sidecars up` owns the LiteLLM schema bootstrap phase. Bring the stack up through the CLI entrypoint instead of raw `docker compose up` when you need the supported startup ordering on a cold Postgres state directory.
 
 Prefer targeted cleanup over deleting the whole tree:
 

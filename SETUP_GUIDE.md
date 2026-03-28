@@ -65,12 +65,9 @@ make dev
 make test
 ```
 
-`make test` runs in the locked managed environment via `uv run`. The baseline
-verifier also uses that managed test path, and bootstrap installs `uv` when
-the host does not already provide it.
+`make test` runs in the locked managed environment via `uv run`. The baseline verifier also uses that managed test path, and bootstrap installs `uv` when the host does not already provide it.
 
-If you want shorter commands in an interactive shell, sync the dev environment
-once and activate `.venv` before running tools directly:
+If you want shorter commands in an interactive shell, sync the dev environment once and activate `.venv` before running tools directly:
 
 ```bash
 uv sync --locked
@@ -81,11 +78,7 @@ deactivate
 
 ## 4. Prepare the Varlock env contract
 
-You can let the guided setup path create and repair the managed Varlock env
-contract for you, or you can prepare it manually. The managed path defaults to
-`~/.config/strongclaw/varlock` on Linux and
-`~/Library/Application Support/StrongClaw/config/varlock` on macOS. The manual
-path is:
+You can let the guided setup path create and repair the managed Varlock env contract for you, or you can prepare it manually. The managed path defaults to `~/.config/strongclaw/varlock` on Linux and `~/Library/Application Support/StrongClaw/config/varlock` on macOS. The manual path is:
 
 ```bash
 clawops varlock-env configure --non-interactive
@@ -98,14 +91,9 @@ If `varlock` is already installed on the host, you can validate the contract now
 varlock load --path ~/.config/strongclaw/varlock
 ```
 
-The managed env contract also carries the local Neo4j sidecar credentials
-used by the codebase context provider. `clawops varlock-env configure` repairs
-them automatically; for manual edits keep `NEO4J_USERNAME=neo4j` unless you
-also rotate the compose-side username, and set `NEO4J_PASSWORD` to a real
-secret.
+The managed env contract also carries the local Neo4j sidecar credentials used by the codebase context provider. `clawops varlock-env configure` repairs them automatically; for manual edits keep `NEO4J_USERNAME=neo4j` unless you also rotate the compose-side username, and set `NEO4J_PASSWORD` to a real secret.
 
-Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
-StrongClaw supports both guided and env-driven setup:
+Before bring-up, choose how OpenClaw should authenticate to an LLM provider. StrongClaw supports both guided and env-driven setup:
 
 - guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
 - env-driven: set provider keys in the managed `.env.local`
@@ -126,16 +114,9 @@ Equivalent shell entrypoint:
 clawops setup
 ```
 
-That path bootstraps the host, creates or repairs the repo-local Varlock env
-contract, prompts for missing setup input when interactive, supports local or
-managed Varlock secret backends for provider auth, configures or validates
-OpenClaw model/provider auth, renders or refreshes the host service
-definitions, activates the gateway plus sidecars, and runs the baseline
-verification gate.
+That path bootstraps the host, creates or repairs the repo-local Varlock env contract, prompts for missing setup input when interactive, supports local or managed Varlock secret backends for provider auth, configures or validates OpenClaw model/provider auth, renders or refreshes the host service definitions, activates the gateway plus sidecars, and runs the baseline verification gate.
 
-For a render-only pass, use `clawops setup --no-activate-services`. That path
-still repairs the host/env/config state but now defers model/provider auth until
-you are ready to activate the gateway.
+For a render-only pass, use `clawops setup --no-activate-services`. That path still repairs the host/env/config state but now defers model/provider auth until you are ready to activate the gateway.
 
 The bootstrap flow verifies or installs:
 
@@ -148,22 +129,11 @@ The bootstrap flow verifies or installs:
 - Python dependencies
 - host-compatible vendored `memory-lancedb-pro` dependencies
 
-For container backends, bootstrap first looks for an existing Docker-compatible
-runtime that already exposes `docker` plus `docker compose`. If it finds one,
-Strongclaw uses it and does not install Docker over it. If it finds an
-alternative runtime without the Docker CLI integration enabled yet, bootstrap
-stops and tells you to finish that integration instead of replacing it.
-Only when no Docker-compatible runtime is detected does bootstrap install
-Docker as the fallback runtime.
+For container backends, bootstrap first looks for an existing Docker-compatible runtime that already exposes `docker` plus `docker compose`. If it finds one, Strongclaw uses it and does not install Docker over it. If it finds an alternative runtime without the Docker CLI integration enabled yet, bootstrap stops and tells you to finish that integration instead of replacing it. Only when no Docker-compatible runtime is detected does bootstrap install Docker as the fallback runtime.
 
-If Linux bootstrap just added the runtime user to the `docker` group, setup
-now pauses before service activation. Open a fresh login shell as that user and
-rerun the same `make setup` or `clawops setup` command. Completed bootstrap
-work is detected automatically; `--skip-bootstrap` remains available only as a
-manual override.
+If Linux bootstrap just added the runtime user to the `docker` group, setup now pauses before service activation. Open a fresh login shell as that user and rerun the same `make setup` or `clawops setup` command. Completed bootstrap work is detected automatically; `--skip-bootstrap` remains available only as a manual override.
 
-If you need a placeholder-backed profile during bring-up, rerender through the
-wrapper:
+If you need a placeholder-backed profile during bring-up, rerender through the wrapper:
 
 ```bash
 make setup SETUP_ARGS="--profile acp"
@@ -171,18 +141,13 @@ make setup SETUP_ARGS="--profile hypermemory"
 make setup SETUP_ARGS="--profile memory-lancedb-pro"
 ```
 
-For `hypermemory`, set `HYPERMEMORY_EMBEDDING_MODEL` before you
-run setup. The guided env contract fills loopback defaults for
-`HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
-them.
+For `hypermemory`, set `HYPERMEMORY_EMBEDDING_MODEL` before you run setup. The guided env contract fills loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override them.
 
-Use `clawops doctor-host` again after any host-side package or
-config change that might affect the local OpenClaw runtime contract.
+Use `clawops doctor-host` again after any host-side package or config change that might affect the local OpenClaw runtime contract.
 
 ## 6. Manual config and service flow
 
-If you want to control the render, service activation, or verification steps
-separately, use the lower-level entrypoints directly.
+If you want to control the render, service activation, or verification steps separately, use the lower-level entrypoints directly.
 
 Bootstrap the host:
 
@@ -199,24 +164,17 @@ clawops render-openclaw-config
 
 This writes the merged config to `~/.openclaw/openclaw.json`.
 
-If you bypass `make setup` / `clawops setup`, complete model/provider setup manually before
-starting services:
+If you bypass `make setup` / `clawops setup`, complete model/provider setup manually before starting services:
 
 ```bash
 clawops model-auth ensure
 ```
 
-By default it now renders the `hypermemory` stack. If you want
-the built-in OpenClaw path instead, run
-`clawops config memory --set-profile openclaw-default` or rerender with
-`--profile openclaw-default`.
+By default it now renders the `hypermemory` stack. If you want the built-in OpenClaw path instead, run `clawops config memory --set-profile openclaw-default` or rerender with `--profile openclaw-default`.
 
-For the experimental built-in QMD path, use
-`clawops config memory --set-profile openclaw-qmd` or rerender with
-`--profile openclaw-qmd`.
+For the experimental built-in QMD path, use `clawops config memory --set-profile openclaw-qmd` or rerender with `--profile openclaw-qmd`.
 
-The `openclaw-qmd` profile enables QMD-backed memory retrieval and renders
-the rendered QMD corpus for:
+The `openclaw-qmd` profile enables QMD-backed memory retrieval and renders the rendered QMD corpus for:
 
 - `platform/docs`
 - `platform/skills`
@@ -234,11 +192,7 @@ clawops render-openclaw-config --profile hypermemory
 clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
-The default `hypermemory` profile renders a self-contained
-combined runtime: `lossless-claw` for context continuity plus
-`strongclaw-hypermemory` with
-`~/.config/strongclaw/memory/hypermemory.yaml`, `autoRecall: true`, and
-`autoReflect: false`.
+The default `hypermemory` profile renders a self-contained combined runtime: `lossless-claw` for context continuity plus `strongclaw-hypermemory` with `~/.config/strongclaw/memory/hypermemory.yaml`, `autoRecall: true`, and `autoReflect: false`.
 
 Install and activate services:
 
@@ -273,8 +227,7 @@ clawops verify-platform sidecars
 
 ## 7. Verify the secure baseline
 
-If you used `make setup` or `clawops setup`, this verification already
-ran. Re-run it directly whenever you want to recheck the host baseline:
+If you used `make setup` or `clawops setup`, this verification already ran. Re-run it directly whenever you want to recheck the host baseline:
 
 ```bash
 clawops baseline verify
@@ -338,20 +291,15 @@ clawops context codebase query \
   --query "operation journal idempotency"
 ```
 
-If you need the opt-in local durable memory path instead of the default
-QMD-backed retrieval rollout, rerender with the Ollama-backed smart extraction
-profile:
+If you need the opt-in local durable memory path instead of the default QMD-backed retrieval rollout, rerender with the Ollama-backed smart extraction profile:
 
 ```bash
 clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
-This StrongClaw-managed profile uses Ollama-backed smart extraction, but it
-still keeps `autoRecall` off and leaves session-memory/self-improvement and
-management tools disabled by default.
+This StrongClaw-managed profile uses Ollama-backed smart extraction, but it still keeps `autoRecall` off and leaves session-memory/self-improvement and management tools disabled by default.
 
-If you need a combined placeholder-backed variant, use the root CLI and append
-the extra overlay explicitly so every selected fragment is rendered first:
+If you need a combined placeholder-backed variant, use the root CLI and append the extra overlay explicitly so every selected fragment is rendered first:
 
 ```bash
 clawops render-openclaw-config \
@@ -359,8 +307,7 @@ clawops render-openclaw-config \
   --overlay platform/configs/openclaw/20-acp-workers.json5
 ```
 
-Keep `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5` as the
-Markdown-canonical migration source while you validate parity.
+Keep `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5` as the Markdown-canonical migration source while you validate parity.
 
 For the supported sparse+dense hypermemory path, run:
 
@@ -371,9 +318,7 @@ clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify
 clawops doctor
 ```
 
-That profile keeps QMD out of the rendered contract and verifies that both the
-dense and sparse Qdrant lanes are healthy instead of silently degrading to the
-SQLite fallback path.
+That profile keeps QMD out of the rendered contract and verifies that both the dense and sparse Qdrant lanes are healthy instead of silently degrading to the SQLite fallback path.
 
 ## 11. Add channels carefully
 
@@ -446,8 +391,7 @@ Reach the gateway over SSH tunnel only:
 ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 ```
 
-Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator
-workstation. Verify the local-only posture after startup:
+Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator workstation. Verify the local-only posture after startup:
 
 ```bash
 clawops verify-platform sidecars

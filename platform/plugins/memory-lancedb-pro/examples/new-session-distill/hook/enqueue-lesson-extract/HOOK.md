@@ -1,14 +1,9 @@
----
-name: enqueue-lesson-extract
-description: "Enqueue a lesson-extraction task on /new (async Map-Reduce → LanceDB Pro)"
-metadata:
-  {
+--- name: enqueue-lesson-extract description: "Enqueue a lesson-extraction task on /new (async Map-Reduce → LanceDB Pro)" metadata: {
     "openclaw": {
       "emoji": "🧾",
       "events": ["command:new"]
     }
-  }
----
+} ---
 
 # Enqueue Lesson Extract Hook
 

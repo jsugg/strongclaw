@@ -2,9 +2,7 @@
 
 This quickstart gets you from zero to a verified secure baseline.
 
-For host-native runtime-user provisioning and service-manager activation, use
-[`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md) alongside
-this guide.
+For host-native runtime-user provisioning and service-manager activation, use [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md) alongside this guide.
 
 ## 1. Install the runtime package
 
@@ -12,18 +10,11 @@ this guide.
 make install
 ```
 
-`make install` prefers Python `3.12` for the managed environment on supported
-Darwin/Linux hosts so the default hypermemory rerank stack stays on the most
-compatible interpreter path. Python `3.13` remains supported when you choose it
-explicitly.
+`make install` prefers Python `3.12` for the managed environment on supported Darwin/Linux hosts so the default hypermemory rerank stack stays on the most compatible interpreter path. Python `3.13` remains supported when you choose it explicitly.
 
-If you plan to develop on this repo, install `uv` and use `make dev` plus
-`make test` separately. The companion-tool test entrypoints run through
-`uv run`, and the bootstrap flow installs `uv` when the host does not
-already provide it.
+If you plan to develop on this repo, install `uv` and use `make dev` plus `make test` separately. The companion-tool test entrypoints run through `uv run`, and the bootstrap flow installs `uv` when the host does not already provide it.
 
-If you want shorter commands in an interactive shell, sync the dev environment
-once and activate `.venv` before running tools directly:
+If you want shorter commands in an interactive shell, sync the dev environment once and activate `.venv` before running tools directly:
 
 ```bash
 uv sync --locked
@@ -34,13 +25,7 @@ deactivate
 
 ## 2. Prepare the Varlock env contract
 
-You can prepare the env contract either manually or through the guided setup
-flow. `clawops setup` and `clawops varlock-env configure` create the managed
-Varlock env under the StrongClaw config dir, repair missing keys, generate
-required local secrets, and prompt for missing runtime or provider-auth input
-when needed. On Linux that default path is usually
-`~/.config/strongclaw/varlock`; on macOS it is usually
-`~/Library/Application Support/StrongClaw/config/varlock`.
+You can prepare the env contract either manually or through the guided setup flow. `clawops setup` and `clawops varlock-env configure` create the managed Varlock env under the StrongClaw config dir, repair missing keys, generate required local secrets, and prompt for missing runtime or provider-auth input when needed. On Linux that default path is usually `~/.config/strongclaw/varlock`; on macOS it is usually `~/Library/Application Support/StrongClaw/config/varlock`.
 
 Manual path:
 
@@ -49,8 +34,7 @@ clawops varlock-env configure --non-interactive
 $EDITOR ~/.config/strongclaw/varlock/.env.local
 ```
 
-Before you continue, decide how OpenClaw should authenticate to an LLM provider.
-StrongClaw supports two setup paths:
+Before you continue, decide how OpenClaw should authenticate to an LLM provider. StrongClaw supports two setup paths:
 
 - guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` can launch `openclaw configure --section model`
 - env-driven: set provider keys plus optional model overrides in the managed `.env.local`
@@ -59,25 +43,17 @@ StrongClaw supports two setup paths:
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
   - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
 
-StrongClaw now defaults to `hypermemory`, so set
-`HYPERMEMORY_EMBEDDING_MODEL=<upstream embedding model>` before you run the
-no-arg setup path. The hypermemory setup path uses loopback defaults for
-`HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override
-them.
+StrongClaw now defaults to `hypermemory`, so set `HYPERMEMORY_EMBEDDING_MODEL=<upstream embedding model>` before you run the no-arg setup path. The hypermemory setup path uses loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override them.
 
-For a fully local dev stack, `HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text`
-plus `HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434` is a
-working local baseline when that Ollama model is already pulled.
+For a fully local dev stack, `HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text` plus `HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434` is a working local baseline when that Ollama model is already pulled.
 
-If you want the built-in OpenClaw path instead, use the explicit
-`openclaw-default` profile:
+If you want the built-in OpenClaw path instead, use the explicit `openclaw-default` profile:
 
 ```bash
 clawops config memory --set-profile openclaw-default
 ```
 
-If you want the built-ins plus the experimental QMD backend, use
-`openclaw-qmd`:
+If you want the built-ins plus the experimental QMD backend, use `openclaw-qmd`:
 
 ```bash
 clawops config memory --set-profile openclaw-qmd
@@ -132,13 +108,9 @@ That setup flow:
 - prepares sidecar config and service manifests
 - runs the baseline verification gate
 
-StrongClaw-generated runtime data does not default into the repository checkout.
-Setup now places compose state, harness artifacts, ACP summaries, the managed
-`lossless-claw` checkout, and QMD package files under OS-appropriate app
-data/state directories instead.
+StrongClaw-generated runtime data does not default into the repository checkout. Setup now places compose state, harness artifacts, ACP summaries, the managed `lossless-claw` checkout, and QMD package files under OS-appropriate app data/state directories instead.
 
-If you intentionally want repo-local compose state during development, keep it
-explicit instead of relying on stale container mounts:
+If you intentionally want repo-local compose state during development, keep it explicit instead of relying on stale container mounts:
 
 ```bash
 clawops ops sidecars up --repo-local-state
@@ -147,8 +119,7 @@ clawops ops prune-qdrant-test-collections
 clawops ops reset-compose-state --component qdrant
 ```
 
-You can rerun the host doctor directly after any local change that might affect
-the rendered config or CLI toolchain:
+You can rerun the host doctor directly after any local change that might affect the rendered config or CLI toolchain:
 
 ```bash
 clawops doctor-host
@@ -160,10 +131,7 @@ For the full post-bootstrap readiness sweep, run:
 clawops doctor
 ```
 
-If Linux bootstrap just added the runtime user to the `docker` group, setup
-pauses with clear remediation. Open a fresh login shell as that user and rerun
-the same `make setup` or `clawops setup` command; completed bootstrap work is
-auto-detected and skipped.
+If Linux bootstrap just added the runtime user to the `docker` group, setup pauses with clear remediation. Open a fresh login shell as that user and rerun the same `make setup` or `clawops setup` command; completed bootstrap work is auto-detected and skipped.
 
 ## 4. Rerender the OpenClaw config when you change profiles
 
@@ -171,8 +139,7 @@ auto-detected and skipped.
 clawops render-openclaw-config
 ```
 
-This now renders the default StrongClaw profile, `hypermemory`,
-and writes the result to `~/.openclaw/openclaw.json`.
+This now renders the default StrongClaw profile, `hypermemory`, and writes the result to `~/.openclaw/openclaw.json`.
 
 For the explicit built-in OpenClaw path, render `openclaw-default`, which merges:
 
@@ -183,8 +150,7 @@ For the explicit OpenClaw + QMD path, render `openclaw-qmd`, which adds:
 
 - a rendered form of `platform/configs/openclaw/40-qmd-context.json5`
 
-For placeholder-backed variants, rerender by profile instead of merging raw
-JSON5 overlays:
+For placeholder-backed variants, rerender by profile instead of merging raw JSON5 overlays:
 
 ```bash
 clawops render-openclaw-config --profile openclaw-default
@@ -202,11 +168,7 @@ The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
 - the managed StrongClaw workspace Markdown tree
 - the managed upstream checkout when that directory exists
 
-The default `hypermemory` profile enables the combined
-`lossless-claw` + `strongclaw-hypermemory` runtime, points the plugin at
-the rendered runtime config under `~/.config/strongclaw/memory/hypermemory.yaml`,
-enables `autoRecall`, keeps
-`autoReflect` disabled, and does not inherit the QMD overlay.
+The default `hypermemory` profile enables the combined `lossless-claw` + `strongclaw-hypermemory` runtime, points the plugin at the rendered runtime config under `~/.config/strongclaw/memory/hypermemory.yaml`, enables `autoRecall`, keeps `autoReflect` disabled, and does not inherit the QMD overlay.
 
 ## 5. Verify the baseline again on demand
 
@@ -235,15 +197,13 @@ clawops devflow resume --run-id <run-id> --approved-by operator
 clawops devflow audit --run-id <run-id>
 ```
 
-See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run
-layout, recovery flow, and audit bundle details.
+See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run layout, recovery flow, and audit bundle details.
 - `clawops verify-platform sidecars --skip-runtime`
 - `clawops verify-platform observability --skip-runtime`
 - `clawops verify-platform channels`
 - companion-tool smoke tests
 
-For the deeper StrongClaw readiness scan, including model/provider validation
-and platform verification in one place, run:
+For the deeper StrongClaw readiness scan, including model/provider validation and platform verification in one place, run:
 
 ```bash
 make doctor
@@ -257,13 +217,13 @@ Add these only in order:
 2. Repo codebase context: `clawops context codebase index --scale small --config platform/configs/context/codebase.yaml --repo .`
 3. QMD prewarm: `qmd status`
 4. Built-in OpenClaw memory fallback:
-   `clawops setup --profile openclaw-default`
+`clawops setup --profile openclaw-default`
 5. Built-in OpenClaw plus experimental QMD:
-   `clawops setup --profile openclaw-qmd`
+`clawops setup --profile openclaw-qmd`
 6. Opt-in local LanceDB durable memory with Ollama-backed smart extraction by rerendering
-   `clawops render-openclaw-config --profile memory-lancedb-pro`
+`clawops render-openclaw-config --profile memory-lancedb-pro`
 7. Migration-only standalone overlay reference:
-   `platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
+`platform/configs/openclaw/75-strongclaw-hypermemory.example.json5`
 8. Telegram: `platform/docs/channels/telegram.md`
 9. WhatsApp: `platform/docs/channels/whatsapp.md`
 10. OTel/Langfuse: `clawops verify-platform observability`

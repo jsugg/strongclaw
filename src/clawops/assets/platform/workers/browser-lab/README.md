@@ -12,8 +12,7 @@ Operator access should tunnel only the gateway port:
 ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 ```
 
-Do not tunnel `9222` or `3128` to an operator workstation. Keep the browser lab
-reachable only from the hardened session that runs OpenClaw.
+Do not tunnel `9222` or `3128` to an operator workstation. Keep the browser lab reachable only from the hardened session that runs OpenClaw.
 
 Included:
 - `squid.conf` outbound allowlist proxy

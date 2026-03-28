@@ -1,7 +1,4 @@
----
-name: lesson
-description: Store a lesson learned from the current conversation. Triggered by /lesson command. Use when Master signals that the recent conversation contains a pitfall, fix, or key insight that should be persisted to long-term memory.
----
+--- name: lesson description: Store a lesson learned from the current conversation. Triggered by /lesson command. Use when Master signals that the recent conversation contains a pitfall, fix, or key insight that should be persisted to long-term memory. ---
 
 # Lesson Extraction & Storage
 

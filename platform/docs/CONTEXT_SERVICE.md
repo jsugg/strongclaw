@@ -1,8 +1,6 @@
 # Codebase Context Provider
 
-This repo exposes codebase context under the generic `clawops context` namespace.
-The first explicit provider is `codebase`, which keeps the SQLite lexical baseline
-and adds scale-aware chunk, hybrid, and graph state.
+This repo exposes codebase context under the generic `clawops context` namespace. The first explicit provider is `codebase`, which keeps the SQLite lexical baseline and adds scale-aware chunk, hybrid, and graph state.
 
 ## What it does
 
@@ -33,8 +31,7 @@ clawops context codebase worker --scale medium --config platform/configs/context
 clawops context codebase benchmark --scale medium --config platform/configs/context/codebase.yaml --repo . --fixtures platform/configs/context/benchmarks/codebase.yaml --json
 ```
 
-The shipped config keeps default indexing focused on repo-authored material by
-excluding large vendored trees and the benchmark fixture directory.
+The shipped config keeps default indexing focused on repo-authored material by excluding large vendored trees and the benchmark fixture directory.
 
 ## Included integrations
 
@@ -45,13 +42,11 @@ excluding large vendored trees and the benchmark fixture directory.
 
 ## Default memory retrieval
 
-The default StrongClaw render path is `hypermemory`, which uses
-`lossless-claw` plus `strongclaw-hypermemory`.
+The default StrongClaw render path is `hypermemory`, which uses `lossless-claw` plus `strongclaw-hypermemory`.
 
 The explicit `openclaw-default` fallback profile keeps the OpenClaw built-ins only.
 
-The explicit `openclaw-qmd` fallback profile enables QMD-backed memory
-retrieval.
+The explicit `openclaw-qmd` fallback profile enables QMD-backed memory retrieval.
 
 The rendered QMD corpus for `openclaw-qmd` includes:
 
@@ -123,18 +118,16 @@ The shipped codebase config supports:
 
 Path filters are applied to repo-relative POSIX paths before indexing.
 
-The shipped config excludes packaged runtime mirrors under `src/clawops/assets/**`
-so retrieval ranks the real source tree instead of duplicated install assets.
+The shipped config excludes packaged runtime mirrors under `src/clawops/assets/**` so retrieval ranks the real source tree instead of duplicated install assets.
 
 Symlink handling is explicit:
 
 - `in_repo_only` follows symlinks only when the resolved target stays inside the
-  configured repo root
+configured repo root
 - `never` skips all symlinked files
 - `follow` follows all symlinked files and should only be used intentionally
 
-The default shipped policy is `in_repo_only` to prevent context packs from
-pulling host files from outside the repo tree.
+The default shipped policy is `in_repo_only` to prevent context packs from pulling host files from outside the repo tree.
 
 Reindexing is authoritative for the configured file universe:
 
@@ -153,28 +146,15 @@ Hybrid runtime artifacts are intentionally deferred for medium and large reindex
 - `worker` reconciles pending Qdrant point deletions and chunk-vector upserts in the background
 - `query` and `pack` transparently fall back to lexical chunk retrieval until the worker finishes a healthy hybrid sync
 
-Successful hybrid batches now persist incrementally, so a late local embedding
-timeout leaves the worker degraded but does not discard already indexed chunk
-vectors. The next worker or benchmark pass resumes from the remaining chunks.
+Successful hybrid batches now persist incrementally, so a late local embedding timeout leaves the worker degraded but does not discard already indexed chunk vectors. The next worker or benchmark pass resumes from the remaining chunks.
 
-When chunk hashes and pending deletions already match the indexed corpus, the
-worker reuses the persisted sparse metadata and skips both sparse rebuild and
-dense re-embedding work. On cold syncs, the sparse lane now normalizes each
-chunk once and reuses that token stream for both corpus statistics and the
-persisted sparse vector payloads.
+When chunk hashes and pending deletions already match the indexed corpus, the worker reuses the persisted sparse metadata and skips both sparse rebuild and dense re-embedding work. On cold syncs, the sparse lane now normalizes each chunk once and reuses that token stream for both corpus statistics and the persisted sparse vector payloads.
 
-The Neo4j lane now uses the official Python driver over the Bolt protocol and
-keeps the SQLite graph fallback aligned by materializing symbol-aware
-`DEFINES`, `CALLS`, and `REFERENCES` edges alongside file import edges.
+The Neo4j lane now uses the official Python driver over the Bolt protocol and keeps the SQLite graph fallback aligned by materializing symbol-aware `DEFINES`, `CALLS`, and `REFERENCES` edges alongside file import edges.
 
 ## Benchmark fixtures
 
-Use `clawops context codebase benchmark` to measure Recall@k and MRR against a
-curated fixture file. The command reindexes the repo, consolidates runtime
-artifacts, and then evaluates each case against the final context surface for
-the current provider scale: the top retrieved roots plus graph dependency expansion
-when that lane is active. When the fixture file lives under the repo
-root, the benchmark command excludes that exact file from indexing so the query set cannot self-match.
+Use `clawops context codebase benchmark` to measure Recall@k and MRR against a curated fixture file. The command reindexes the repo, consolidates runtime artifacts, and then evaluates each case against the final context surface for the current provider scale: the top retrieved roots plus graph dependency expansion when that lane is active. When the fixture file lives under the repo root, the benchmark command excludes that exact file from indexing so the query set cannot self-match.
 
 Fixture files live under `platform/configs/context/benchmarks/` and accept:
 
@@ -193,20 +173,13 @@ Benchmark authoring guidance:
 - Keep the shipped benchmark CLI example on `--scale medium` when validating hybrid recall expectations.
 - The shipped local medium config keeps embedding batches conservative and allows longer HTTP timeouts because direct Ollama embedding can still exceed optimistic defaults on singleton retries.
 
-For the shipped local sidecar stack, the codebase provider reads Neo4j
-credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
-contract now carries those keys directly, and the compose stack derives the
-container's `NEO4J_AUTH` value from the same pair so fresh-host bring-up and
-graph-backed retrieval stay aligned.
+For the shipped local sidecar stack, the codebase provider reads Neo4j credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env contract now carries those keys directly, and the compose stack derives the container's `NEO4J_AUTH` value from the same pair so fresh-host bring-up and graph-backed retrieval stay aligned.
 
-The shipped local medium lane uses direct Ollama embeddings plus the shared
-Qdrant and rerank contract:
+The shipped local medium lane uses direct Ollama embeddings plus the shared Qdrant and rerank contract:
 
 - `HYPERMEMORY_EMBEDDING_MODEL` with a pulled local Ollama embedding model such as `ollama/nomic-embed-text`
 - direct Ollama on `http://127.0.0.1:11434`
 - `HYPERMEMORY_QDRANT_URL`
 - optional rerank fallback keys `HYPERMEMORY_RERANK_BASE_URL`, `HYPERMEMORY_RERANK_MODEL`, and `HYPERMEMORY_RERANK_API_KEY`
 
-If you want the codebase provider to route embeddings through LiteLLM or a
-remote OpenAI-compatible gateway instead, switch `embedding.provider` back to
-`compatible-http` and point `embedding.base_url` at that endpoint.
+If you want the codebase provider to route embeddings through LiteLLM or a remote OpenAI-compatible gateway instead, switch `embedding.provider` back to `compatible-http` and point `embedding.base_url` at that endpoint.
