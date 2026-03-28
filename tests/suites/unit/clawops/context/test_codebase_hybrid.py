@@ -6,13 +6,13 @@ import pathlib
 import uuid
 from collections.abc import Sequence
 
-import pytest
 import requests
 
 from clawops.common import write_yaml
 from clawops.context.codebase.service import CodebaseContextService, service_from_config
 from clawops.hypermemory.contracts import SparseVectorPayload, VectorPoint
 from clawops.hypermemory.models import DenseSearchCandidate, RerankResponse, SparseSearchCandidate
+from tests.plugins.infrastructure.context import TestContext
 
 
 class _FakeEmbeddingProvider:
@@ -258,7 +258,7 @@ def test_medium_scale_worker_syncs_chunk_vectors_when_hybrid_enabled(
 
 def test_medium_scale_worker_skips_sparse_rebuild_for_unchanged_warm_consolidation(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     repo, service = _build_service(tmp_path)
     (repo / "auth.py").write_text(
@@ -283,9 +283,9 @@ def test_medium_scale_worker_skips_sparse_rebuild_for_unchanged_warm_consolidati
         del args, kwargs
         raise AssertionError("warm consolidation should reuse the persisted sparse state")
 
-    monkeypatch.setattr(
+    test_context.patch.patch(
         "clawops.context.codebase.service.build_sparse_encoder_from_documents",
-        _unexpected_sparse_rebuild,
+        new=_unexpected_sparse_rebuild,
     )
 
     service.consolidate_runtime_artifacts()
