@@ -3,28 +3,42 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 
 from tests.utils.helpers.repo import REPO_ROOT
 
 
-def _relative_files(root: pathlib.Path) -> set[pathlib.Path]:
-    """Return the normalized file set under one root."""
-    return {
-        path.relative_to(root)
-        for path in root.rglob("*")
-        if path.is_file()
-        and path.name != ".DS_Store"
-        and "__pycache__" not in path.parts
-        and "node_modules" not in path.parts
-    }
+def _tracked_relative_files(root: pathlib.Path) -> set[pathlib.Path]:
+    """Return git-tracked files under one repo-relative root."""
+    repo_relative_root = root.resolve().relative_to(REPO_ROOT)
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "ls-files",
+            "-z",
+            repo_relative_root.as_posix(),
+        ],
+        check=True,
+        capture_output=True,
+        text=False,
+    )
+    files: set[pathlib.Path] = set()
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        tracked_path = pathlib.Path(raw_path.decode("utf-8"))
+        files.add(tracked_path.relative_to(repo_relative_root))
+    return files
 
 
 def test_packaged_platform_asset_tree_matches_source_tree() -> None:
     source_root = REPO_ROOT / "platform"
     packaged_root = REPO_ROOT / "src" / "clawops" / "assets" / "platform"
 
-    source_files = _relative_files(source_root)
-    packaged_files = _relative_files(packaged_root)
+    source_files = _tracked_relative_files(source_root)
+    packaged_files = _tracked_relative_files(packaged_root)
 
     assert packaged_files == source_files
     for relative_path in sorted(source_files):
