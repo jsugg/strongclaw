@@ -167,6 +167,12 @@ Fixture files live under `platform/configs/context/benchmarks/` and accept:
 
 Each case must define at least one expected path or chunk id.
 
+Benchmark authoring guidance:
+
+- For `small`, benchmark cases should use exact lexical or symbol-oriented queries.
+- semantic or paraphrase-oriented benchmark cases should target `medium` or `large`.
+- Keep the shipped benchmark CLI example on `--scale medium` when validating hybrid recall expectations.
+
 For the shipped local sidecar stack, the codebase provider reads Neo4j
 credentials from `NEO4J_USERNAME` and `NEO4J_PASSWORD`. The Varlock env
 contract now carries those keys directly, and the compose stack derives the
