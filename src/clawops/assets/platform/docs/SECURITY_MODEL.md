@@ -28,7 +28,6 @@ Require an independent reviewer for:
 
 ## Skill intake
 
-Use:
-`clawops skill-scan --source <path> --quarantine <dir> --report <file>`
+Use: `clawops skill-scan --source <path> --quarantine <dir> --report <file>`
 
 Never auto-enable a new skill or plugin directly from a download path.

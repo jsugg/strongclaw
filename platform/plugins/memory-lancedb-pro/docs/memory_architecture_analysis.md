@@ -615,8 +615,7 @@ graph LR
 
 ### 9.4 session-summary 的特殊处理
 
-`sessionMemory` 写入的 memory 会带 `metadata.type = "session-summary"`。
-在 auto-recall 生命周期维护中，这类 memory 会被排除在 tier 评估之外，避免会话摘要挤占核心长期记忆层级。
+`sessionMemory` 写入的 memory 会带 `metadata.type = "session-summary"`。 在 auto-recall 生命周期维护中，这类 memory 会被排除在 tier 评估之外，避免会话摘要挤占核心长期记忆层级。
 
 ---
 

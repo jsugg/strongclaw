@@ -24,8 +24,7 @@ The supported `hypermemory` profile uses:
 - `hypermemory-embedding` as the stable LiteLLM alias consumed by `hypermemory`
 - `HYPERMEMORY_EMBEDDING_BASE_URL` to point `hypermemory` at the loopback LiteLLM route
 
-This keeps the hypermemory memory config pinned to a stable route while letting
-operators swap the upstream embedding model behind that alias.
+This keeps the hypermemory memory config pinned to a stable route while letting operators swap the upstream embedding model behind that alias.
 
 ## Role defaults
 

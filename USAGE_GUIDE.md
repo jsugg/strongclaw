@@ -34,9 +34,7 @@ systemctl --user restart openclaw-gateway.service
 
 ## Health checks
 
-Repository helper commands that depend on `openclaw` now detect whether the CLI
-is installed. Tasks that require it fail fast with a clear message, while
-fallback-capable tasks warn and continue with their fallback path.
+Repository helper commands that depend on `openclaw` now detect whether the CLI is installed. Tasks that require it fail fast with a clear message, while fallback-capable tasks warn and continue with their fallback path.
 
 ```bash
 clawops doctor-host
@@ -69,8 +67,7 @@ Tunnel the gateway only:
 ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 ```
 
-Keep browser-lab ports local to the hardened session. Do not tunnel `9222` or
-`3128` to an operator workstation.
+Keep browser-lab ports local to the hardened session. Do not tunnel `9222` or `3128` to an operator workstation.
 
 ## Render placeholder-backed profiles
 
@@ -79,8 +76,7 @@ clawops render-openclaw-config \
   --profile acp
 ```
 
-If you need to combine a named profile with another placeholder-bearing
-overlay, append it explicitly so each fragment is rendered before merge:
+If you need to combine a named profile with another placeholder-bearing overlay, append it explicitly so each fragment is rendered before merge:
 
 ```bash
 clawops render-openclaw-config \
@@ -115,8 +111,7 @@ Initialize:
 clawops op-journal init --db ~/.openclaw/clawops/op_journal.sqlite
 ```
 
-Treat `~/.openclaw/clawops` as service-owned state, not a shared scratch
-directory.
+Treat `~/.openclaw/clawops` as service-owned state, not a shared scratch directory.
 
 - keep directory mode `0700` on `~/.openclaw/clawops`
 - keep file mode `0600` on `~/.openclaw/clawops/op_journal.sqlite`
@@ -134,8 +129,7 @@ clawops op-journal begin \
   --payload-file payload.json
 ```
 
-`op-journal begin` is an audit/bookkeeping primitive. It does not create an
-executable wrapper operation by itself.
+`op-journal begin` is an audit/bookkeeping primitive. It does not create an executable wrapper operation by itself.
 
 Approve an external action:
 
@@ -170,8 +164,7 @@ clawops policy \
 
 ## Devflow
 
-Use the public devflow surface for staged planning, execution, recovery, and
-audit:
+Use the public devflow surface for staged planning, execution, recovery, and audit:
 
 ```bash
 clawops devflow plan --goal "Fix regression and add coverage"
@@ -183,8 +176,7 @@ clawops devflow cancel --run-id <run-id> --requested-by operator
 clawops devflow audit --run-id <run-id>
 ```
 
-Run-local state lands under `.clawops/devflow/<run-id>/` and the audit bundle
-is written under that run's `audit/` directory.
+Run-local state lands under `.clawops/devflow/<run-id>/` and the audit bundle is written under that run's `audit/` directory.
 
 ## Context service
 
@@ -220,8 +212,7 @@ clawops context codebase pack \
 
 ## Hypermemory path
 
-StrongClaw now defaults to the supported sparse+dense memory stack. Bring it up
-explicitly with:
+StrongClaw now defaults to the supported sparse+dense memory stack. Bring it up explicitly with:
 
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
@@ -230,9 +221,7 @@ clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify
 clawops doctor
 ```
 
-That profile enables the combined `lossless-claw` + `strongclaw-hypermemory`
-runtime, keeps `autoRecall` on, keeps `autoReflect` off, and verifies the
-Qdrant dense+sparse backend rather than the legacy built-in QMD path.
+That profile enables the combined `lossless-claw` + `strongclaw-hypermemory` runtime, keeps `autoRecall` on, keeps `autoReflect` off, and verifies the Qdrant dense+sparse backend rather than the legacy built-in QMD path.
 
 If you need the OpenClaw built-ins instead, switch to the explicit fallback:
 
@@ -248,15 +237,9 @@ clawops config memory --set-profile openclaw-qmd
 
 ## Memory migration
 
-Treat QMD plus the context service as the repo-document retrieval lane for the
-explicit `openclaw-qmd` fallback profile. Use this section only when you need
-to migrate a standalone or hypermemory `hypermemory` corpus into the vendored
-`memory-lancedb-pro` plugin.
+Treat QMD plus the context service as the repo-document retrieval lane for the explicit `openclaw-qmd` fallback profile. Use this section only when you need to migrate a standalone or hypermemory `hypermemory` corpus into the vendored `memory-lancedb-pro` plugin.
 
-Export one scope at a time into the import JSON shape that `openclaw memory-pro
-import` expects. When you omit `--output` or `--report`, StrongClaw now writes
-those artifacts under its OS-specific state directory instead of into the git
-checkout.
+Export one scope at a time into the import JSON shape that `openclaw memory-pro import` expects. When you omit `--output` or `--report`, StrongClaw now writes those artifacts under its OS-specific state directory instead of into the git checkout.
 
 ```bash
 clawops memory migrate-hypermemory-to-pro \
@@ -264,8 +247,7 @@ clawops memory migrate-hypermemory-to-pro \
   --output /tmp/project-strongclaw-import.json
 ```
 
-Apply that snapshot through the same upstream `openclaw memory-pro import`
-command shape, but with a ClawOps-managed report artifact:
+Apply that snapshot through the same upstream `openclaw memory-pro import` command shape, but with a ClawOps-managed report artifact:
 
 ```bash
 clawops memory import-pro-snapshot \
@@ -282,9 +264,7 @@ clawops memory verify-pro-parity \
   --query "deployment playbook"
 ```
 
-If a live `openclaw memory-pro search` path is already available, switch
-`--mode` to `openclaw` or `auto` to compare against the actual plugin-backed
-search results.
+If a live `openclaw memory-pro search` path is already available, switch `--mode` to `openclaw` or `auto` to compare against the actual plugin-backed search results.
 
 ## Repo workspace contract
 
@@ -313,8 +293,7 @@ clawops skills scan \
   --report platform/skills/manifests/downloaded-skill.json
 ```
 
-Promote only after the bundle has been reviewed against its manifest and hash
-trail:
+Promote only after the bundle has been reviewed against its manifest and hash trail:
 
 ```bash
 clawops skills promote \
@@ -359,9 +338,7 @@ clawops workflow \
   --workflow platform/configs/workflows/code_review.yaml
 ```
 
-The shipped repository workflows declare `base_dir`, so they can be run from
-any current working directory. The helper script also pins the repo root
-explicitly:
+The shipped repository workflows declare `base_dir`, so they can be run from any current working directory. The helper script also pins the repo root explicitly:
 
 ```bash
 clawops workflow --workflow platform/configs/workflows/code_review.yaml --dry-run
@@ -390,9 +367,7 @@ clawops wrapper webhook \
   --execute-approved
 ```
 
-If you are replaying an older approved row created before execution contracts
-were introduced, pass the policy file again so the wrapper can restamp the row
-before executing:
+If you are replaying an older approved row created before execution contracts were introduced, pass the policy file again so the wrapper can restamp the row before executing:
 
 ```bash
 clawops wrapper webhook \
@@ -404,9 +379,7 @@ clawops wrapper webhook \
 
 ## Workflow trust roots
 
-`clawops workflow` now treats workflow YAML as executable code rather than
-passive config. By default it only runs workflows from
-`platform/configs/workflows/`.
+`clawops workflow` now treats workflow YAML as executable code rather than passive config. By default it only runs workflows from `platform/configs/workflows/`.
 
 For intentional ad hoc local workflows, use:
 

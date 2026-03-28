@@ -11,8 +11,7 @@ clawops devflow cancel
 clawops devflow audit
 ```
 
-Use `--project-root <path>` when the control root for run state, journals, and
-audit artifacts is not the current working directory.
+Use `--project-root <path>` when the control root for run state, journals, and audit artifacts is not the current working directory.
 
 ## Operator Flow
 

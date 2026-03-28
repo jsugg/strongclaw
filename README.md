@@ -1,8 +1,6 @@
 # Strongclaw / ClawOps
 
-This repository is the **Strongclaw** bootstrap for a hardened,
-production-oriented OpenClaw deployment and ships the **ClawOps** companion
-tooling. It is intentionally broader than a simple install pack. It includes:
+This repository is the **Strongclaw** bootstrap for a hardened, production-oriented OpenClaw deployment and ships the **ClawOps** companion tooling. It is intentionally broader than a simple install pack. It includes:
 
 - a hardened OpenClaw control plane baseline
 - a separate execution plane for ACP/acpx coding workers
@@ -68,27 +66,11 @@ make install
 make setup
 ```
 
-`make install` and the managed bootstrap path prefer Python `3.12` on supported
-Darwin/Linux hosts as the compatibility baseline. That keeps the default
-hypermemory local-rerank path installable on Intel macOS while remaining valid
-across Apple Silicon Macs, Linux laptops, and supported 64-bit Raspberry Pi
-setups. Python `3.13` remains supported for explicit use and CI coverage.
+`make install` and the managed bootstrap path prefer Python `3.12` on supported Darwin/Linux hosts as the compatibility baseline. That keeps the default hypermemory local-rerank path installable on Intel macOS while remaining valid across Apple Silicon Macs, Linux laptops, and supported 64-bit Raspberry Pi setups. Python `3.13` remains supported for explicit use and CI coverage.
 
-`make setup` runs the guided `clawops setup` workflow inside the managed
-environment. It bootstraps host prerequisites, creates or repairs
-the managed Varlock env under the StrongClaw config dir, offers local or
-managed Varlock secret backends for provider auth, prompts for missing setup
-input when needed, configures OpenClaw model/provider auth, activates
-services, and runs the baseline verification gate. The lower-level CLI
-entrypoint remains available at `clawops setup` for manual or partial
-bring-up, and you can call the CLI directly with `uv run --project . clawops setup`.
-For a render-only pass that does not activate services yet, use
-`clawops setup --no-activate-services`; that path now defers model/provider
-auth until you are ready to start the gateway.
+`make setup` runs the guided `clawops setup` workflow inside the managed environment. It bootstraps host prerequisites, creates or repairs the managed Varlock env under the StrongClaw config dir, offers local or managed Varlock secret backends for provider auth, prompts for missing setup input when needed, configures OpenClaw model/provider auth, activates services, and runs the baseline verification gate. The lower-level CLI entrypoint remains available at `clawops setup` for manual or partial bring-up, and you can call the CLI directly with `uv run --project . clawops setup`. For a render-only pass that does not activate services yet, use `clawops setup --no-activate-services`; that path now defers model/provider auth until you are ready to start the gateway.
 
-The wheel now ships the runtime `platform` asset bundle, so package-safe
-commands such as `clawops render-openclaw-config`, `clawops setup`, and
-`clawops verify-platform ...` work outside a cloned StrongClaw checkout.
+The wheel now ships the runtime `platform` asset bundle, so package-safe commands such as `clawops render-openclaw-config`, `clawops setup`, and `clawops verify-platform ...` work outside a cloned StrongClaw checkout.
 
 Boundary override flags are now literal:
 
@@ -97,22 +79,16 @@ Boundary override flags are now literal:
 - use `--source-root` for source-tree-only verification such as `clawops baseline`
 - use `--repo-root` only for repo-contract tooling such as `clawops repo`, `clawops worktree`, and `clawops supply-chain`
 
-Package-safe runtime commands now default to the packaged asset bundle even
-when you run them from inside a StrongClaw source checkout. To opt into
-repo-backed assets for local development, export `STRONGCLAW_ASSET_ROOT` or use
-the repo-local developer flow:
+Package-safe runtime commands now default to the packaged asset bundle even when you run them from inside a StrongClaw source checkout. To opt into repo-backed assets for local development, export `STRONGCLAW_ASSET_ROOT` or use the repo-local developer flow:
 
 ```bash
 source scripts/dev-env.sh
 clawops-dev render-openclaw-config
 ```
 
-`make dev-shell` opens an interactive shell with the same repo-backed asset
-override and managed virtualenv activated.
+`make dev-shell` opens an interactive shell with the same repo-backed asset override and managed virtualenv activated.
 
-By default, StrongClaw now renders and provisions the
-`hypermemory` stack. Set one embedding model name before you run
-the no-arg setup path:
+By default, StrongClaw now renders and provisions the `hypermemory` stack. Set one embedding model name before you run the no-arg setup path:
 
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
@@ -120,58 +96,31 @@ uv run --project . clawops setup
 clawops doctor
 ```
 
-The shipped hypermemory configs now also enable planner-stage reranking with a
-local `sentence-transformers` provider first and a `compatible-http` fallback.
-Plain `uv sync` installs the local rerank dependency on the host/Python
-combinations where upstream wheels are known to work: macOS arm64, macOS
-x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or
-3.13. For Raspberry Pi, that explicitly includes Raspberry Pi 4/5 running
-64-bit Raspberry Pi OS or Ubuntu arm64. On unsupported combinations such as
-macOS x86_64 with Python 3.13 or 32-bit Raspberry Pi Linux, StrongClaw skips
-the local dependency and relies on `compatible-http` or fail-open behavior
-instead of breaking installation.
-On Intel macOS/Python 3.12 that compatibility path is pinned to
-`sentence-transformers==3.4.1`, `torch==2.2.2`, and `numpy<2`. The shipped
-config defaults `rerank.local.device` to `auto`, which selects `cuda` on
-supported GPU hosts, `mps` on supported Apple Silicon hosts, and `cpu`
-otherwise. If auto-selected acceleration fails at runtime, the local reranker
-falls back to CPU automatically.
+The shipped hypermemory configs now also enable planner-stage reranking with a local `sentence-transformers` provider first and a `compatible-http` fallback. Plain `uv sync` installs the local rerank dependency on the host/Python combinations where upstream wheels are known to work: macOS arm64, macOS x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or 3.13. For Raspberry Pi, that explicitly includes Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64. On unsupported combinations such as macOS x86_64 with Python 3.13 or 32-bit Raspberry Pi Linux, StrongClaw skips the local dependency and relies on `compatible-http` or fail-open behavior instead of breaking installation. On Intel macOS/Python 3.12 that compatibility path is pinned to `sentence-transformers==3.4.1`, `torch==2.2.2`, and `numpy<2`. The shipped config defaults `rerank.local.device` to `auto`, which selects `cuda` on supported GPU hosts, `mps` on supported Apple Silicon hosts, and `cpu` otherwise. If auto-selected acceleration fails at runtime, the local reranker falls back to CPU automatically.
 
-If you want the HTTP fallback available, set `HYPERMEMORY_RERANK_BASE_URL` and,
-optionally, `HYPERMEMORY_RERANK_MODEL` / `HYPERMEMORY_RERANK_API_KEY`.
+If you want the HTTP fallback available, set `HYPERMEMORY_RERANK_BASE_URL` and, optionally, `HYPERMEMORY_RERANK_MODEL` / `HYPERMEMORY_RERANK_API_KEY`.
 
-If you want the legacy OpenClaw built-ins instead, use the explicit
-`openclaw-default` profile:
+If you want the legacy OpenClaw built-ins instead, use the explicit `openclaw-default` profile:
 
 ```bash
 uv run --project . clawops config memory --set-profile openclaw-default
 ```
 
-If you want the built-ins plus the experimental QMD backend, use
-`openclaw-qmd`:
+If you want the built-ins plus the experimental QMD backend, use `openclaw-qmd`:
 
 ```bash
 uv run --project . clawops config memory --set-profile openclaw-qmd
 ```
 
-StrongClaw-generated runtime artifacts no longer default into the git checkout.
-Harness output, ACP summaries, compose sidecar state, QMD package files, and
-the managed `lossless-claw` checkout are written to OS-appropriate app
-data/state directories instead.
+StrongClaw-generated runtime artifacts no longer default into the git checkout. Harness output, ACP summaries, compose sidecar state, QMD package files, and the managed `lossless-claw` checkout are written to OS-appropriate app data/state directories instead.
 
-The bootstrap path reuses any existing Docker-compatible runtime that already
-provides `docker` plus `docker compose`, and only installs Docker as a fallback
-when no compatible runtime is detected.
+The bootstrap path reuses any existing Docker-compatible runtime that already provides `docker` plus `docker compose`, and only installs Docker as a fallback when no compatible runtime is detected.
 
 Then continue with ACP workers, repo lexical context indexing, channels, and observability using the step order in [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
 
-If Linux bootstrap just added the runtime user to the `docker` group, setup now
-pauses with a clear message. Open a fresh login shell as that user and rerun
-the same `make setup` or `clawops setup` command; completed bootstrap work is
-detected automatically.
+If Linux bootstrap just added the runtime user to the `docker` group, setup now pauses with a clear message. Open a fresh login shell as that user and rerun the same `make setup` or `clawops setup` command; completed bootstrap work is detected automatically.
 
-For placeholder-backed variants, rerender through the profile-aware entrypoint
-instead of merging raw overlays:
+For placeholder-backed variants, rerender through the profile-aware entrypoint instead of merging raw overlays:
 
 ```bash
 clawops render-openclaw-config --profile acp
@@ -179,13 +128,9 @@ clawops render-openclaw-config --profile hypermemory
 clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
-The StrongClaw-managed `memory-lancedb-pro` profile keeps smart extraction on,
-but still ships with `autoRecall = false`, `sessionStrategy = "none"`,
-`selfImprovement.enabled = false`, and `enableManagementTools = false`.
+The StrongClaw-managed `memory-lancedb-pro` profile keeps smart extraction on, but still ships with `autoRecall = false`, `sessionStrategy = "none"`, `selfImprovement.enabled = false`, and `enableManagementTools = false`.
 
-The bootstrap verification flow keeps the `clawops verify-platform` entrypoints
-on the operator path: sidecars can be probed directly, while the baseline gate
-re-runs the sidecar, observability, and channel checks in static mode.
+The bootstrap verification flow keeps the `clawops verify-platform` entrypoints on the operator path: sidecars can be probed directly, while the baseline gate re-runs the sidecar, observability, and channel checks in static mode.
 
 For a deeper post-setup scan, run:
 
@@ -193,16 +138,11 @@ For a deeper post-setup scan, run:
 make doctor
 ```
 
-Supported toolchain versions are documented in
-[`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The
-current validated baseline is Python `3.12` or `3.13`, Node `22.16.x` or
-`24.x`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.3.13`, ACPX `0.3.0`,
-QMD `2.0.1`, and `lossless-claw v0.3.0`.
+Supported toolchain versions are documented in [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The current validated baseline is Python `3.12` or `3.13`, Node `22.16.x` or `24.x`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.3.13`, ACPX `0.3.0`, QMD `2.0.1`, and `lossless-claw v0.3.0`.
 
 ## Development
 
-For local development, use `uv` for the project environment and install the
-pre-commit hooks once:
+For local development, use `uv` for the project environment and install the pre-commit hooks once:
 
 ```bash
 make dev
@@ -219,8 +159,7 @@ That syncs the `dev` extra into `.venv/` and installs hooks for:
 - actionlint for GitHub Actions
 - basic repository hygiene checks
 
-If you want shorter commands in a shell session, sync the dev environment once
-and activate it before running tools directly:
+If you want shorter commands in a shell session, sync the dev environment once and activate it before running tools directly:
 
 ```bash
 uv sync --locked
@@ -230,10 +169,7 @@ clawops --help
 deactivate
 ```
 
-`uv run ...` remains the default documented path for one-off commands from the
-repo root. Activating `.venv/` is optional and is mainly useful when you want
-plain `pytest`, `clawops`, and other project commands without repeating
-`uv run`.
+`uv run ...` remains the default documented path for one-off commands from the repo root. Activating `.venv/` is optional and is mainly useful when you want plain `pytest`, `clawops`, and other project commands without repeating `uv run`.
 
 Useful follow-up commands:
 
@@ -249,23 +185,15 @@ make precommit
 make dev-check
 ```
 
-`make precommit` runs the mutating formatter/import/hygiene hooks first and then
-verifies the full pre-commit stack in one final pass.
+`make precommit` runs the mutating formatter/import/hygiene hooks first and then verifies the full pre-commit stack in one final pass.
 
-`make dev-check` builds on `make precommit` and then runs the test suite plus a
-compile smoke. That keeps the two targets distinct: `make precommit` is the
-repository normalization and hook gate, while `make dev-check` is the deeper
-development verification pass.
+`make dev-check` builds on `make precommit` and then runs the test suite plus a compile smoke. That keeps the two targets distinct: `make precommit` is the repository normalization and hook gate, while `make dev-check` is the deeper development verification pass.
 
-`make shellcheck` and `make precommit` expect a local `shellcheck` binary on
-`PATH` now that the repo hook uses the system binary instead of a Docker-backed
-wrapper. `brew install shellcheck` and `sudo apt-get install shellcheck` both
-work.
+`make shellcheck` and `make precommit` expect a local `shellcheck` binary on `PATH` now that the repo hook uses the system binary instead of a Docker-backed wrapper. `brew install shellcheck` and `sudo apt-get install shellcheck` both work.
 
 ## Devflow
 
-The repository now exposes a production devflow surface for multi-stage
-planning, execution, recovery, and audit:
+The repository now exposes a production devflow surface for multi-stage planning, execution, recovery, and audit:
 
 ```bash
 clawops devflow plan --goal "Fix regression and add coverage"

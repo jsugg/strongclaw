@@ -1,7 +1,6 @@
 # StrongClaw Hypermemory
 
-`hypermemory` is StrongClaw's Markdown-canonical durable memory engine. It is the default StrongClaw memory stack through the `hypermemory` profile, which
-binds:
+`hypermemory` is StrongClaw's Markdown-canonical durable memory engine. It is the default StrongClaw memory stack through the `hypermemory` profile, which binds:
 
 - `plugins.slots.contextEngine = "lossless-claw"`
 - `plugins.slots.memory = "strongclaw-hypermemory"`
@@ -115,20 +114,9 @@ That flow renders the default StrongClaw stack with `lossless-claw`, `strongclaw
 
 The hypermemory env contract requires `HYPERMEMORY_EMBEDDING_MODEL`. Guided setup backfills loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override them.
 
-The shipped hypermemory configs also enable planner-stage reranking. The
-primary provider is `local-sentence-transformers` with
-`BAAI/bge-reranker-v2-m3`; the fallback is `compatible-http`, which activates
-when `HYPERMEMORY_RERANK_BASE_URL` is configured and reachable. If neither
-provider is available, search fails open and keeps the provisional hybrid
-planner order.
+The shipped hypermemory configs also enable planner-stage reranking. The primary provider is `local-sentence-transformers` with `BAAI/bge-reranker-v2-m3`; the fallback is `compatible-http`, which activates when `HYPERMEMORY_RERANK_BASE_URL` is configured and reachable. If neither provider is available, search fails open and keeps the provisional hybrid planner order.
 
-Plain `uv sync` keeps the primary local rerank path on host/Python combinations
-with known upstream wheel support: macOS arm64, macOS x86_64 on Python 3.12,
-and Linux x86_64 or aarch64/arm64 on Python 3.12 or 3.13. For Raspberry Pi,
-that means Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu arm64 stay
-on the primary local rerank path. Unsupported combinations such as 32-bit Pi
-Linux skip the local dependency and use `compatible-http` or fail-open behavior
-instead of blocking setup.
+Plain `uv sync` keeps the primary local rerank path on host/Python combinations with known upstream wheel support: macOS arm64, macOS x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or 3.13. For Raspberry Pi, that means Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu arm64 stay on the primary local rerank path. Unsupported combinations such as 32-bit Pi Linux skip the local dependency and use `compatible-http` or fail-open behavior instead of blocking setup.
 
 Optional fallback env vars:
 
@@ -252,10 +240,4 @@ Corpus path globs are segment-aware:
 - `**/*.md` matches markdown files recursively below the configured corpus root
 - if two configured corpus sources resolve to the same repo-relative document, the first configured source wins and later duplicates are skipped during indexing
 
-When `CLAWOPS_STRUCTURED_LOGS=1` is set, hypermemory emits compact JSON lines
-for embedding calls, Qdrant search, lexical planning, fusion, rerank, rerank
-errors, fallback activation, and vector sync. When OTLP tracing is enabled
-through `CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*`
-variables, the same operations emit spans through the shared ClawOps
-observability pipeline, including a dedicated `clawops.hypermemory.rerank`
-span.
+When `CLAWOPS_STRUCTURED_LOGS=1` is set, hypermemory emits compact JSON lines for embedding calls, Qdrant search, lexical planning, fusion, rerank, rerank errors, fallback activation, and vector sync. When OTLP tracing is enabled through `CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*` variables, the same operations emit spans through the shared ClawOps observability pipeline, including a dedicated `clawops.hypermemory.rerank` span.

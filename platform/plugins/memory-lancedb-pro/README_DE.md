@@ -8,10 +8,7 @@
 
 Ein LanceDB-basiertes OpenClaw-Langzeitgedächtnis-Plugin, das Präferenzen, Entscheidungen und Projektkontext speichert und in zukünftigen Sitzungen automatisch abruft.
 
-[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Plugin-blue)](https://github.com/openclaw/openclaw)
-[![npm version](https://img.shields.io/npm/v/memory-lancedb-pro)](https://www.npmjs.com/package/memory-lancedb-pro)
-[![LanceDB](https://img.shields.io/badge/LanceDB-Vectorstore-orange)](https://lancedb.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Plugin-blue)](https://github.com/openclaw/openclaw) [![npm version](https://img.shields.io/npm/v/memory-lancedb-pro)](https://www.npmjs.com/package/memory-lancedb-pro) [![LanceDB](https://img.shields.io/badge/LanceDB-Vectorstore-orange)](https://lancedb.com) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [English](README.md) | [简体中文](README_CN.md) | [繁體中文](README_TW.md) | [日本語](README_JA.md) | [한국어](README_KO.md) | [Français](README_FR.md) | [Español](README_ES.md) | [Deutsch](README_DE.md) | [Italiano](README_IT.md) | [Русский](README_RU.md) | [Português (Brasil)](README_PT-BR.md)
 
@@ -134,8 +131,7 @@ Sie sollten sehen:
 
 Fertig! Ihr Agent verfügt jetzt über Langzeitgedächtnis.
 
-<details>
-<summary><strong>Weitere Installationswege (bestehende Benutzer, Upgrades)</strong></summary>
+<details> <summary><strong>Weitere Installationswege (bestehende Benutzer, Upgrades)</strong></summary>
 
 **Bereits OpenClaw-Benutzer?**
 
@@ -160,8 +156,7 @@ Siehe `CHANGELOG-v1.1.0.md` für Verhaltensänderungen und Upgrade-Begründung.
 
 </details>
 
-<details>
-<summary><strong>Telegram-Bot-Schnellimport (zum Aufklappen klicken)</strong></summary>
+<details> <summary><strong>Telegram-Bot-Schnellimport (zum Aufklappen klicken)</strong></summary>
 
 Wenn Sie die Telegram-Integration von OpenClaw verwenden, ist es am einfachsten, einen Importbefehl direkt an den Hauptbot zu senden, anstatt die Konfiguration manuell zu bearbeiten.
 
@@ -244,11 +239,9 @@ git clone https://github.com/CortexReach/memory-lancedb-pro-skill.git ~/.opencla
 
 > Vollständige Anleitung: Installation, Konfiguration und Funktionsweise der hybriden Suche.
 
-[![YouTube Video](https://img.shields.io/badge/YouTube-Watch%20Now-red?style=for-the-badge&logo=youtube)](https://youtu.be/MtukF1C8epQ)
-**https://youtu.be/MtukF1C8epQ**
+[![YouTube Video](https://img.shields.io/badge/YouTube-Watch%20Now-red?style=for-the-badge&logo=youtube)](https://youtu.be/MtukF1C8epQ) **https://youtu.be/MtukF1C8epQ**
 
-[![Bilibili Video](https://img.shields.io/badge/Bilibili-Watch%20Now-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1zUf2BGEgn/)
-**https://www.bilibili.com/video/BV1zUf2BGEgn/**
+[![Bilibili Video](https://img.shields.io/badge/Bilibili-Watch%20Now-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1zUf2BGEgn/) **https://www.bilibili.com/video/BV1zUf2BGEgn/**
 
 ---
 
@@ -278,8 +271,7 @@ git clone https://github.com/CortexReach/memory-lancedb-pro-skill.git ~/.opencla
 
 > Für eine detaillierte Analyse der vollständigen Architektur siehe [docs/memory_architecture_analysis.md](docs/memory_architecture_analysis.md).
 
-<details>
-<summary><strong>Dateireferenz (zum Aufklappen klicken)</strong></summary>
+<details> <summary><strong>Dateireferenz (zum Aufklappen klicken)</strong></summary>
 
 | Datei | Zweck |
 | --- | --- |
@@ -369,8 +361,7 @@ Query → BM25 FTS ─────┘
 
 ---
 
-<details>
-<summary><strong>Vergleich mit dem eingebauten <code>memory-lancedb</code> (zum Aufklappen klicken)</strong></summary>
+<details> <summary><strong>Vergleich mit dem eingebauten <code>memory-lancedb</code> (zum Aufklappen klicken)</strong></summary>
 
 | Funktion | Eingebautes `memory-lancedb` | **memory-lancedb-pro** |
 | --- | :---: | :---: |
@@ -397,8 +388,7 @@ Query → BM25 FTS ─────┘
 
 ## Konfiguration
 
-<details>
-<summary><strong>Vollständiges Konfigurationsbeispiel</strong></summary>
+<details> <summary><strong>Vollständiges Konfigurationsbeispiel</strong></summary>
 
 ```json
 {
@@ -462,8 +452,7 @@ Query → BM25 FTS ─────┘
 
 </details>
 
-<details>
-<summary><strong>Embedding-Anbieter</strong></summary>
+<details> <summary><strong>Embedding-Anbieter</strong></summary>
 
 Funktioniert mit **jeder OpenAI-kompatiblen Embedding-API**:
 
@@ -477,8 +466,7 @@ Funktioniert mit **jeder OpenAI-kompatiblen Embedding-API**:
 
 </details>
 
-<details>
-<summary><strong>Rerank-Anbieter</strong></summary>
+<details> <summary><strong>Rerank-Anbieter</strong></summary>
 
 Cross-Encoder Reranking unterstützt mehrere Anbieter über `rerankProvider`:
 
@@ -493,8 +481,7 @@ Jeder Jina-kompatible Rerank-Endpunkt funktioniert ebenfalls — setzen Sie `rer
 
 </details>
 
-<details>
-<summary><strong>Intelligente Extraktion (LLM) — v1.1.0</strong></summary>
+<details> <summary><strong>Intelligente Extraktion (LLM) — v1.1.0</strong></summary>
 
 Wenn `smartExtraction` aktiviert ist (Standard: `true`), verwendet das Plugin ein LLM, um Erinnerungen intelligent zu extrahieren und zu klassifizieren, anstatt regex-basierte Auslöser zu verwenden.
 
@@ -535,8 +522,7 @@ Hinweise zu `llm.auth: "oauth"`:
 
 </details>
 
-<details>
-<summary><strong>Lebenszyklus-Konfiguration (Zerfall + Stufen)</strong></summary>
+<details> <summary><strong>Lebenszyklus-Konfiguration (Zerfall + Stufen)</strong></summary>
 
 | Feld | Standard | Beschreibung |
 |-------|---------|-------------|
@@ -551,8 +537,7 @@ Hinweise zu `llm.auth: "oauth"`:
 
 </details>
 
-<details>
-<summary><strong>Zugriffsverstärkung</strong></summary>
+<details> <summary><strong>Zugriffsverstärkung</strong></summary>
 
 Häufig abgerufene Erinnerungen zerfallen langsamer (Spaced-Repetition-Stil).
 
@@ -594,8 +579,7 @@ OAuth-Login-Ablauf:
 
 ## Erweiterte Themen
 
-<details>
-<summary><strong>Wenn injizierte Erinnerungen in Antworten auftauchen</strong></summary>
+<details> <summary><strong>Wenn injizierte Erinnerungen in Antworten auftauchen</strong></summary>
 
 Manchmal kann das Modell den injizierten `<relevant-memories>`-Block wiedergeben.
 
@@ -609,8 +593,7 @@ Manchmal kann das Modell den injizierten `<relevant-memories>`-Block wiedergeben
 
 </details>
 
-<details>
-<summary><strong>Sitzungsgedächtnis</strong></summary>
+<details> <summary><strong>Sitzungsgedächtnis</strong></summary>
 
 - Wird beim `/new`-Befehl ausgelöst — speichert die vorherige Sitzungszusammenfassung in LanceDB
 - Standardmäßig deaktiviert (OpenClaw hat bereits native `.jsonl`-Sitzungspersistenz)
@@ -620,8 +603,7 @@ Siehe [docs/openclaw-integration-playbook.md](docs/openclaw-integration-playbook
 
 </details>
 
-<details>
-<summary><strong>Benutzerdefinierte Slash-Befehle (z.B. /lesson)</strong></summary>
+<details> <summary><strong>Benutzerdefinierte Slash-Befehle (z.B. /lesson)</strong></summary>
 
 Fügen Sie zu Ihrer `CLAUDE.md`, `AGENTS.md` oder Ihrem Systemprompt hinzu:
 
@@ -640,8 +622,7 @@ When the user sends `/remember <content>`:
 
 </details>
 
-<details>
-<summary><strong>Eiserne Regeln für KI-Agenten</strong></summary>
+<details> <summary><strong>Eiserne Regeln für KI-Agenten</strong></summary>
 
 > Kopieren Sie den folgenden Block in Ihre `AGENTS.md`, damit Ihr Agent diese Regeln automatisch durchsetzt.
 
@@ -668,8 +649,7 @@ After modifying .ts files under plugins/, MUST run rm -rf /tmp/jiti/ BEFORE open
 
 </details>
 
-<details>
-<summary><strong>Datenbankschema</strong></summary>
+<details> <summary><strong>Datenbankschema</strong></summary>
 
 LanceDB-Tabelle `memories`:
 
@@ -690,8 +670,7 @@ Häufige `metadata`-Schlüssel in v1.1.0: `l0_abstract`, `l1_overview`, `l2_cont
 
 </details>
 
-<details>
-<summary><strong>Fehlerbehebung</strong></summary>
+<details> <summary><strong>Fehlerbehebung</strong></summary>
 
 ### "Cannot mix BigInt and other types" (LanceDB / Apache Arrow)
 
@@ -738,29 +717,17 @@ Feedback: [GitHub Issues](https://github.com/CortexReach/memory-lancedb-pro/issu
 
 ## Contributors
 
-<p>
-<a href="https://github.com/win4r"><img src="https://avatars.githubusercontent.com/u/42172631?v=4" width="48" height="48" alt="@win4r" /></a>
-<a href="https://github.com/kctony"><img src="https://avatars.githubusercontent.com/u/1731141?v=4" width="48" height="48" alt="@kctony" /></a>
-<a href="https://github.com/Akatsuki-Ryu"><img src="https://avatars.githubusercontent.com/u/8062209?v=4" width="48" height="48" alt="@Akatsuki-Ryu" /></a>
-<a href="https://github.com/JasonSuz"><img src="https://avatars.githubusercontent.com/u/612256?v=4" width="48" height="48" alt="@JasonSuz" /></a>
-<a href="https://github.com/Minidoracat"><img src="https://avatars.githubusercontent.com/u/11269639?v=4" width="48" height="48" alt="@Minidoracat" /></a>
-<a href="https://github.com/furedericca-lab"><img src="https://avatars.githubusercontent.com/u/263020793?v=4" width="48" height="48" alt="@furedericca-lab" /></a>
-<a href="https://github.com/joe2643"><img src="https://avatars.githubusercontent.com/u/19421931?v=4" width="48" height="48" alt="@joe2643" /></a>
-<a href="https://github.com/AliceLJY"><img src="https://avatars.githubusercontent.com/u/136287420?v=4" width="48" height="48" alt="@AliceLJY" /></a>
-<a href="https://github.com/chenjiyong"><img src="https://avatars.githubusercontent.com/u/8199522?v=4" width="48" height="48" alt="@chenjiyong" /></a>
-</p>
+<p> <a href="https://github.com/win4r"><img src="https://avatars.githubusercontent.com/u/42172631?v=4" width="48" height="48" alt="@win4r" /></a> <a href="https://github.com/kctony"><img src="https://avatars.githubusercontent.com/u/1731141?v=4" width="48" height="48" alt="@kctony" /></a> <a href="https://github.com/Akatsuki-Ryu"><img src="https://avatars.githubusercontent.com/u/8062209?v=4" width="48" height="48" alt="@Akatsuki-Ryu" /></a> <a href="https://github.com/JasonSuz"><img src="https://avatars.githubusercontent.com/u/612256?v=4" width="48" height="48" alt="@JasonSuz" /></a> <a href="https://github.com/Minidoracat"><img src="https://avatars.githubusercontent.com/u/11269639?v=4" width="48" height="48" alt="@Minidoracat" /></a> <a href="https://github.com/furedericca-lab"><img src="https://avatars.githubusercontent.com/u/263020793?v=4" width="48" height="48" alt="@furedericca-lab" /></a> <a href="https://github.com/joe2643"><img src="https://avatars.githubusercontent.com/u/19421931?v=4" width="48" height="48" alt="@joe2643" /></a> <a href="https://github.com/AliceLJY"><img src="https://avatars.githubusercontent.com/u/136287420?v=4" width="48" height="48" alt="@AliceLJY" /></a> <a href="https://github.com/chenjiyong"><img src="https://avatars.githubusercontent.com/u/8199522?v=4" width="48" height="48" alt="@chenjiyong" /></a> </p>
 
 Full list: [Contributors](https://github.com/CortexReach/memory-lancedb-pro/graphs/contributors)
 
 ## Star History
 
-<a href="https://star-history.com/#CortexReach/memory-lancedb-pro&Date">
-  <picture>
+<a href="https://star-history.com/#CortexReach/memory-lancedb-pro&Date"> <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=CortexReach/memory-lancedb-pro&type=Date&theme=dark&transparent=true" />
     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=CortexReach/memory-lancedb-pro&type=Date&transparent=true" />
     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CortexReach/memory-lancedb-pro&type=Date&transparent=true" />
-  </picture>
-</a>
+</picture> </a>
 
 ## Lizenz
 

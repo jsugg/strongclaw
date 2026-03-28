@@ -60,16 +60,14 @@ Wrapper transport remains intentionally conservative:
 
 - requests use a stable `User-Agent` and explicit timeout
 - terminal success/failure rows persist request method/url, request attempt count,
-  status code, body excerpt, and a typed transport error code when relevant
+status code, body excerpt, and a typed transport error code when relevant
 - automatic retries are endpoint-scoped, not blanket behavior
 - current mutating wrappers (`github.comment.create`,
-  `github.issue.labels.add`, `github.pull_request.merge`, `webhook.post`) stay
-  on explicit no-retry policies until endpoint-level idempotency is proven
+`github.issue.labels.add`, `github.pull_request.merge`, `webhook.post`) stay on explicit no-retry policies until endpoint-level idempotency is proven
 
 ## Execution contract
 
-Wrappers now persist an execution contract alongside the stored policy decision.
-That contract binds execution to the prepared operation metadata:
+Wrappers now persist an execution contract alongside the stored policy decision. That contract binds execution to the prepared operation metadata:
 
 - scope
 - kind
@@ -78,11 +76,9 @@ That contract binds execution to the prepared operation metadata:
 - input hash
 - policy decision
 
-`clawops op-journal begin` remains available for generic audit/bookkeeping use,
-but those rows are not executable wrapper operations by themselves.
+`clawops op-journal begin` remains available for generic audit/bookkeeping use, but those rows are not executable wrapper operations by themselves.
 
-This prevents a forged journal row from bypassing policy and allowlist checks at
-`--execute-approved` time.
+This prevents a forged journal row from bypassing policy and allowlist checks at `--execute-approved` time.
 
 ## Journal ownership
 
@@ -139,14 +135,11 @@ clawops wrapper webhook \
 Legacy note:
 
 - older approved rows that predate execution contracts may require an explicit
-  policy file on `--execute-approved` so the wrapper can restamp the row before
-  sending the side effect
+policy file on `--execute-approved` so the wrapper can restamp the row before sending the side effect
 
 ## Devflow audit spine
 
-The production devflow surface reuses the same SQLite audit spine in
-`op_journal.sqlite` and adds devflow-specific run, stage, and stage-event
-tables. Operators inspect and recover that workflow state through:
+The production devflow surface reuses the same SQLite audit spine in `op_journal.sqlite` and adds devflow-specific run, stage, and stage-event tables. Operators inspect and recover that workflow state through:
 
 ```bash
 clawops devflow status --run-id <run-id>

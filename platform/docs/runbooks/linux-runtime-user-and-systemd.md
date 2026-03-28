@@ -1,7 +1,6 @@
 # Linux runtime user and user-level systemd
 
-Create a dedicated non-admin account for the OpenClaw runtime and keep it
-separate from your daily admin shell.
+Create a dedicated non-admin account for the OpenClaw runtime and keep it separate from your daily admin shell.
 
 Preferred pattern:
 1. create `openclawsvc`

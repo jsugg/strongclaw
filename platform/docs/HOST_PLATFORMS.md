@@ -5,18 +5,13 @@ Strongclaw supports two operator-host platforms:
 - macOS hosts using Homebrew plus `launchd`
 - Linux hosts using `apt-get` plus user-level `systemd`
 
-Both use the same bootstrap entrypoints, config overlays, and verification
-gates.
+Both use the same bootstrap entrypoints, config overlays, and verification gates.
 
-The bootstrap contract is runtime-aware: if the host already has a
-Docker-compatible runtime that exposes `docker` plus `docker compose`,
-Strongclaw reuses it. Docker is installed only as the fallback runtime when no
-compatible backend is detected.
+The bootstrap contract is runtime-aware: if the host already has a Docker-compatible runtime that exposes `docker` plus `docker compose`, Strongclaw reuses it. Docker is installed only as the fallback runtime when no compatible backend is detected.
 
 ## Compatibility matrix
 
-StrongClaw's supported baseline is derived from the codebase constraints plus
-the pinned external tools that setup installs.
+StrongClaw's supported baseline is derived from the codebase constraints plus the pinned external tools that setup installs.
 
 | Component | Supported / pinned version | Why |
 | --- | --- | --- |
@@ -49,9 +44,7 @@ For low-end or older hosts, this split matters:
 
 ## Runtime data locations
 
-StrongClaw-generated runtime artifacts should not live inside the repository
-checkout. The setup, doctor, harness, ACP runner, workflow context-pack, and
-compose helper commands now default to OS-appropriate app directories instead.
+StrongClaw-generated runtime artifacts should not live inside the repository checkout. The setup, doctor, harness, ACP runner, workflow context-pack, and compose helper commands now default to OS-appropriate app directories instead.
 
 | Kind | Linux default | macOS default |
 | --- | --- | --- |
@@ -65,10 +58,7 @@ compose helper commands now default to OS-appropriate app directories instead.
 | QMD package files | `<data>/qmd` | `<data>/qmd` |
 | `lossless-claw` checkout | `<data>/plugins/lossless-claw` | `<data>/plugins/lossless-claw` |
 
-Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`,
-`STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs
-to override those defaults. The Python-owned compose commands export
-`STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
+Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`, `STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs to override those defaults. The Python-owned compose commands export `STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
 
 ## Shared host contract
 
@@ -89,41 +79,38 @@ Regardless of host OS, the baseline flow is:
 
 - Preflight requires Homebrew.
 - OrbStack, Rancher Desktop, Colima, and Docker Desktop are all acceptable as
-  long as they expose `docker` plus `docker compose`.
+long as they expose `docker` plus `docker compose`.
 - `clawops ops sidecars up` now phases hosted macOS sidecar startup: Postgres
-  comes up first, StrongClaw runs LiteLLM Prisma bootstrap as a transient
-  compose run, and only then does the long-lived LiteLLM proxy start. That
-  keeps cold-database bootstrap work out of the runtime health window without
-  encoding init containers into the steady-state compose topology.
+comes up first, StrongClaw runs LiteLLM Prisma bootstrap as a transient compose run, and only then does the long-lived LiteLLM proxy start. That keeps cold-database bootstrap work out of the runtime health window without encoding init containers into the steady-state compose topology.
 - If one of those runtimes is installed but its Docker CLI integration is not
-  enabled yet, bootstrap stops instead of installing Docker over it.
+enabled yet, bootstrap stops instead of installing Docker over it.
 - Service definitions render into `~/Library/LaunchAgents`.
 - Activate them with `launchctl bootstrap gui/$(id -u) ...`.
 - The runtime-user and loopback-SSH flow is documented in
-  `platform/docs/runbooks/macos-service-user-and-ssh.md`.
+`platform/docs/runbooks/macos-service-user-and-ssh.md`.
 
 ## Linux host notes
 
 - The current Linux bootstrap path targets Debian/Ubuntu-style hosts with
-  `apt-get`.
+`apt-get`.
 - Existing Docker-compatible runtimes are reused when they already expose
-  `docker` plus `docker compose` for the runtime user.
+`docker` plus `docker compose` for the runtime user.
 - If no compatible runtime is detected, bootstrap installs Docker Engine as the
-  fallback backend.
+fallback backend.
 - Provision the runtime user with `your platform-native runtime-user provisioning flow`.
 - Service definitions render into `~/.config/systemd/user`.
 - Activate them with `systemctl --user daemon-reload` and
-  `systemctl --user enable --now ...`.
+`systemctl --user enable --now ...`.
 - Use `loginctl enable-linger <user>` when user services must survive logout.
 - Prefer rootless Docker or a tightly controlled `docker` group for the runtime
-  user.
+user.
 - The runtime-user and user-systemd flow is documented in
-  `platform/docs/runbooks/linux-runtime-user-and-systemd.md`.
+`platform/docs/runbooks/linux-runtime-user-and-systemd.md`.
 
 ## Separate-host guidance
 
 - Browser lab belongs on a separate host or hardened user session.
 - ACP workers can run on the same operator host for evaluation, but a separate
-  worker host is the safer steady-state.
+worker host is the safer steady-state.
 - Langfuse and similar observability extras can live on a separate VM or sidecar
-  host without changing the control-plane bootstrap contract.
+host without changing the control-plane bootstrap contract.

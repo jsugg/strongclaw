@@ -8,9 +8,9 @@
 ## Files
 
 - managed Varlock env dir: `~/.config/strongclaw/varlock` on Linux,
-  `~/Library/Application Support/StrongClaw/config/varlock` on macOS
+`~/Library/Application Support/StrongClaw/config/varlock` on macOS
 - source template assets: `platform/configs/varlock/.env.schema`,
-  `platform/configs/varlock/.env.local.example`
+`platform/configs/varlock/.env.local.example`
 - managed plugin overlay: `.env.plugins` (generated locally when you choose a managed secret backend)
 - `platform/examples/openclaw-secretref-*.json5`
 
@@ -40,11 +40,9 @@
 - StrongClaw keeps core machine-local secrets such as the gateway token and LiteLLM bootstrap secrets in `.env.local` by default.
 - Managed backends are primarily used for LLM provider credentials and similar integration tokens.
 - `HYPERMEMORY_EMBEDDING_MODEL` is the only hypermemory env key that
-  normally needs operator input; the loopback base URLs are backfilled by
-  guided setup unless you override them.
+normally needs operator input; the loopback base URLs are backfilled by guided setup unless you override them.
 - `.env.plugins` is ignored by git and imported from `.env.schema`, so manual and guided setup can be mixed safely. If you author it by hand, keep explicit plugin version specifiers in each `@plugin(...)` decorator.
 
 ## Rotation
 
-Use `clawops recovery rotate-secrets` and the runbook:
-`platform/docs/runbooks/credential-rotation.md`
+Use `clawops recovery rotate-secrets` and the runbook: `platform/docs/runbooks/credential-rotation.md`
