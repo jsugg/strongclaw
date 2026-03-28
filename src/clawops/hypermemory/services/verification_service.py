@@ -130,7 +130,10 @@ class VerificationService:
         if status["dirty"]:
             errors.append("hypermemory index is dirty")
         if status["lastVectorSyncError"]:
-            errors.append(f"vector sync error: {status['lastVectorSyncError']}")
+            if status["vectorSyncDeferred"] and status["searchItems"] > 0:
+                errors.append(f"vector sync deferred: {status['lastVectorSyncError']}")
+            else:
+                errors.append(f"vector sync error: {status['lastVectorSyncError']}")
         if not status["qdrantEnabled"] or not status["qdrantHealthy"]:
             errors.append("Qdrant must be enabled and healthy")
         if status["vectorItems"] <= 0:

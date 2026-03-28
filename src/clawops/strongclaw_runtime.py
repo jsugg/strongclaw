@@ -103,6 +103,20 @@ class DockerRefreshState:
     created_at: str
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class DockerBackendDiagnostics:
+    """Structured Docker backend reachability diagnostics."""
+
+    docker_cli_installed: bool
+    docker_compose_available: bool
+    backend_ready: bool
+    provider: str | None
+    context: str | None
+    docker_host: str | None
+    info_stdout: str
+    info_stderr: str
+
+
 def resolve_repo_root(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:
     """Return the effective repository root."""
     if repo_root is None:
@@ -704,11 +718,68 @@ def docker_compose_available() -> bool:
     return run_command(["docker", "compose", "version"], timeout_seconds=10).ok
 
 
+def _docker_context_name() -> str | None:
+    """Return the active Docker context when available."""
+    if not docker_cli_installed():
+        return None
+    result = run_command(["docker", "context", "show"], timeout_seconds=10)
+    if not result.ok:
+        return None
+    context = result.stdout.strip()
+    return context or None
+
+
+def _infer_docker_provider(
+    *,
+    host_os: str,
+    context: str | None,
+    docker_host: str | None,
+) -> str | None:
+    """Infer the Docker runtime provider from runtime signals."""
+    haystack = " ".join(part for part in (context, docker_host) if part).casefold()
+    if "orbstack" in haystack:
+        return "OrbStack"
+    if "colima" in haystack:
+        return "Colima"
+    if "rancher" in haystack:
+        return "Rancher Desktop"
+    if "desktop" in haystack:
+        return "Docker Desktop"
+    provider = detect_docker_runtime_provider(host_os)
+    return None if provider == "docker-compose" else provider
+
+
+def docker_backend_diagnostics() -> DockerBackendDiagnostics:
+    """Return structured diagnostics for Docker backend reachability."""
+    cli_installed = docker_cli_installed()
+    compose_installed = docker_compose_available() if cli_installed else False
+    context = _docker_context_name() if cli_installed else None
+    docker_host = os.environ.get("DOCKER_HOST")
+    info_result = (
+        run_command(["docker", "info"], timeout_seconds=15)
+        if cli_installed and compose_installed
+        else ExecResult(argv=("docker", "info"), returncode=None, stdout="", stderr="", duration_ms=0)
+    )
+    provider = _infer_docker_provider(
+        host_os=platform.system(),
+        context=context,
+        docker_host=docker_host,
+    )
+    return DockerBackendDiagnostics(
+        docker_cli_installed=cli_installed,
+        docker_compose_available=compose_installed,
+        backend_ready=cli_installed and compose_installed and info_result.ok,
+        provider=provider,
+        context=context,
+        docker_host=docker_host,
+        info_stdout=info_result.stdout.strip(),
+        info_stderr=info_result.stderr.strip(),
+    )
+
+
 def docker_backend_ready() -> bool:
     """Return whether the Docker backend is reachable."""
-    if not docker_compose_available():
-        return False
-    return run_command(["docker", "info"], timeout_seconds=15).ok
+    return docker_backend_diagnostics().backend_ready
 
 
 def detect_docker_runtime_provider(host_os: str) -> str | None:
@@ -760,14 +831,15 @@ def docker_runtime_enable_guidance(provider: str) -> str:
 
 def ensure_docker_backend_ready() -> None:
     """Raise when Docker is not ready for sidecar operations."""
-    if docker_backend_ready():
+    diagnostics = docker_backend_diagnostics()
+    if diagnostics.backend_ready:
         clear_docker_shell_refresh_required()
         return
-    if not docker_cli_installed():
+    if not diagnostics.docker_cli_installed:
         raise CommandError(
             "A Docker-compatible runtime is required to activate StrongClaw sidecars."
         )
-    if not docker_compose_available():
+    if not diagnostics.docker_compose_available:
         raise CommandError(
             "docker is installed but `docker compose` is unavailable. Install or enable a compatible compose plugin."
         )
@@ -777,7 +849,23 @@ def ensure_docker_backend_ready() -> None:
             "Docker access was granted during bootstrap, but this shell has not picked up the new group membership yet. "
             f"Start a fresh login shell as {refresh_state.runtime_user}, then rerun the operation."
         )
-    raise CommandError("Docker is installed but the backend is not reachable from this shell.")
+    details: list[str] = []
+    if diagnostics.provider is not None:
+        details.append(f"Detected runtime: {diagnostics.provider}.")
+    if diagnostics.context is not None:
+        details.append(f"Active docker context: {diagnostics.context}.")
+    if diagnostics.docker_host:
+        details.append(f"DOCKER_HOST={diagnostics.docker_host}.")
+    if diagnostics.info_stderr:
+        details.append(f"`docker info` stderr: {diagnostics.info_stderr}.")
+    elif diagnostics.info_stdout:
+        details.append(f"`docker info` output: {diagnostics.info_stdout}.")
+    if diagnostics.provider is not None:
+        details.append(docker_runtime_enable_guidance(diagnostics.provider))
+    raise CommandError(
+        "Docker is installed but the backend is not reachable from this shell. "
+        + " ".join(details)
+    )
 
 
 def repair_linux_runtime_user_docker_access(runtime_user: str) -> None:

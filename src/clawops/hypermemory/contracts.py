@@ -112,6 +112,7 @@ class StatusResult(TypedDict):
     qdrant: dict[str, object]
     lastVectorSyncAt: str | None
     lastVectorSyncError: str | None
+    vectorSyncDeferred: bool
     sparseFingerprint: str | None
     sparseFingerprintDirty: bool
     sparseDocumentCount: int

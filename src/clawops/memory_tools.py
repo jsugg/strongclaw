@@ -15,7 +15,7 @@ from typing import Any, Final, cast
 from clawops.app_paths import scoped_state_dir
 from clawops.common import ResultSummary, load_json, write_json
 from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
-from clawops.process_runner import run_command
+from clawops.process_runner import CommandResult, run_command
 from clawops.typed_values import as_mapping, as_mapping_list
 
 MIGRATION_REPORT_VERSION: Final[int] = 1
@@ -72,6 +72,15 @@ def _default_report_output(engine: HypermemoryEngine, scope: str, name: str) -> 
 def _default_import_report_output(snapshot_path: pathlib.Path, scope: str) -> pathlib.Path:
     """Return the default report path for a managed memory-pro import."""
     return snapshot_path.parent / f"import-report-{_scope_slug(scope)}.json"
+
+
+def _probe_memory_pro_import_support(
+    openclaw_bin: str,
+) -> tuple[bool, CommandResult, list[str]]:
+    """Return whether the target OpenClaw binary supports `memory-pro import`."""
+    command = [openclaw_bin, "memory-pro", "import", "--help"]
+    result = run_command(command, timeout_seconds=DEFAULT_IMPORT_TIMEOUT_SECONDS)
+    return result.ok, result, command
 
 
 def _category_counts(memories: Sequence[Mapping[str, object]]) -> dict[str, int]:
@@ -183,6 +192,32 @@ def import_pro_snapshot(
         if report is None
         else report.expanduser().resolve()
     )
+    capability_ok, probe_result, probe_command = _probe_memory_pro_import_support(openclaw_bin)
+    if not capability_ok:
+        summary: dict[str, Any] = {
+            "ok": False,
+            "version": MIGRATION_REPORT_VERSION,
+            "scope": resolved_scope,
+            "dryRun": dry_run,
+            "importSnapshot": snapshot_path.as_posix(),
+            "report": report_output.as_posix(),
+            "command": probe_command,
+            "durationMs": probe_result.duration_ms,
+            "returnCode": probe_result.returncode,
+            "timedOut": probe_result.timed_out,
+            "failedToStart": probe_result.failed_to_start,
+        }
+        stdout = probe_result.stdout.strip()
+        stderr = probe_result.stderr.strip()
+        if stdout:
+            summary["stdoutExcerpt"] = stdout[:1000]
+        if stderr:
+            summary["stderrExcerpt"] = stderr[:1000]
+        if not probe_result.failed_to_start and not probe_result.timed_out:
+            summary["capabilityError"] = "openclaw binary does not support `memory-pro import`"
+        write_json(report_output, summary)
+        return summary
+
     command = [
         openclaw_bin,
         "memory-pro",

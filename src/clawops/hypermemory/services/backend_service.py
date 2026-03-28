@@ -243,12 +243,12 @@ class BackendService:
         stale_point_ids: set[str],
         sparse_encoder: SparseEncoder,
     ) -> None:
-        conn.execute("DELETE FROM backend_state")
-        conn.execute("DELETE FROM sparse_terms")
-        self._index.write_sparse_state(
-            conn, sparse_encoder, enabled=self.backend_uses_sparse_vectors()
-        )
         if not self._config.qdrant.enabled or not self._config.embedding.enabled:
+            conn.execute("DELETE FROM backend_state")
+            conn.execute("DELETE FROM sparse_terms")
+            self._index.write_sparse_state(
+                conn, sparse_encoder, enabled=self.backend_uses_sparse_vectors()
+            )
             conn.execute("DELETE FROM vector_items")
             self._index.write_backend_state(conn, "config_fingerprint", self.backend_fingerprint())
             self._index.write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
@@ -264,6 +264,11 @@ class BackendService:
             )
             return
         if not vector_rows:
+            conn.execute("DELETE FROM backend_state")
+            conn.execute("DELETE FROM sparse_terms")
+            self._index.write_sparse_state(
+                conn, sparse_encoder, enabled=self.backend_uses_sparse_vectors()
+            )
             conn.execute("DELETE FROM vector_items")
             self._index.write_backend_state(conn, "config_fingerprint", self.backend_fingerprint())
             self._index.write_backend_state(conn, "last_sync_at", datetime.now(tz=UTC).isoformat())
@@ -326,6 +331,11 @@ class BackendService:
                 stale_ids = sorted(stale_point_ids - new_point_ids)
                 if stale_ids:
                     self._vector_backend.delete_points(stale_ids)
+                conn.execute("DELETE FROM backend_state")
+                conn.execute("DELETE FROM sparse_terms")
+                self._index.write_sparse_state(
+                    conn, sparse_encoder, enabled=self.backend_uses_sparse_vectors()
+                )
                 conn.execute("DELETE FROM vector_items")
                 for embedded_row in embedded_vectors:
                     entry = embedded_row.row
@@ -373,6 +383,13 @@ class BackendService:
                 span.set_attributes(payload)
                 emit_structured_log("clawops.hypermemory.vector_sync", payload)
             except Exception as err:
+                conn.execute("DELETE FROM sparse_terms")
+                self._index.write_sparse_state(
+                    conn, sparse_encoder, enabled=self.backend_uses_sparse_vectors()
+                )
+                self._index.write_backend_state(
+                    conn, "config_fingerprint", self.backend_fingerprint()
+                )
                 self._index.write_backend_state(conn, "last_sync_error", str(err))
                 conn.commit()
                 span.record_exception(err)

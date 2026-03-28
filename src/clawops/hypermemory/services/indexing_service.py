@@ -26,6 +26,14 @@ from clawops.hypermemory.utils import normalized_retrieval_text, point_id, sha25
 from clawops.observability import emit_structured_log, observed_span
 
 
+class DeferredVectorSyncError(RuntimeError):
+    """Raised when local reindex succeeds but vector synchronization is deferred."""
+
+    def __init__(self, message: str, *, summary: ReindexSummary) -> None:
+        super().__init__(message)
+        self.summary = summary
+
+
 class IndexingService:
     """Stateful owner for document discovery and derived-index rebuilds."""
 
@@ -222,12 +230,6 @@ class IndexingService:
                             chunks += 1
                     self._rebuild_fact_registry(conn)
                     conn.commit()
-                    self._backend.sync_vectors(
-                        conn=conn,
-                        vector_rows=vector_rows,
-                        stale_point_ids=existing_point_ids,
-                        sparse_encoder=sparse_encoder,
-                    )
                 summary = ReindexSummary(
                     files=len(documents),
                     chunks=chunks,
@@ -238,6 +240,16 @@ class IndexingService:
                     entities=typed_counts["entity"],
                     proposals=typed_counts["proposal"],
                 )
+                with self._connect() as conn:
+                    try:
+                        self._backend.sync_vectors(
+                            conn=conn,
+                            vector_rows=vector_rows,
+                            stale_point_ids=existing_point_ids,
+                            sparse_encoder=sparse_encoder,
+                        )
+                    except Exception as err:
+                        raise DeferredVectorSyncError(str(err), summary=summary) from err
                 summary_payload = {
                     "files": summary.files,
                     "chunks": summary.chunks,
@@ -404,8 +416,6 @@ class IndexingService:
     def _clear_derived_rows(self, conn: sqlite3.Connection) -> None:
         """Clear the rebuildable tables before a full reindex."""
         for table_name in (
-            "backend_state",
-            "vector_items",
             "fact_registry",
             "conflicts",
             "evidence_links",

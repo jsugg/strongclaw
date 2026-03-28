@@ -34,6 +34,7 @@ from clawops.devflow_state import (
     list_stuck_runs,
     mark_run_succeeded,
     record_stage_completed,
+    record_stage_started,
     record_stage_failed,
     resume_run,
 )
@@ -303,100 +304,140 @@ def _execute_plan(
         "repo_root": plan.repo_root.as_posix(),
         "stages": workflow_stages,
     }
-    for stage in plan.stages[start_index:]:
-        workspace = planner.prepare(
+    for stage_index, stage in enumerate(plan.stages[start_index:], start=start_index):
+        planned_root = planner.planned_root(
             stage_name=stage.name,
             workspace_mode=stage.workspace_mode,
-            source_root=current_source_root,
         )
-        stage_workflow = _compile_stage_workflow(
-            plan=plan,
-            stage=stage,
-            run_root=run_root,
-            workspace_root=workspace.root,
-            approved_by=approved_by,
-        )
-        workflow_stages.append(
-            {
-                "name": stage.name,
-                "workspace_mode": stage.workspace_mode,
-                "workspace_root": workspace.root.as_posix(),
-                "workflow": stage_workflow,
-            }
-        )
-        write_yaml(run_root / "workflow.yaml", workflow_contract)
-        _write_log(
-            run_root,
-            "stage_prepare",
-            {
-                "run_id": plan.run_id,
-                "stage": stage.name,
-                "workspace_root": workspace.root.as_posix(),
-            },
-        )
-        results = WorkflowRunner(stage_workflow, base_dir=plan.repo_root).run()
-        dispatch_result = next(
-            result for result in results if result.name == f"{stage.name}-worker-dispatch"
-        )
-        manifest_result = next(
-            result for result in results if result.name == f"{stage.name}-artifact-manifest"
-        )
-        summary_path = _copy_optional(
-            cast(str | None, dispatch_result.details.get("summary_path")),
-            _summary_target(run_root, stage.name),
-        )
-        audit_path = _copy_optional(
-            cast(str | None, dispatch_result.details.get("audit_path")),
-            _audit_target(run_root, stage.name),
-        )
-        manifest_path = (
-            pathlib.Path(str(manifest_result.details["manifest_path"])).expanduser().resolve()
-        )
-        failed_messages = [result.message for result in results if not result.ok]
-        if failed_messages:
-            record_stage_failed(
+        try:
+            workspace = planner.prepare(
+                stage_name=stage.name,
+                workspace_mode=stage.workspace_mode,
+                source_root=current_source_root,
+            )
+            stage_workflow = _compile_stage_workflow(
+                plan=plan,
+                stage=stage,
+                run_root=run_root,
+                workspace_root=workspace.root,
+                approved_by=approved_by,
+            )
+            workflow_stages.append(
+                {
+                    "name": stage.name,
+                    "workspace_mode": stage.workspace_mode,
+                    "workspace_root": workspace.root.as_posix(),
+                    "workflow": stage_workflow,
+                }
+            )
+            write_yaml(run_root / "workflow.yaml", workflow_contract)
+            _write_log(
+                run_root,
+                "stage_prepare",
+                {
+                    "run_id": plan.run_id,
+                    "stage": stage.name,
+                    "workspace_root": workspace.root.as_posix(),
+                },
+            )
+            results = WorkflowRunner(stage_workflow, base_dir=plan.repo_root).run()
+            dispatch_result = next(
+                result for result in results if result.name == f"{stage.name}-worker-dispatch"
+            )
+            manifest_result = next(
+                result for result in results if result.name == f"{stage.name}-artifact-manifest"
+            )
+            summary_path = _copy_optional(
+                cast(str | None, dispatch_result.details.get("summary_path")),
+                _summary_target(run_root, stage.name),
+            )
+            audit_path = _copy_optional(
+                cast(str | None, dispatch_result.details.get("audit_path")),
+                _audit_target(run_root, stage.name),
+            )
+            manifest_path = (
+                pathlib.Path(str(manifest_result.details["manifest_path"])).expanduser().resolve()
+            )
+            failed_messages = [result.message for result in results if not result.ok]
+            if failed_messages:
+                record_stage_failed(
+                    _journal_db(plan.repo_root),
+                    run_id=plan.run_id,
+                    stage_name=stage.name,
+                    summary_path=summary_path,
+                    audit_path=audit_path,
+                    artifact_manifest_path=manifest_path,
+                    reason="; ".join(failed_messages),
+                )
+                view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
+                _write_run_snapshot(run_root, view)
+                _write_log(
+                    run_root,
+                    "stage_failed",
+                    {"run_id": plan.run_id, "stage": stage.name, "messages": failed_messages},
+                )
+                return {
+                    "ok": False,
+                    "run_id": plan.run_id,
+                    "stage": stage.name,
+                    "messages": failed_messages,
+                }
+            record_stage_completed(
                 _journal_db(plan.repo_root),
                 run_id=plan.run_id,
                 stage_name=stage.name,
                 summary_path=summary_path,
                 audit_path=audit_path,
                 artifact_manifest_path=manifest_path,
-                reason="; ".join(failed_messages),
+            )
+            if stage.workspace_mode in {"mutable_primary", "mutable_test"}:
+                current_source_root = workspace.root
+            view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
+            _write_run_snapshot(run_root, view)
+            _write_log(
+                run_root,
+                "stage_succeeded",
+                {
+                    "run_id": plan.run_id,
+                    "stage": stage.name,
+                    "workspace_root": workspace.root.as_posix(),
+                },
+            )
+        except Exception as exc:
+            view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
+            stage_record = next(
+                (record for record in view.stages if record.stage_name == stage.name),
+                None,
+            )
+            if stage_record is None or stage_record.status != "running":
+                record_stage_started(
+                    _journal_db(plan.repo_root),
+                    run_id=plan.run_id,
+                    stage_name=stage.name,
+                    stage_index=stage_index,
+                    role=stage.role,
+                    workspace_root=planned_root,
+                    retry_budget=stage.retry_budget,
+                )
+            record_stage_failed(
+                _journal_db(plan.repo_root),
+                run_id=plan.run_id,
+                stage_name=stage.name,
+                reason=str(exc),
             )
             view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
             _write_run_snapshot(run_root, view)
             _write_log(
                 run_root,
                 "stage_failed",
-                {"run_id": plan.run_id, "stage": stage.name, "messages": failed_messages},
+                {"run_id": plan.run_id, "stage": stage.name, "messages": [str(exc)]},
             )
             return {
                 "ok": False,
                 "run_id": plan.run_id,
                 "stage": stage.name,
-                "messages": failed_messages,
+                "messages": [str(exc)],
             }
-        record_stage_completed(
-            _journal_db(plan.repo_root),
-            run_id=plan.run_id,
-            stage_name=stage.name,
-            summary_path=summary_path,
-            audit_path=audit_path,
-            artifact_manifest_path=manifest_path,
-        )
-        if stage.workspace_mode in {"mutable_primary", "mutable_test"}:
-            current_source_root = workspace.root
-        view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
-        _write_run_snapshot(run_root, view)
-        _write_log(
-            run_root,
-            "stage_succeeded",
-            {
-                "run_id": plan.run_id,
-                "stage": stage.name,
-                "workspace_root": workspace.root.as_posix(),
-            },
-        )
     final_view = get_run(_journal_db(plan.repo_root), run_id=plan.run_id)
     run_record = mark_run_succeeded(
         _journal_db(plan.repo_root),

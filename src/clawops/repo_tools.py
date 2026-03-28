@@ -27,6 +27,25 @@ def _worktrees_root(repo_root: pathlib.Path) -> pathlib.Path:
     return repo_root / "repo" / "worktrees"
 
 
+def _repo_contract_remediation(repo_root: pathlib.Path, upstream_repo: pathlib.Path) -> str:
+    """Return the standard remediation message for the repo contract."""
+    return (
+        f"expected repo/upstream at {upstream_repo}; populate that repository and rerun "
+        f"`clawops repo --repo-root {repo_root.as_posix()} doctor`"
+    )
+
+
+def _ensure_upstream_repo(repo_root: pathlib.Path, upstream_repo: pathlib.Path) -> None:
+    """Raise when the managed upstream repository is missing or invalid."""
+    if not upstream_repo.exists():
+        raise RuntimeError(_repo_contract_remediation(repo_root, upstream_repo))
+    if not upstream_repo.is_dir():
+        raise RuntimeError(
+            f"repo/upstream is not a directory: {upstream_repo}; "
+            f"{_repo_contract_remediation(repo_root, upstream_repo)}"
+        )
+
+
 def _git_available() -> bool:
     """Return True when git is available on PATH."""
     return shutil.which("git") is not None
@@ -89,6 +108,7 @@ def list_worktrees(repo_root: pathlib.Path) -> dict[str, Any]:
     managed_root = _worktrees_root(resolved_root)
     if not _git_available():
         raise RuntimeError("git executable not found in PATH")
+    _ensure_upstream_repo(resolved_root, upstream_repo)
     ok, output = _git_text("-C", str(upstream_repo), "worktree", "list", "--porcelain")
     if not ok:
         raise RuntimeError(output or f"unable to list git worktrees under {upstream_repo}")
@@ -122,9 +142,12 @@ def repo_doctor(repo_root: pathlib.Path, *, branch: str | None) -> dict[str, Any
     if not checks["gitAvailable"]:
         errors.append("git executable not found in PATH")
     if not upstream_repo.exists():
-        errors.append(f"missing upstream repository: {upstream_repo}")
+        errors.append(_repo_contract_remediation(resolved_root, upstream_repo))
     elif not upstream_repo.is_dir():
-        errors.append(f"upstream repository is not a directory: {upstream_repo}")
+        errors.append(
+            f"repo/upstream is not a directory: {upstream_repo}; "
+            f"{_repo_contract_remediation(resolved_root, upstream_repo)}"
+        )
     if not managed_root.exists():
         errors.append(f"missing worktrees root: {managed_root}")
     elif not managed_root.is_dir():
@@ -175,6 +198,7 @@ def create_worktree(
     resolved_root = _resolve_repo_root(repo_root)
     upstream_repo = _upstream_repo(resolved_root)
     managed_root = _worktrees_root(resolved_root)
+    _ensure_upstream_repo(resolved_root, upstream_repo)
     managed_root.mkdir(parents=True, exist_ok=True)
     destination = (path or (managed_root / branch)).expanduser().resolve()
     if not destination.parent.exists():

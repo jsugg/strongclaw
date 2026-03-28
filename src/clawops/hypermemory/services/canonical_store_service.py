@@ -70,6 +70,7 @@ from clawops.hypermemory.models import (
 )
 from clawops.hypermemory.parser import iter_retained_notes, parse_typed_entry
 from clawops.hypermemory.search_hit_mapper import row_to_search_hit as row_to_search_hit_impl
+from clawops.hypermemory.services.indexing_service import DeferredVectorSyncError
 from clawops.hypermemory.utils import sha256
 from clawops.observability import emit_structured_log
 
@@ -384,6 +385,7 @@ class CanonicalStoreService:
         entry_text = text.strip()
         if not entry_text:
             raise ValueError("text must not be empty")
+        deferred_sync_error: DeferredVectorSyncError | None = None
 
         resolved_scope = ensure_writable_scope(
             scope or self.config.governance.default_scope, self.config.governance
@@ -406,7 +408,11 @@ class CanonicalStoreService:
             and (self.config.dedup.enabled or self.config.fact_registry.enabled)
             and self.is_dirty()
         ):
-            self.reindex()
+            try:
+                self.reindex()
+            except DeferredVectorSyncError:
+                # Local rows are already rebuilt; continue and retry after the append.
+                pass
 
         current_fact_hit: SearchHit | None = None
         if (
@@ -475,8 +481,12 @@ class CanonicalStoreService:
             supersedes=supersedes,
         )
         changed = self._append_unique_entry(target, kind=kind, entry_line=entry_line)
-        summary = self.reindex(flush_metadata=not _skip_preflush_on_reindex)
-        return {
+        try:
+            summary = self.reindex(flush_metadata=not _skip_preflush_on_reindex)
+        except DeferredVectorSyncError as exc:
+            deferred_sync_error = exc
+            summary = exc.summary
+        result = {
             "ok": True,
             "stored": changed,
             "path": resolve_under_workspace(self.config.workspace_root, target),
@@ -485,6 +495,10 @@ class CanonicalStoreService:
             "factKey": normalized_fact_key,
             "index": summary.to_dict(),
         }
+        if deferred_sync_error is not None:
+            result["vectorSyncDeferred"] = True
+            result["vectorSyncError"] = str(deferred_sync_error)
+        return result
 
     def update(
         self,

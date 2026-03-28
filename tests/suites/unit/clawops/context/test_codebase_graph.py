@@ -7,7 +7,12 @@ import pathlib
 import pytest
 
 from clawops.common import write_yaml
-from clawops.context.codebase.service import normalize_neo4j_driver_url, service_from_config
+from clawops.context.codebase.service import (
+    GraphConfig,
+    Neo4jGraphBackend,
+    normalize_neo4j_driver_url,
+    service_from_config,
+)
 
 
 def test_large_scale_requires_healthy_neo4j_even_when_fallback_is_allowed(
@@ -138,3 +143,46 @@ def test_medium_scale_symbol_graph_expands_related_files(
             ).fetchall()
         }
     assert {"CALLS", "DEFINES", "REFERENCES"} <= edge_types
+
+
+def test_neo4j_neighbors_use_literal_validated_depth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = Neo4jGraphBackend(GraphConfig())
+    recorded_query = ""
+    recorded_parameters: dict[str, object] = {}
+
+    def _fake_run_query(
+        query: str,
+        *,
+        parameters: dict[str, object],
+    ) -> list[dict[str, object]]:
+        nonlocal recorded_query, recorded_parameters
+        recorded_query = query
+        recorded_parameters = parameters
+        return [{"id": "neighbor-1"}]
+
+    monkeypatch.setattr(backend, "_run_query", _fake_run_query)
+
+    neighbors = backend.neighbors(
+        node_id="symbol:provider.rotate_token",
+        edge_types=["CALLS"],
+        depth=2,
+        limit=4,
+    )
+
+    assert neighbors == ["neighbor-1"]
+    assert "*1..2" in recorded_query
+    assert "depth" not in recorded_parameters
+
+
+def test_neo4j_neighbors_reject_invalid_depth() -> None:
+    backend = Neo4jGraphBackend(GraphConfig())
+
+    with pytest.raises(ValueError, match="depth"):
+        backend.neighbors(
+            node_id="symbol:provider.rotate_token",
+            edge_types=["CALLS"],
+            depth=0,
+            limit=4,
+        )
