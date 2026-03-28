@@ -33,7 +33,7 @@ def test_devflow_recovery_audit_and_resume(
     install_fake_devflow_backends(bin_dir)
     prepend_path(bin_dir)
 
-    exit_code = main(["run", "--repo-root", str(repo_root), "--goal", "recovery smoke"])
+    exit_code = main(["run", "--project-root", str(repo_root), "--goal", "recovery smoke"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 1
@@ -42,7 +42,7 @@ def test_devflow_recovery_audit_and_resume(
     exit_code = main(
         [
             "resume",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--run-id",
             payload["run_id"],
@@ -54,7 +54,7 @@ def test_devflow_recovery_audit_and_resume(
     assert exit_code == 0
     assert resumed["ok"] is True
 
-    exit_code = main(["audit", "--repo-root", str(repo_root), "--run-id", payload["run_id"]])
+    exit_code = main(["audit", "--project-root", str(repo_root), "--run-id", payload["run_id"]])
     audit_payload = json.loads(capsys.readouterr().out)
     bundle = json.loads(pathlib.Path(audit_payload["bundle_path"]).read_text(encoding="utf-8"))
 
@@ -103,20 +103,20 @@ def test_devflow_workspace_failure_marks_run_failed_and_audit_still_works(
 
     test_context.patch.patch_object(DevflowWorkspacePlanner, "prepare", new=_flaky_prepare)
 
-    exit_code = main(["run", "--repo-root", str(repo_root), "--goal", "workspace recovery"])
+    exit_code = main(["run", "--project-root", str(repo_root), "--goal", "workspace recovery"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 1
     assert payload["ok"] is False
     assert payload["stage"] == "reviewer"
 
-    status_exit = main(["status", "--repo-root", str(repo_root), "--run-id", payload["run_id"]])
+    status_exit = main(["status", "--project-root", str(repo_root), "--run-id", payload["run_id"]])
     status_payload = json.loads(capsys.readouterr().out)
 
     assert status_exit == 0
     assert status_payload["run"]["status"] == "failed"
 
-    audit_exit = main(["audit", "--repo-root", str(repo_root), "--run-id", payload["run_id"]])
+    audit_exit = main(["audit", "--project-root", str(repo_root), "--run-id", payload["run_id"]])
     audit_payload = json.loads(capsys.readouterr().out)
     bundle = json.loads(pathlib.Path(audit_payload["bundle_path"]).read_text(encoding="utf-8"))
 
@@ -129,7 +129,7 @@ def test_devflow_workspace_failure_marks_run_failed_and_audit_still_works(
     resume_exit = main(
         [
             "resume",
-            "--repo-root",
+            "--project-root",
             str(repo_root),
             "--run-id",
             payload["run_id"],

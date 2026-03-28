@@ -8,6 +8,7 @@ import pathlib
 import shutil
 from typing import Any
 
+from clawops.cli_roots import add_repo_root_argument
 from clawops.common import ResultSummary
 from clawops.process_runner import run_command
 from clawops.root_detection import resolve_strongclaw_repo_root
@@ -261,7 +262,7 @@ def prune_worktrees(repo_root: pathlib.Path) -> dict[str, Any]:
 def repo_parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the `clawops repo` command."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_repo_root_argument(parser)
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="Validate the repo/upstream + repo/worktrees layout.")
     doctor.add_argument("--branch")
@@ -271,7 +272,7 @@ def repo_parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def worktree_parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the `clawops worktree` command."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_repo_root_argument(parser)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list", help="List managed git worktrees.")
     new = sub.add_parser("new", help="Create a new managed git worktree.")

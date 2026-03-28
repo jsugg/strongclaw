@@ -87,6 +87,7 @@ class DevflowPlan:
             "schema_version": self.schema_version,
             "run_id": self.run_id,
             "goal": self.goal,
+            "project_root": self.repo_root.as_posix(),
             "repo_root": self.repo_root.as_posix(),
             "project_id": self.project_id,
             "lane": self.lane,
@@ -277,7 +278,15 @@ def plan_from_dict(payload: dict[str, object]) -> DevflowPlan:
         schema_version=as_int(mapping.get("schema_version"), path="devflow plan.schema_version"),
         run_id=as_string(mapping.get("run_id"), path="devflow plan.run_id"),
         goal=as_string(mapping.get("goal"), path="devflow plan.goal"),
-        repo_root=pathlib.Path(as_string(mapping.get("repo_root"), path="devflow plan.repo_root"))
+        repo_root=pathlib.Path(
+            as_string(
+                mapping.get(
+                    "project_root",
+                    as_string(mapping.get("repo_root"), path="devflow plan.repo_root"),
+                ),
+                path="devflow plan.project_root",
+            )
+        )
         .expanduser()
         .resolve(),
         project_id=as_string(mapping.get("project_id"), path="devflow plan.project_id"),

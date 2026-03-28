@@ -9,6 +9,7 @@ import pathlib
 import sys
 from typing import Final
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
     CommandError,
     clear_env_assignment,
@@ -17,7 +18,6 @@ from clawops.strongclaw_runtime import (
     merge_env_template,
     profile_requires_hypermemory_backend,
     resolve_profile,
-    resolve_repo_root,
     resolve_varlock_bin,
     run_command,
     set_env_assignment,
@@ -593,7 +593,7 @@ def configure_varlock_env(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the varlock-env CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
     configure_parser = subparsers.add_parser("configure")
     configure_parser.add_argument("--non-interactive", action="store_true")
@@ -605,7 +605,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for env-contract management."""
     args = parse_args(argv)
     payload = configure_varlock_env(
-        resolve_repo_root(args.repo_root),
+        resolve_asset_root_argument(args, command_name="clawops varlock-env"),
         check_only=args.command == "check",
         non_interactive=bool(getattr(args, "non_interactive", False)),
     )

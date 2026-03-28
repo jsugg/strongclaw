@@ -10,6 +10,7 @@ import time
 from typing import Final
 from xml.sax.saxutils import escape
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_text, write_text
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
 from clawops.strongclaw_runtime import (
@@ -308,7 +309,7 @@ def activate_services(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the services CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--state-dir", type=pathlib.Path, default=None)
     parser.add_argument("--service-manager", choices=("launchd", "systemd"))
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -321,7 +322,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for host service rendering and activation."""
     args = parse_args(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops services")
     if args.command == "render":
         payload = render_service_files(
             repo_root,

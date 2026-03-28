@@ -192,9 +192,9 @@ def test_fresh_host_cli_linux_sidecars_verifies_runtime_before_teardown(tmp_path
     assert [phase["status"] for phase in report["phases"]] == ["success"]
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "docker:info",
-        "python:-m clawops ops --repo-root . sidecars up --repo-local-state",
+        "python:-m clawops ops --asset-root . sidecars up --repo-local-state",
         f"docker:compose -f {compose_file} ps --format json",
-        "python:-m clawops ops --repo-root . sidecars down --repo-local-state",
+        "python:-m clawops ops --asset-root . sidecars down --repo-local-state",
     ]
 
 
@@ -222,9 +222,9 @@ def test_fresh_host_cli_linux_browser_lab_verifies_runtime_before_teardown(
     assert [phase["status"] for phase in report["phases"]] == ["success"]
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "docker:info",
-        "python:-m clawops ops --repo-root . browser-lab up --repo-local-state",
+        "python:-m clawops ops --asset-root . browser-lab up --repo-local-state",
         f"docker:compose -f {compose_file} ps --format json",
-        "python:-m clawops ops --repo-root . browser-lab down --repo-local-state",
+        "python:-m clawops ops --asset-root . browser-lab down --repo-local-state",
     ]
 
     summary = _run_fresh_host(
@@ -263,10 +263,10 @@ def test_fresh_host_cli_linux_browser_lab_retries_after_empty_compose_ps_output(
     assert completed.returncode == 0, completed.stderr
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         "docker:info",
-        "python:-m clawops ops --repo-root . browser-lab up --repo-local-state",
+        "python:-m clawops ops --asset-root . browser-lab up --repo-local-state",
         f"docker:compose -f {compose_file} ps --format json",
         f"docker:compose -f {compose_file} ps --format json",
-        "python:-m clawops ops --repo-root . browser-lab down --repo-local-state",
+        "python:-m clawops ops --asset-root . browser-lab down --repo-local-state",
     ]
 
 
@@ -294,6 +294,6 @@ def test_fresh_host_cli_linux_browser_lab_reports_runtime_failure(tmp_path: Path
     log_lines = log_path.read_text(encoding="utf-8").splitlines()
     assert log_lines[:2] == [
         "docker:info",
-        "python:-m clawops ops --repo-root . browser-lab up --repo-local-state",
+        "python:-m clawops ops --asset-root . browser-lab up --repo-local-state",
     ]
     assert log_lines[2:] == [f"docker:compose -f {compose_file} ps --format json"] * 11

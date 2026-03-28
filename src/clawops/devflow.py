@@ -8,6 +8,7 @@ import pathlib
 import shutil
 from typing import Any, cast
 
+from clawops.cli_roots import add_project_root_argument, resolve_project_root_argument
 from clawops.common import (
     canonical_json,
     dump_json,
@@ -39,18 +40,12 @@ from clawops.devflow_state import (
     resume_run,
 )
 from clawops.devflow_workspaces import DevflowWorkspacePlanner
-from clawops.root_detection import resolve_strongclaw_repo_root
 from clawops.workflow_runner import WorkflowRunner
 
 
 def _default_requested_by() -> str:
     """Return the default operator identity for devflow commands."""
     return os.environ.get("USER", "operator")
-
-
-def _repo_root(path: str | pathlib.Path | None) -> pathlib.Path:
-    """Resolve one repository root argument."""
-    return resolve_strongclaw_repo_root(path)
 
 
 def _journal_db(repo_root: pathlib.Path) -> pathlib.Path:
@@ -121,7 +116,7 @@ def _render_stage_prompt(plan: DevflowPlan, stage: DevflowStagePlan) -> str:
         f"Goal:\n{plan.goal}\n\n"
         f"Run:\n"
         f"- run_id: {plan.run_id}\n"
-        f"- repo_root: {plan.repo_root.as_posix()}\n"
+        f"- project_root: {plan.repo_root.as_posix()}\n"
         f"- lane: {plan.lane}\n"
         f"- stage: {stage.name}\n\n"
         "Expected artifacts:\n"
@@ -510,7 +505,7 @@ def _write_initial_run_view(run_root: pathlib.Path, record: DevflowRunRecord) ->
 def _handle_plan(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow plan``."""
     plan = build_devflow_plan(
-        repo_root=_repo_root(args.repo_root),
+        repo_root=resolve_project_root_argument(args, command_name="clawops devflow plan"),
         goal=args.goal,
         lane=args.lane,
         run_id=args.run_id,
@@ -522,7 +517,7 @@ def _handle_plan(args: argparse.Namespace) -> int:
 def _handle_run(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow run``."""
     plan = build_devflow_plan(
-        repo_root=_repo_root(args.repo_root),
+        repo_root=resolve_project_root_argument(args, command_name="clawops devflow run"),
         goal=args.goal,
         lane=args.lane,
         run_id=args.run_id,
@@ -571,7 +566,7 @@ def _handle_run(args: argparse.Namespace) -> int:
 
 def _handle_status(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow status``."""
-    repo_root = _repo_root(args.repo_root)
+    repo_root = resolve_project_root_argument(args, command_name="clawops devflow status")
     if args.stuck_only:
         stuck_runs = [
             run.to_dict()
@@ -592,7 +587,7 @@ def _handle_status(args: argparse.Namespace) -> int:
 
 def _handle_resume(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow resume``."""
-    repo_root = _repo_root(args.repo_root)
+    repo_root = resolve_project_root_argument(args, command_name="clawops devflow resume")
     run_root = devflow_run_root(repo_root, args.run_id)
     plan = load_devflow_plan(run_root / "plan.json")
     view = resume_run(_journal_db(repo_root), run_id=args.run_id)
@@ -615,7 +610,7 @@ def _handle_resume(args: argparse.Namespace) -> int:
 
 def _handle_cancel(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow cancel``."""
-    repo_root = _repo_root(args.repo_root)
+    repo_root = resolve_project_root_argument(args, command_name="clawops devflow cancel")
     run_root = devflow_run_root(repo_root, args.run_id)
     try:
         record = cancel_run(
@@ -631,7 +626,7 @@ def _handle_cancel(args: argparse.Namespace) -> int:
 
 def _handle_audit(args: argparse.Namespace) -> int:
     """Implement ``clawops devflow audit``."""
-    repo_root = _repo_root(args.repo_root)
+    repo_root = resolve_project_root_argument(args, command_name="clawops devflow audit")
     run_root = devflow_run_root(repo_root, args.run_id)
     view = get_run(_journal_db(repo_root), run_id=args.run_id)
     bundle_path = _audit_bundle(run_root, view)
@@ -647,10 +642,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def _add_common_flags(target: argparse.ArgumentParser) -> None:
-        target.add_argument(
-            "--repo-root",
-            default=None,
-            help="Repository root for devflow state and planning.",
+        add_project_root_argument(
+            target,
+            help_text="Control project root for devflow state, planning, and audit outputs.",
         )
         target.add_argument("--lane", default="default", help="Lane identifier for the run.")
 

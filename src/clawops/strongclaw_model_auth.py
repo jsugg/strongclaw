@@ -9,11 +9,11 @@ import pathlib
 from collections.abc import Sequence
 from typing import cast
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
     CommandError,
     load_env_assignments,
     resolve_openclaw_config_path,
-    resolve_repo_root,
     run_command_inherited,
     run_openclaw_command,
     run_varlock_command,
@@ -350,7 +350,7 @@ def ensure_model_auth(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the model-auth CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ensure_parser = subparsers.add_parser("ensure")
@@ -367,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for model-auth readiness."""
     args = parse_args(argv)
     payload = ensure_model_auth(
-        resolve_repo_root(args.repo_root),
+        resolve_asset_root_argument(args, command_name="clawops model-auth"),
         check_only=args.command == "check",
         probe=bool(args.probe),
         probe_max_tokens=int(args.probe_max_tokens),

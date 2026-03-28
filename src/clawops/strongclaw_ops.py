@@ -14,6 +14,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
@@ -23,7 +24,6 @@ from clawops.strongclaw_runtime import (
     resolve_openclaw_config_path,
     resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
-    resolve_repo_root,
     run_command,
     run_command_inherited,
     varlock_local_env_file,
@@ -511,7 +511,7 @@ def prune_qdrant_test_collections(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for operational commands."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     gateway = subparsers.add_parser("gateway")
@@ -555,7 +555,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for StrongClaw operational commands."""
     args = parse_args(argv)
-    repo_root = resolve_repo_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops ops")
     if args.command == "gateway":
         return gateway_start(repo_root)
     if args.command == "sidecars":

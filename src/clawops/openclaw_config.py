@@ -10,9 +10,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from clawops.app_paths import strongclaw_lossless_claw_dir
+from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
-from clawops.runtime_assets import resolve_asset_path, resolve_asset_root, resolve_runtime_layout
+from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
 HOME_PLACEHOLDER = "__HOME__"
@@ -384,7 +385,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=pathlib.Path,
         help="Additional overlay template to render and merge on top of the selected profile.",
     )
-    parser.add_argument("--repo-root", type=pathlib.Path, default=None)
+    add_asset_root_argument(parser)
     parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OPENCLAW_CONFIG_OUTPUT)
     parser.add_argument(
         "--exec-approvals-output",
@@ -411,7 +412,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Render a placeholder-backed OpenClaw overlay to JSON."""
     args = parse_args(argv)
-    repo_root = resolve_asset_root(args.repo_root)
+    repo_root = resolve_asset_root_argument(args, command_name="clawops render-openclaw-config")
     materialize_runtime_memory_configs(
         repo_root=repo_root,
         home_dir=args.home_dir,

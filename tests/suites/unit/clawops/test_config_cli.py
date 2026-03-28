@@ -78,7 +78,7 @@ def test_memory_config_set_profile_installs_assets_and_renders(
 
     exit_code = config_cli.main(
         [
-            "--repo-root",
+            "--asset-root",
             str(tmp_path),
             "memory",
             "--set-profile",
@@ -135,7 +135,7 @@ def test_memory_config_set_profile_skip_assets_only_renders(
 
     exit_code = config_cli.main(
         [
-            "--repo-root",
+            "--asset-root",
             str(tmp_path),
             "memory",
             "--set-profile",
