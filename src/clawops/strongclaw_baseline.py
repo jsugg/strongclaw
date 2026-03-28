@@ -141,7 +141,7 @@ def verify_baseline(
             "--project",
             str(repo_root),
             "--locked",
-            "--extra",
+            "--group",
             "dev",
             "pytest",
             "-q",
