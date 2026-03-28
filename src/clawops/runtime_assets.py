@@ -74,11 +74,16 @@ def _configured_asset_root_override(
 ) -> pathlib.Path | None:
     """Return the explicit asset-root override when one was supplied."""
     if repo_root is not None:
-        return _require_platform_root(_resolve_path(repo_root))
+        return _resolve_path(repo_root)
     configured = os.environ.get(ASSET_ROOT_ENV_VAR, "").strip()
     if not configured:
         return None
     return _require_platform_root(_resolve_path(configured))
+
+
+def require_asset_root(root: pathlib.Path | str) -> pathlib.Path:
+    """Resolve and validate one explicit runtime asset-root override."""
+    return _require_platform_root(_resolve_path(root))
 
 
 def resolve_asset_root(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:

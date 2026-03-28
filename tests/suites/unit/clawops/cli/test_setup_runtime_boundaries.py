@@ -9,6 +9,7 @@ import pytest
 from clawops import cli as root_cli
 from clawops import setup_cli
 from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.assets import make_asset_root
 
 
 def test_root_cli_setup_render_only_path_skips_model_auth(
@@ -16,6 +17,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
     test_context: TestContext,
 ) -> None:
     """The public CLI should not require model auth on a render-only setup path."""
+    asset_root = make_asset_root(tmp_path / "assets")
     calls: list[str] = []
 
     def _bootstrap_state_ready() -> bool:
@@ -87,7 +89,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
     test_context.patch.patch_object(setup_cli, "ensure_model_auth", new=_ensure_model_auth)
     test_context.patch.patch_object(setup_cli, "render_service_files", new=_render_service_files)
 
-    exit_code = root_cli.main(["setup", "--asset-root", str(tmp_path), "--no-activate-services"])
+    exit_code = root_cli.main(["setup", "--asset-root", str(asset_root), "--no-activate-services"])
 
     assert exit_code == 0
     assert calls == [
@@ -105,6 +107,7 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
     test_context: TestContext,
 ) -> None:
     """The public CLI should keep bounded doctor local when both skip flags are set."""
+    asset_root = make_asset_root(tmp_path / "assets")
 
     class _OkReport:
         ok = True
@@ -169,7 +172,7 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
     test_context.patch.patch_object(setup_cli, "verify_channels", new=_verify_channels)
 
     exit_code = root_cli.main(
-        ["doctor", "--asset-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]
+        ["doctor", "--asset-root", str(asset_root), "--skip-runtime", "--no-model-probe"]
     )
     output = capsys.readouterr().out
 
