@@ -12,19 +12,26 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final, cast
 
 from clawops.app_paths import (
     strongclaw_compose_state_dir,
+    strongclaw_config_dir,
     strongclaw_data_dir,
     strongclaw_log_dir,
     strongclaw_lossless_claw_dir,
+    strongclaw_memory_config_dir,
+    strongclaw_plugin_dir,
     strongclaw_qmd_install_dir,
+    strongclaw_repo_dir,
     strongclaw_repo_local_compose_state_dir,
     strongclaw_runs_dir,
     strongclaw_state_dir,
+    strongclaw_varlock_dir,
+    strongclaw_workspace_dir,
 )
 from clawops.platform_compat import (
     DEFAULT_ACPX_VERSION,
@@ -33,10 +40,8 @@ from clawops.platform_compat import (
     detect_host_platform,
     resolve_memory_plugin_lancedb_version,
 )
-from clawops.root_detection import (
-    DEFAULT_SOURCE_REPO_ROOT,
-    resolve_strongclaw_repo_root,
-)
+from clawops.root_detection import DEFAULT_SOURCE_REPO_ROOT
+from clawops.runtime_assets import resolve_runtime_layout
 
 DEFAULT_REPO_ROOT: Final[pathlib.Path] = DEFAULT_SOURCE_REPO_ROOT
 DEFAULT_PROFILE_NAME = "hypermemory"
@@ -122,8 +127,8 @@ class DockerBackendDiagnostics:
 
 
 def resolve_repo_root(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:
-    """Return the effective repository root."""
-    return resolve_strongclaw_repo_root(repo_root, fallback=DEFAULT_REPO_ROOT)
+    """Return the effective StrongClaw asset root."""
+    return resolve_runtime_layout(repo_root=repo_root).asset_root
 
 
 def resolve_home_dir(home_dir: pathlib.Path | str | None = None) -> pathlib.Path:
@@ -443,7 +448,18 @@ def varlock_env_dir(repo_root: pathlib.Path) -> pathlib.Path:
     override = os.environ.get("OPENCLAW_VARLOCK_ENV_PATH") or os.environ.get("VARLOCK_ENV_DIR")
     if override:
         return expand_user_path(override)
-    return repo_root / DEFAULT_VARLOCK_ENV_RELATIVE
+    layout = resolve_runtime_layout(repo_root=repo_root)
+    managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir)
+    legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
+    if (managed_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
+        managed_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
+    ).exists():
+        return managed_dir
+    if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
+        legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
+    ).exists():
+        return legacy_dir
+    return managed_dir
 
 
 def varlock_local_env_file(repo_root: pathlib.Path) -> pathlib.Path:
@@ -467,7 +483,8 @@ def varlock_env_template_file(repo_root: pathlib.Path) -> pathlib.Path:
     override = os.environ.get("VARLOCK_ENV_TEMPLATE")
     if override:
         return expand_user_path(override)
-    return varlock_env_dir(repo_root) / DEFAULT_VARLOCK_ENV_TEMPLATE_NAME
+    layout = resolve_runtime_layout(repo_root=repo_root)
+    return layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE / DEFAULT_VARLOCK_ENV_TEMPLATE_NAME
 
 
 def load_env_assignments(path: pathlib.Path) -> dict[str, str]:
@@ -896,8 +913,12 @@ def repair_linux_runtime_user_docker_access(runtime_user: str) -> None:
 
 
 def managed_python(repo_root: pathlib.Path) -> pathlib.Path:
-    """Return the project venv Python path."""
-    return repo_root / ".venv" / "bin" / "python"
+    """Return the preferred Python executable for managed clawops commands."""
+    resolved_repo_root = repo_root.expanduser().resolve()
+    source_venv_python = resolved_repo_root / ".venv" / "bin" / "python"
+    if source_venv_python.is_file():
+        return source_venv_python
+    return pathlib.Path(sys.executable).resolve()
 
 
 def managed_clawops_command(repo_root: pathlib.Path, *arguments: str) -> list[str]:
@@ -952,11 +973,17 @@ def ensure_common_state_roots(*, home_dir: pathlib.Path | None = None) -> None:
     """Create the shared StrongClaw data and state roots."""
     roots = (
         strongclaw_data_dir(home_dir=home_dir),
+        strongclaw_config_dir(home_dir=home_dir),
         strongclaw_state_dir(home_dir=home_dir),
         strongclaw_log_dir(home_dir=home_dir),
         strongclaw_compose_state_dir(home_dir=home_dir),
         strongclaw_qmd_install_dir(home_dir=home_dir),
         strongclaw_lossless_claw_dir(home_dir=home_dir),
+        strongclaw_memory_config_dir(home_dir=home_dir),
+        strongclaw_varlock_dir(home_dir=home_dir),
+        strongclaw_workspace_dir(home_dir=home_dir),
+        strongclaw_repo_dir(home_dir=home_dir),
+        strongclaw_plugin_dir("memory-lancedb-pro", home_dir=home_dir),
     )
     for root in roots:
         root.mkdir(parents=True, exist_ok=True)

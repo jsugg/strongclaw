@@ -14,6 +14,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
     CommandError,
@@ -138,7 +139,7 @@ def _compose_execution(
     return _ComposeExecution(
         repo_root=repo_root,
         compose_path=compose_path,
-        cwd=repo_root / "platform" / "compose",
+        cwd=resolve_asset_path("platform/compose", repo_root=repo_root),
         env=compose_env,
     )
 
@@ -378,9 +379,10 @@ def status(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, obje
     compose_name = "docker-compose.aux-stack.yaml"
     env = _compose_env(repo_root, repo_local_state=repo_local_state, compose_name=compose_name)
     compose_path = _compose_path(repo_root, compose_name)
+    compose_cwd = resolve_asset_path("platform/compose", repo_root=repo_root)
     compose_result = run_command(
         ["docker", "compose", "-f", str(compose_path), "ps", "--format", "json"],
-        cwd=repo_root / "platform" / "compose",
+        cwd=compose_cwd,
         env=env,
         timeout_seconds=30,
     )
@@ -421,6 +423,7 @@ def reset_compose_state(
     target_dir = target_root / component_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     compose_file = _compose_path(repo_root, compose_file_name)
+    compose_cwd = resolve_asset_path("platform/compose", repo_root=repo_root)
     env = _compose_env(
         repo_root,
         repo_local_state=True,
@@ -428,7 +431,7 @@ def reset_compose_state(
     )
     inspect_result = run_command(
         ["docker", "compose", "-f", str(compose_file), "ps", "-q", service_name],
-        cwd=repo_root / "platform" / "compose",
+        cwd=compose_cwd,
         env=env,
         timeout_seconds=30,
     )
@@ -440,7 +443,7 @@ def reset_compose_state(
     if container_id:
         stop_result = run_command(
             ["docker", "compose", "-f", str(compose_file), "stop", service_name],
-            cwd=repo_root / "platform" / "compose",
+            cwd=compose_cwd,
             env=env,
             timeout_seconds=120,
         )

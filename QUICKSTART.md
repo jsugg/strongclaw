@@ -35,22 +35,25 @@ deactivate
 ## 2. Prepare the Varlock env contract
 
 You can prepare the env contract either manually or through the guided setup
-flow. `clawops setup` will create `platform/configs/varlock/.env.local`,
-repair missing keys, generate required local secrets, and prompt for missing
-runtime or provider-auth input when needed.
+flow. `clawops setup` and `clawops varlock-env configure` create the managed
+Varlock env under the StrongClaw config dir, repair missing keys, generate
+required local secrets, and prompt for missing runtime or provider-auth input
+when needed. On Linux that default path is usually
+`~/.config/strongclaw/varlock`; on macOS it is usually
+`~/Library/Application Support/StrongClaw/config/varlock`.
 
 Manual path:
 
 ```bash
-cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
-$EDITOR platform/configs/varlock/.env.local
+clawops varlock-env configure --non-interactive
+$EDITOR ~/.config/strongclaw/varlock/.env.local
 ```
 
 Before you continue, decide how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports two setup paths:
 
 - guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` can launch `openclaw configure --section model`
-- env-driven: set provider keys plus optional model overrides in `platform/configs/varlock/.env.local`
+- env-driven: set provider keys plus optional model overrides in the managed `.env.local`
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
@@ -96,7 +99,7 @@ Equivalent explicit hypermemory path:
 
 ```bash
 clawops setup --profile hypermemory
-clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
+clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify
 ```
 
 Explicit built-in OpenClaw path:
@@ -121,7 +124,7 @@ That setup flow:
 - fails fast if required installs or the post-bootstrap doctor checks do not pass
 - provisions the selected profile's memory and context assets
 - installs the vendored `memory-lancedb-pro` dependencies only for the `memory-lancedb-pro` profile
-- creates, normalizes, and validates the repo-local Varlock env contract under `platform/configs/varlock`
+- creates, normalizes, and validates the managed Varlock env contract under the StrongClaw config dir
 - prompts for missing Varlock runtime/provider settings when needed, including managed secret backend selection when you want Varlock plugins instead of local `.env` secrets
 - configures or validates OpenClaw model/provider auth before services are activated
 - renders and activates launchd or systemd service templates
@@ -196,12 +199,13 @@ The `openclaw-qmd` profile enables QMD-backed memory retrieval and indexes:
 - `platform/docs`
 - `platform/skills`
 - repo-root `*.md`
-- `platform/workspace/**/*.md`
-- optional `repo/upstream/**/*.md` when the upstream checkout exists
+- the managed StrongClaw workspace Markdown tree
+- the managed upstream checkout when that directory exists
 
 The default `hypermemory` profile enables the combined
 `lossless-claw` + `strongclaw-hypermemory` runtime, points the plugin at
-`platform/configs/memory/hypermemory.yaml`, enables `autoRecall`, keeps
+the rendered runtime config under `~/.config/strongclaw/memory/hypermemory.yaml`,
+enables `autoRecall`, keeps
 `autoReflect` disabled, and does not inherit the QMD overlay.
 
 ## 5. Verify the baseline again on demand

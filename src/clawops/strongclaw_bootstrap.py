@@ -8,10 +8,17 @@ import os
 import pathlib
 import platform
 import shutil
+import sys
 import time
 from collections.abc import Sequence
 
 from clawops.platform_compat import detect_host_platform, resolve_memory_plugin_lancedb_version
+from clawops.runtime_assets import (
+    mirror_asset_tree,
+    resolve_asset_path,
+    resolve_managed_plugin_dir,
+    resolve_runtime_layout,
+)
 from clawops.strongclaw_runtime import (
     DEFAULT_ACPX_VERSION,
     DEFAULT_LOSSLESS_CLAW_REF,
@@ -315,9 +322,15 @@ def install_qmd_asset(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
     return expected_wrapper
 
 
-def install_memory_plugin_asset(repo_root: pathlib.Path) -> pathlib.Path:
+def install_memory_plugin_asset(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
     """Install the vendored memory plugin dependencies."""
-    plugin_dir = repo_root / "platform" / "plugins" / "memory-lancedb-pro"
+    plugin_dir = resolve_managed_plugin_dir("memory-lancedb-pro", home_dir=home_dir)
+    plugin_source = resolve_asset_path("platform/plugins/memory-lancedb-pro", repo_root=repo_root)
+    mirror_asset_tree(plugin_source, plugin_dir, ignore_names=("node_modules",))
     if not command_exists("npm"):
         raise CommandError("npm is required")
     _stream_checked(["npm", "ci"], cwd=plugin_dir, timeout_seconds=1800)
@@ -423,7 +436,7 @@ def install_profile_assets(
         install_qmd_asset(home_dir=home_dir)
         installed_assets.append("qmd")
     if profile_requires_memory_pro_plugin(profile):
-        install_memory_plugin_asset(repo_root)
+        install_memory_plugin_asset(repo_root, home_dir=home_dir)
         installed_assets.append("memory-lancedb-pro")
     if profile_requires_lossless_claw(profile):
         install_lossless_claw_asset(repo_root, home_dir=home_dir)
@@ -437,12 +450,15 @@ def uv_sync_managed_environment(
     home_dir: pathlib.Path | None = None,
 ) -> pathlib.Path:
     """Run `uv sync` for the managed StrongClaw environment."""
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    if layout.source_checkout_root is None:
+        return pathlib.Path(sys.executable).resolve()
     uv_binary = ensure_uv_installed(home_dir=home_dir)
     command = [
         str(uv_binary),
         "sync",
         "--project",
-        str(repo_root),
+        str(layout.source_checkout_root),
         "--python",
         "3.12",
         "--locked",

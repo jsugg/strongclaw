@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import pytest
 
 import clawops.strongclaw_runtime as runtime
+from clawops.app_paths import strongclaw_varlock_dir
 from clawops.strongclaw_runtime import CommandError, ExecResult, write_env_assignments
 
 
@@ -79,3 +81,25 @@ def test_ensure_docker_backend_ready_surfaces_runtime_details(
     assert "OrbStack" in message
     assert "orbstack" in message
     assert "Cannot connect to the Docker daemon" in message
+
+
+def test_varlock_env_dir_defaults_to_managed_config_root(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "assets"
+    (repo_root / "platform" / "configs" / "varlock").mkdir(parents=True)
+    managed_root = tmp_path / "config-root"
+    monkeypatch.setenv("STRONGCLAW_CONFIG_DIR", str(managed_root))
+    legacy_dir = repo_root / "platform" / "configs" / "varlock"
+
+    expected = runtime.varlock_env_dir(repo_root)
+
+    assert expected == strongclaw_varlock_dir()
+    assert expected != legacy_dir
+
+
+def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path) -> None:
+    repo_root = tmp_path / "assets"
+
+    assert runtime.managed_python(repo_root) == pathlib.Path(sys.executable).resolve()

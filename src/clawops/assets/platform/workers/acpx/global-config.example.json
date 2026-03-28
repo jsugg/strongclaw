@@ -1,0 +1,11 @@
+{
+  "defaultAgent": "codex",
+  "defaultPermissions": "approve-reads",
+  "nonInteractivePermissions": "deny",
+  "authPolicy": "skip",
+  "ttl": 3600,
+  "timeout": 1800,
+  "format": "text",
+  "agents": {},
+  "auth": {}
+}

@@ -81,21 +81,24 @@ deactivate
 
 ## 4. Prepare the Varlock env contract
 
-You can let the guided setup path create and repair the repo-local Varlock env
-contract for you, or you can prepare it manually. The manual path is:
+You can let the guided setup path create and repair the managed Varlock env
+contract for you, or you can prepare it manually. The managed path defaults to
+`~/.config/strongclaw/varlock` on Linux and
+`~/Library/Application Support/StrongClaw/config/varlock` on macOS. The manual
+path is:
 
 ```bash
-cp platform/configs/varlock/.env.local.example platform/configs/varlock/.env.local
-$EDITOR platform/configs/varlock/.env.local
+clawops varlock-env configure --non-interactive
+$EDITOR ~/.config/strongclaw/varlock/.env.local
 ```
 
 If `varlock` is already installed on the host, you can validate the contract now:
 
 ```bash
-varlock load --path platform/configs/varlock
+varlock load --path ~/.config/strongclaw/varlock
 ```
 
-The repo-local env contract also carries the local Neo4j sidecar credentials
+The managed env contract also carries the local Neo4j sidecar credentials
 used by the codebase context provider. `clawops varlock-env configure` repairs
 them automatically; for manual edits keep `NEO4J_USERNAME=neo4j` unless you
 also rotate the compose-side username, and set `NEO4J_PASSWORD` to a real
@@ -105,7 +108,7 @@ Before bring-up, choose how OpenClaw should authenticate to an LLM provider.
 StrongClaw supports both guided and env-driven setup:
 
 - guided/OpenClaw-managed: `make setup`, `uv run --project . clawops setup`, or `clawops setup` launches `openclaw configure --section model` when no usable model is configured, and can wire provider secrets through local `.env` values or supported Varlock plugin backends
-- env-driven: set provider keys in `platform/configs/varlock/.env.local`
+- env-driven: set provider keys in the managed `.env.local`
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - local models require both `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
@@ -213,13 +216,13 @@ For the experimental built-in QMD path, use
 `--profile openclaw-qmd`.
 
 The `openclaw-qmd` profile enables QMD-backed memory retrieval and renders
-repo-local memory corpus paths for:
+the rendered QMD corpus for:
 
 - `platform/docs`
 - `platform/skills`
 - repo-root `*.md`
-- `platform/workspace/**/*.md`
-- optional `repo/upstream/**/*.md` when the upstream checkout exists
+- the managed StrongClaw workspace Markdown tree
+- the managed upstream checkout when it exists
 
 Use profile rerenders for placeholder-backed variants:
 
@@ -234,7 +237,7 @@ clawops render-openclaw-config --profile memory-lancedb-pro
 The default `hypermemory` profile renders a self-contained
 combined runtime: `lossless-claw` for context continuity plus
 `strongclaw-hypermemory` with
-`platform/configs/memory/hypermemory.yaml`, `autoRecall: true`, and
+`~/.config/strongclaw/memory/hypermemory.yaml`, `autoRecall: true`, and
 `autoReflect: false`.
 
 Install and activate services:
@@ -364,7 +367,7 @@ For the supported sparse+dense hypermemory path, run:
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
 clawops setup --profile hypermemory
-clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
+clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify
 clawops doctor
 ```
 
@@ -376,7 +379,7 @@ SQLite fallback path.
 
 ### Telegram
 
-1. Put the bot token into `platform/configs/varlock/.env.local`.
+1. Put the bot token into the managed Varlock `.env.local`.
 2. Merge `platform/configs/openclaw/30-channels.json5`.
 3. Start the gateway.
 4. Approve the first DM via pairing.

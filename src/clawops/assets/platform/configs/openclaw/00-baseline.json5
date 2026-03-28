@@ -1,0 +1,195 @@
+{
+  "agents": {
+    "defaults": {
+      "heartbeat": {
+        "directPolicy": "block",
+        "every": "0m",
+        "includeReasoning": false,
+        "lightContext": true,
+        "suppressToolErrorWarnings": true,
+        "target": "none"
+      },
+      "imageMaxDimensionPx": 1200,
+      "model": {
+        "fallbacks": [
+          "github-copilot/gpt-4o",
+          "zai/glm-5"
+        ],
+        "primary": "openai-codex/gpt-5.4"
+      },
+      "models": {
+        "github-copilot/gpt-4o": {
+          "alias": "copilot"
+        },
+        "openai-codex/gpt-5.4": {
+          "alias": "gpt"
+        },
+        "zai/glm-5": {
+          "alias": "glm5"
+        }
+      },
+      "sandbox": {
+        "mode": "all",
+        "scope": "session",
+        "workspaceAccess": "none"
+      },
+      "subagents": {
+        "runTimeoutSeconds": 1800
+      },
+      "timeFormat": "24",
+      "userTimezone": "__USER_TIMEZONE__",
+      "workspace": "__ADMIN_WORKSPACE__"
+    },
+    "list": [
+      {
+        "agentDir": "~/.openclaw/agents/admin/agent",
+        "default": true,
+        "id": "admin",
+        "name": "Admin",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "rw"
+        },
+        "tools": {
+          "deny": [
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "browser",
+            "sessions_spawn"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "__ADMIN_WORKSPACE__"
+      }
+    ]
+  },
+  "browser": {
+    "enabled": false,
+    "evaluateEnabled": false,
+    "ssrfPolicy": {
+      "dangerouslyAllowPrivateNetwork": false
+    }
+  },
+  "channels": {
+    "defaults": {
+      "groupPolicy": "allowlist",
+      "heartbeat": {
+        "showAlerts": true,
+        "showOk": false,
+        "useIndicator": true
+      }
+    },
+    "telegram": {
+      "dmPolicy": "pairing",
+      "enabled": false,
+      "groupPolicy": "disabled",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      }
+    },
+    "whatsapp": {
+      "dmPolicy": "pairing",
+      "enabled": false,
+      "groupPolicy": "disabled",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      }
+    }
+  },
+  "gateway": {
+    "auth": {
+      "allowTailscale": false,
+      "mode": "token",
+      "token": {
+        "id": "OPENCLAW_GATEWAY_TOKEN",
+        "provider": "default",
+        "source": "env"
+      }
+    },
+    "bind": "loopback",
+    "mode": "local",
+    "port": 18789,
+    "tailscale": {
+      "mode": "off"
+    }
+  },
+  "logging": {
+    "consoleLevel": "info",
+    "consoleStyle": "compact",
+    "level": "info",
+    "redactSensitive": "tools"
+  },
+  "memory": {
+    "citations": "auto"
+  },
+  "plugins": {
+    "allow": [],
+    "deny": [],
+    "enabled": true,
+    "entries": {},
+    "slots": {
+      "contextEngine": "legacy",
+      "memory": "memory-core"
+    }
+  },
+  "secrets": {
+    "defaults": {
+      "env": "default"
+    },
+    "providers": {
+      "default": {
+        "source": "env"
+      }
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer",
+    "maintenance": {
+      "highWaterBytes": "400mb",
+      "maxDiskBytes": "500mb",
+      "maxEntries": 500,
+      "mode": "warn",
+      "pruneAfter": "30d",
+      "resetArchiveRetention": "30d",
+      "rotateBytes": "10mb"
+    },
+    "reset": {
+      "atHour": 4,
+      "idleMinutes": 240,
+      "mode": "daily"
+    }
+  },
+  "tools": {
+    "deny": [
+      "gateway",
+      "cron",
+      "nodes",
+      "canvas",
+      "browser"
+    ],
+    "elevated": {
+      "enabled": false
+    },
+    "fs": {
+      "workspaceOnly": true
+    },
+    "loopDetection": {
+      "criticalThreshold": 14,
+      "enabled": true,
+      "globalCircuitBreakerThreshold": 20,
+      "historySize": 30,
+      "warningThreshold": 8
+    },
+    "profile": "minimal",
+    "sessions": {
+      "visibility": "self"
+    }
+  }
+}

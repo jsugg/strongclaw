@@ -1,0 +1,267 @@
+{
+  "agents": {
+    "list": [
+      {
+        "agentDir": "~/.openclaw/agents/admin/agent",
+        "default": true,
+        "id": "admin",
+        "name": "Admin",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "rw"
+        },
+        "subagents": {
+          "allowAgents": [
+            "coder",
+            "reviewer",
+            "reader",
+            "messaging"
+          ]
+        },
+        "tools": {
+          "deny": [
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "browser"
+          ],
+          "profile": "coding"
+        },
+        "workspace": "__ADMIN_WORKSPACE__"
+      },
+      {
+        "agentDir": "~/.openclaw/agents/reader/agent",
+        "id": "reader",
+        "model": {
+          "fallbacks": [
+            "github-copilot/gpt-4o"
+          ],
+          "primary": "zai/glm-5"
+        },
+        "name": "Reader",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "none"
+        },
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "web_search",
+            "web_fetch",
+            "memory_search",
+            "memory_get",
+            "sessions_list",
+            "session_status"
+          ],
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "browser",
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "__READER_WORKSPACE__"
+      },
+      {
+        "agentDir": "~/.openclaw/agents/coder/agent",
+        "id": "coder",
+        "model": {
+          "fallbacks": [
+            "github-copilot/gpt-4o"
+          ],
+          "primary": "openai-codex/gpt-5.4"
+        },
+        "name": "Coder",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "rw"
+        },
+        "subagents": {
+          "allowAgents": [
+            "reviewer"
+          ]
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "sessions_spawn",
+            "session_status",
+            "memory_search",
+            "memory_get"
+          ],
+          "deny": [
+            "browser",
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "send",
+            "whatsapp",
+            "telegram"
+          ],
+          "profile": "coding"
+        },
+        "workspace": "__CODER_WORKSPACE__"
+      },
+      {
+        "agentDir": "~/.openclaw/agents/reviewer/agent",
+        "id": "reviewer",
+        "model": {
+          "fallbacks": [
+            "zai/glm-5",
+            "openai-codex/gpt-5.4"
+          ],
+          "primary": "github-copilot/gpt-4o"
+        },
+        "name": "Reviewer",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "ro"
+        },
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "web_search",
+            "web_fetch",
+            "sessions_list",
+            "session_status",
+            "memory_search",
+            "memory_get"
+          ],
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "browser",
+            "gateway",
+            "cron",
+            "nodes",
+            "canvas",
+            "send",
+            "whatsapp",
+            "telegram"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "__REVIEWER_WORKSPACE__"
+      },
+      {
+        "agentDir": "~/.openclaw/agents/messaging/agent",
+        "id": "messaging",
+        "model": {
+          "fallbacks": [
+            "github-copilot/gpt-4o"
+          ],
+          "primary": "zai/glm-5"
+        },
+        "name": "Messaging",
+        "sandbox": {
+          "mode": "all",
+          "scope": "agent",
+          "workspaceAccess": "none"
+        },
+        "subagents": {
+          "allowAgents": []
+        },
+        "tools": {
+          "allow": [
+            "sessions_list",
+            "session_status",
+            "memory_search",
+            "memory_get"
+          ],
+          "deny": [
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "browser",
+            "canvas",
+            "nodes",
+            "gateway",
+            "cron"
+          ],
+          "profile": "messaging"
+        },
+        "workspace": "__MESSAGING_WORKSPACE__"
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "agentId": "messaging",
+      "match": {
+        "channel": "telegram"
+      }
+    },
+    {
+      "agentId": "messaging",
+      "match": {
+        "channel": "whatsapp"
+      }
+    }
+  ],
+  "tools": {
+    "byProvider": {
+      "github-copilot/gpt-4o": {
+        "deny": [
+          "group:runtime",
+          "send",
+          "whatsapp",
+          "telegram",
+          "browser",
+          "gateway",
+          "cron",
+          "nodes",
+          "canvas"
+        ],
+        "profile": "minimal"
+      },
+      "zai/glm-5": {
+        "deny": [
+          "group:runtime",
+          "group:fs",
+          "browser",
+          "gateway",
+          "cron",
+          "nodes",
+          "canvas",
+          "send",
+          "whatsapp",
+          "telegram"
+        ],
+        "profile": "minimal"
+      }
+    },
+    "sessions": {
+      "visibility": "tree"
+    }
+  }
+}

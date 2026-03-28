@@ -8,6 +8,7 @@ import pathlib
 from collections.abc import Mapping
 from typing import Final
 
+from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_runtime import CommandError
 
 COMPOSE_VARIANT_ENV_VAR: Final[str] = "STRONGCLAW_COMPOSE_VARIANT"
@@ -30,7 +31,7 @@ def active_compose_variant(*, environ: Mapping[str, str] | None = None) -> str |
 
 def resolve_compose_file(repo_root: pathlib.Path, compose_name: str) -> pathlib.Path:
     """Return the effective compose file for the active environment."""
-    compose_dir = repo_root / "platform" / "compose"
+    compose_dir = resolve_asset_path("platform/compose", repo_root=repo_root)
     base_path = compose_dir / compose_name
     variant = active_compose_variant()
     if variant is None:

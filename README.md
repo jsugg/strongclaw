@@ -76,15 +76,19 @@ setups. Python `3.13` remains supported for explicit use and CI coverage.
 
 `make setup` runs the guided `clawops setup` workflow inside the managed
 environment. It bootstraps host prerequisites, creates or repairs
-`platform/configs/varlock/.env.local`, offers local or managed Varlock secret
-backends for provider auth, prompts for missing setup input when needed,
-configures OpenClaw model/provider auth, activates services, and runs the
-baseline verification gate. The lower-level CLI entrypoint remains available
-at `clawops setup` for manual or partial bring-up, and you can
-call the CLI directly with `uv run --project . clawops setup`.
+the managed Varlock env under the StrongClaw config dir, offers local or
+managed Varlock secret backends for provider auth, prompts for missing setup
+input when needed, configures OpenClaw model/provider auth, activates
+services, and runs the baseline verification gate. The lower-level CLI
+entrypoint remains available at `clawops setup` for manual or partial
+bring-up, and you can call the CLI directly with `uv run --project . clawops setup`.
 For a render-only pass that does not activate services yet, use
 `clawops setup --no-activate-services`; that path now defers model/provider
 auth until you are ready to start the gateway.
+
+The wheel now ships the runtime `platform` asset bundle, so package-safe
+commands such as `clawops render-openclaw-config`, `clawops setup`, and
+`clawops verify-platform ...` work outside a cloned StrongClaw checkout.
 
 By default, StrongClaw now renders and provisions the
 `hypermemory` stack. Set one embedding model name before you run

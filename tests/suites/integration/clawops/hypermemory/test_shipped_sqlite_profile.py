@@ -24,11 +24,12 @@ def test_shipped_sqlite_profile_reindexes_repo_without_duplicate_document_crash(
             HAVING COUNT(*) > 1
             """).fetchall()
         row = conn.execute(
-            "SELECT source_name FROM documents WHERE rel_path = ?",
-            ("platform/docs/ACP_WORKERS.md",),
+            "SELECT rel_path, source_name FROM documents WHERE rel_path LIKE ?",
+            ("%platform/docs/ACP_WORKERS.md",),
         ).fetchone()
 
     assert summary.files > 0
     assert duplicate_rows == []
     assert row is not None
+    assert str(row["rel_path"]).endswith("platform/docs/ACP_WORKERS.md")
     assert str(row["source_name"]) == "runbooks"

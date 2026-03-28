@@ -17,6 +17,7 @@ from clawops.devflow_roles import (
     load_role_catalog,
 )
 from clawops.orchestration import AuthMode
+from clawops.runtime_assets import resolve_asset_path
 from clawops.typed_values import (
     as_bool,
     as_int,
@@ -28,9 +29,8 @@ from clawops.typed_values import (
 from clawops.workspace_bootstrap import BootstrapProfile, resolve_bootstrap_profile
 
 DEVFLOW_PLAN_SCHEMA_VERSION: Final[int] = 1
-DEFAULT_WORKFLOW_PATH: Final[pathlib.Path] = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "platform/configs/devflow/workflows/production.yaml"
+DEFAULT_WORKFLOW_PATH: Final[pathlib.Path] = resolve_asset_path(
+    "platform/configs/devflow/workflows/production.yaml"
 )
 
 

@@ -1,0 +1,12 @@
+cases:
+  - name: workflow-runner-contract
+    query: context pack provider scale workflow runner
+    maxResults: 6
+    expectedPaths:
+      - src/clawops/workflow_runner.py
+      - src/clawops/orchestration.py
+  - name: codebase-provider-service
+    query: codebase context hybrid qdrant neo4j retrieval
+    maxResults: 6
+    expectedPaths:
+      - src/clawops/context/codebase/service.py

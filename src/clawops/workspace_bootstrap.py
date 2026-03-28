@@ -9,13 +9,12 @@ from collections.abc import Sequence
 from typing import Final, cast
 
 from clawops.common import load_json, load_yaml
+from clawops.runtime_assets import resolve_asset_path
 from clawops.typed_values import as_mapping, as_mapping_list, as_string, as_string_list
 
 DEFAULT_BOOTSTRAP_PATHS: Final[tuple[pathlib.Path, ...]] = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "platform/configs/devflow/bootstrap/strongclaw.yaml",
-    pathlib.Path(__file__).resolve().parents[2]
-    / "platform/configs/devflow/bootstrap/defaults.yaml",
+    resolve_asset_path("platform/configs/devflow/bootstrap/strongclaw.yaml"),
+    resolve_asset_path("platform/configs/devflow/bootstrap/defaults.yaml"),
 )
 
 

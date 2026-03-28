@@ -11,6 +11,13 @@ from clawops import strongclaw_bootstrap
 from tests.plugins.infrastructure.context import TestContext
 
 
+def _mark_source_checkout(repo_root: pathlib.Path) -> None:
+    """Create the minimal StrongClaw source markers for bootstrap tests."""
+    (repo_root / "platform").mkdir(parents=True)
+    (repo_root / "src" / "clawops").mkdir(parents=True)
+    (repo_root / "pyproject.toml").write_text("[project]\nname = 'clawops'\n", encoding="utf-8")
+
+
 def test_uv_sync_managed_environment_uses_uv_default_dev_group(
     test_context: TestContext,
     tmp_path: pathlib.Path,
@@ -41,6 +48,7 @@ def test_uv_sync_managed_environment_uses_uv_default_dev_group(
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _mark_source_checkout(repo_root)
 
     assert (
         strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path) == uv_binary
@@ -93,6 +101,7 @@ def test_uv_sync_managed_environment_retries_transient_failure(
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _mark_source_checkout(repo_root)
 
     assert (
         strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path) == uv_binary
@@ -163,6 +172,7 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _mark_source_checkout(repo_root)
 
     with pytest.raises(strongclaw_bootstrap.CommandError, match="persistent download timeout"):
         strongclaw_bootstrap.uv_sync_managed_environment(repo_root, home_dir=tmp_path)

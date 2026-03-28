@@ -14,6 +14,7 @@ from clawops.common import load_text, write_text
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
 from clawops.strongclaw_runtime import (
     ensure_docker_backend_ready,
+    managed_python,
     resolve_openclaw_state_dir,
     resolve_repo_root,
     run_command,
@@ -76,6 +77,7 @@ def _render_template(
     return (
         load_text(template_path)
         .replace("__REPO_ROOT__", repo_root.as_posix())
+        .replace("__PYTHON_EXECUTABLE__", managed_python(repo_root).as_posix())
         .replace("__STATE_DIR__", state_dir.as_posix())
         .replace("__HOME_DIR__", pathlib.Path.home().as_posix())
         .replace("__LAUNCHD_EXTRA_ENV__", _launchd_extra_env_xml())

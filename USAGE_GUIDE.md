@@ -226,7 +226,7 @@ explicitly with:
 ```bash
 export HYPERMEMORY_EMBEDDING_MODEL=openai/text-embedding-3-small
 clawops setup --profile hypermemory
-clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify
+clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify
 clawops doctor
 ```
 

@@ -5,8 +5,15 @@ from __future__ import annotations
 import json
 import pathlib
 
-from clawops.app_paths import strongclaw_lossless_claw_dir
+from clawops.app_paths import (
+    strongclaw_lossless_claw_dir,
+    strongclaw_memory_config_dir,
+    strongclaw_plugin_dir,
+    strongclaw_upstream_repo_dir,
+    strongclaw_workspace_dir,
+)
 from clawops.openclaw_config import (
+    materialize_runtime_memory_configs,
     render_openclaw_overlay,
     render_openclaw_profile,
     render_qmd_overlay,
@@ -133,6 +140,7 @@ def test_repo_qmd_template_includes_expected_default_corpus() -> None:
 
 def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> None:
     repo_root = REPO_ROOT
+    workspace_root = strongclaw_workspace_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_profile(
         profile_name="openclaw-default",
         repo_root=repo_root,
@@ -144,11 +152,12 @@ def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> No
     assert rendered["gateway"]["bind"] == "loopback"
     assert rendered["plugins"]["slots"]["memory"] == "memory-core"
     admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
-    assert admin["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+    assert admin["workspace"] == f"{workspace_root.as_posix()}/admin"
 
 
 def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> None:
     repo_root = REPO_ROOT
+    workspace_root = strongclaw_workspace_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_profile(
         profile_name="openclaw-qmd",
         repo_root=repo_root,
@@ -159,11 +168,12 @@ def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> No
     assert rendered["memory"]["backend"] == "qmd"
     assert rendered["gateway"]["bind"] == "loopback"
     admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
-    assert admin["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+    assert admin["workspace"] == f"{workspace_root.as_posix()}/admin"
 
 
 def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
     repo_root = REPO_ROOT
+    upstream_root = strongclaw_upstream_repo_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_profile(
         profile_name="acp",
         repo_root=repo_root,
@@ -173,12 +183,13 @@ def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
 
     coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
     runtime = coder["runtime"]["acp"]
-    assert runtime["cwd"] == f"{repo_root.as_posix()}/repo/upstream"
-    assert coder["workspace"] == f"{repo_root.as_posix()}/repo/upstream"
+    assert runtime["cwd"] == upstream_root.as_posix()
+    assert coder["workspace"] == upstream_root.as_posix()
 
 
 def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None:
     repo_root = REPO_ROOT
+    upstream_root = strongclaw_upstream_repo_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_profile(
         profile_name="memory-lancedb-pro",
         repo_root=repo_root,
@@ -190,11 +201,12 @@ def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None
     plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
     coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
     assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
-    assert coder["workspace"] == f"{repo_root.as_posix()}/repo/upstream"
+    assert coder["workspace"] == upstream_root.as_posix()
 
 
 def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
     repo_root = REPO_ROOT
+    memory_config_dir = strongclaw_memory_config_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_overlay(
         template_path=repo_root
         / "platform/configs/openclaw/75-strongclaw-hypermemory.example.json5",
@@ -205,10 +217,7 @@ def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
 
     plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     assert rendered["plugins"]["slots"]["memory"] == "strongclaw-hypermemory"
-    assert (
-        plugin_config["configPath"]
-        == f"{repo_root.as_posix()}/platform/configs/memory/hypermemory.sqlite.yaml"
-    )
+    assert plugin_config["configPath"] == f"{memory_config_dir.as_posix()}/hypermemory.sqlite.yaml"
     assert rendered["plugins"]["load"]["paths"] == [
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-hypermemory"
     ]
@@ -238,6 +247,7 @@ def test_hypermemory_overlay_renders_repo_local_paths(
 
 def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
     repo_root = REPO_ROOT
+    memory_config_dir = strongclaw_memory_config_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_profile(
         profile_name="hypermemory",
         repo_root=repo_root,
@@ -251,16 +261,14 @@ def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
         "memory": "strongclaw-hypermemory",
     }
     plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
-    assert (
-        plugin_config["configPath"]
-        == f"{repo_root.as_posix()}/platform/configs/memory/hypermemory.yaml"
-    )
+    assert plugin_config["configPath"] == f"{memory_config_dir.as_posix()}/hypermemory.yaml"
     assert plugin_config["autoRecall"] is True
     assert plugin_config["autoReflect"] is False
 
 
 def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders() -> None:
     repo_root = REPO_ROOT
+    workspace_root = strongclaw_workspace_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/00-baseline.json5",
         repo_root=repo_root,
@@ -270,11 +278,12 @@ def test_baseline_overlay_template_renders_workspace_and_timezone_placeholders()
 
     defaults = rendered["agents"]["defaults"]
     assert defaults["userTimezone"] == "UTC"
-    assert defaults["workspace"] == f"{repo_root.as_posix()}/platform/workspace/admin"
+    assert defaults["workspace"] == f"{workspace_root.as_posix()}/admin"
 
 
 def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
     repo_root = REPO_ROOT
+    upstream_root = strongclaw_upstream_repo_dir(home_dir=pathlib.Path.home())
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/exec-approvals.json",
         repo_root=repo_root,
@@ -285,12 +294,13 @@ def test_exec_approvals_template_renders_repo_local_prefixes() -> None:
     cwd_prefixes = rendered["rules"][0]["match"]["cwdPrefixes"]
     assert cwd_prefixes == [
         repo_root.as_posix(),
-        f"{repo_root.as_posix()}/repo/upstream",
+        upstream_root.as_posix(),
     ]
 
 
 def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
     repo_root = REPO_ROOT
+    plugin_root = strongclaw_plugin_dir("memory-lancedb-pro", home_dir=pathlib.Path.home())
     rendered = render_openclaw_overlay(
         template_path=repo_root / "platform/configs/openclaw/75-memory-lancedb-pro.local.json5",
         repo_root=repo_root,
@@ -300,9 +310,7 @@ def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
 
     plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
     assert rendered["plugins"]["slots"]["memory"] == "memory-lancedb-pro"
-    assert rendered["plugins"]["load"]["paths"] == [
-        f"{repo_root.as_posix()}/platform/plugins/memory-lancedb-pro"
-    ]
+    assert rendered["plugins"]["load"]["paths"] == [plugin_root.as_posix()]
     assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
     assert plugin["sessionStrategy"] == "none"
     assert plugin["selfImprovement"]["enabled"] is False
@@ -323,3 +331,27 @@ def test_vendored_memory_lancedb_pro_bundle_is_pinned() -> None:
     assert package["version"] == "1.1.0-beta.10"
     assert "63495671fde55f2c8e3d6eb95267381d1889cca9" in vendor_note
     assert "selfImprovement.enabled = false" in vendor_note
+
+
+def test_materialize_runtime_memory_configs_writes_managed_configs(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = REPO_ROOT
+    home_dir = tmp_path / "home"
+
+    default_path, sqlite_path = materialize_runtime_memory_configs(
+        repo_root=repo_root,
+        home_dir=home_dir,
+        user_timezone="UTC",
+    )
+
+    default_text = default_path.read_text(encoding="utf-8")
+    sqlite_text = sqlite_path.read_text(encoding="utf-8")
+    workspace_root = strongclaw_workspace_dir(home_dir=home_dir)
+    upstream_root = strongclaw_upstream_repo_dir(home_dir=home_dir)
+
+    assert "__REPO_ROOT__" not in default_text
+    assert "__WORKSPACE_ROOT__" not in sqlite_text
+    assert repo_root.as_posix() in default_text
+    assert workspace_root.as_posix() in default_text
+    assert upstream_root.as_posix() in sqlite_text

@@ -1,0 +1,59 @@
+{
+  "memory": {
+    "backend": "qmd",
+    "citations": "auto",
+    "qmd": {
+      "command": "__HOME__/.bun/bin/qmd",
+      "includeDefaultMemory": true,
+      "limits": {
+        "maxResults": 6,
+        "timeoutMs": 4000
+      },
+      "paths": [
+        {
+          "name": "runbooks",
+          "path": "__REPO_ROOT__/platform/docs",
+          "pattern": "**/*.md"
+        },
+        {
+          "name": "skills",
+          "path": "__REPO_ROOT__/platform/skills",
+          "pattern": "**/*.md"
+        },
+        {
+          "name": "openclaw-workspaces",
+          "path": "__WORKSPACE_ROOT__",
+          "pattern": "**/*.md"
+        },
+        {
+          "name": "openclaw-upstream",
+          "path": "__UPSTREAM_REPO_ROOT__",
+          "pattern": "**/*.md"
+        },
+        {
+          "name": "repo-root-markdown",
+          "path": "__REPO_ROOT__",
+          "pattern": "*.md"
+        }
+      ],
+      "scope": {
+        "default": "deny",
+        "rules": [
+          {
+            "action": "allow",
+            "match": {
+              "chatType": "direct"
+            }
+          }
+        ]
+      },
+      "searchMode": "search",
+      "update": {
+        "debounceMs": 15000,
+        "interval": "15m",
+        "onBoot": true,
+        "waitForBootSync": false
+      }
+    }
+  }
+}

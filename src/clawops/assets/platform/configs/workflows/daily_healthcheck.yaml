@@ -1,0 +1,9 @@
+name: daily-healthcheck
+steps:
+  - name: openclaw doctor
+    kind: shell
+    command: ["openclaw", "doctor"]
+
+  - name: security audit
+    kind: shell
+    command: ["openclaw", "security", "audit", "--deep"]

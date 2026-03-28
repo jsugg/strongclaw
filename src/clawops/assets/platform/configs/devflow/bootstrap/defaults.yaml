@@ -1,0 +1,50 @@
+schema_version: 1
+profiles:
+  - id: python-basic
+    match:
+      files:
+        - pyproject.toml
+    commands:
+      install:
+        - ["python", "-m", "pip", "install", "-e", ".", "pytest"]
+      lint:
+        - ["python", "-m", "compileall", "-q", "."]
+      typecheck: []
+      test_unit:
+        - ["python", "-m", "pytest", "-q"]
+      test_integration: []
+      test_contracts: []
+      test_e2e: []
+      compile:
+        - ["python", "-m", "compileall", "-q", "."]
+  - id: node-basic
+    match:
+      files:
+        - package.json
+    commands:
+      install:
+        - ["npm", "install"]
+      lint: []
+      typecheck: []
+      test_unit:
+        - ["npm", "test"]
+      test_integration: []
+      test_contracts: []
+      test_e2e: []
+      compile: []
+  - id: go-basic
+    match:
+      files:
+        - go.mod
+    commands:
+      install:
+        - ["go", "mod", "download"]
+      lint: []
+      typecheck: []
+      test_unit:
+        - ["go", "test", "./..."]
+      test_integration: []
+      test_contracts: []
+      test_e2e: []
+      compile:
+        - ["go", "test", "./..."]

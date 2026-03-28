@@ -12,7 +12,7 @@ from typing import Any, cast
 from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
-from clawops.root_detection import resolve_strongclaw_repo_root
+from clawops.runtime_assets import resolve_asset_path, resolve_asset_root, resolve_runtime_layout
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
 HOME_PLACEHOLDER = "__HOME__"
@@ -28,6 +28,9 @@ READER_WORKSPACE_PLACEHOLDER = "__READER_WORKSPACE__"
 CODER_WORKSPACE_PLACEHOLDER = "__CODER_WORKSPACE__"
 REVIEWER_WORKSPACE_PLACEHOLDER = "__REVIEWER_WORKSPACE__"
 MESSAGING_WORKSPACE_PLACEHOLDER = "__MESSAGING_WORKSPACE__"
+HYPERMEMORY_WORKSPACE_ROOT_PLACEHOLDER = "__HYPERMEMORY_WORKSPACE_ROOT__"
+HYPERMEMORY_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_CONFIG_PATH__"
+HYPERMEMORY_SQLITE_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_SQLITE_CONFIG_PATH__"
 OPENCLAW_CONFIG_DIR = pathlib.Path("platform/configs/openclaw")
 DEFAULT_PROFILE_NAME = "hypermemory"
 DEFAULT_OPENCLAW_CONFIG_OUTPUT = pathlib.Path.home() / ".openclaw" / "openclaw.json"
@@ -126,27 +129,36 @@ def build_placeholder_map(
     lossless_claw_plugin_path: pathlib.Path | None = None,
 ) -> dict[str, str]:
     """Build the placeholder replacement table for rendered overlays."""
-    resolved_repo_root = repo_root.expanduser().resolve()
-    resolved_home_dir = home_dir.expanduser().resolve()
-    workspace_root = resolved_repo_root / "platform" / "workspace"
-    upstream_repo_root = resolved_repo_root / "repo" / "upstream"
-    worktrees_root = resolved_repo_root / "repo" / "worktrees"
-    plugin_root = resolved_repo_root / "platform" / "plugins"
-    openclaw_home = resolved_home_dir / ".openclaw"
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    hypermemory_workspace_root = pathlib.Path(
+        os.path.commonpath(
+            [
+                layout.asset_root,
+                layout.workspace_root,
+                layout.upstream_repo_root,
+                layout.openclaw_home,
+            ]
+        )
+    ).resolve()
     replacements = {
-        REPO_ROOT_PLACEHOLDER: resolved_repo_root.as_posix(),
-        HOME_PLACEHOLDER: resolved_home_dir.as_posix(),
-        WORKSPACE_ROOT_PLACEHOLDER: workspace_root.as_posix(),
-        UPSTREAM_REPO_ROOT_PLACEHOLDER: upstream_repo_root.as_posix(),
-        WORKTREES_ROOT_PLACEHOLDER: worktrees_root.as_posix(),
-        PLUGIN_ROOT_PLACEHOLDER: plugin_root.as_posix(),
-        OPENCLAW_HOME_PLACEHOLDER: openclaw_home.as_posix(),
+        REPO_ROOT_PLACEHOLDER: layout.asset_root.as_posix(),
+        HOME_PLACEHOLDER: layout.home_dir.as_posix(),
+        WORKSPACE_ROOT_PLACEHOLDER: layout.workspace_root.as_posix(),
+        UPSTREAM_REPO_ROOT_PLACEHOLDER: layout.upstream_repo_root.as_posix(),
+        WORKTREES_ROOT_PLACEHOLDER: layout.worktrees_root.as_posix(),
+        PLUGIN_ROOT_PLACEHOLDER: layout.plugin_root.as_posix(),
+        OPENCLAW_HOME_PLACEHOLDER: layout.openclaw_home.as_posix(),
         USER_TIMEZONE_PLACEHOLDER: user_timezone,
-        ADMIN_WORKSPACE_PLACEHOLDER: (workspace_root / "admin").as_posix(),
-        READER_WORKSPACE_PLACEHOLDER: (workspace_root / "reader").as_posix(),
-        CODER_WORKSPACE_PLACEHOLDER: (workspace_root / "coder").as_posix(),
-        REVIEWER_WORKSPACE_PLACEHOLDER: (workspace_root / "reviewer").as_posix(),
-        MESSAGING_WORKSPACE_PLACEHOLDER: (workspace_root / "messaging").as_posix(),
+        ADMIN_WORKSPACE_PLACEHOLDER: (layout.workspace_root / "admin").as_posix(),
+        READER_WORKSPACE_PLACEHOLDER: (layout.workspace_root / "reader").as_posix(),
+        CODER_WORKSPACE_PLACEHOLDER: (layout.workspace_root / "coder").as_posix(),
+        REVIEWER_WORKSPACE_PLACEHOLDER: (layout.workspace_root / "reviewer").as_posix(),
+        MESSAGING_WORKSPACE_PLACEHOLDER: (layout.workspace_root / "messaging").as_posix(),
+        HYPERMEMORY_WORKSPACE_ROOT_PLACEHOLDER: hypermemory_workspace_root.as_posix(),
+        HYPERMEMORY_CONFIG_PATH_PLACEHOLDER: layout.hypermemory_config_path.as_posix(),
+        HYPERMEMORY_SQLITE_CONFIG_PATH_PLACEHOLDER: (
+            layout.hypermemory_sqlite_config_path.as_posix()
+        ),
     }
     if lossless_claw_plugin_path is not None:
         replacements[LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER] = (
@@ -204,8 +216,9 @@ def _resolve_lossless_claw_plugin_path(
         return candidate.expanduser().resolve()
 
     app_data_path = strongclaw_lossless_claw_dir(home_dir=home_dir)
-    vendored_path = (repo_root / "vendor" / "lossless-claw").expanduser().resolve()
-    plugin_path = (repo_root / "platform" / "plugins" / "lossless-claw").expanduser().resolve()
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    vendored_path = (layout.asset_root / "vendor" / "lossless-claw").expanduser().resolve()
+    plugin_path = (layout.platform_root / "plugins" / "lossless-claw").expanduser().resolve()
     if app_data_path.is_dir():
         return app_data_path
     if vendored_path.is_dir():
@@ -213,6 +226,46 @@ def _resolve_lossless_claw_plugin_path(
     if plugin_path.is_dir():
         return plugin_path
     return app_data_path
+
+
+def _render_text_placeholders(text: str, *, replacements: Mapping[str, str]) -> str:
+    """Replace placeholder tokens in raw template text."""
+    rendered = text
+    for placeholder, replacement in replacements.items():
+        rendered = rendered.replace(placeholder, replacement)
+    return rendered
+
+
+def materialize_runtime_memory_configs(
+    *,
+    repo_root: pathlib.Path,
+    home_dir: pathlib.Path,
+    user_timezone: str | None = None,
+) -> tuple[pathlib.Path, pathlib.Path]:
+    """Render runtime hypermemory configs into the managed config directory."""
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    replacements = build_placeholder_map(
+        repo_root=repo_root,
+        home_dir=home_dir,
+        user_timezone=detect_local_timezone() if user_timezone is None else user_timezone,
+        lossless_claw_plugin_path=_resolve_lossless_claw_plugin_path(repo_root, home_dir=home_dir),
+    )
+    template_map = {
+        resolve_asset_path("platform/configs/memory/hypermemory.yaml", repo_root=repo_root): (
+            layout.hypermemory_config_path
+        ),
+        resolve_asset_path(
+            "platform/configs/memory/hypermemory.sqlite.yaml", repo_root=repo_root
+        ): layout.hypermemory_sqlite_config_path,
+    }
+    layout.memory_config_root.mkdir(parents=True, exist_ok=True)
+    for template_path, output_path in template_map.items():
+        rendered = _render_text_placeholders(
+            template_path.read_text(encoding="utf-8"),
+            replacements=replacements,
+        )
+        output_path.write_text(rendered, encoding="utf-8")
+    return layout.hypermemory_config_path, layout.hypermemory_sqlite_config_path
 
 
 def render_openclaw_overlay(
@@ -260,10 +313,10 @@ def render_qmd_overlay(
 
 
 def _resolve_repo_relative_path(*, repo_root: pathlib.Path, path: pathlib.Path) -> pathlib.Path:
-    """Resolve a possibly repo-relative path against *repo_root*."""
+    """Resolve a possibly asset-root-relative path against *repo_root*."""
     if path.is_absolute():
         return path.expanduser().resolve()
-    return (repo_root.expanduser().resolve() / path).resolve()
+    return resolve_asset_path(path, repo_root=repo_root)
 
 
 def _resolve_profile(profile_name: str) -> RenderProfile:
@@ -358,7 +411,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Render a placeholder-backed OpenClaw overlay to JSON."""
     args = parse_args(argv)
-    repo_root = resolve_strongclaw_repo_root(args.repo_root)
+    repo_root = resolve_asset_root(args.repo_root)
+    materialize_runtime_memory_configs(
+        repo_root=repo_root,
+        home_dir=args.home_dir,
+        user_timezone=args.user_timezone,
+    )
     if args.template is not None:
         rendered = render_openclaw_overlay(
             template_path=_resolve_repo_relative_path(repo_root=repo_root, path=args.template),

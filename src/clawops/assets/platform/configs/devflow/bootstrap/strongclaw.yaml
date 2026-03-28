@@ -1,0 +1,27 @@
+schema_version: 1
+profiles:
+  - id: strongclaw
+    match:
+      files:
+        - Makefile
+        - pyproject.toml
+      python_project_name: clawops
+    commands:
+      install:
+        - ["uv", "sync", "--locked"]
+      lint:
+        - ["uv", "run", "ruff", "check", "src", "tests"]
+        - ["uv", "run", "isort", "--check-only", "src", "tests"]
+      typecheck:
+        - ["uv", "run", "mypy"]
+        - ["uv", "run", "pyright"]
+      test_unit:
+        - ["uv", "run", "--locked", "pytest", "-q", "-m", "unit"]
+      test_integration:
+        - ["uv", "run", "--locked", "pytest", "-q", "-m", "integration"]
+      test_contracts:
+        - ["uv", "run", "--locked", "pytest", "-q", "-m", "contract"]
+      test_e2e:
+        - ["uv", "run", "--locked", "pytest", "-q", "-m", "e2e"]
+      compile:
+        - ["uv", "run", "python", "-m", "compileall", "-q", "src", "tests"]

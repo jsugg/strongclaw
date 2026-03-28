@@ -60,6 +60,26 @@ def strongclaw_data_dir(
     return resolved_home / ".local" / "share" / APP_DIR_LINUX
 
 
+def strongclaw_config_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw configuration directory."""
+    env = os.environ if environ is None else environ
+    resolved_home = _resolve_home_dir(home_dir)
+    override = _resolve_override_path("STRONGCLAW_CONFIG_DIR", home_dir=resolved_home, environ=env)
+    if override is not None:
+        return override
+    xdg_config_home = env.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return pathlib.Path(xdg_config_home).expanduser().resolve() / APP_DIR_LINUX
+    if _resolve_os_name(os_name) == "darwin":
+        return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "config"
+    return resolved_home / ".config" / APP_DIR_LINUX
+
+
 def strongclaw_state_dir(
     *,
     home_dir: pathlib.Path | None = None,
@@ -167,6 +187,27 @@ def strongclaw_lossless_claw_dir(
     )
 
 
+def strongclaw_plugins_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw plugin install root."""
+    return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "plugins"
+
+
+def strongclaw_plugin_dir(
+    plugin_name: str,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the install directory for one managed plugin."""
+    return strongclaw_plugins_dir(home_dir=home_dir, environ=environ, os_name=os_name) / plugin_name
+
+
 def strongclaw_qmd_install_dir(
     *,
     home_dir: pathlib.Path | None = None,
@@ -175,6 +216,66 @@ def strongclaw_qmd_install_dir(
 ) -> pathlib.Path:
     """Return the default install directory for the QMD package files."""
     return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "qmd"
+
+
+def strongclaw_workspace_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw OpenClaw workspace root."""
+    return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "workspace"
+
+
+def strongclaw_repo_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw managed repository root."""
+    return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "repo"
+
+
+def strongclaw_upstream_repo_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default managed upstream checkout directory."""
+    return strongclaw_repo_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "upstream"
+
+
+def strongclaw_worktrees_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default managed git worktree root."""
+    return strongclaw_repo_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "worktrees"
+
+
+def strongclaw_varlock_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw Varlock env directory."""
+    return strongclaw_config_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "varlock"
+
+
+def strongclaw_memory_config_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the default StrongClaw generated memory-config directory."""
+    return strongclaw_config_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "memory"
 
 
 def _slugify(value: str) -> str:

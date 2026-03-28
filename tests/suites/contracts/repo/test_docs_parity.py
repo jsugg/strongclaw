@@ -141,7 +141,8 @@ def test_operator_docs_surface_supported_hypermemory_path() -> None:
     assert "clawops config memory --set-profile hypermemory" in memory_doc
     assert "clawops config memory --set-profile openclaw-qmd" in memory_doc
     assert (
-        "clawops hypermemory --config platform/configs/memory/hypermemory.yaml verify" in memory_doc
+        "clawops hypermemory --config ~/.config/strongclaw/memory/hypermemory.yaml verify"
+        in memory_doc
     )
     assert "HYPERMEMORY_EMBEDDING_MODEL" in quickstart
     assert "HYPERMEMORY_EMBEDDING_MODEL" in secrets

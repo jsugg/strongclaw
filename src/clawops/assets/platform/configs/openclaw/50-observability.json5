@@ -1,0 +1,42 @@
+{
+  "diagnostics": {
+    "enabled": true,
+    "otel": {
+      "enabled": true,
+      "endpoint": "http://127.0.0.1:4318",
+      "flushIntervalMs": 60000,
+      "logs": false,
+      "metrics": true,
+      "protocol": "http/protobuf",
+      "sampleRate": 0.2,
+      "serviceName": "openclaw-gateway",
+      "traces": true
+    }
+  },
+  "logging": {
+    "consoleLevel": "info",
+    "consoleStyle": "compact",
+    "level": "info",
+    "redactPatterns": [
+      "sk-.*",
+      "ghp_.*",
+      "xoxb-.*"
+    ],
+    "redactSensitive": "tools"
+  },
+  "plugins": {
+    "allow": [
+      "diagnostics-otel"
+    ],
+    "enabled": true,
+    "entries": {
+      "diagnostics-otel": {
+        "enabled": true
+      }
+    },
+    "slots": {
+      "contextEngine": "legacy",
+      "memory": "memory-core"
+    }
+  }
+}

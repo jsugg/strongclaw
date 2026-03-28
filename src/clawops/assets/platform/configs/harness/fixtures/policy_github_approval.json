@@ -1,0 +1,9 @@
+{
+  "trust_zone": "coder",
+  "action": "github.comment.create",
+  "category": "external_write",
+  "target_kind": "github_repo",
+  "target": "your-org/openclaw-platform",
+  "environment": "prod",
+  "host_boundary": "main-control-plane"
+}
