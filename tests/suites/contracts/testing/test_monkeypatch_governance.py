@@ -1,4 +1,4 @@
-"""Framework governance for the remaining direct monkeypatch exceptions."""
+"""Governance for the remaining direct monkeypatch exceptions."""
 
 from __future__ import annotations
 

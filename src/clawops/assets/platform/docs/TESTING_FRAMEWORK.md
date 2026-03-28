@@ -11,7 +11,11 @@ Strongclaw uses four primary default pytest lanes:
 The repository also maintains an explicit `framework` lane for pytest-framework self-checks.
 Framework tests live under `tests/suites/contracts/testing/framework/` and are excluded from
 default runs via the project pytest configuration. Run them explicitly when changing pytest
-bootstrap, plugin registration, or framework governance behavior.
+bootstrap or plugin-registration behavior.
+
+Monkeypatch governance is a default contract, not a framework-only self-check. The direct
+monkeypatch contract lives under `tests/suites/contracts/testing/` so ordinary pytest runs fail
+when new unmanaged `monkeypatch` usage appears in suite code.
 
 Capability markers are additive and remain module-local:
 - `hypermemory`
@@ -41,8 +45,9 @@ managed env injection, patch teardown, and named runtime profiles.
 aggregate their leaf fixture modules.
 Tests consume fixtures by name through pytest injection and should not import from `tests.fixtures`.
 Tests that need reusable builders, fakes, or types should import them from `tests.utils.helpers`.
-Environment mutation and patching should flow through the infrastructure runtime, for example
-`prepend_path`, `TestContext.env`, and `TestContext.patch`, instead of direct `monkeypatch`
+Environment mutation, working-directory changes, and patching should flow through the
+infrastructure runtime, for example `prepend_path`, `TestContext.env`, `TestContext.chdir`, and
+`TestContext.patch`, instead of direct `monkeypatch`
 usage in ordinary suite code.
 
 ## DualMode Service Resolution
@@ -103,6 +108,7 @@ suite.
 
 Current governance covers:
 - root bootstrap shape
+- direct monkeypatch usage policy
 - workflow pytest invocation policy
 - test-context cleanup invariants
 - environment and patch isolation

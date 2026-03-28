@@ -1,8 +1,8 @@
 # Test Fixture Layout
 
 `tests/plugins/infrastructure/` contains the structural runtime for every test.
-It owns the universal `TestContext`, framework env injection, patch teardown, profile handling,
-and infrastructure-owned pytest hooks.
+It owns the universal `TestContext`, framework env injection, tracked cwd changes, patch teardown,
+profile handling, and infrastructure-owned pytest hooks.
 
 `tests/fixtures/` contains domain-facing pytest activation surfaces.
 The package is loaded through root `tests/conftest.py`, then aggregated by package-level

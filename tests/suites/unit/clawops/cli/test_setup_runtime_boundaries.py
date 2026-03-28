@@ -1,4 +1,4 @@
-"""Integration coverage for setup/doctor runtime-boundary behavior."""
+"""Unit coverage for setup/doctor runtime-boundary behavior."""
 
 from __future__ import annotations
 
@@ -8,11 +8,12 @@ import pytest
 
 from clawops import cli as root_cli
 from clawops import setup_cli
+from tests.plugins.infrastructure.context import TestContext
 
 
 def test_root_cli_setup_render_only_path_skips_model_auth(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
+    test_context: TestContext,
 ) -> None:
     """The public CLI should not require model auth on a render-only setup path."""
     calls: list[str] = []
@@ -74,13 +75,17 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
         calls.append("services-render")
         return {"ok": True}
 
-    monkeypatch.setattr(setup_cli, "bootstrap_state_ready", _bootstrap_state_ready)
-    monkeypatch.setattr(setup_cli, "install_profile_assets", _install_profile_assets)
-    monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
-    monkeypatch.setattr(setup_cli, "_render_openclaw_config", _render_openclaw_config)
-    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
-    monkeypatch.setattr(setup_cli, "ensure_model_auth", _ensure_model_auth)
-    monkeypatch.setattr(setup_cli, "render_service_files", _render_service_files)
+    test_context.patch.patch_object(setup_cli, "bootstrap_state_ready", new=_bootstrap_state_ready)
+    test_context.patch.patch_object(
+        setup_cli, "install_profile_assets", new=_install_profile_assets
+    )
+    test_context.patch.patch_object(setup_cli, "configure_varlock_env", new=_configure_varlock_env)
+    test_context.patch.patch_object(
+        setup_cli, "_render_openclaw_config", new=_render_openclaw_config
+    )
+    test_context.patch.patch_object(setup_cli, "_doctor_host_payload", new=_doctor_host_payload)
+    test_context.patch.patch_object(setup_cli, "ensure_model_auth", new=_ensure_model_auth)
+    test_context.patch.patch_object(setup_cli, "render_service_files", new=_render_service_files)
 
     exit_code = root_cli.main(["setup", "--repo-root", str(tmp_path), "--no-activate-services"])
 
@@ -95,9 +100,9 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
 
 
 def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
 ) -> None:
     """The public CLI should keep bounded doctor local when both skip flags are set."""
 
@@ -153,13 +158,15 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
         del kwargs
         return _OkReport()
 
-    monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
-    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
-    monkeypatch.setattr(setup_cli, "_require_model_check_ok", _require_model_check_ok)
-    monkeypatch.setattr(setup_cli, "run_openclaw_command", _run_openclaw_command)
-    monkeypatch.setattr(setup_cli, "verify_sidecars", _verify_sidecars)
-    monkeypatch.setattr(setup_cli, "verify_observability", _verify_observability)
-    monkeypatch.setattr(setup_cli, "verify_channels", _verify_channels)
+    test_context.patch.patch_object(setup_cli, "configure_varlock_env", new=_configure_varlock_env)
+    test_context.patch.patch_object(setup_cli, "_doctor_host_payload", new=_doctor_host_payload)
+    test_context.patch.patch_object(
+        setup_cli, "_require_model_check_ok", new=_require_model_check_ok
+    )
+    test_context.patch.patch_object(setup_cli, "run_openclaw_command", new=_run_openclaw_command)
+    test_context.patch.patch_object(setup_cli, "verify_sidecars", new=_verify_sidecars)
+    test_context.patch.patch_object(setup_cli, "verify_observability", new=_verify_observability)
+    test_context.patch.patch_object(setup_cli, "verify_channels", new=_verify_channels)
 
     exit_code = root_cli.main(
         ["doctor", "--repo-root", str(tmp_path), "--skip-runtime", "--no-model-probe"]

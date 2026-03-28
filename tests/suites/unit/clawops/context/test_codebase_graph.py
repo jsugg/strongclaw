@@ -13,6 +13,7 @@ from clawops.context.codebase.service import (
     normalize_neo4j_driver_url,
     service_from_config,
 )
+from tests.plugins.infrastructure.context import TestContext
 
 
 def test_large_scale_requires_healthy_neo4j_even_when_fallback_is_allowed(
@@ -146,7 +147,7 @@ def test_medium_scale_symbol_graph_expands_related_files(
 
 
 def test_neo4j_neighbors_use_literal_validated_depth(
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     backend = Neo4jGraphBackend(GraphConfig())
     recorded_query = ""
@@ -162,7 +163,7 @@ def test_neo4j_neighbors_use_literal_validated_depth(
         recorded_parameters = parameters
         return [{"id": "neighbor-1"}]
 
-    monkeypatch.setattr(backend, "_run_query", _fake_run_query)
+    test_context.patch.patch_object(backend, "_run_query", new=_fake_run_query)
 
     neighbors = backend.neighbors(
         node_id="symbol:provider.rotate_token",
