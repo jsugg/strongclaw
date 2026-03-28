@@ -123,6 +123,9 @@ The shipped codebase config supports:
 
 Path filters are applied to repo-relative POSIX paths before indexing.
 
+The shipped config excludes packaged runtime mirrors under `src/clawops/assets/**`
+so retrieval ranks the real source tree instead of duplicated install assets.
+
 Symlink handling is explicit:
 
 - `in_repo_only` follows symlinks only when the resolved target stays inside the
@@ -162,9 +165,10 @@ keeps the SQLite graph fallback aligned by materializing symbol-aware
 
 Use `clawops context codebase benchmark` to measure Recall@k and MRR against a
 curated fixture file. The command reindexes the repo, consolidates runtime
-artifacts, and then evaluates each case against the current provider scale.
-When the fixture file lives under the repo root, the benchmark command excludes
-that exact file from indexing so the query set cannot self-match.
+artifacts, and then evaluates each case against the final context surface for
+the current provider scale: the top retrieved roots plus graph dependency expansion
+when that lane is active. When the fixture file lives under the repo
+root, the benchmark command excludes that exact file from indexing so the query set cannot self-match.
 
 Fixture files live under `platform/configs/context/benchmarks/` and accept:
 

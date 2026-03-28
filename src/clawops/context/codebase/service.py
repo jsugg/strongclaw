@@ -2714,17 +2714,26 @@ class CodebaseContextService:
             expected_chunk_ids = list(case.get("expectedChunkIds", []))
             hits = self.query(query, limit=max_results)
 
-            retrieved_paths: list[str] = []
+            direct_retrieved_paths: list[str] = []
             path_rank: dict[str, int] = {}
             retrieved_chunk_ids: list[str] = []
             chunk_rank: dict[str, int] = {}
             for index, hit in enumerate(hits, start=1):
                 if hit.path not in path_rank:
                     path_rank[hit.path] = index
-                    retrieved_paths.append(hit.path)
+                    direct_retrieved_paths.append(hit.path)
                 if hit.chunk_id is not None and hit.chunk_id not in chunk_rank:
                     chunk_rank[hit.chunk_id] = index
                     retrieved_chunk_ids.append(hit.chunk_id)
+            dependency_paths: list[str] = []
+            dependency_rank = len(hits)
+            for path in self._dependency_expansion(direct_retrieved_paths):
+                if path in path_rank:
+                    continue
+                dependency_rank += 1
+                path_rank[path] = dependency_rank
+                dependency_paths.append(path)
+            retrieved_paths = [*direct_retrieved_paths, *dependency_paths]
 
             matched_paths = [path for path in expected_paths if path in path_rank]
             matched_chunk_ids = [
@@ -2754,6 +2763,8 @@ class CodebaseContextService:
                     expectedChunkIds=expected_chunk_ids,
                     matchedPaths=matched_paths,
                     matchedChunkIds=matched_chunk_ids,
+                    directRetrievedPaths=direct_retrieved_paths,
+                    dependencyPaths=dependency_paths,
                     retrievedPaths=retrieved_paths,
                     retrievedChunkIds=retrieved_chunk_ids,
                     recallAtK=recall_at_k,

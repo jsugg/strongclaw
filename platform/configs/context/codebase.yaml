@@ -78,5 +78,6 @@ paths:
     - "build/**"
     - "vendor/**"
     - ".openclaw/**"
+    - "src/clawops/assets/**"
     - "platform/plugins/memory-lancedb-pro/**"
     - "platform/configs/context/benchmarks/**"

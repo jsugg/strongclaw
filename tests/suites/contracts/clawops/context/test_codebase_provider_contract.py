@@ -29,9 +29,10 @@ def test_shipped_codebase_benchmark_fixtures_load() -> None:
     assert cases[0].get("expectedPaths")
 
 
-def test_shipped_codebase_provider_excludes_vendor_and_benchmark_fixture_trees() -> None:
+def test_shipped_codebase_provider_excludes_non_source_runtime_mirrors() -> None:
     config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
 
+    assert "src/clawops/assets/**" in config.exclude_globs
     assert "vendor/**" in config.exclude_globs
     assert "platform/configs/context/benchmarks/**" in config.exclude_globs
 
@@ -61,7 +62,10 @@ def test_shipped_codebase_benchmark_examples_route_semantic_expectations_to_medi
         "semantic or paraphrase-oriented benchmark cases should target `medium` or `large`." in docs
     )
     assert "clawops context codebase benchmark --scale medium" in docs
+    assert "final context surface" in docs
+    assert "dependency expansion" in docs
     assert "the benchmark command excludes" in docs
     assert "query set cannot self-match" in docs
+    assert "src/clawops/assets/**" in docs
     assert "keeps embedding batches conservative and allows longer HTTP timeouts" in docs
     assert "resumes from the remaining chunks" in docs

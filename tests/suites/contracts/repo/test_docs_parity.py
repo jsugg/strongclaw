@@ -44,6 +44,7 @@ def test_shipped_context_config_loads() -> None:
     config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
     assert config.include_globs
     assert config.exclude_globs
+    assert "src/clawops/assets/**" in config.exclude_globs
     assert "platform/plugins/memory-lancedb-pro/**" in config.exclude_globs
 
 
