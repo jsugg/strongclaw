@@ -8,6 +8,11 @@ Type=oneshot
 RemainAfterExit=true
 WorkingDirectory=__REPO_ROOT__
 Environment=OPENCLAW_STATE_DIR=__STATE_DIR__
+Environment=OPENCLAW_HOME=__OPENCLAW_HOME__
+Environment=OPENCLAW_CONFIG_PATH=__OPENCLAW_CONFIG_PATH__
+Environment=OPENCLAW_CONFIG=__OPENCLAW_CONFIG__
+Environment=OPENCLAW_PROFILE=__OPENCLAW_PROFILE__
+Environment=STRONGCLAW_RUNTIME_ROOT=__STRONGCLAW_RUNTIME_ROOT__
 Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 ExecStart=__PYTHON_EXECUTABLE__ -m clawops ops --asset-root __REPO_ROOT__ browser-lab up
 ExecStop=__PYTHON_EXECUTABLE__ -m clawops ops --asset-root __REPO_ROOT__ browser-lab down

@@ -15,6 +15,7 @@ from clawops.openclaw_config import (
     materialize_runtime_memory_configs,
     render_openclaw_profile,
 )
+from clawops.runtime_assets import resolve_runtime_layout
 from clawops.strongclaw_bootstrap import install_profile_assets
 from clawops.strongclaw_runtime import resolve_home_dir
 
@@ -77,7 +78,7 @@ def _print_payload(payload: Mapping[str, object], *, as_json: bool) -> None:
 def _set_memory_profile(
     *,
     profile_id: str,
-    output_path: pathlib.Path,
+    output_path: pathlib.Path | None,
     skip_assets: bool,
     repo_root: pathlib.Path,
     home_dir: pathlib.Path,
@@ -97,7 +98,10 @@ def _set_memory_profile(
         home_dir=home_dir,
     )
     materialize_runtime_memory_configs(repo_root=repo_root, home_dir=home_dir)
-    resolved_output = output_path.expanduser().resolve()
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    resolved_output = (
+        layout.openclaw_config_path if output_path is None else output_path.expanduser().resolve()
+    )
     write_json(resolved_output, rendered)
     return {
         "ok": True,
@@ -136,7 +140,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         type=pathlib.Path,
         default=DEFAULT_OPENCLAW_CONFIG_OUTPUT,
-        help="Target OpenClaw config path. Defaults to ~/.openclaw/openclaw.json.",
+        help="Target OpenClaw config path. Defaults to the active runtime boundary.",
     )
     memory_parser.add_argument("--json", action="store_true", help="Emit JSON.")
     return parser.parse_args(argv)

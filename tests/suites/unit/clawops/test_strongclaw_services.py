@@ -240,6 +240,29 @@ def test_render_service_files_includes_launchd_docker_env(
     assert "<string>ci-hosted-macos</string>" in rendered_sidecars
 
 
+def test_render_service_files_include_isolated_runtime_env(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Rendered services should encode the full isolated runtime contract."""
+    runtime_root = tmp_path / "dev-runtime"
+    output_dir = tmp_path / "systemd"
+    test_context.patch.patch_object(strongclaw_services, "systemd_dir", new=lambda: output_dir)
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    payload = strongclaw_services.render_service_files(REPO_ROOT, service_manager="systemd")
+    rendered_gateway = load_text(output_dir / "openclaw-gateway.service")
+
+    assert payload["stateDir"] == str(runtime_root / ".openclaw")
+    assert f"Environment=OPENCLAW_HOME={runtime_root}" in rendered_gateway
+    assert (
+        f"Environment=OPENCLAW_CONFIG_PATH={runtime_root / '.openclaw' / 'openclaw.json'}"
+        in rendered_gateway
+    )
+    assert "Environment=OPENCLAW_PROFILE=strongclaw-dev" in rendered_gateway
+    assert f"Environment=STRONGCLAW_RUNTIME_ROOT={runtime_root}" in rendered_gateway
+
+
 def test_render_service_files_omits_launchd_passthrough_env_when_unset(
     test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:

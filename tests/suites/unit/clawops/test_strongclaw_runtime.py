@@ -9,6 +9,7 @@ import clawops.strongclaw_runtime as runtime
 from clawops.app_paths import strongclaw_varlock_dir
 from clawops.strongclaw_runtime import CommandError, ExecResult, write_env_assignments
 from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_write_env_assignments_uses_owner_only_permissions(tmp_path: pathlib.Path) -> None:
@@ -119,3 +120,40 @@ def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path
     repo_root = tmp_path / "assets"
 
     assert runtime.managed_python(repo_root) == pathlib.Path(sys.executable).resolve()
+
+
+def test_resolve_openclaw_config_path_prefers_config_path_env(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    configured_path = tmp_path / "explicit" / "openclaw.json"
+    test_context.env.set("OPENCLAW_CONFIG_PATH", str(configured_path))
+    test_context.env.set("OPENCLAW_CONFIG", str(tmp_path / "legacy" / "openclaw.json"))
+
+    resolved = runtime.resolve_openclaw_config_path(REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert resolved == configured_path
+
+
+def test_resolve_openclaw_config_path_uses_runtime_layout_when_isolated(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    resolved = runtime.resolve_openclaw_config_path(REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert resolved == runtime_root / ".openclaw" / "openclaw.json"
+
+
+def test_resolve_openclaw_state_dir_uses_runtime_layout_when_isolated(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    resolved = runtime.resolve_openclaw_state_dir(REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert resolved == runtime_root / ".openclaw"

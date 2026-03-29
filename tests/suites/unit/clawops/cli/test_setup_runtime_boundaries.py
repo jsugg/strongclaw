@@ -180,3 +180,76 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
     assert openclaw_calls == []
     assert model_check_calls == 0
     assert "bounded local doctor" in output
+
+
+def test_setup_render_path_uses_isolated_runtime_root(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    """Setup render-only flow should target the isolated runtime config path."""
+    asset_root = make_asset_root(tmp_path / "assets")
+    runtime_root = tmp_path / "dev-runtime"
+    rendered_paths: list[pathlib.Path] = []
+
+    def _bootstrap_state_ready() -> bool:
+        return True
+
+    def _install_profile_assets(
+        repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path | None,
+    ) -> list[str]:
+        del repo_root, profile, home_dir
+        return []
+
+    def _configure_varlock_env(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        non_interactive: bool,
+    ) -> dict[str, object]:
+        del repo_root, check_only, non_interactive
+        return {"ok": True}
+
+    def _render_openclaw_config(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+        profile: str,
+    ) -> pathlib.Path:
+        del repo_root, home_dir, profile
+        path = runtime_root / ".openclaw" / "openclaw.json"
+        rendered_paths.append(path)
+        return path
+
+    def _doctor_host_payload(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"ok": True}
+
+    def _render_service_files(repo_root: pathlib.Path) -> dict[str, object]:
+        del repo_root
+        return {"ok": True}
+
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+    test_context.patch.patch_object(setup_cli, "bootstrap_state_ready", new=_bootstrap_state_ready)
+    test_context.patch.patch_object(
+        setup_cli, "install_profile_assets", new=_install_profile_assets
+    )
+    test_context.patch.patch_object(setup_cli, "configure_varlock_env", new=_configure_varlock_env)
+    test_context.patch.patch_object(
+        setup_cli, "_render_openclaw_config", new=_render_openclaw_config
+    )
+    test_context.patch.patch_object(setup_cli, "_doctor_host_payload", new=_doctor_host_payload)
+    test_context.patch.patch_object(setup_cli, "render_service_files", new=_render_service_files)
+
+    exit_code = root_cli.main(
+        ["setup", "--asset-root", str(asset_root), "--no-activate-services", "--skip-bootstrap"]
+    )
+
+    assert exit_code == 0
+    assert rendered_paths == [runtime_root / ".openclaw" / "openclaw.json"]

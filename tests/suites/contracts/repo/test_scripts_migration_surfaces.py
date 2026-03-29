@@ -17,17 +17,33 @@ def test_makefile_uses_python_native_operational_targets() -> None:
     assert "$(RUN) clawops ops sidecars up" in makefile
     assert "$(RUN) clawops baseline verify" in makefile
     assert "$(RUN) clawops recovery backup-create" in makefile
-    assert "$(RUN) clawops render-openclaw-config --asset-root ." in makefile
+    assert "./bin/clawops-dev render-openclaw-config" in makefile
 
 
-def test_repo_dev_entrypoints_enable_explicit_repo_asset_mode() -> None:
+def test_repo_dev_entrypoints_enable_isolated_dev_runtime_mode() -> None:
     dev_env = (REPO_ROOT / "scripts" / "dev-env.sh").read_text(encoding="utf-8")
     wrapper = (REPO_ROOT / "bin" / "clawops-dev").read_text(encoding="utf-8")
 
-    assert 'export STRONGCLAW_ASSET_ROOT="$repo_root"' in dev_env
+    assert 'runtime_root="${STRONGCLAW_RUNTIME_ROOT:-$repo_root/.local/dev-runtime}"' in dev_env
+    assert 'export STRONGCLAW_ASSET_ROOT="${STRONGCLAW_ASSET_ROOT:-$repo_root}"' in dev_env
+    assert 'export STRONGCLAW_RUNTIME_ROOT="$runtime_root"' in dev_env
+    assert 'export OPENCLAW_PROFILE="${OPENCLAW_PROFILE:-strongclaw-dev}"' in dev_env
+    assert (
+        'export OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"'
+        in dev_env
+    )
+    assert 'export OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$OPENCLAW_CONFIG_PATH}"' in dev_env
     assert 'PATH="$repo_root/bin:$PATH"' in dev_env
     assert '. "$venv_activate"' in dev_env
+    assert 'runtime_root="${STRONGCLAW_RUNTIME_ROOT:-$repo_root/.local/dev-runtime}"' in wrapper
     assert 'export STRONGCLAW_ASSET_ROOT="${STRONGCLAW_ASSET_ROOT:-$repo_root}"' in wrapper
+    assert 'export STRONGCLAW_RUNTIME_ROOT="$runtime_root"' in wrapper
+    assert 'export OPENCLAW_PROFILE="${OPENCLAW_PROFILE:-strongclaw-dev}"' in wrapper
+    assert (
+        'export OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"'
+        in wrapper
+    )
+    assert 'export OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$OPENCLAW_CONFIG_PATH}"' in wrapper
     assert 'exec uv run --project "$repo_root" clawops "$@"' in wrapper
 
 

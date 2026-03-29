@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from typing import cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
-from clawops.runtime_assets import resolve_asset_path
+from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
     CommandError,
@@ -96,16 +96,24 @@ def _compose_env(
     compose_name: str,
 ) -> dict[str, str]:
     """Build the compose execution environment."""
-    openclaw_state_dir = resolve_openclaw_state_dir(repo_root)
-    state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
-    state_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
-    for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
+    layout = resolve_runtime_layout(repo_root=repo_root, environ=env)
+    for key, value in load_env_assignments(varlock_local_env_file(repo_root, environ=env)).items():
         if value and not env.get(key, "").strip():
             env[key] = value
+    openclaw_state_dir = resolve_openclaw_state_dir(repo_root, environ=env)
+    openclaw_config_path = resolve_openclaw_config_path(repo_root, environ=env)
+    state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    env["OPENCLAW_HOME"] = str(layout.openclaw_home)
     env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
+    env["OPENCLAW_CONFIG_PATH"] = str(openclaw_config_path)
+    env["OPENCLAW_CONFIG"] = str(openclaw_config_path)
     env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
-    env["OPENCLAW_CONFIG"] = str(resolve_openclaw_config_path(repo_root))
+    if layout.openclaw_profile is not None:
+        env["OPENCLAW_PROFILE"] = layout.openclaw_profile
+    if layout.runtime_root is not None:
+        env["STRONGCLAW_RUNTIME_ROOT"] = str(layout.runtime_root)
     project_name = compose_project_name(
         compose_name=compose_name,
         state_dir=state_dir,

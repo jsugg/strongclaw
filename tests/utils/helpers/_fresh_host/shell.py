@@ -17,6 +17,7 @@ from clawops.strongclaw_runtime import (
     expand_user_path,
     load_env_assignments,
     resolve_openclaw_config_path,
+    resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
     varlock_local_env_file,
 )
@@ -197,9 +198,10 @@ def _compose_probe_env(
     for key, value in local_env.items():
         if value and not probe_env.get(key, "").strip():
             probe_env[key] = value
-    openclaw_state_dir = expand_user_path(
-        local_env.get("OPENCLAW_STATE_DIR", "~/.openclaw"),
+    openclaw_state_dir = resolve_openclaw_state_dir(
+        repo_root_path,
         home_dir=home_dir,
+        environ=probe_env,
     )
     explicit_state_dir = probe_env.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip()
     repo_local_override = probe_env.get("STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR", "").strip()
@@ -213,17 +215,36 @@ def _compose_probe_env(
     else:
         state_dir = openclaw_state_dir / "compose"
     state_dir.mkdir(parents=True, exist_ok=True)
+    openclaw_home = probe_env.get("OPENCLAW_HOME", "").strip()
+    if openclaw_home:
+        probe_env["OPENCLAW_HOME"] = str(expand_user_path(openclaw_home, home_dir=home_dir))
+    elif "STRONGCLAW_RUNTIME_ROOT" in probe_env:
+        probe_env["OPENCLAW_HOME"] = str(
+            expand_user_path(probe_env["STRONGCLAW_RUNTIME_ROOT"], home_dir=home_dir)
+        )
+    if (
+        probe_env.get("STRONGCLAW_RUNTIME_ROOT", "").strip()
+        and not probe_env.get("OPENCLAW_PROFILE", "").strip()
+    ):
+        probe_env["OPENCLAW_PROFILE"] = "strongclaw-dev"
     probe_env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
     probe_env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(state_dir)
     if repo_local_override:
         probe_env["STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR"] = str(state_dir)
-    openclaw_config = probe_env.get("OPENCLAW_CONFIG", "").strip()
+    openclaw_config = (
+        probe_env.get("OPENCLAW_CONFIG_PATH", "").strip()
+        or probe_env.get("OPENCLAW_CONFIG", "").strip()
+    )
     if openclaw_config:
-        probe_env["OPENCLAW_CONFIG"] = str(expand_user_path(openclaw_config, home_dir=home_dir))
+        resolved_config = expand_user_path(openclaw_config, home_dir=home_dir)
     else:
-        probe_env["OPENCLAW_CONFIG"] = str(
-            resolve_openclaw_config_path(repo_root_path, home_dir=home_dir)
+        resolved_config = resolve_openclaw_config_path(
+            repo_root_path,
+            home_dir=home_dir,
+            environ=probe_env,
         )
+    probe_env["OPENCLAW_CONFIG_PATH"] = str(resolved_config)
+    probe_env["OPENCLAW_CONFIG"] = str(resolved_config)
     project_name = compose_project_name(
         compose_name=compose_name,
         state_dir=state_dir,

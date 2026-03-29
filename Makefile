@@ -34,8 +34,8 @@ dev: ## Sync the locked dev environment and install pre-commit hooks.
 	$(UV_SYNC) $(DEV_SYNC_FLAGS)
 	$(PRE_COMMIT) install --install-hooks
 
-dev-shell: install ## Open an interactive dev shell with repo-backed StrongClaw assets enabled.
-	@bash -lc 'source scripts/dev-env.sh && exec "$${SHELL:-/bin/bash}" -i'
+dev-shell: install ## Open an interactive dev shell with repo-backed isolated runtime enabled.
+	@bash -lc 'source "$(CURDIR)/scripts/dev-env.sh" && cd "$(CURDIR)" && exec "$${SHELL:-/bin/bash}" -i'
 
 fmt: ## Apply import sorting, lint autofixes, and formatting.
 	$(RUN) isort src tests
@@ -106,7 +106,7 @@ compile: ## Compile source and tests in the managed dev environment.
 	$(RUN) python -m compileall -q src tests
 
 render-config: ## Render the OpenClaw config bundle.
-	$(RUN) clawops render-openclaw-config --asset-root .
+	./bin/clawops-dev render-openclaw-config
 
 start-sidecars: ## Launch the sidecar services.
 	$(RUN) clawops ops sidecars up

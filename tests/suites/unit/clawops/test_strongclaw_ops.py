@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import pathlib
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
 import pytest
 
 from clawops import strongclaw_ops
 from clawops.strongclaw_runtime import ExecResult
+from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 class _ComposeStateDir(Protocol):
@@ -134,10 +136,16 @@ def test_compose_env_exports_openclaw_and_compose_state(
     openclaw_state_dir = tmp_path / ".openclaw"
     config_path = tmp_path / ".openclaw" / "openclaw.json"
 
-    def _resolve_openclaw_state_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_state_dir(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return openclaw_state_dir
 
-    def _resolve_openclaw_config_path(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_config_path(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return config_path
 
     monkeypatch.delenv("STRONGCLAW_COMPOSE_STATE_DIR", raising=False)
@@ -149,7 +157,7 @@ def test_compose_env_exports_openclaw_and_compose_state(
     )
 
     env = _compose_env(
-        tmp_path,
+        REPO_ROOT,
         repo_local_state=False,
         compose_name="docker-compose.aux-stack.yaml",
     )
@@ -157,6 +165,29 @@ def test_compose_env_exports_openclaw_and_compose_state(
     assert env["OPENCLAW_STATE_DIR"] == str(openclaw_state_dir)
     assert env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(openclaw_state_dir / "compose")
     assert env["OPENCLAW_CONFIG"] == str(config_path)
+
+
+def test_compose_env_exports_isolated_runtime_contract(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    openclaw_state_dir = runtime_root / ".openclaw"
+    config_path = openclaw_state_dir / "openclaw.json"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    env = _compose_env(
+        REPO_ROOT,
+        repo_local_state=False,
+        compose_name="docker-compose.aux-stack.yaml",
+    )
+
+    assert env["OPENCLAW_HOME"] == str(runtime_root)
+    assert env["OPENCLAW_STATE_DIR"] == str(openclaw_state_dir)
+    assert env["OPENCLAW_CONFIG_PATH"] == str(config_path)
+    assert env["OPENCLAW_CONFIG"] == str(config_path)
+    assert env["OPENCLAW_PROFILE"] == "strongclaw-dev"
+    assert env["STRONGCLAW_RUNTIME_ROOT"] == str(runtime_root)
 
 
 def test_compose_env_inherits_repo_local_varlock_assignments(
@@ -171,11 +202,26 @@ def test_compose_env_inherits_repo_local_varlock_assignments(
         "NEO4J_PASSWORD=repo-secret\nNEO4J_USERNAME=neo4j\n", encoding="utf-8"
     )
 
-    def _resolve_openclaw_state_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_state_dir(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return openclaw_state_dir
 
-    def _resolve_openclaw_config_path(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_config_path(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return config_path
+
+    def _varlock_local_env_file(
+        _repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> pathlib.Path:
+        del home_dir, environ
+        return local_env_file
 
     monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
     monkeypatch.setattr(strongclaw_ops, "resolve_openclaw_state_dir", _resolve_openclaw_state_dir)
@@ -184,9 +230,10 @@ def test_compose_env_inherits_repo_local_varlock_assignments(
         "resolve_openclaw_config_path",
         _resolve_openclaw_config_path,
     )
+    monkeypatch.setattr(strongclaw_ops, "varlock_local_env_file", _varlock_local_env_file)
 
     env = _compose_env(
-        tmp_path,
+        REPO_ROOT,
         repo_local_state=False,
         compose_name="docker-compose.aux-stack.yaml",
     )
@@ -203,10 +250,16 @@ def test_compose_env_sets_project_name_for_variant(
     config_path = openclaw_state_dir / "openclaw.json"
     repo_local_dir = tmp_path / "repo-local"
 
-    def _resolve_openclaw_state_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_state_dir(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return openclaw_state_dir
 
-    def _resolve_openclaw_config_path(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _resolve_openclaw_config_path(
+        _repo_root: pathlib.Path, *, environ: Mapping[str, str] | None = None
+    ) -> pathlib.Path:
+        del environ
         return config_path
 
     monkeypatch.setenv("STRONGCLAW_COMPOSE_VARIANT", "ci-hosted-macos")
@@ -219,12 +272,12 @@ def test_compose_env_sets_project_name_for_variant(
     )
 
     host_env = _compose_env(
-        tmp_path,
+        REPO_ROOT,
         repo_local_state=False,
         compose_name="docker-compose.aux-stack.yaml",
     )
     repo_env = _compose_env(
-        tmp_path,
+        REPO_ROOT,
         repo_local_state=True,
         compose_name="docker-compose.aux-stack.yaml",
     )
@@ -298,7 +351,7 @@ def test_sidecars_up_bootstraps_litellm_before_starting_runtime_services(
     monkeypatch.setattr(strongclaw_ops, "run_command", fake_run_command)
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
 
-    assert strongclaw_ops.sidecars_up(tmp_path, repo_local_state=False) == 0
+    assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
     assert inherited_calls == [
         ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres"),
         (
@@ -392,7 +445,7 @@ def test_sidecars_up_skips_bootstrap_when_litellm_is_already_healthy(
     monkeypatch.setattr(strongclaw_ops, "run_command", fake_run_command)
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
 
-    assert strongclaw_ops.sidecars_up(tmp_path, repo_local_state=False) == 0
+    assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
     assert inherited_calls == [
         ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres"),
         (
@@ -471,7 +524,7 @@ def test_sidecars_up_fails_when_postgres_never_turns_healthy(
     with pytest.raises(
         strongclaw_ops.CommandError, match="timed out waiting for compose service 'postgres'"
     ):
-        strongclaw_ops.sidecars_up(tmp_path, repo_local_state=False)
+        strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False)
 
     assert inherited_calls == [
         ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres")

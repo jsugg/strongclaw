@@ -11,6 +11,7 @@ from collections.abc import Mapping
 
 APP_DIR_LINUX = "strongclaw"
 APP_DIR_MACOS = "StrongClaw"
+RUNTIME_ROOT_ENV_VAR = "STRONGCLAW_RUNTIME_ROOT"
 
 
 def _resolve_os_name(os_name: str | None = None) -> str:
@@ -40,6 +41,18 @@ def _resolve_override_path(
     return pathlib.Path(raw_value).expanduser().resolve()
 
 
+def strongclaw_runtime_root(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path | None:
+    """Return the umbrella managed runtime root when one is configured."""
+    env = os.environ if environ is None else environ
+    raw_value = env.get(RUNTIME_ROOT_ENV_VAR)
+    if raw_value is None or not raw_value.strip():
+        return None
+    return pathlib.Path(raw_value).expanduser().resolve()
+
+
 def strongclaw_data_dir(
     *,
     home_dir: pathlib.Path | None = None,
@@ -52,6 +65,9 @@ def strongclaw_data_dir(
     override = _resolve_override_path("STRONGCLAW_DATA_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    runtime_root = strongclaw_runtime_root(environ=env)
+    if runtime_root is not None:
+        return runtime_root / "strongclaw" / "data"
     if _resolve_os_name(os_name) == "darwin":
         return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS
     xdg_data_home = env.get("XDG_DATA_HOME")
@@ -72,6 +88,9 @@ def strongclaw_config_dir(
     override = _resolve_override_path("STRONGCLAW_CONFIG_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    runtime_root = strongclaw_runtime_root(environ=env)
+    if runtime_root is not None:
+        return runtime_root / "strongclaw" / "config"
     if _resolve_os_name(os_name) == "darwin":
         return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "config"
     xdg_config_home = env.get("XDG_CONFIG_HOME")
@@ -92,6 +111,9 @@ def strongclaw_state_dir(
     override = _resolve_override_path("STRONGCLAW_STATE_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    runtime_root = strongclaw_runtime_root(environ=env)
+    if runtime_root is not None:
+        return runtime_root / "strongclaw" / "state"
     if _resolve_os_name(os_name) == "darwin":
         return resolved_home / "Library" / "Application Support" / APP_DIR_MACOS / "state"
     xdg_state_home = env.get("XDG_STATE_HOME")
@@ -112,6 +134,9 @@ def strongclaw_log_dir(
     override = _resolve_override_path("STRONGCLAW_LOG_DIR", home_dir=resolved_home, environ=env)
     if override is not None:
         return override
+    runtime_root = strongclaw_runtime_root(environ=env)
+    if runtime_root is not None:
+        return runtime_root / "strongclaw" / "logs"
     if _resolve_os_name(os_name) == "darwin":
         return resolved_home / "Library" / "Logs" / APP_DIR_MACOS
     return strongclaw_state_dir(home_dir=resolved_home, environ=env, os_name=os_name) / "logs"
