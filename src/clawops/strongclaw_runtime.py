@@ -652,12 +652,15 @@ def resolve_openclaw_config_path(
 ) -> pathlib.Path:
     """Return the rendered OpenClaw config path."""
     env = os.environ if environ is None else environ
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir, environ=env)
     config_path = env.get("OPENCLAW_CONFIG_PATH", "").strip()
     if config_path:
         return expand_user_path(config_path, home_dir=home_dir)
     legacy_config = env.get("OPENCLAW_CONFIG", "").strip()
     if legacy_config:
         return expand_user_path(legacy_config, home_dir=home_dir)
+    if layout.uses_isolated_runtime:
+        return layout.openclaw_config_path
     local_env = load_env_assignments(
         varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
     )
@@ -667,9 +670,7 @@ def resolve_openclaw_config_path(
     legacy_local_config = local_env.get("OPENCLAW_CONFIG", "").strip()
     if legacy_local_config:
         return expand_user_path(legacy_local_config, home_dir=home_dir)
-    return resolve_runtime_layout(
-        repo_root=repo_root, home_dir=home_dir, environ=env
-    ).openclaw_config_path
+    return layout.openclaw_config_path
 
 
 def openclaw_available() -> bool:
@@ -1028,18 +1029,19 @@ def resolve_openclaw_state_dir(
 ) -> pathlib.Path:
     """Return the configured OpenClaw state directory."""
     env = os.environ if environ is None else environ
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir, environ=env)
     override = env.get("OPENCLAW_STATE_DIR", "").strip()
     if override:
         return expand_user_path(override, home_dir=home_dir)
+    if layout.uses_isolated_runtime:
+        return layout.openclaw_state_dir
     local_env = load_env_assignments(
         varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
     )
     raw_value = local_env.get("OPENCLAW_STATE_DIR", "").strip()
     if raw_value:
         return expand_user_path(raw_value, home_dir=home_dir)
-    return resolve_runtime_layout(
-        repo_root=repo_root, home_dir=home_dir, environ=env
-    ).openclaw_state_dir
+    return layout.openclaw_state_dir
 
 
 def resolve_runtime_user(repo_root: pathlib.Path) -> str:

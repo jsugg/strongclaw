@@ -179,3 +179,48 @@ def test_resolve_openclaw_state_dir_uses_runtime_layout_when_isolated(
     resolved = runtime.resolve_openclaw_state_dir(REPO_ROOT, home_dir=tmp_path / "home")
 
     assert resolved == runtime_root / ".openclaw"
+
+
+def test_resolve_openclaw_config_path_prefers_runtime_root_over_local_env_fallback(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    def _load_env_assignments(_: pathlib.Path) -> dict[str, str]:
+        return {
+            "OPENCLAW_CONFIG_PATH": str(tmp_path / "local-env" / "openclaw.json"),
+            "OPENCLAW_CONFIG": str(tmp_path / "legacy-local-env" / "openclaw.json"),
+        }
+
+    test_context.patch.patch_object(
+        runtime,
+        "load_env_assignments",
+        new=_load_env_assignments,
+    )
+
+    resolved = runtime.resolve_openclaw_config_path(REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert resolved == runtime_root / ".openclaw" / "openclaw.json"
+
+
+def test_resolve_openclaw_state_dir_prefers_runtime_root_over_local_env_fallback(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    def _load_env_assignments(_: pathlib.Path) -> dict[str, str]:
+        return {"OPENCLAW_STATE_DIR": str(tmp_path / "local-env" / ".openclaw")}
+
+    test_context.patch.patch_object(
+        runtime,
+        "load_env_assignments",
+        new=_load_env_assignments,
+    )
+
+    resolved = runtime.resolve_openclaw_state_dir(REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert resolved == runtime_root / ".openclaw"
