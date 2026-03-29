@@ -98,7 +98,17 @@ def _compose_env(
     """Build the compose execution environment."""
     env = dict(os.environ)
     layout = resolve_runtime_layout(repo_root=repo_root, environ=env)
+    isolated_runtime_keys = {
+        "OPENCLAW_HOME",
+        "OPENCLAW_STATE_DIR",
+        "OPENCLAW_CONFIG_PATH",
+        "OPENCLAW_CONFIG",
+        "OPENCLAW_PROFILE",
+        "STRONGCLAW_RUNTIME_ROOT",
+    }
     for key, value in load_env_assignments(varlock_local_env_file(repo_root, environ=env)).items():
+        if layout.uses_isolated_runtime and key in isolated_runtime_keys:
+            continue
         if value and not env.get(key, "").strip():
             env[key] = value
     openclaw_state_dir = resolve_openclaw_state_dir(repo_root, environ=env)
