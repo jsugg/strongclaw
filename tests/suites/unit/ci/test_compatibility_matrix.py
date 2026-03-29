@@ -177,3 +177,74 @@ def test_main_dispatches_prepare_setup_smoke(
             github_env_file.resolve(),
         )
     ]
+
+
+def test_assert_openclaw_profiles_render_writes_one_file_per_profile(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Nightly profile validation should render every OpenClaw profile to disk."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    runner_temp = tmp_path / "runner-temp"
+    seen_calls: list[tuple[str, Path, Path]] = []
+
+    def fake_render_openclaw_profile(
+        *,
+        profile_name: str,
+        repo_root: Path,
+        home_dir: Path,
+    ) -> dict[str, str]:
+        seen_calls.append((profile_name, repo_root, home_dir))
+        return {"profile": profile_name}
+
+    test_context.patch.patch_object(
+        compatibility_helpers,
+        "render_openclaw_profile",
+        new=fake_render_openclaw_profile,
+    )
+
+    rendered_profiles = ci_workflows.assert_openclaw_profiles_render(repo_root, runner_temp)
+
+    expected_profiles = sorted(compatibility_helpers.PROFILES)
+    expected_home = (runner_temp / "strongclaw" / "nightly" / "profile-home").resolve()
+    expected_output_dir = (runner_temp / "strongclaw" / "nightly" / "openclaw-profiles").resolve()
+    assert rendered_profiles == expected_profiles
+    assert [profile for profile, _, _ in seen_calls] == expected_profiles
+    assert all(resolved_repo_root == repo_root.resolve() for _, resolved_repo_root, _ in seen_calls)
+    assert all(home_dir == expected_home for _, _, home_dir in seen_calls)
+    for profile_name in expected_profiles:
+        payload = json.loads(
+            (expected_output_dir / f"{profile_name}.json").read_text(encoding="utf-8")
+        )
+        assert payload == {"profile": profile_name}
+
+
+def test_main_dispatches_assert_openclaw_profiles(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch all-profile rendering checks."""
+    seen_calls: list[tuple[Path, Path]] = []
+
+    def fake_assert_openclaw_profiles_render(repo_root: Path, runner_temp: Path) -> None:
+        seen_calls.append((repo_root, runner_temp))
+
+    test_context.patch.patch_object(
+        compatibility_matrix_script,
+        "assert_openclaw_profiles_render",
+        new=fake_assert_openclaw_profiles_render,
+    )
+
+    exit_code = compatibility_matrix_script.main(
+        [
+            "assert-openclaw-profiles",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--runner-temp",
+            str(tmp_path / "runner-temp"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [((tmp_path / "repo").resolve(), (tmp_path / "runner-temp").resolve())]

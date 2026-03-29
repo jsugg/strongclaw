@@ -190,6 +190,56 @@ def test_compose_env_exports_isolated_runtime_contract(
     assert env["STRONGCLAW_RUNTIME_ROOT"] == str(runtime_root)
 
 
+def test_compose_env_ignores_isolated_runtime_keys_from_local_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Compose env should keep runtime isolation even if local env files define legacy paths."""
+    runtime_root = tmp_path / "dev-runtime"
+    local_env_file = tmp_path / "legacy.env.local"
+    local_env_file.write_text(
+        "\n".join(
+            (
+                "OPENCLAW_STATE_DIR=/tmp/legacy-openclaw-state",
+                "OPENCLAW_CONFIG_PATH=/tmp/legacy-openclaw.json",
+                "OPENCLAW_CONFIG=/tmp/legacy-openclaw-config.json",
+                "OPENCLAW_HOME=/tmp/legacy-openclaw-home",
+                "OPENCLAW_PROFILE=legacy-profile",
+                "NEO4J_PASSWORD=repo-secret",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def _varlock_local_env_file(
+        _repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> pathlib.Path:
+        del home_dir, environ
+        return local_env_file
+
+    monkeypatch.setenv("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+    monkeypatch.setattr(strongclaw_ops, "varlock_local_env_file", _varlock_local_env_file)
+
+    env = _compose_env(
+        REPO_ROOT,
+        repo_local_state=False,
+        compose_name="docker-compose.aux-stack.yaml",
+    )
+
+    expected_state_dir = runtime_root / ".openclaw"
+    expected_config_path = expected_state_dir / "openclaw.json"
+    assert env["OPENCLAW_HOME"] == str(runtime_root)
+    assert env["OPENCLAW_STATE_DIR"] == str(expected_state_dir)
+    assert env["OPENCLAW_CONFIG_PATH"] == str(expected_config_path)
+    assert env["OPENCLAW_CONFIG"] == str(expected_config_path)
+    assert env["OPENCLAW_PROFILE"] == "strongclaw-dev"
+    assert env["NEO4J_PASSWORD"] == "repo-secret"
+
+
 def test_compose_env_inherits_repo_local_varlock_assignments(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:

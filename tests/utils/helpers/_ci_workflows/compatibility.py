@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 from clawops.common import write_json
-from clawops.openclaw_config import render_openclaw_profile
+from clawops.openclaw_config import PROFILES, render_openclaw_profile
 from clawops.strongclaw_bootstrap import ensure_varlock_installed, install_lossless_claw_asset
 from tests.utils.helpers._ci_workflows.common import (
     CiWorkflowError,
@@ -134,6 +134,38 @@ def assert_hypermemory_config(tmp_root: Path) -> None:
         )
     if auto_recall is not True:
         raise CiWorkflowError(f"unexpected autoRecall setting: expected True, got {auto_recall!r}")
+
+
+def assert_openclaw_profiles_render(
+    repo_root: Path,
+    runner_temp: Path,
+) -> list[str]:
+    """Render every OpenClaw profile and persist artifacts for nightly inspection."""
+    resolved_repo_root = repo_root.expanduser().resolve()
+    resolved_runner_temp = runner_temp.expanduser().resolve()
+    nightly_root = resolved_runner_temp / "strongclaw" / "nightly"
+    home_dir = nightly_root / "profile-home"
+    runtime_root = nightly_root / "profile-runtime-root"
+    output_dir = nightly_root / "openclaw-profiles"
+    for directory in (home_dir, runtime_root, output_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    rendered_profiles: list[str] = []
+    with patched_environment(
+        {
+            "HOME": str(home_dir),
+            "STRONGCLAW_RUNTIME_ROOT": str(runtime_root),
+        }
+    ):
+        for profile_name in sorted(PROFILES):
+            rendered = render_openclaw_profile(
+                profile_name=profile_name,
+                repo_root=resolved_repo_root,
+                home_dir=home_dir,
+            )
+            write_json(output_dir / f"{profile_name}.json", rendered)
+            rendered_profiles.append(profile_name)
+    return rendered_profiles
 
 
 def _require_str_object_dict(value: object, *, label: str) -> dict[str, object]:

@@ -251,12 +251,18 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     """Refactored workflow lanes should route operational logic through semantic scripts."""
     compatibility = _workflow_text("compatibility-matrix.yml")
     memory_plugin = _workflow_text("memory-plugin-verification.yml")
+    nightly = _workflow_text("nightly.yml")
     security = _workflow_text("security.yml")
     release = _workflow_text("release.yml")
 
     assert "./tests/scripts/compatibility_matrix.py prepare-setup-smoke" in compatibility
     assert "./tests/scripts/compatibility_matrix.py assert-lossless-claw" in compatibility
     assert "./tests/scripts/compatibility_matrix.py assert-hypermemory-config" in compatibility
+    assert "./tests/scripts/compatibility_matrix.py assert-openclaw-profiles" in nightly
+    assert (
+        "./tests/scripts/memory_plugin_verification.py run-clawops-memory-migration"
+        in memory_plugin
+    )
     assert "./tests/scripts/memory_plugin_verification.py run-vendored-host-checks" in memory_plugin
     assert "./tests/scripts/memory_plugin_verification.py wait-for-qdrant" in memory_plugin
     assert "./tests/scripts/security_workflow.py write-coverage-summary" in security

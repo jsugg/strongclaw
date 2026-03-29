@@ -73,3 +73,39 @@ def wait_for_qdrant(url: str, *, attempts: int = 30, sleep_seconds: float = 2.0)
             break
         time.sleep(sleep_seconds)
     raise CiWorkflowError(f"Qdrant failed to become ready at {url} after {attempts} attempts")
+
+
+def run_clawops_memory_migration(
+    repo_root: Path,
+    *,
+    runner_temp: Path | None = None,
+) -> Path:
+    """Run a dry-run clawops memory migration and return the report path."""
+    resolved_repo_root = repo_root.expanduser().resolve()
+    report_root = (
+        runner_temp.expanduser().resolve()
+        if runner_temp is not None
+        else Path(tempfile.mkdtemp(prefix="strongclaw-memory-migration."))
+    )
+    report_root.mkdir(parents=True, exist_ok=True)
+    report_path = report_root / "clawops-memory-migration-report.json"
+    env = dict(os.environ)
+    if not env.get("PYTHONPATH", "").strip():
+        env["PYTHONPATH"] = "src"
+    run_checked(
+        [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "clawops",
+            "memory",
+            "migrate-hypermemory-to-pro",
+            "--dry-run",
+            "--report",
+            str(report_path),
+        ],
+        cwd=resolved_repo_root,
+        env=env,
+    )
+    return report_path

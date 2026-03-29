@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -611,6 +611,99 @@ def test_verify_compose_services_running_uses_scenario_home_for_compose_env(
     assert captured_env["OPENCLAW_CONFIG"] == str(
         (home_dir / ".openclaw" / "openclaw.json").resolve()
     )
+
+
+def test_verify_compose_services_running_ignores_isolated_runtime_keys_from_local_env(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Compose probes should not accept legacy runtime-path keys when isolation is active."""
+    repo_root = tmp_path / "repo"
+    compose_dir = repo_root / "platform" / "compose"
+    compose_dir.mkdir(parents=True)
+    compose_file = compose_dir / "docker-compose.browser-lab.yaml"
+    compose_file.write_text("services: {}\n", encoding="utf-8")
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    runtime_root = home_dir / "runtime-root"
+    local_env_file = tmp_path / "legacy.env.local"
+    local_env_file.write_text(
+        "\n".join(
+            (
+                "OPENCLAW_STATE_DIR=/tmp/legacy-openclaw-state",
+                "OPENCLAW_CONFIG_PATH=/tmp/legacy-openclaw.json",
+                "OPENCLAW_PROFILE=legacy-profile",
+                "NEO4J_PASSWORD=repo-secret",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured_env: dict[str, str] = {}
+    payload = json.dumps(
+        [
+            {"Service": "browserlab-proxy", "State": "running"},
+            {"Service": "browserlab-playwright", "State": "running"},
+        ]
+    )
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, check, timeout, text, capture_output
+        assert env is not None
+        captured_env.update(env)
+        return subprocess.CompletedProcess(
+            args=["docker", "compose"],
+            returncode=0,
+            stdout=payload,
+            stderr="",
+        )
+
+    def _varlock_local_env_file(
+        _repo_root: Path,
+        *,
+        home_dir: Path | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> Path:
+        del home_dir, environ
+        return local_env_file
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(
+        fresh_host_shell,
+        "varlock_local_env_file",
+        new=_varlock_local_env_file,
+    )
+
+    fresh_host_shell.verify_compose_services_running(
+        compose_file,
+        cwd=compose_dir,
+        env={
+            "HOME": str(home_dir),
+            "PATH": "/usr/bin",
+            "STRONGCLAW_RUNTIME_ROOT": str(runtime_root),
+        },
+        expected_services=("browserlab-proxy", "browserlab-playwright"),
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+
+    expected_state_dir = (runtime_root / ".openclaw").resolve()
+    expected_config_path = expected_state_dir / "openclaw.json"
+    assert captured_env["OPENCLAW_HOME"] == str(runtime_root.resolve())
+    assert captured_env["OPENCLAW_STATE_DIR"] == str(expected_state_dir)
+    assert captured_env["OPENCLAW_CONFIG_PATH"] == str(expected_config_path)
+    assert captured_env["OPENCLAW_CONFIG"] == str(expected_config_path)
+    assert captured_env["OPENCLAW_PROFILE"] == "strongclaw-dev"
+    assert captured_env["NEO4J_PASSWORD"] == "repo-secret"
 
 
 def test_verify_compose_services_running_honors_repo_local_state_override_for_variants(

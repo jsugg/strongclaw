@@ -17,6 +17,7 @@ from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E4
 from tests.utils.helpers._ci_workflows.compatibility import (  # noqa: E402
     assert_hypermemory_config,
     assert_lossless_claw_installed,
+    assert_openclaw_profiles_render,
     prepare_setup_smoke,
 )
 
@@ -46,6 +47,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     config_parser.add_argument("--tmp-root", type=Path, required=True)
 
+    profile_parser = subparsers.add_parser(
+        "assert-openclaw-profiles",
+        help="Render all OpenClaw profiles for nightly validation.",
+    )
+    profile_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    profile_parser.add_argument("--runner-temp", type=Path, required=True)
+
     return parser.parse_args(argv)
 
 
@@ -69,6 +77,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "assert-hypermemory-config":
             assert_hypermemory_config(Path(args.tmp_root).expanduser().resolve())
+            return 0
+        if args.command == "assert-openclaw-profiles":
+            assert_openclaw_profiles_render(
+                Path(args.repo_root).expanduser().resolve(),
+                Path(args.runner_temp).expanduser().resolve(),
+            )
             return 0
     except CiWorkflowError as exc:
         print(f"compatibility-matrix error: {exc}", file=sys.stderr)
