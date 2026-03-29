@@ -23,6 +23,18 @@
       <string>__HOME_DIR__</string>
       <key>XDG_CONFIG_HOME</key>
       <string>__HOME_DIR__/.config</string>
+      <key>OPENCLAW_HOME</key>
+      <string>__OPENCLAW_HOME__</string>
+      <key>OPENCLAW_STATE_DIR</key>
+      <string>__STATE_DIR__</string>
+      <key>OPENCLAW_CONFIG_PATH</key>
+      <string>__OPENCLAW_CONFIG_PATH__</string>
+      <key>OPENCLAW_CONFIG</key>
+      <string>__OPENCLAW_CONFIG__</string>
+      <key>OPENCLAW_PROFILE</key>
+      <string>__OPENCLAW_PROFILE__</string>
+      <key>STRONGCLAW_RUNTIME_ROOT</key>
+      <string>__STRONGCLAW_RUNTIME_ROOT__</string>
       <key>PATH</key>
       <string>__HOME_DIR__/.config/varlock/bin:__HOME_DIR__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 __LAUNCHD_EXTRA_ENV__

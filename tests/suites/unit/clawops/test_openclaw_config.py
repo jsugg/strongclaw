@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from clawops.app_paths import (
     strongclaw_lossless_claw_dir,
     strongclaw_memory_config_dir,
@@ -13,17 +15,22 @@ from clawops.app_paths import (
     strongclaw_workspace_dir,
 )
 from clawops.openclaw_config import (
+    DEV_RUNTIME_GATEWAY_PORT,
+    main,
     materialize_runtime_memory_configs,
+    parse_args,
     render_openclaw_overlay,
     render_openclaw_profile,
     render_qmd_overlay,
 )
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) -> None:
     repo_root = tmp_path / "repo"
     home_dir = tmp_path / "home"
+    (repo_root / "platform").mkdir(parents=True)
     template = tmp_path / "40-qmd-context.json"
     template.write_text(
         """
@@ -63,6 +70,7 @@ def test_render_qmd_overlay_replaces_local_placeholders(tmp_path: pathlib.Path) 
 def test_render_overlay_accepts_json5_comments_and_trailing_commas(tmp_path: pathlib.Path) -> None:
     repo_root = tmp_path / "repo"
     home_dir = tmp_path / "home"
+    (repo_root / "platform").mkdir(parents=True)
     template = tmp_path / "overlay.json5"
     template.write_text(
         """
@@ -92,6 +100,7 @@ def test_render_overlay_accepts_json5_comments_and_trailing_commas(tmp_path: pat
 def test_render_overlay_accepts_full_json5_syntax(tmp_path: pathlib.Path) -> None:
     repo_root = tmp_path / "repo"
     home_dir = tmp_path / "home"
+    (repo_root / "platform").mkdir(parents=True)
     template = tmp_path / "overlay.json5"
     template.write_text(
         """
@@ -355,3 +364,47 @@ def test_materialize_runtime_memory_configs_writes_managed_configs(
     assert repo_root.as_posix() in default_text
     assert workspace_root.as_posix() in default_text
     assert upstream_root.as_posix() in sqlite_text
+
+
+def test_parse_args_defers_openclaw_config_output_default() -> None:
+    args = parse_args(["--profile", "hypermemory"])
+
+    assert args.output is None
+
+
+def test_render_openclaw_profile_injects_dev_gateway_port_when_runtime_root_is_active(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    rendered = render_openclaw_profile(
+        profile_name="hypermemory",
+        repo_root=REPO_ROOT,
+        home_dir=tmp_path / "home",
+        user_timezone="UTC",
+    )
+
+    assert rendered["gateway"]["port"] == DEV_RUNTIME_GATEWAY_PORT
+    assert rendered["agents"]["defaults"]["workspace"] == str(
+        runtime_root / "strongclaw" / "data" / "workspace" / "admin"
+    )
+
+
+def test_main_uses_layout_derived_output_when_output_is_omitted(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    exit_code = main(["--asset-root", str(REPO_ROOT), "--profile", "hypermemory"])
+
+    rendered_path = runtime_root / ".openclaw" / "openclaw.json"
+    payload = json.loads(rendered_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert payload["gateway"]["port"] == DEV_RUNTIME_GATEWAY_PORT
+    assert f"Rendered {rendered_path}" in capsys.readouterr().out

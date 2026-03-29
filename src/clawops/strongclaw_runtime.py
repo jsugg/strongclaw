@@ -632,22 +632,41 @@ def run_varlock_command(
     )
 
 
-def default_openclaw_config_path(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
+def default_openclaw_config_path(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the default rendered OpenClaw config path."""
-    return resolve_home_dir(home_dir) / ".openclaw" / "openclaw.json"
+    return resolve_runtime_layout(home_dir=home_dir, environ=environ).openclaw_config_path
 
 
 def resolve_openclaw_config_path(
     repo_root: pathlib.Path,
     *,
     home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> pathlib.Path:
     """Return the rendered OpenClaw config path."""
-    del repo_root
-    override = os.environ.get("OPENCLAW_CONFIG")
-    if override:
-        return expand_user_path(override, home_dir=home_dir)
-    return default_openclaw_config_path(home_dir=home_dir)
+    env = os.environ if environ is None else environ
+    config_path = env.get("OPENCLAW_CONFIG_PATH", "").strip()
+    if config_path:
+        return expand_user_path(config_path, home_dir=home_dir)
+    legacy_config = env.get("OPENCLAW_CONFIG", "").strip()
+    if legacy_config:
+        return expand_user_path(legacy_config, home_dir=home_dir)
+    local_env = load_env_assignments(
+        varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
+    )
+    local_config_path = local_env.get("OPENCLAW_CONFIG_PATH", "").strip()
+    if local_config_path:
+        return expand_user_path(local_config_path, home_dir=home_dir)
+    legacy_local_config = local_env.get("OPENCLAW_CONFIG", "").strip()
+    if legacy_local_config:
+        return expand_user_path(legacy_local_config, home_dir=home_dir)
+    return resolve_runtime_layout(
+        repo_root=repo_root, home_dir=home_dir, environ=env
+    ).openclaw_config_path
 
 
 def openclaw_available() -> bool:
@@ -998,11 +1017,26 @@ def host_platform_record(
     }
 
 
-def resolve_openclaw_state_dir(repo_root: pathlib.Path) -> pathlib.Path:
+def resolve_openclaw_state_dir(
+    repo_root: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> pathlib.Path:
     """Return the configured OpenClaw state directory."""
-    local_env = load_env_assignments(varlock_local_env_file(repo_root))
-    raw_value = local_env.get("OPENCLAW_STATE_DIR", "~/.openclaw")
-    return expand_user_path(raw_value)
+    env = os.environ if environ is None else environ
+    override = env.get("OPENCLAW_STATE_DIR", "").strip()
+    if override:
+        return expand_user_path(override, home_dir=home_dir)
+    local_env = load_env_assignments(
+        varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
+    )
+    raw_value = local_env.get("OPENCLAW_STATE_DIR", "").strip()
+    if raw_value:
+        return expand_user_path(raw_value, home_dir=home_dir)
+    return resolve_runtime_layout(
+        repo_root=repo_root, home_dir=home_dir, environ=env
+    ).openclaw_state_dir
 
 
 def resolve_runtime_user(repo_root: pathlib.Path) -> str:
@@ -1026,21 +1060,26 @@ def resolve_compose_state_dir() -> pathlib.Path:
     return strongclaw_compose_state_dir()
 
 
-def ensure_common_state_roots(*, home_dir: pathlib.Path | None = None) -> None:
+def ensure_common_state_roots(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> None:
     """Create the shared StrongClaw data and state roots."""
+    env = os.environ if environ is None else environ
     roots = (
-        strongclaw_data_dir(home_dir=home_dir),
-        strongclaw_config_dir(home_dir=home_dir),
-        strongclaw_state_dir(home_dir=home_dir),
-        strongclaw_log_dir(home_dir=home_dir),
-        strongclaw_compose_state_dir(home_dir=home_dir),
-        strongclaw_qmd_install_dir(home_dir=home_dir),
-        strongclaw_lossless_claw_dir(home_dir=home_dir),
-        strongclaw_memory_config_dir(home_dir=home_dir),
-        strongclaw_varlock_dir(home_dir=home_dir),
-        strongclaw_workspace_dir(home_dir=home_dir),
-        strongclaw_repo_dir(home_dir=home_dir),
-        strongclaw_plugin_dir("memory-lancedb-pro", home_dir=home_dir),
+        strongclaw_data_dir(home_dir=home_dir, environ=env),
+        strongclaw_config_dir(home_dir=home_dir, environ=env),
+        strongclaw_state_dir(home_dir=home_dir, environ=env),
+        strongclaw_log_dir(home_dir=home_dir, environ=env),
+        strongclaw_compose_state_dir(home_dir=home_dir, environ=env),
+        strongclaw_qmd_install_dir(home_dir=home_dir, environ=env),
+        strongclaw_lossless_claw_dir(home_dir=home_dir, environ=env),
+        strongclaw_memory_config_dir(home_dir=home_dir, environ=env),
+        strongclaw_varlock_dir(home_dir=home_dir, environ=env),
+        strongclaw_workspace_dir(home_dir=home_dir, environ=env),
+        strongclaw_repo_dir(home_dir=home_dir, environ=env),
+        strongclaw_plugin_dir("memory-lancedb-pro", home_dir=home_dir, environ=env),
     )
     for root in roots:
         root.mkdir(parents=True, exist_ok=True)

@@ -39,7 +39,12 @@
 - Or open a prepared shell in one step:
   `make dev-shell`
 - After either flow, use `clawops-dev ...` to run the repo checkout against
-  repo-backed assets without changing the default installed/runtime behavior.
+  repo-backed assets and an isolated runtime rooted at
+  `<repo>/.local/dev-runtime`.
+- If you only need source assets without switching the mutable runtime, keep
+  using `clawops --asset-root <repo> ...` instead of the dev shell.
+- The dev shell is practical same-user isolation, not perfect total isolation:
+  some upstream approval files are still home-scoped under `~/.openclaw/`.
 
 ## Common Triage
 

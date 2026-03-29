@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 from clawops import config_cli
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.assets import make_asset_root
 
 
@@ -154,3 +155,64 @@ def test_memory_config_set_profile_skip_assets_only_renders(
     assert exit_code == 0
     assert payload["installedAssets"] == []
     assert payload["renderProfile"] == "hypermemory"
+
+
+def test_memory_config_parse_args_defers_output_default() -> None:
+    args = config_cli.parse_args(["memory", "--list-profiles"])
+
+    assert args.output is None
+
+
+def test_memory_config_default_output_uses_runtime_layout(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
+) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    def _render_openclaw_profile(
+        *,
+        profile_name: str,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"profile": profile_name}
+
+    def _test_materialize_runtime_memory_configs(
+        *,
+        repo_root: pathlib.Path,
+        home_dir: pathlib.Path,
+        user_timezone: str | None = None,
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        del repo_root, home_dir, user_timezone
+        return tmp_path / "hypermemory.yaml", tmp_path / "hypermemory.sqlite.yaml"
+
+    test_context.patch.patch_object(
+        config_cli,
+        "render_openclaw_profile",
+        new=_render_openclaw_profile,
+    )
+    test_context.patch.patch_object(
+        config_cli,
+        "materialize_runtime_memory_configs",
+        new=_test_materialize_runtime_memory_configs,
+    )
+
+    exit_code = config_cli.main(
+        [
+            "--asset-root",
+            str(asset_root),
+            "memory",
+            "--set-profile",
+            "hypermemory",
+            "--skip-assets",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["output"] == str(runtime_root / ".openclaw" / "openclaw.json")

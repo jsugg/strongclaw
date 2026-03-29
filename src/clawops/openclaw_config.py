@@ -34,8 +34,9 @@ HYPERMEMORY_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_CONFIG_PATH__"
 HYPERMEMORY_SQLITE_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_SQLITE_CONFIG_PATH__"
 OPENCLAW_CONFIG_DIR = pathlib.Path("platform/configs/openclaw")
 DEFAULT_PROFILE_NAME = "hypermemory"
-DEFAULT_OPENCLAW_CONFIG_OUTPUT = pathlib.Path.home() / ".openclaw" / "openclaw.json"
+DEFAULT_OPENCLAW_CONFIG_OUTPUT: pathlib.Path | None = None
 DEFAULT_EXEC_APPROVALS_TEMPLATE = OPENCLAW_CONFIG_DIR / "exec-approvals.json"
+DEV_RUNTIME_GATEWAY_PORT = 19001
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -341,6 +342,7 @@ def render_openclaw_profile(
 ) -> dict[str, Any]:
     """Render and merge a named OpenClaw config profile."""
     profile = _resolve_profile(profile_name)
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
     template_paths = [*profile.overlays, *extra_overlays]
     rendered_documents = [
         render_openclaw_overlay(
@@ -354,6 +356,15 @@ def render_openclaw_profile(
     if not rendered_documents:
         raise ValueError(f"OpenClaw render profile {profile_name} did not resolve any overlays")
     base, *overlays = rendered_documents
+    if layout.uses_isolated_runtime:
+        overlays = [
+            *overlays,
+            {
+                "gateway": {
+                    "port": DEV_RUNTIME_GATEWAY_PORT,
+                }
+            },
+        ]
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
@@ -386,7 +397,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Additional overlay template to render and merge on top of the selected profile.",
     )
     add_asset_root_argument(parser)
-    parser.add_argument("--output", type=pathlib.Path, default=DEFAULT_OPENCLAW_CONFIG_OUTPUT)
+    parser.add_argument(
+        "--output",
+        type=pathlib.Path,
+        default=DEFAULT_OPENCLAW_CONFIG_OUTPUT,
+        help="Target OpenClaw config path. Defaults to the active runtime boundary.",
+    )
     parser.add_argument(
         "--exec-approvals-output",
         type=pathlib.Path,
@@ -413,35 +429,39 @@ def main(argv: list[str] | None = None) -> int:
     """Render a placeholder-backed OpenClaw overlay to JSON."""
     args = parse_args(argv)
     repo_root = resolve_asset_root_argument(args, command_name="clawops render-openclaw-config")
+    home_dir = args.home_dir.expanduser().resolve()
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    output_path = layout.openclaw_config_path if args.output is None else args.output
+    resolved_output_path = output_path.expanduser().resolve()
     materialize_runtime_memory_configs(
         repo_root=repo_root,
-        home_dir=args.home_dir,
+        home_dir=home_dir,
         user_timezone=args.user_timezone,
     )
     if args.template is not None:
         rendered = render_openclaw_overlay(
             template_path=_resolve_repo_relative_path(repo_root=repo_root, path=args.template),
             repo_root=repo_root,
-            home_dir=args.home_dir,
+            home_dir=home_dir,
             user_timezone=args.user_timezone,
         )
     else:
         rendered = render_openclaw_profile(
             profile_name=args.profile,
             repo_root=repo_root,
-            home_dir=args.home_dir,
+            home_dir=home_dir,
             user_timezone=args.user_timezone,
             extra_overlays=tuple(args.overlay),
         )
-    write_json(args.output, rendered)
-    print(f"Rendered {args.output.expanduser().resolve()}")
+    write_json(resolved_output_path, rendered)
+    print(f"Rendered {resolved_output_path}")
     if args.exec_approvals_output is not None:
         approvals = render_openclaw_overlay(
             template_path=_resolve_repo_relative_path(
                 repo_root=repo_root, path=args.exec_approvals_template
             ),
             repo_root=repo_root,
-            home_dir=args.home_dir,
+            home_dir=home_dir,
             user_timezone=args.user_timezone,
         )
         write_json(args.exec_approvals_output, approvals)

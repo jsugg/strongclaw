@@ -72,6 +72,29 @@ def test_runtime_layout_rejects_invalid_env_asset_root_override(
         resolve_runtime_layout(home_dir=tmp_path / "home")
 
 
+def test_runtime_layout_isolates_mutable_roots_under_runtime_root(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    layout = resolve_runtime_layout(repo_root=REPO_ROOT, home_dir=tmp_path / "home")
+
+    assert layout.asset_root == REPO_ROOT
+    assert layout.runtime_root == runtime_root
+    assert layout.uses_isolated_runtime is True
+    assert layout.openclaw_home == runtime_root
+    assert layout.openclaw_state_dir == runtime_root / ".openclaw"
+    assert layout.openclaw_config_path == runtime_root / ".openclaw" / "openclaw.json"
+    assert layout.openclaw_profile == "strongclaw-dev"
+    assert layout.strongclaw_data_root == runtime_root / "strongclaw" / "data"
+    assert layout.strongclaw_config_root == runtime_root / "strongclaw" / "config"
+    assert layout.strongclaw_state_root == runtime_root / "strongclaw" / "state"
+    assert layout.strongclaw_log_root == runtime_root / "strongclaw" / "logs"
+    assert layout.workspace_root == runtime_root / "strongclaw" / "data" / "workspace"
+
+
 def test_resolve_asset_path_accepts_explicit_asset_root(tmp_path: pathlib.Path) -> None:
     asset_root = tmp_path / "assets"
     target = asset_root / "platform" / "docs" / "guide.md"

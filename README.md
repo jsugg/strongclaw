@@ -79,14 +79,31 @@ Boundary override flags are now literal:
 - use `--source-root` for source-tree-only verification such as `clawops baseline`
 - use `--repo-root` only for repo-contract tooling such as `clawops repo`, `clawops worktree`, and `clawops supply-chain`
 
-Package-safe runtime commands now default to the packaged asset bundle even when you run them from inside a StrongClaw source checkout. To opt into repo-backed assets for local development, export `STRONGCLAW_ASSET_ROOT` or use the repo-local developer flow:
+StrongClaw now supports three distinct runtime modes:
+
+- bare `clawops ...`: packaged assets plus your normal installed OpenClaw and StrongClaw runtime
+- `clawops --asset-root <repo> ...` or `STRONGCLAW_ASSET_ROOT=<repo>`: repo-backed assets only, while keeping the normal installed runtime
+- `source scripts/dev-env.sh`, `make dev-shell`, or `clawops-dev ...`: repo-backed assets plus a fully isolated dev runtime rooted at `<repo>/.local/dev-runtime`
+
+Package-safe runtime commands still default to the packaged asset bundle even when you run them from inside a StrongClaw source checkout. Use `--asset-root` only when you want source assets without switching the mutable runtime. For the full dev-isolated flow:
 
 ```bash
 source scripts/dev-env.sh
 clawops-dev render-openclaw-config
 ```
 
-`make dev-shell` opens an interactive shell with the same repo-backed asset override and managed virtualenv activated.
+`make dev-shell` opens an interactive shell with the same isolated dev contract and managed virtualenv activated.
+
+The dev shell exports these default boundaries unless you override them explicitly:
+
+- `STRONGCLAW_ASSET_ROOT=<repo>`
+- `STRONGCLAW_RUNTIME_ROOT=<repo>/.local/dev-runtime`
+- `OPENCLAW_PROFILE=strongclaw-dev`
+- `OPENCLAW_HOME=<repo>/.local/dev-runtime`
+- `OPENCLAW_STATE_DIR=<repo>/.local/dev-runtime/.openclaw`
+- `OPENCLAW_CONFIG_PATH=<repo>/.local/dev-runtime/.openclaw/openclaw.json`
+
+This is practical same-user developer isolation, not perfect total isolation. Current upstream OpenClaw still keeps some approval files under `~/.openclaw/` instead of the state dir, so home-scoped approval artifacts can still leak across same-user instances until upstream moves those files behind the runtime boundary.
 
 By default, StrongClaw now renders and provisions the `hypermemory` stack. Set one embedding model name before you run the no-arg setup path:
 

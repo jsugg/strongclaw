@@ -13,9 +13,11 @@ from xml.sax.saxutils import escape
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_text, write_text
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
+from clawops.runtime_assets import RuntimeLayout, resolve_runtime_layout
 from clawops.strongclaw_runtime import (
     ensure_docker_backend_ready,
     managed_python,
+    resolve_openclaw_config_path,
     resolve_openclaw_state_dir,
     resolve_repo_root,
     run_command,
@@ -72,13 +74,26 @@ def _launchd_extra_env_xml() -> str:
 
 
 def _render_template(
-    template_path: pathlib.Path, *, repo_root: pathlib.Path, state_dir: pathlib.Path
+    template_path: pathlib.Path,
+    *,
+    repo_root: pathlib.Path,
+    runtime_layout: RuntimeLayout,
+    state_dir: pathlib.Path,
+    config_path: pathlib.Path,
 ) -> str:
     """Render one service template."""
     return (
         load_text(template_path)
         .replace("__REPO_ROOT__", repo_root.as_posix())
         .replace("__PYTHON_EXECUTABLE__", managed_python(repo_root).as_posix())
+        .replace("__OPENCLAW_HOME__", runtime_layout.openclaw_home.as_posix())
+        .replace("__OPENCLAW_CONFIG_PATH__", config_path.as_posix())
+        .replace("__OPENCLAW_CONFIG__", config_path.as_posix())
+        .replace("__OPENCLAW_PROFILE__", runtime_layout.openclaw_profile or "")
+        .replace(
+            "__STRONGCLAW_RUNTIME_ROOT__",
+            "" if runtime_layout.runtime_root is None else runtime_layout.runtime_root.as_posix(),
+        )
         .replace("__STATE_DIR__", state_dir.as_posix())
         .replace("__HOME_DIR__", pathlib.Path.home().as_posix())
         .replace("__LAUNCHD_EXTRA_ENV__", _launchd_extra_env_xml())
@@ -93,10 +108,18 @@ def render_service_files(
 ) -> dict[str, object]:
     """Render launchd or systemd service definitions for the current host."""
     resolved_repo_root = resolve_repo_root(repo_root)
+    layout = resolve_runtime_layout(repo_root=resolved_repo_root)
     resolved_state_dir = (
         state_dir.expanduser().resolve()
         if state_dir is not None
         else resolve_openclaw_state_dir(resolved_repo_root)
+    )
+    resolved_config_path = resolve_openclaw_config_path(
+        resolved_repo_root,
+        environ={
+            **os.environ,
+            "OPENCLAW_STATE_DIR": resolved_state_dir.as_posix(),
+        },
     )
     resolved_state_dir.mkdir(parents=True, exist_ok=True)
     (resolved_state_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -125,7 +148,9 @@ def render_service_files(
             _render_template(
                 template_path,
                 repo_root=resolved_repo_root,
+                runtime_layout=layout,
                 state_dir=resolved_state_dir,
+                config_path=resolved_config_path,
             ),
         )
         rendered_files.append(output_path.as_posix())

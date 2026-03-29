@@ -93,3 +93,40 @@ def test_override_paths_apply_to_lossless_and_qmd_installs(tmp_path: pathlib.Pat
     assert scoped_dir.parent.parent == tmp_path / "state-root" / "workspaces"
     assert scoped_dir.parent.name.startswith("repo-")
     assert scoped_dir.name == "acp"
+
+
+def test_runtime_root_derives_managed_roots(tmp_path: pathlib.Path) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    env = {"STRONGCLAW_RUNTIME_ROOT": str(runtime_root)}
+
+    assert strongclaw_data_dir(environ=env) == runtime_root / "strongclaw" / "data"
+    assert strongclaw_config_dir(environ=env) == runtime_root / "strongclaw" / "config"
+    assert strongclaw_state_dir(environ=env) == runtime_root / "strongclaw" / "state"
+    assert strongclaw_log_dir(environ=env) == runtime_root / "strongclaw" / "logs"
+    assert strongclaw_runs_dir(environ=env) == runtime_root / "strongclaw" / "state" / "runs"
+    assert strongclaw_workspace_dir(environ=env) == (
+        runtime_root / "strongclaw" / "data" / "workspace"
+    )
+    assert strongclaw_repo_dir(environ=env) == runtime_root / "strongclaw" / "data" / "repo"
+    assert strongclaw_upstream_repo_dir(environ=env) == (
+        runtime_root / "strongclaw" / "data" / "repo" / "upstream"
+    )
+    assert strongclaw_worktrees_dir(environ=env) == (
+        runtime_root / "strongclaw" / "data" / "repo" / "worktrees"
+    )
+    assert strongclaw_varlock_dir(environ=env) == runtime_root / "strongclaw" / "config" / "varlock"
+    assert strongclaw_memory_config_dir(environ=env) == (
+        runtime_root / "strongclaw" / "config" / "memory"
+    )
+
+
+def test_explicit_override_wins_over_runtime_root(tmp_path: pathlib.Path) -> None:
+    runtime_root = tmp_path / "dev-runtime"
+    env = {
+        "STRONGCLAW_RUNTIME_ROOT": str(runtime_root),
+        "STRONGCLAW_STATE_DIR": str(tmp_path / "explicit-state"),
+        "STRONGCLAW_DATA_DIR": str(tmp_path / "explicit-data"),
+    }
+
+    assert strongclaw_state_dir(environ=env) == tmp_path / "explicit-state"
+    assert strongclaw_data_dir(environ=env) == tmp_path / "explicit-data"

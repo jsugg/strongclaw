@@ -1,8 +1,9 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(CDPATH='' cd -- "$script_dir/.." && pwd)"
+runtime_root="${STRONGCLAW_RUNTIME_ROOT:-$repo_root/.local/dev-runtime}"
 
 if [ ! -f "$repo_root/pyproject.toml" ] || [ ! -d "$repo_root/src/clawops" ]; then
   printf '%s\n' "clawops-dev must live inside a StrongClaw source checkout." >&2
@@ -10,5 +11,11 @@ if [ ! -f "$repo_root/pyproject.toml" ] || [ ! -d "$repo_root/src/clawops" ]; th
 fi
 
 export STRONGCLAW_ASSET_ROOT="${STRONGCLAW_ASSET_ROOT:-$repo_root}"
+export STRONGCLAW_RUNTIME_ROOT="$runtime_root"
+export OPENCLAW_PROFILE="${OPENCLAW_PROFILE:-strongclaw-dev}"
+export OPENCLAW_HOME="${OPENCLAW_HOME:-$runtime_root}"
+export OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$runtime_root/.openclaw}"
+export OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"
+export OPENCLAW_CONFIG="${OPENCLAW_CONFIG:-$OPENCLAW_CONFIG_PATH}"
 
 exec uv run --project "$repo_root" clawops "$@"
