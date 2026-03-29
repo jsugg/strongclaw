@@ -5,7 +5,6 @@ on:
     paths:
       - ".github/workflows/devflow-contract.yml"
       - "platform/configs/devflow/**"
-      - "platform/docs/DEVFLOW.md"
       - "platform/workers/acpx/**"
       - "src/clawops/devflow.py"
       - "src/clawops/devflow_*.py"

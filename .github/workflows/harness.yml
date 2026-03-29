@@ -2,6 +2,19 @@ name: Policy Harness Smoke Tests
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+      - "**/*.rst"
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.jpeg"
+      - "**/*.gif"
+      - "**/*.svg"
+      - "**/*.webp"
+      - "**/*.ico"
+      - "**/*.pdf"
+      - "LICENSE*"
   workflow_dispatch:
 
 permissions:

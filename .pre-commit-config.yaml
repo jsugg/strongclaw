@@ -32,11 +32,13 @@ repos:
         entry: uv run pyright
         language: system
         pass_filenames: false
+        types_or: [python, pyi]
       - id: mypy
         name: mypy
         entry: uv run mypy
         language: system
         pass_filenames: false
+        types_or: [python, pyi]
       - id: shellcheck
         name: shellcheck
         entry: shellcheck
