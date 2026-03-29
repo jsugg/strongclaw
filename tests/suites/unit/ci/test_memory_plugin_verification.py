@@ -88,6 +88,51 @@ def test_wait_for_qdrant_retries_until_ready(test_context: TestContext) -> None:
     assert sleeps == [1.5, 1.5]
 
 
+def test_run_clawops_memory_migration_invokes_dry_run_cli(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Memory migration checks should execute the dry-run clawops migration CLI."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    runner_temp = tmp_path / "runner-temp"
+    seen_calls: list[tuple[list[str], Path | None, dict[str, str] | None]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        capture_output: bool = False,
+    ) -> Any:
+        del timeout_seconds, capture_output
+        seen_calls.append((command, cwd, env))
+        return None
+
+    test_context.patch.patch_object(memory_plugin_helpers, "run_checked", new=fake_run_checked)
+    test_context.env.remove("PYTHONPATH")
+
+    report_path = ci_workflows.run_clawops_memory_migration(repo_root, runner_temp=runner_temp)
+
+    assert report_path == runner_temp.resolve() / "clawops-memory-migration-report.json"
+    command, command_cwd, command_env = seen_calls[0]
+    assert command[:8] == [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "clawops",
+        "memory",
+        "migrate-hypermemory-to-pro",
+        "--dry-run",
+    ]
+    assert command[-2:] == ["--report", str(report_path)]
+    assert command_cwd == repo_root.resolve()
+    assert command_env is not None
+    assert command_env["PYTHONPATH"] == "src"
+
+
 def test_main_dispatches_wait_for_qdrant(test_context: TestContext) -> None:
     """The CLI should dispatch Qdrant readiness checks."""
     seen_calls: list[tuple[str, int, float]] = []
@@ -107,3 +152,38 @@ def test_main_dispatches_wait_for_qdrant(test_context: TestContext) -> None:
 
     assert exit_code == 0
     assert seen_calls == [("http://127.0.0.1:6333/healthz", 12, 2.0)]
+
+
+def test_main_dispatches_run_clawops_memory_migration(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch dry-run clawops memory migration checks."""
+    seen_calls: list[tuple[Path, Path | None]] = []
+
+    def fake_run_clawops_memory_migration(
+        repo_root: Path,
+        *,
+        runner_temp: Path | None = None,
+    ) -> Path:
+        seen_calls.append((repo_root, runner_temp))
+        return tmp_path / "report.json"
+
+    test_context.patch.patch_object(
+        memory_plugin_script,
+        "run_clawops_memory_migration",
+        new=fake_run_clawops_memory_migration,
+    )
+
+    exit_code = memory_plugin_script.main(
+        [
+            "run-clawops-memory-migration",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--runner-temp",
+            str(tmp_path / "runner-temp"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [((tmp_path / "repo").resolve(), (tmp_path / "runner-temp").resolve())]

@@ -16,6 +16,7 @@ for import_root in (SRC_ROOT, REPO_ROOT):
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E402
 from tests.utils.helpers._ci_workflows.memory_plugin import (  # noqa: E402
     DEFAULT_OPENCLAW_PACKAGE_SPEC,
+    run_clawops_memory_migration,
     run_vendored_host_checks,
     wait_for_qdrant,
 )
@@ -33,6 +34,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     vendored_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     vendored_parser.add_argument("--package-spec", default=DEFAULT_OPENCLAW_PACKAGE_SPEC)
 
+    migration_parser = subparsers.add_parser(
+        "run-clawops-memory-migration",
+        help="Run clawops memory migration in dry-run mode.",
+    )
+    migration_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    migration_parser.add_argument("--runner-temp", type=Path)
+
     qdrant_parser = subparsers.add_parser("wait-for-qdrant", help="Wait for Qdrant readiness.")
     qdrant_parser.add_argument("--url", required=True)
     qdrant_parser.add_argument("--attempts", type=int, default=30)
@@ -49,6 +57,16 @@ def main(argv: list[str] | None = None) -> int:
             run_vendored_host_checks(
                 Path(args.repo_root).expanduser().resolve(),
                 package_spec=str(args.package_spec),
+            )
+            return 0
+        if args.command == "run-clawops-memory-migration":
+            run_clawops_memory_migration(
+                Path(args.repo_root).expanduser().resolve(),
+                runner_temp=(
+                    Path(args.runner_temp).expanduser().resolve()
+                    if args.runner_temp is not None
+                    else None
+                ),
             )
             return 0
         if args.command == "wait-for-qdrant":

@@ -63,6 +63,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: PYTHONPATH=src uv run python -m clawops config --asset-root . memory --set-profile memory-lancedb-pro --output "$RUNNER_TEMP/openclaw.json"
+      - run: python3 ./tests/scripts/memory_plugin_verification.py run-clawops-memory-migration --repo-root . --runner-temp "$RUNNER_TEMP"
       - run: python3 ./tests/scripts/memory_plugin_verification.py run-vendored-host-checks --repo-root . --package-spec "openclaw@2026.3.13"
   verify-hypermemory-qdrant:
     name: Run Hypermemory Qdrant Checks

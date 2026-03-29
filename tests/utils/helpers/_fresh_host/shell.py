@@ -19,6 +19,7 @@ from clawops.strongclaw_runtime import (
     resolve_openclaw_config_path,
     resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
+    resolve_runtime_layout,
     varlock_local_env_file,
 )
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
@@ -192,10 +193,25 @@ def _compose_probe_env(
     """Build the compose env used by the runtime probe."""
     probe_env = dict(base_env)
     home_dir = Path(probe_env.get("HOME", Path.home().as_posix())).expanduser().resolve()
+    layout = resolve_runtime_layout(
+        repo_root=repo_root_path,
+        home_dir=home_dir,
+        environ=probe_env,
+    )
+    isolated_runtime_keys = {
+        "OPENCLAW_HOME",
+        "OPENCLAW_STATE_DIR",
+        "OPENCLAW_CONFIG_PATH",
+        "OPENCLAW_CONFIG",
+        "OPENCLAW_PROFILE",
+        "STRONGCLAW_RUNTIME_ROOT",
+    }
     local_env = load_env_assignments(
         varlock_local_env_file(repo_root_path, home_dir=home_dir, environ=probe_env)
     )
     for key, value in local_env.items():
+        if layout.uses_isolated_runtime and key in isolated_runtime_keys:
+            continue
         if value and not probe_env.get(key, "").strip():
             probe_env[key] = value
     openclaw_state_dir = resolve_openclaw_state_dir(
