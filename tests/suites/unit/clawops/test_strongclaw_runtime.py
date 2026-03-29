@@ -116,6 +116,28 @@ def test_varlock_env_dir_defaults_to_managed_config_root(
     assert (expected / ".env.local.example").read_text(encoding="utf-8") == "APP_ENV=local\n"
 
 
+def test_varlock_env_dir_ignores_legacy_asset_env_when_runtime_root_is_isolated(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = tmp_path / "assets"
+    legacy_dir = repo_root / "platform" / "configs" / "varlock"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / ".env.local").write_text("OPENCLAW_STATE_DIR=~/.openclaw\n", encoding="utf-8")
+    (legacy_dir / ".env.local.example").write_text("APP_ENV=local\n", encoding="utf-8")
+    (legacy_dir / ".env.schema").write_text("APP_ENV=\n", encoding="utf-8")
+    (legacy_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
+    (legacy_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
+    runtime_root = tmp_path / "dev-runtime"
+    test_context.env.set("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
+
+    expected = runtime.varlock_env_dir(repo_root, home_dir=tmp_path / "home")
+
+    assert expected == runtime_root / "strongclaw" / "config" / "varlock"
+    assert expected != legacy_dir
+    assert (expected / ".env.local.example").read_text(encoding="utf-8") == "APP_ENV=local\n"
+
+
 def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path) -> None:
     repo_root = tmp_path / "assets"
 

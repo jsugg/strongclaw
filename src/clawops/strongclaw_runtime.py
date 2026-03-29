@@ -461,9 +461,12 @@ def varlock_env_dir(
     override = env.get("OPENCLAW_VARLOCK_ENV_PATH") or env.get("VARLOCK_ENV_DIR")
     if override:
         return expand_user_path(override, home_dir=home_dir)
-    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir)
+    layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir, environ=env)
     managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir, environ=env)
     legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
+    if layout.uses_isolated_runtime:
+        materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
+        return managed_dir
     if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
         legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
     ).exists():
