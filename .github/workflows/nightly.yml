@@ -33,7 +33,7 @@ jobs:
       - name: Create nightly artifact directory
         run: mkdir -p "$RUNNER_TEMP/strongclaw/nightly"
       - name: Render nightly OpenClaw profile matrix
-        run: ./tests/scripts/compatibility_matrix.py assert-openclaw-profiles --repo-root . --runner-temp "${RUNNER_TEMP}"
+        run: uv run python ./tests/scripts/compatibility_matrix.py assert-openclaw-profiles --repo-root . --runner-temp "${RUNNER_TEMP}"
       - name: Run nightly security harness
         run: PYTHONPATH=src uv run python -m clawops harness --suite platform/configs/harness/security_regressions.yaml --output "$RUNNER_TEMP/strongclaw/nightly/security.jsonl"
       - name: Run nightly policy harness
