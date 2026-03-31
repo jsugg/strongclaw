@@ -200,3 +200,24 @@ def test_operator_docs_no_longer_surface_root_shell_entrypoints() -> None:
     for markdown_file in _official_markdown_files(REPO_ROOT):
         text = markdown_file.read_text(encoding="utf-8")
         assert "./scripts/" not in text
+
+
+def test_operator_docs_surface_plugin_inventory_and_degradation_contract() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    inventory = (REPO_ROOT / "platform/docs/PLUGIN_INVENTORY.md").read_text(encoding="utf-8")
+    degradation = (REPO_ROOT / "platform/docs/DEGRADATION.md").read_text(encoding="utf-8")
+    hypermemory = (REPO_ROOT / "platform/docs/HYPERMEMORY.md").read_text(encoding="utf-8")
+    ci_doc = (REPO_ROOT / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
+
+    assert "platform/docs/PLUGIN_INVENTORY.md" in readme
+    assert "platform/docs/DEGRADATION.md" in readme
+    assert "`strongclaw-hypermemory`" in inventory
+    assert "`memory-lancedb-pro`" in inventory
+    assert "Support level" in inventory
+    assert "clawops ops status" in degradation
+    assert "fatal" in degradation
+    assert "degraded" in degradation
+    assert "observational" in degradation
+    assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in hypermemory
+    assert "[Degradation Contract](./DEGRADATION.md)" in hypermemory
+    assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in ci_doc

@@ -52,6 +52,12 @@ def test_service_templates_call_repo_venv_python() -> None:
     browserlab = (REPO_ROOT / "platform/systemd/openclaw-browserlab.service").read_text(
         encoding="utf-8"
     )
+    maintenance_service = (REPO_ROOT / "platform/systemd/openclaw-maintenance.service").read_text(
+        encoding="utf-8"
+    )
+    maintenance_timer = (REPO_ROOT / "platform/systemd/openclaw-maintenance.timer").read_text(
+        encoding="utf-8"
+    )
     sidecars = (REPO_ROOT / "platform/systemd/openclaw-sidecars.service").read_text(
         encoding="utf-8"
     )
@@ -64,13 +70,22 @@ def test_service_templates_call_repo_venv_python() -> None:
     launchd_browserlab = (
         REPO_ROOT / "platform/launchd/ai.openclaw.browserlab.plist.template"
     ).read_text(encoding="utf-8")
+    launchd_maintenance = (
+        REPO_ROOT / "platform/launchd/ai.openclaw.maintenance.plist.template"
+    ).read_text(encoding="utf-8")
 
     assert "scripts/ops/" not in gateway
     assert "scripts/ops/" not in sidecars
     assert "__PYTHON_EXECUTABLE__ -m clawops" in gateway
     assert "__PYTHON_EXECUTABLE__ -m clawops" in browserlab
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in maintenance_service
     assert "__PYTHON_EXECUTABLE__ -m clawops" in sidecars
+    assert "openclaw-sidecars.service" in gateway
+    assert "Unit=openclaw-maintenance.service" in maintenance_timer
     assert "__PYTHON_EXECUTABLE__" in launchd_gateway
+    assert "__PYTHON_EXECUTABLE__" in launchd_maintenance
+    assert "<string>recovery</string>" in launchd_maintenance
+    assert "<string>prune-retention</string>" in launchd_maintenance
     assert (
         "Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         in gateway

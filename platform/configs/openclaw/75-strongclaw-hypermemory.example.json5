@@ -6,6 +6,8 @@
         "enabled": true,
         "config": {
           "command": [
+            "__PYTHON_EXECUTABLE__",
+            "-m",
             "clawops"
           ],
           "configPath": "__HYPERMEMORY_SQLITE_CONFIG_PATH__",

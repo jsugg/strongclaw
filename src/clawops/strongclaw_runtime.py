@@ -33,6 +33,7 @@ from clawops.app_paths import (
     strongclaw_varlock_dir,
     strongclaw_workspace_dir,
 )
+from clawops.memory_profiles import MemoryProfileSpec, resolve_memory_profile
 from clawops.platform_compat import (
     DEFAULT_ACPX_VERSION,
     DEFAULT_MANAGED_PROJECT_PYTHON_VERSION,
@@ -151,24 +152,33 @@ def resolve_profile(profile_name: str | None = None) -> str:
     return configured or os.environ.get("STRONGCLAW_DEFAULT_PROFILE", DEFAULT_PROFILE_NAME)
 
 
+def _resolved_profile_spec(profile_name: str | None = None) -> MemoryProfileSpec | None:
+    """Resolve the active profile from the shared registry when available."""
+    return resolve_memory_profile(resolve_profile(profile_name))
+
+
 def profile_requires_qmd(profile_name: str | None = None) -> bool:
     """Return whether the profile requires the QMD asset."""
-    return resolve_profile(profile_name) in {"openclaw-qmd", "memory-lancedb-pro", "acp"}
+    spec = _resolved_profile_spec(profile_name)
+    return bool(spec is not None and spec.installs_qmd)
 
 
 def profile_requires_lossless_claw(profile_name: str | None = None) -> bool:
     """Return whether the profile requires the lossless-claw plugin."""
-    return resolve_profile(profile_name) == "hypermemory"
+    spec = _resolved_profile_spec(profile_name)
+    return bool(spec is not None and spec.installs_lossless_claw)
 
 
 def profile_requires_hypermemory_backend(profile_name: str | None = None) -> bool:
     """Return whether the profile enables strongclaw-hypermemory."""
-    return resolve_profile(profile_name) == "hypermemory"
+    spec = _resolved_profile_spec(profile_name)
+    return bool(spec is not None and spec.enables_hypermemory_backend)
 
 
 def profile_requires_memory_pro_plugin(profile_name: str | None = None) -> bool:
     """Return whether the profile requires the vendored memory-pro plugin."""
-    return resolve_profile(profile_name) == "memory-lancedb-pro"
+    spec = _resolved_profile_spec(profile_name)
+    return bool(spec is not None and spec.installs_memory_pro)
 
 
 def profile_bootstrap_capabilities(profile_name: str | None = None) -> tuple[str, ...]:
@@ -287,14 +297,27 @@ def run_command_inherited(
     *,
     cwd: pathlib.Path | None = None,
     env: Mapping[str, str] | None = None,
-    timeout_seconds: int = 1800,
+    timeout_seconds: int | None = 1800,
 ) -> int:
     """Run a subprocess with inherited stdio."""
+    argv = [str(part) for part in command]
+    cwd_value = None if cwd is None else str(cwd)
+    env_value = None if env is None else dict(env)
+    if timeout_seconds is None:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            cwd=cwd_value,
+            env=env_value,
+        )
+        return int(completed.returncode)
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive when provided")
     completed = subprocess.run(
-        [str(part) for part in command],
+        argv,
         check=False,
-        cwd=None if cwd is None else str(cwd),
-        env=None if env is None else dict(env),
+        cwd=cwd_value,
+        env=env_value,
         timeout=timeout_seconds,
     )
     return int(completed.returncode)

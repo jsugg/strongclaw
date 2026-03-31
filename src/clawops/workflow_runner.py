@@ -12,6 +12,7 @@ from typing import cast
 from clawops.acp_runner import SessionSpec, run_session
 from clawops.acpx_adapter import AcpxPermissionMode
 from clawops.app_paths import scoped_state_dir
+from clawops.approval_dispatch import dispatch_pending_approval
 from clawops.common import canonical_json, load_json, load_yaml, write_json, write_text
 from clawops.context.contracts import validate_context_provider, validate_context_scale
 from clawops.context.registry import create_context_service
@@ -658,7 +659,7 @@ class WorkflowRunner:
         details["journal_db"] = str(journal_db)
         contract_json = canonical_json(task.to_contract())
         if task.approval_required:
-            journal.transition(
+            pending = journal.transition(
                 op.op_id,
                 "pending_approval",
                 policy_decision="require_approval",
@@ -666,6 +667,16 @@ class WorkflowRunner:
                 execution_contract_json=contract_json,
                 approval_required=True,
             )
+            dispatch_outcome = dispatch_pending_approval(journal=journal, operation=pending)
+            details["dispatch"] = dispatch_outcome.to_dict()
+            details["review_artifact_path"] = dispatch_outcome.artifact_path.as_posix()
+            if dispatch_outcome.error is not None:
+                return self._store_step_result(
+                    step_name=str(step["name"]),
+                    ok=False,
+                    message=f"approval dispatch failed for {op.op_id}: {dispatch_outcome.error}",
+                    details=details,
+                )
             approved_by = step.get("approved_by")
             if not isinstance(approved_by, str) or not approved_by.strip():
                 return self._store_step_result(

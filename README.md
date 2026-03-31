@@ -23,6 +23,8 @@ Read these in order:
 5. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
 6. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
 7. [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md)
+8. [`platform/docs/PLUGIN_INVENTORY.md`](platform/docs/PLUGIN_INVENTORY.md)
+9. [`platform/docs/DEGRADATION.md`](platform/docs/DEGRADATION.md)
 
 ## Repository map
 

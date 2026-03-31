@@ -14,6 +14,7 @@ from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argume
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
+from clawops.strongclaw_runtime import managed_python
 
 REPO_ROOT_PLACEHOLDER = "__REPO_ROOT__"
 HOME_PLACEHOLDER = "__HOME__"
@@ -32,6 +33,7 @@ MESSAGING_WORKSPACE_PLACEHOLDER = "__MESSAGING_WORKSPACE__"
 HYPERMEMORY_WORKSPACE_ROOT_PLACEHOLDER = "__HYPERMEMORY_WORKSPACE_ROOT__"
 HYPERMEMORY_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_CONFIG_PATH__"
 HYPERMEMORY_SQLITE_CONFIG_PATH_PLACEHOLDER = "__HYPERMEMORY_SQLITE_CONFIG_PATH__"
+PYTHON_EXECUTABLE_PLACEHOLDER = "__PYTHON_EXECUTABLE__"
 OPENCLAW_CONFIG_DIR = pathlib.Path("platform/configs/openclaw")
 DEFAULT_PROFILE_NAME = "hypermemory"
 DEFAULT_OPENCLAW_CONFIG_OUTPUT: pathlib.Path | None = None
@@ -161,6 +163,7 @@ def build_placeholder_map(
         HYPERMEMORY_SQLITE_CONFIG_PATH_PLACEHOLDER: (
             layout.hypermemory_sqlite_config_path.as_posix()
         ),
+        PYTHON_EXECUTABLE_PLACEHOLDER: managed_python(repo_root).as_posix(),
     }
     if lossless_claw_plugin_path is not None:
         replacements[LOSSLESS_CLAW_PLUGIN_PATH_PLACEHOLDER] = (

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run StrongClaw maintenance daily
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=openclaw-maintenance.service
+
+[Install]
+WantedBy=timers.target

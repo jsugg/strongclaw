@@ -8,6 +8,11 @@
 
 The built-in OpenClaw fallback remains available as `openclaw-default`, and the explicit built-ins-plus-QMD fallback remains available as `openclaw-qmd`.
 
+Canonical support/degradation references:
+
+- [Plugin Inventory](./PLUGIN_INVENTORY.md)
+- [Degradation Contract](./DEGRADATION.md)
+
 ## Design goals
 
 - preserve OpenClaw-compatible `memory_search` and `memory_get`

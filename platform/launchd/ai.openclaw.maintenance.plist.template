@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>ai.openclaw.maintenance</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>__PYTHON_EXECUTABLE__</string>
+      <string>-m</string>
+      <string>clawops</string>
+      <string>recovery</string>
+      <string>--home-dir</string>
+      <string>__HOME_DIR__</string>
+      <string>prune-retention</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>HOME</key>
+      <string>__HOME_DIR__</string>
+      <key>XDG_CONFIG_HOME</key>
+      <string>__HOME_DIR__/.config</string>
+      <key>OPENCLAW_HOME</key>
+      <string>__OPENCLAW_HOME__</string>
+      <key>OPENCLAW_STATE_DIR</key>
+      <string>__STATE_DIR__</string>
+      <key>OPENCLAW_CONFIG_PATH</key>
+      <string>__OPENCLAW_CONFIG_PATH__</string>
+      <key>OPENCLAW_CONFIG</key>
+      <string>__OPENCLAW_CONFIG__</string>
+      <key>OPENCLAW_PROFILE</key>
+      <string>__OPENCLAW_PROFILE__</string>
+      <key>STRONGCLAW_RUNTIME_ROOT</key>
+      <string>__STRONGCLAW_RUNTIME_ROOT__</string>
+      <key>PATH</key>
+      <string>__HOME_DIR__/.config/varlock/bin:__HOME_DIR__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+__LAUNCHD_EXTRA_ENV__
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>4</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__STATE_DIR__/logs/launchd-maintenance.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE_DIR__/logs/launchd-maintenance.err.log</string>
+    <key>KeepAlive</key>
+    <false/>
+  </dict>
+</plist>

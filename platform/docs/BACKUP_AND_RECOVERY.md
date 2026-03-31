@@ -15,6 +15,19 @@
 - `clawops recovery prune-retention`
 - `clawops recovery rotate-secrets`
 
+## Scheduled maintenance
+
+StrongClaw host service activation now installs a daily maintenance schedule at `04:00` local time:
+
+- systemd: `openclaw-maintenance.timer` -> `openclaw-maintenance.service`
+- launchd: `ai.openclaw.maintenance`
+
+The scheduled command is:
+
+- `clawops recovery --home-dir <home> prune-retention`
+
+This maintenance path is idempotent and retention-only. It prunes expired StrongClaw recovery artifacts and does not mutate upstream OpenClaw internals.
+
 ## Development-mode repo-local compose state
 
 If you keep compose state under `platform/compose/state` during development, use the explicit dev wrappers instead of relying on implicit leftover mounts:
