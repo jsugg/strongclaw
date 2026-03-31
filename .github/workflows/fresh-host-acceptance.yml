@@ -2,22 +2,6 @@ name: Fresh Host Acceptance
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/fresh-host-acceptance.yml"
-      - ".github/workflows/fresh-host-cache-warm.yml"
-      - ".github/workflows/fresh-host-core.yml"
-      - ".github/workflows/nightly.yml"
-      - "platform/compose/**"
-      - "platform/configs/**"
-      - "platform/plugins/**"
-      - "platform/workers/**"
-      - "platform/workspace/**"
-      - "scripts/**"
-      - "src/**"
-      - "tests/scripts/**"
-      - "tests/utils/helpers/**"
-      - "pyproject.toml"
-      - "uv.lock"
   workflow_dispatch:
     inputs:
       macos_runtime_provider:

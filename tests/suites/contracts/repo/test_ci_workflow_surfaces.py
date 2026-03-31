@@ -101,35 +101,18 @@ def test_fresh_host_acceptance_workflow_routes_to_reusable_core() -> None:
     """The trigger workflow should delegate execution to the reusable core workflow."""
     text = _workflow_text("fresh-host-acceptance.yml")
 
-    assert "pull_request:\n    paths:" in text
+    assert "pull_request:" in text
+    assert "pull_request:\n    paths:" not in text
     assert "workflow_dispatch:" in text
     assert "push:" not in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
 
 
-def test_fresh_host_acceptance_workflow_limits_pull_request_paths_to_runtime_surfaces() -> None:
-    """Fresh-host acceptance should only trigger for runtime-affecting pull-request changes."""
+def test_fresh_host_acceptance_workflow_runs_for_every_pull_request() -> None:
+    """Fresh-host acceptance should emit required checks for every pull request."""
     text = _workflow_text("fresh-host-acceptance.yml")
 
-    for marker in (
-        '".github/workflows/fresh-host-acceptance.yml"',
-        '".github/workflows/fresh-host-cache-warm.yml"',
-        '".github/workflows/fresh-host-core.yml"',
-        '".github/workflows/nightly.yml"',
-        '"platform/compose/**"',
-        '"platform/configs/**"',
-        '"platform/plugins/**"',
-        '"platform/workers/**"',
-        '"platform/workspace/**"',
-        '"scripts/**"',
-        '"src/**"',
-        '"tests/scripts/**"',
-        '"tests/utils/helpers/**"',
-        '"pyproject.toml"',
-        '"uv.lock"',
-    ):
-        assert marker in text
-    assert "platform/docs/**" not in text
+    assert "paths:" not in text
 
 
 def test_fresh_host_core_workflow_uses_semantic_test_scripts() -> None:
