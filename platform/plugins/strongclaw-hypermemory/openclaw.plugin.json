@@ -48,6 +48,16 @@
         "type": "number",
         "minimum": 1000,
         "maximum": 120000
+      },
+      "shortTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 120000
+      },
+      "longTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 120000
       }
     },
     "required": [

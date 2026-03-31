@@ -42,6 +42,12 @@ PROVIDER_ENV_DEFAULTS: Final[tuple[tuple[str, str], ...]] = (
     ("ANTHROPIC_API_KEY", "anthropic/claude-opus-4-6"),
     ("ZAI_API_KEY", "zai/glm-5"),
 )
+LOCAL_SECRET_MIN_LENGTHS: Final[dict[str, int]] = {
+    "OPENCLAW_GATEWAY_TOKEN": 40,
+    "NEO4J_PASSWORD": 16,
+    "LITELLM_MASTER_KEY": 24,
+    "LITELLM_DB_PASSWORD": 16,
+}
 
 
 def _interactive_mode(*, check_only: bool, non_interactive: bool) -> bool:
@@ -177,12 +183,22 @@ def _ensure_required_defaults(
     required_defaults.update(generated_secret_defaults)
     for key, default_value in required_defaults.items():
         current = values.get(key)
-        if value_is_effective(current):
-            continue
+        if key in LOCAL_SECRET_MIN_LENGTHS:
+            minimum_length = LOCAL_SECRET_MIN_LENGTHS[key]
+            current_text = "" if current is None else current.strip()
+            invalid_reason: str | None = None
+            if not value_is_effective(current_text):
+                invalid_reason = "blank or uses a placeholder"
+            elif len(current_text) < minimum_length:
+                invalid_reason = f"shorter than the required minimum length ({minimum_length})"
+            if invalid_reason is None:
+                continue
+        else:
+            invalid_reason = None if value_is_effective(current) else "blank or uses a placeholder"
+            if invalid_reason is None:
+                continue
         if check_only:
-            raise CommandError(
-                f"Required Varlock key {key} is blank or uses a placeholder in {env_file}."
-            )
+            raise CommandError(f"Required Varlock key {key} is {invalid_reason} in {env_file}.")
         set_env_assignment(env_file, key, default_value)
         values[key] = default_value
         updated += 1

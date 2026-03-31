@@ -144,7 +144,16 @@ def test_varlock_env_dir_ignores_legacy_asset_env_when_runtime_root_is_isolated(
 def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path) -> None:
     repo_root = tmp_path / "assets"
 
-    assert runtime.managed_python(repo_root) == pathlib.Path(sys.executable).resolve()
+    assert runtime.managed_python(repo_root) == pathlib.Path(sys.executable)
+
+
+def test_managed_python_prefers_repo_venv_entrypoint_path(tmp_path: pathlib.Path) -> None:
+    repo_root = tmp_path / "assets"
+    venv_python = repo_root / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.symlink_to(pathlib.Path(sys.executable))
+
+    assert runtime.managed_python(repo_root) == venv_python
 
 
 def test_resolve_openclaw_config_path_prefers_config_path_env(

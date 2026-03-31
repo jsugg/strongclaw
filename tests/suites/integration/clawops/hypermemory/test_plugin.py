@@ -19,6 +19,8 @@ def test_hypermemory_plugin_manifest_and_package_metadata() -> None:
     assert "captureMinMessages" in manifest["configSchema"]["properties"]
     assert "startupTimeoutMs" in manifest["configSchema"]["properties"]
     assert "toolTimeoutMs" in manifest["configSchema"]["properties"]
+    assert "shortTimeoutMs" in manifest["configSchema"]["properties"]
+    assert "longTimeoutMs" in manifest["configSchema"]["properties"]
     assert package["openclaw"]["extensions"] == ["./index.js"]
     assert package["scripts"]["test:openclaw-host"] == "node test/openclaw-host-functional.mjs"
     assert (plugin_root / "test" / "openclaw-host-functional.mjs").exists()

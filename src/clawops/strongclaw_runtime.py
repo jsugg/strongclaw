@@ -1021,7 +1021,7 @@ def managed_python(repo_root: pathlib.Path) -> pathlib.Path:
     source_venv_python = resolved_repo_root / ".venv" / "bin" / "python"
     if source_venv_python.is_file():
         return source_venv_python
-    return pathlib.Path(sys.executable).resolve()
+    return pathlib.Path(sys.executable)
 
 
 def managed_clawops_command(repo_root: pathlib.Path, *arguments: str) -> list[str]:

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 from collections.abc import Sequence
 from typing import cast
 
@@ -25,6 +26,7 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
+JSON_DOCUMENT_START_RE = re.compile(r"(?m)^[ \t]*[\[{]")
 
 
 def _mapping_or_none(value: object) -> dict[str, object] | None:
@@ -32,6 +34,19 @@ def _mapping_or_none(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
     return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
+def _extract_json_document(output: str) -> object | None:
+    """Return the first JSON document found in mixed command output."""
+    decoder = json.JSONDecoder()
+    for match in JSON_DOCUMENT_START_RE.finditer(output):
+        candidate = output[match.start() :].lstrip()
+        try:
+            payload, _ = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+        return cast(object, payload)
+    return None
 
 
 def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
@@ -83,10 +98,9 @@ def _list_agent_ids(repo_root: pathlib.Path) -> list[str]:
     if not result.ok:
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw agents list failed"
         raise CommandError(detail, result=result)
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise CommandError(f"invalid JSON from `openclaw agents list --json`: {exc}") from exc
+    payload = _extract_json_document(result.stdout)
+    if payload is None:
+        raise CommandError("invalid JSON from `openclaw agents list --json`")
     agent_ids = _extract_agent_ids(payload)
     if not agent_ids:
         raise CommandError("OpenClaw does not have any configured agents to validate.")
@@ -112,9 +126,8 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
     )
     if not result.ok:
         return False
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
+    payload = _extract_json_document(result.stdout)
+    if payload is None:
         return False
     payload_mapping = _mapping_or_none(payload)
     if payload_mapping is None:
@@ -276,6 +289,7 @@ def ensure_model_auth(
     check_only: bool,
     probe: bool,
     probe_max_tokens: int = DEFAULT_PROBE_MAX_TOKENS,
+    allow_prompt: bool = True,
 ) -> dict[str, object]:
     """Ensure or validate that OpenClaw model auth is usable."""
     config_path = resolve_openclaw_config_path(repo_root)
@@ -317,7 +331,7 @@ def ensure_model_auth(
                 "modelChain": model_chain,
                 "missingAgents": [],
             }
-    if setup_mode in {"auto", "prompt"} and _interactive_prompt_allowed():
+    if allow_prompt and setup_mode in {"auto", "prompt"} and _interactive_prompt_allowed():
         returncode = run_command_inherited(
             wrap_command_with_varlock(repo_root, ["openclaw", "configure", "--section", "model"]),
             cwd=repo_root,

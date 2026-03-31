@@ -67,8 +67,9 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
         *,
         check_only: bool,
         probe: bool,
+        allow_prompt: bool = True,
     ) -> dict[str, object]:
-        del repo_root, check_only, probe
+        del repo_root, check_only, probe, allow_prompt
         calls.append("model")
         return {"ok": True}
 

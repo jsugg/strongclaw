@@ -319,6 +319,7 @@ def setup_main(argv: list[str] | None = None) -> int:
             repo_root,
             check_only=False,
             probe=not bool(args.non_interactive),
+            allow_prompt=not bool(args.non_interactive),
         )
         if not bool(model_payload.get("ok")):
             raise CommandError(str(model_payload.get("guidance", "OpenClaw model auth failed.")))
