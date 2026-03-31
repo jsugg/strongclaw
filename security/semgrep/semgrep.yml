@@ -19,8 +19,8 @@ rules:
     message: "Reject raw tarfile.extractall(...); validate members before extraction."
     paths:
       include:
-        - src/**/*.py
-        - tests/scripts/**/*.py
+        - /src/**/*.py
+        - /tests/scripts/**/*.py
     patterns:
       - pattern-either:
           - pattern: $ARCHIVE.extractall($DEST)
@@ -32,9 +32,12 @@ rules:
     message: "Do not join archive member names into filesystem paths without validation."
     paths:
       include:
-        - src/**/*.py
-        - tests/scripts/**/*.py
+        - /src/**/*.py
+        - /tests/scripts/**/*.py
     patterns:
+      - pattern-inside: |
+          for $MEMBER in $ARCHIVE.getmembers():
+            ...
       - pattern-either:
           - pattern: os.path.join($ROOT, $MEMBER.name)
           - pattern: pathlib.Path($ROOT) / $MEMBER.name
@@ -46,8 +49,8 @@ rules:
     message: "Avoid subprocess shell=True in repo-managed runtime code."
     paths:
       include:
-        - src/**/*.py
-        - tests/scripts/**/*.py
+        - /src/**/*.py
+        - /tests/scripts/**/*.py
     patterns:
       - pattern-either:
           - pattern: subprocess.run(..., shell=True, ...)
@@ -61,8 +64,8 @@ rules:
     message: "Avoid unsafe loaders and pickle-based deserialization for untrusted data."
     paths:
       include:
-        - src/**/*.py
-        - tests/scripts/**/*.py
+        - /src/**/*.py
+        - /tests/scripts/**/*.py
     patterns:
       - pattern-either:
           - pattern: yaml.load(..., Loader=yaml.Loader, ...)
