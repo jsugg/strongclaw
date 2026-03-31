@@ -3,6 +3,20 @@ import { existsSync } from "node:fs";
 
 const DEFAULT_COMMAND = ["clawops"];
 const DEFAULT_TIMEOUT_MS = 20000;
+const READ_TIMEOUT_OPERATIONS = new Set(["status", "search", "get", "list-facts"]);
+const WRITE_TIMEOUT_OPERATIONS = new Set([
+  "index",
+  "store",
+  "update",
+  "reflect",
+  "forget",
+  "capture",
+  "access",
+  "record-injection",
+  "record-confirmation",
+  "record-bad-recall",
+  "flush-metadata",
+]);
 const SEARCH_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -111,6 +125,10 @@ function readNumberParam(params, key) {
   return undefined;
 }
 
+function clampTimeoutMs(timeoutMs, fallbackTimeoutMs) {
+  return timeoutMs && timeoutMs >= 1000 ? Math.min(120000, Math.trunc(timeoutMs)) : fallbackTimeoutMs;
+}
+
 function resolvePluginConfig(rawConfig) {
   const input = rawConfig && typeof rawConfig === "object" ? rawConfig : {};
   const configPath =
@@ -133,16 +151,15 @@ function resolvePluginConfig(rawConfig) {
   const timeoutMs = readNumberParam(input, "timeoutMs");
   const startupTimeoutMs = readNumberParam(input, "startupTimeoutMs");
   const toolTimeoutMs = readNumberParam(input, "toolTimeoutMs");
+  const shortTimeoutMs = readNumberParam(input, "shortTimeoutMs");
+  const longTimeoutMs = readNumberParam(input, "longTimeoutMs");
   const recallMaxResults = readNumberParam(input, "recallMaxResults");
   const captureMinMessages = readNumberParam(input, "captureMinMessages");
-  const resolvedTimeoutMs =
-    timeoutMs && timeoutMs >= 1000 ? Math.min(120000, Math.trunc(timeoutMs)) : DEFAULT_TIMEOUT_MS;
-  const resolvedStartupTimeoutMs =
-    startupTimeoutMs && startupTimeoutMs >= 1000
-      ? Math.min(120000, Math.trunc(startupTimeoutMs))
-      : resolvedTimeoutMs;
-  const resolvedToolTimeoutMs =
-    toolTimeoutMs && toolTimeoutMs >= 1000 ? Math.min(120000, Math.trunc(toolTimeoutMs)) : resolvedTimeoutMs;
+  const resolvedTimeoutMs = clampTimeoutMs(timeoutMs, DEFAULT_TIMEOUT_MS);
+  const resolvedStartupTimeoutMs = clampTimeoutMs(startupTimeoutMs, resolvedTimeoutMs);
+  const resolvedToolTimeoutMs = clampTimeoutMs(toolTimeoutMs, resolvedTimeoutMs);
+  const resolvedShortTimeoutMs = clampTimeoutMs(shortTimeoutMs, resolvedToolTimeoutMs);
+  const resolvedLongTimeoutMs = clampTimeoutMs(longTimeoutMs, resolvedToolTimeoutMs);
   return {
     command,
     configPath,
@@ -156,16 +173,36 @@ function resolvePluginConfig(rawConfig) {
     timeoutMs: resolvedTimeoutMs,
     startupTimeoutMs: resolvedStartupTimeoutMs,
     toolTimeoutMs: resolvedToolTimeoutMs,
+    shortTimeoutMs: resolvedShortTimeoutMs,
+    longTimeoutMs: resolvedLongTimeoutMs,
   };
+}
+
+function resolveOperationTimeoutMs(pluginConfig, args, timeoutClass) {
+  if (timeoutClass === "short") {
+    return pluginConfig.shortTimeoutMs;
+  }
+  if (timeoutClass === "long") {
+    return pluginConfig.longTimeoutMs;
+  }
+  const operation = Array.isArray(args) && typeof args[0] === "string" ? args[0] : "";
+  if (READ_TIMEOUT_OPERATIONS.has(operation)) {
+    return pluginConfig.shortTimeoutMs;
+  }
+  if (WRITE_TIMEOUT_OPERATIONS.has(operation)) {
+    return pluginConfig.longTimeoutMs;
+  }
+  return pluginConfig.toolTimeoutMs;
 }
 
 async function runClawopsCommand(
   pluginConfig,
   args,
-  { captureJson = true, timeoutMs = pluginConfig.toolTimeoutMs, phase = "tool" } = {},
+  { captureJson = true, timeoutMs, timeoutClass, phase = "tool" } = {},
 ) {
   const [command, ...commandArgs] = pluginConfig.command;
   const fullArgs = [...commandArgs, "hypermemory", "--config", pluginConfig.configPath, ...args];
+  const resolvedTimeoutMs = timeoutMs ?? resolveOperationTimeoutMs(pluginConfig, args, timeoutClass);
   return await new Promise((resolve, reject) => {
     const child = spawn(command, fullArgs, {
       stdio: captureJson ? ["ignore", "pipe", "pipe"] : "inherit",
@@ -177,7 +214,7 @@ async function runClawopsCommand(
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
-    }, timeoutMs);
+    }, resolvedTimeoutMs);
     if (captureJson) {
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -197,7 +234,7 @@ async function runClawopsCommand(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (timedOut) {
-        reject(new Error(`clawops hypermemory ${phase} timed out after ${timeoutMs}ms`));
+        reject(new Error(`clawops hypermemory ${phase} timed out after ${resolvedTimeoutMs}ms`));
         return;
       }
       if (code !== 0) {
@@ -584,6 +621,8 @@ const strongclawHypermemoryPlugin = {
       timeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
       startupTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
       toolTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
+      shortTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
+      longTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
     },
     required: ["configPath"],
   },

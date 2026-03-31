@@ -14,7 +14,7 @@ This document defines how dependency health maps to StrongClaw runtime impact.
 
 ## Operator Output Contract
 
-- `clawops ops status` reports dependency health under `readiness.required` and `readiness.optional`.
+- `clawops ops status` and `clawops ops sidecars up --json` report dependency health under `readiness.required` and `readiness.optional`.
 - Each readiness entry includes:
   - `service`
   - `required`
@@ -26,9 +26,10 @@ This document defines how dependency health maps to StrongClaw runtime impact.
 
 ## Plugin Startup Contract
 
-- `strongclaw-hypermemory` runs startup preflight (`clawops hypermemory verify --json`) before serving memory tools.
+- `strongclaw-hypermemory` runs startup preflight (`clawops hypermemory status --json`) before serving memory tools.
 - If preflight fails, tool responses return a disabled/unavailable payload instead of silent fallback.
 - Existing configs that only define `timeoutMs` remain valid; startup/tool timeout split is optional via `startupTimeoutMs` and `toolTimeoutMs`.
+- Per-operation timeout classes are optional: read operations can use `shortTimeoutMs`, and write/index/maintenance operations can use `longTimeoutMs`.
 
 ## Related Docs
 

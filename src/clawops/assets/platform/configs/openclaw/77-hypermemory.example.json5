@@ -21,7 +21,9 @@
           "autoRecall": true,
           "autoReflect": false,
           "recallMaxResults": 3,
-          "timeoutMs": 20000
+          "timeoutMs": 20000,
+          "shortTimeoutMs": 12000,
+          "longTimeoutMs": 45000
         }
       }
     },
