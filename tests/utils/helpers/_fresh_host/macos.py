@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from tests.utils.helpers._fresh_host.linux import run_clawops_bootstrap
@@ -24,8 +25,138 @@ from tests.utils.helpers._fresh_host.shell import (
     verify_sidecar_services_running,
     wait_for_docker_backend,
 )
+from tests.utils.helpers._fresh_host.storage import log
 
 HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 300
+
+
+@dataclass(frozen=True, slots=True)
+class _MacosCleanupResult:
+    """Structured cleanup execution result."""
+
+    command: list[str] | None
+    notes: list[str]
+
+
+def _managed_launchd_labels(context: FreshHostContext) -> tuple[str, ...]:
+    """Return the launchd labels managed by the scenario."""
+    if not context.activate_services:
+        return ()
+    labels = ["ai.openclaw.gateway"]
+    if context.exercise_sidecars:
+        labels.append("ai.openclaw.sidecars")
+    if context.exercise_browser_lab:
+        labels.append("ai.openclaw.browserlab")
+    return tuple(labels)
+
+
+def _managed_host_components(context: FreshHostContext) -> tuple[str, ...]:
+    """Return the host-managed stack components for the scenario."""
+    if not context.activate_services:
+        return ()
+    components: list[str] = []
+    if context.exercise_sidecars:
+        components.append("sidecars")
+    if context.exercise_browser_lab:
+        components.append("browser-lab")
+    return tuple(components)
+
+
+def _repo_local_components(context: FreshHostContext) -> tuple[str, ...]:
+    """Return the repo-local stack components for the scenario."""
+    components: list[str] = []
+    if context.exercise_sidecars:
+        components.append("sidecars")
+    if context.exercise_browser_lab:
+        components.append("browser-lab")
+    return tuple(components)
+
+
+def _launchd_label_for_component(component: str) -> str:
+    """Return the launchd label that owns one component."""
+    return "ai.openclaw.browserlab" if component == "browser-lab" else f"ai.openclaw.{component}"
+
+
+def _launchd_service_is_loaded(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    domain: str,
+    label: str,
+) -> bool:
+    """Return whether the requested launchd label is currently loaded."""
+    try:
+        completed = subprocess.run(
+            ["launchctl", "print", f"{domain}/{label}"],
+            cwd=cwd,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise FreshHostError(f"launchctl print {domain}/{label} failed: {exc}") from exc
+    return completed.returncode == 0
+
+
+def _run_actionable_command(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
+    """Run one teardown command and raise on actionable failure."""
+    warning = best_effort(command, cwd=cwd, env=env)
+    if warning is not None:
+        raise FreshHostError(warning)
+
+
+def _run_macos_teardown(
+    context: FreshHostContext,
+    *,
+    include_repo_local_state: bool,
+) -> _MacosCleanupResult:
+    """Execute one scenario-aware macOS teardown plan."""
+    repo_root, home_dir = repo_paths(context)
+    env = phase_env(context)
+    if include_repo_local_state:
+        ensure_private_dir(home_dir / ".xdg-runtime")
+        env["XDG_RUNTIME_DIR"] = str(home_dir / ".xdg-runtime")
+    domain = f"gui/{os.getuid()}"
+    launch_agents = home_dir / "Library" / "LaunchAgents"
+    notes: list[str] = []
+    active_labels: set[str] = set()
+    last_command: list[str] | None = None
+
+    for label in _managed_launchd_labels(context):
+        if not _launchd_service_is_loaded(cwd=repo_root, env=env, domain=domain, label=label):
+            note = f"Skipping launchctl bootout for {label}: service is not loaded."
+            notes.append(note)
+            log(note)
+            continue
+        command = ["launchctl", "bootout", domain, str(launch_agents / f"{label}.plist")]
+        _run_actionable_command(command, cwd=repo_root, env=env)
+        active_labels.add(label)
+        last_command = command
+
+    for component in _managed_host_components(context):
+        if _launchd_label_for_component(component) not in active_labels:
+            continue
+        command = venv_clawops_command(context, "ops", "--asset-root", ".", component, "down")
+        _run_actionable_command(command, cwd=repo_root, env=env)
+        last_command = command
+
+    if include_repo_local_state:
+        for component in _repo_local_components(context):
+            command = venv_clawops_command(
+                context,
+                "ops",
+                "--asset-root",
+                ".",
+                component,
+                "down",
+                "--repo-local-state",
+            )
+            _run_actionable_command(command, cwd=repo_root, env=env)
+            last_command = command
+
+    return _MacosCleanupResult(command=last_command, notes=notes)
 
 
 def normalize_macos_machine_name(_: FreshHostContext) -> list[str]:
@@ -159,53 +290,11 @@ def exercise_macos_browser_lab(context: FreshHostContext) -> list[str]:
     return _run_repo_local_cycle(context, "browser-lab")
 
 
-def deactivate_macos_host_services(context: FreshHostContext) -> list[str]:
+def deactivate_macos_host_services(context: FreshHostContext) -> list[str] | None:
     """Stop launchd-managed macOS services before repo-local exercises."""
-    repo_root, home_dir = repo_paths(context)
-    env = phase_env(context)
-    domain = f"gui/{os.getuid()}"
-    launch_agents = home_dir / "Library" / "LaunchAgents"
-    commands = [
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.gateway.plist")],
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.sidecars.plist")],
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
-        venv_clawops_command(context, "ops", "--asset-root", ".", "sidecars", "down"),
-        venv_clawops_command(context, "ops", "--asset-root", ".", "browser-lab", "down"),
-    ]
-    for command in commands:
-        warning = best_effort(command, cwd=repo_root, env=env)
-        if warning is not None:
-            from tests.utils.helpers._fresh_host.storage import log
-
-            log(warning)
-    return commands[-1]
+    return _run_macos_teardown(context, include_repo_local_state=False).command
 
 
-def cleanup_macos(context: FreshHostContext) -> list[str]:
-    """Best-effort cleanup for macOS launchd and compose state."""
-    repo_root, home_dir = repo_paths(context)
-    env = phase_env(context)
-    ensure_private_dir(home_dir / ".xdg-runtime")
-    env["XDG_RUNTIME_DIR"] = str(home_dir / ".xdg-runtime")
-    domain = f"gui/{os.getuid()}"
-    launch_agents = home_dir / "Library" / "LaunchAgents"
-    commands = [
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.gateway.plist")],
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.sidecars.plist")],
-        ["launchctl", "bootout", domain, str(launch_agents / "ai.openclaw.browserlab.plist")],
-        venv_clawops_command(context, "ops", "--asset-root", ".", "sidecars", "down"),
-        venv_clawops_command(context, "ops", "--asset-root", ".", "browser-lab", "down"),
-        venv_clawops_command(
-            context, "ops", "--asset-root", ".", "sidecars", "down", "--repo-local-state"
-        ),
-        venv_clawops_command(
-            context, "ops", "--asset-root", ".", "browser-lab", "down", "--repo-local-state"
-        ),
-    ]
-    for command in commands:
-        warning = best_effort(command, cwd=repo_root, env=env)
-        if warning is not None:
-            from tests.utils.helpers._fresh_host.storage import log
-
-            log(warning)
-    return commands[-1]
+def cleanup_macos(context: FreshHostContext) -> _MacosCleanupResult:
+    """Clean up macOS launchd and compose state for the active scenario."""
+    return _run_macos_teardown(context, include_repo_local_state=True)

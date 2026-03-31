@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import cast
 
 from tests.utils.helpers._fresh_host.macos import cleanup_macos
-from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostReport, PhaseResult
+from tests.utils.helpers._fresh_host.models import (
+    FreshHostContext,
+    FreshHostError,
+    FreshHostReport,
+    PhaseResult,
+)
 from tests.utils.helpers._fresh_host.shell import capture_to_file, compose_probe_env, phase_env
 from tests.utils.helpers._fresh_host.storage import (
     context_path,
@@ -136,21 +141,45 @@ def collect_diagnostics(context_file: Path) -> FreshHostReport:
 
 
 def cleanup(context_file: Path) -> FreshHostReport:
-    """Run best-effort scenario cleanup."""
+    """Run scenario cleanup and persist the structured result."""
     context = load_context(context_file)
     report_file = context_path(context.report_path)
     report = load_report(report_file)
+    started_at = now_iso()
     started = time.monotonic()
-    command = cleanup_macos(context) if context.platform == "macos" else None
+    command: list[str] | None = None
+    notes: list[str] = []
+    try:
+        if context.platform == "macos":
+            result = cleanup_macos(context)
+            command = result.command
+            notes = result.notes
+    except Exception as exc:  # noqa: BLE001
+        report.phases.append(
+            PhaseResult(
+                name="cleanup",
+                status="failure",
+                duration_seconds=round(time.monotonic() - started, 3),
+                started_at=started_at,
+                finished_at=now_iso(),
+                command=command,
+                failure_reason=str(exc),
+                notes=notes,
+            )
+        )
+        report.failure_reason = str(exc)
+        report.status = "failure"
+        write_report(report, report_file)
+        raise FreshHostError(str(exc)) from exc
     report.phases.append(
         PhaseResult(
             name="cleanup",
             status="success",
             duration_seconds=round(time.monotonic() - started, 3),
-            started_at=now_iso(),
+            started_at=started_at,
             finished_at=now_iso(),
             command=command,
-            notes=[],
+            notes=notes,
         )
     )
     write_report(report, report_file)

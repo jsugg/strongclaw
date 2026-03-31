@@ -989,6 +989,173 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     assert verify_kwargs["repo_local_state"] is True
 
 
+def test_deactivate_macos_host_services_limits_teardown_to_active_sidecars_services(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """macOS sidecars teardown should skip browser-lab commands entirely."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    inspected_labels: list[str] = []
+    executed_commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, check, capture_output, text, timeout
+        assert command[:2] == ["launchctl", "print"]
+        label = command[2].rsplit("/", maxsplit=1)[1]
+        inspected_labels.append(label)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fake_best_effort(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> str | None:
+        del cwd, env
+        executed_commands.append(command)
+        return None
+
+    test_context.patch.patch_object(fresh_host_macos.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_macos, "best_effort", new=fake_best_effort)
+
+    command = fresh_host_macos.deactivate_macos_host_services(context)
+
+    assert command is not None
+    assert inspected_labels == ["ai.openclaw.gateway", "ai.openclaw.sidecars"]
+    assert len(executed_commands) == 3
+    assert executed_commands[0][:2] == ["launchctl", "bootout"]
+    assert executed_commands[0][-1].endswith("ai.openclaw.gateway.plist")
+    assert executed_commands[1][:2] == ["launchctl", "bootout"]
+    assert executed_commands[1][-1].endswith("ai.openclaw.sidecars.plist")
+    assert executed_commands[2][-2:] == ["sidecars", "down"]
+    assert all("browserlab" not in " ".join(step) for step in executed_commands)
+    assert all("browser-lab" not in " ".join(step) for step in executed_commands)
+
+
+def test_deactivate_macos_host_services_raises_for_active_bootout_failure(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """macOS teardown should fail when an active launchd bootout fails."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    executed_commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, check, capture_output, text, timeout
+        assert command[:2] == ["launchctl", "print"]
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fake_best_effort(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> str | None:
+        del cwd, env
+        executed_commands.append(command)
+        if command[:2] == ["launchctl", "bootout"] and command[-1].endswith(
+            "ai.openclaw.sidecars.plist"
+        ):
+            return (
+                "launchctl bootout gui/501 /tmp/ai.openclaw.sidecars.plist failed: "
+                "Boot-out failed: 5: Input/output error"
+            )
+        return None
+
+    test_context.patch.patch_object(fresh_host_macos.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_macos, "best_effort", new=fake_best_effort)
+
+    with pytest.raises(fresh_host.FreshHostError, match="Boot-out failed: 5: Input/output error"):
+        fresh_host_macos.deactivate_macos_host_services(context)
+
+    assert any(
+        command[:2] == ["launchctl", "bootout"]
+        and command[-1].endswith("ai.openclaw.sidecars.plist")
+        for command in executed_commands
+    )
+
+
+def test_cleanup_cli_returns_nonzero_and_records_failure_when_cleanup_raises(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Cleanup should persist failure state and return a nonzero CLI exit code."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_cleanup_macos(_: fresh_host.FreshHostContext) -> object:
+        raise fresh_host.FreshHostError("cleanup exploded")
+
+    test_context.patch.patch_object(
+        fresh_host_reporting,
+        "cleanup_macos",
+        new=fake_cleanup_macos,
+    )
+
+    exit_code = fresh_host_script.main(["cleanup", "--context", str(context.context_path)])
+    report = fresh_host.load_report(Path(context.report_path))
+
+    assert exit_code == 1
+    assert report.status == "failure"
+    assert report.failure_reason == "cleanup exploded"
+    assert report.phases[-1].name == "cleanup"
+    assert report.phases[-1].status == "failure"
+    assert report.phases[-1].failure_reason == "cleanup exploded"
+
+
 def test_collect_diagnostics_uses_compose_probe_env_for_macos_compose_commands(
     tmp_path: Path,
     test_context: TestContext,
