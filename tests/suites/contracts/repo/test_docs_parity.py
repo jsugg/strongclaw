@@ -94,17 +94,22 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     ).read_text(encoding="utf-8")
 
     assert "clawops setup" in readme
-    assert "clawops verify-platform sidecars --skip-runtime" in quickstart
+    assert "clawops verify-platform sidecars" in quickstart
+    assert "clawops verify-platform sidecars --skip-runtime" not in quickstart
     assert "clawops verify-platform channels" in quickstart
     assert "clawops verify-platform channels" in setup
     assert "clawops verify-platform observability" in quickstart
     assert "clawops verify-platform observability" in setup
+    assert "clawops baseline verify --degraded" in quickstart
+    assert "clawops baseline verify --degraded" in setup
     assert "clawops setup" in setup
     assert "clawops setup" in host_platforms
     assert "make doctor" in quickstart
     assert "make doctor" in setup
     assert "make install" in quickstart
     assert "macOS-first rollout before Linux" not in host_platforms
+    assert "best-effort" in host_platforms
+    assert "Continuously validated on Linux `x86_64`" in host_platforms
     assert "platform-native user-management tooling" in macos_runbook
     assert "platform-native user-management tooling" in linux_runbook
 
@@ -221,3 +226,15 @@ def test_operator_docs_surface_plugin_inventory_and_degradation_contract() -> No
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in hypermemory
     assert "[Degradation Contract](./DEGRADATION.md)" in hypermemory
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in ci_doc
+
+
+def test_browser_lab_docs_keep_scope_outside_baseline_verification() -> None:
+    browser_lab = (REPO_ROOT / "platform/docs/BROWSER_LAB.md").read_text(encoding="utf-8")
+    setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
+    ci_doc = (REPO_ROOT / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
+
+    assert "clawops verify-platform sidecars" not in browser_lab
+    assert "docker compose -f platform/compose/docker-compose.browser-lab.yaml ps" in browser_lab
+    assert "outside baseline" in browser_lab
+    assert "not covered by `clawops baseline verify` or `clawops verify-platform`" in setup
+    assert "release quality gate, the reusable fresh-host" in ci_doc

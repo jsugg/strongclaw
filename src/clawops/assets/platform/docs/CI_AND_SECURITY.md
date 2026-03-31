@@ -75,16 +75,28 @@ config, registers the plugin through the local SDK stub, verifies the exported `
 `anchore/sbom-action` and submits the resulting dependency snapshot to the GitHub dependency graph.
 - `.github/workflows/security.yml`,
 `.github/workflows/upstream-merge-validation.yml`, and `.github/workflows/release.yml` all call the centralized `clawops supply-chain quality-gate` surface so linting, typing, tests, coverage, and compile checks stay aligned.
+- That shared quality gate now enforces one overall coverage floor plus named
+minimums for critical operational modules before downstream publish or release
+steps can continue.
 - The compatibility matrix, memory-plugin verification, security, and release
 workflows delegate their nontrivial operational steps to `tests/scripts/` helper CLIs instead of embedding shell blobs or Python heredocs directly in YAML.
 - Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
 before invoking the shared gate, and the repo's `pre-commit` hook now uses that system binary instead of a Docker-backed hook.
 - `.github/workflows/security.yml` installs a pinned `semgrep` CLI directly
 instead of relying on the Docker-backed Semgrep action, which keeps the lane off Docker Hub.
+- The Semgrep ruleset covers the repo's Python-heavy risk surfaces, including
+raw tar extraction, traversal-prone archive-member joins, `subprocess`
+`shell=True`, and unsafe deserialization helpers.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
 tarball SHA-256 digests before extracting the binaries through the dedicated helper script.
-- `.github/workflows/release.yml` syncs the locked `uv` dev environment, builds
-the Python sdist/wheel only after the repository quality gate passes, verifies each artifact with `twine check` plus fresh install smoke tests through the dedicated release helper script, publishes or updates the GitHub release with `gh`, and emits GitHub attestations for both build provenance and the generated SBOM.
+- `.github/workflows/release.yml` now blocks publication on three repo-controlled
+prerequisites: the centralized release quality gate, the reusable fresh-host
+acceptance workflow, and the reusable memory-plugin verification workflow. It
+builds the Python sdist/wheel only after those prerequisites pass, verifies each
+artifact with `twine check` plus fresh install smoke tests through the
+dedicated release helper script, publishes or updates the GitHub release with
+`gh`, and emits GitHub attestations for both build provenance and the generated
+SBOM.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
 plus nightly validation steps after an upstream merge lands in the fork.
 - `.github/workflows/memory-plugin-verification.yml` runs the dedicated

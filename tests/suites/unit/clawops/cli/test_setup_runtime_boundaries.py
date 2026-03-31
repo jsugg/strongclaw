@@ -176,9 +176,11 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
     )
     output = capsys.readouterr().out
 
-    assert exit_code == 0
+    assert exit_code == 1
     assert openclaw_calls == []
     assert model_check_calls == 0
+    assert '"status": "degraded"' in output
+    assert '"mode": "bounded-local"' in output
     assert "bounded local doctor" in output
 
 

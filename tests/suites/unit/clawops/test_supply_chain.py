@@ -190,6 +190,13 @@ def test_quality_gate_cli_runs_declared_commands(
             "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
             "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
         ],
+        [
+            "python3",
+            "./tests/scripts/security_workflow.py",
+            "enforce-coverage-thresholds",
+            "--coverage-file",
+            "coverage.xml",
+        ],
         ["uv", "run", "python", "-m", "compileall", "-q", "src", "tests"],
     ]
     assert all(env is not None for env in envs)
@@ -241,6 +248,8 @@ def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
         if command[:3] == ["uv", "run", "mypy"]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
         if command[:2] == ["bash", "-lc"] and "uv run pytest" in command[-1]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:2] == ["python3", "./tests/scripts/security_workflow.py"]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
         if command[:2] == ["uv", "run"] and "compileall" in command:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)

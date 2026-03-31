@@ -42,6 +42,13 @@ QUALITY_GATE_COMMANDS: tuple[tuple[str, ...], ...] = (
         "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
         "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
     ),
+    (
+        "python3",
+        "./tests/scripts/security_workflow.py",
+        "enforce-coverage-thresholds",
+        "--coverage-file",
+        "coverage.xml",
+    ),
     ("uv", "run", "python", "-m", "compileall", "-q", "src", "tests"),
 )
 
@@ -382,7 +389,7 @@ def _run_sbom_generation(repo_root: pathlib.Path) -> str:
 
 def _run_refresh_command(repo_root: pathlib.Path, command: str) -> None:
     """Run an operator-supplied refresh command."""
-    result = run_command(command, cwd=repo_root, timeout_seconds=1800, shell=True)
+    result = run_command(["bash", "-lc", command], cwd=repo_root, timeout_seconds=1800)
     if not result.ok:
         raise RuntimeError(
             result.stderr.strip() or result.stdout.strip() or f"refresh command failed: {command}"

@@ -26,8 +26,12 @@ ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 Verify the expected local-only bindings after startup:
 
 ```bash
-clawops verify-platform sidecars
+docker compose -f platform/compose/docker-compose.browser-lab.yaml ps
 ```
+
+There is no first-class `clawops verify-platform` target for browser-lab yet.
+Treat browser-lab as an optional, best-effort surface outside baseline
+verification and release-readiness checks.
 
 ## Included artifacts
 

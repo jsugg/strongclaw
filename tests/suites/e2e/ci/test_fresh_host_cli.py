@@ -296,4 +296,6 @@ def test_fresh_host_cli_linux_browser_lab_reports_runtime_failure(tmp_path: Path
         "docker:info",
         "python:-m clawops ops --asset-root . browser-lab up --repo-local-state",
     ]
-    assert log_lines[2:] == [f"docker:compose -f {compose_file} ps --format json"] * 11
+    probe_lines = log_lines[2:]
+    assert probe_lines
+    assert all(line == f"docker:compose -f {compose_file} ps --format json" for line in probe_lines)

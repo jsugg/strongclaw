@@ -39,7 +39,7 @@ Repository helper commands that depend on `openclaw` now detect whether the CLI 
 ```bash
 clawops doctor-host
 make doctor
-uv run --project . clawops doctor --skip-runtime
+uv run --project . clawops doctor --skip-runtime --no-model-probe
 openclaw gateway status --json
 openclaw status --all
 openclaw doctor
@@ -50,6 +50,9 @@ openclaw secrets audit --check
 docker compose -f platform/compose/docker-compose.aux-stack.yaml ps
 clawops verify-platform sidecars
 ```
+
+`clawops doctor --skip-runtime --no-model-probe` is explicitly degraded: it is
+useful for local host validation, but it is not a production-readiness pass.
 
 For repo-local compose state hygiene during development, prefer targeted tools:
 

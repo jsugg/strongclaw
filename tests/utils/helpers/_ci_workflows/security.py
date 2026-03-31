@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
 
 from tests.utils.helpers._ci_workflows.common import (
+    CiWorkflowError,
     append_github_path,
     download_file,
     extract_tar_member,
     verify_sha256,
 )
+
+GLOBAL_COVERAGE_THRESHOLD = 75.0
+CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
+    "src/clawops/strongclaw_recovery.py": 80.0,
+    "src/clawops/strongclaw_model_auth.py": 18.0,
+    "src/clawops/strongclaw_varlock_env.py": 19.0,
+    "src/clawops/strongclaw_bootstrap.py": 28.0,
+}
 
 
 def append_coverage_summary(coverage_file: Path, summary_file: Path) -> None:
@@ -19,6 +29,52 @@ def append_coverage_summary(coverage_file: Path, summary_file: Path) -> None:
     coverage = float(ET.parse(coverage_file).getroot().attrib["line-rate"]) * 100
     with summary_file.open("a", encoding="utf-8") as handle:
         handle.write(f"Coverage: {coverage:.2f}%\n")
+
+
+def enforce_coverage_thresholds(
+    coverage_file: Path,
+    *,
+    global_threshold: float = GLOBAL_COVERAGE_THRESHOLD,
+    module_thresholds: Mapping[str, float] = CRITICAL_MODULE_COVERAGE_THRESHOLDS,
+) -> None:
+    """Raise when overall or critical-module coverage drops below the policy floor."""
+    root = ET.parse(coverage_file).getroot()
+    overall_coverage = float(root.attrib["line-rate"]) * 100
+    if overall_coverage < global_threshold:
+        raise CiWorkflowError(
+            f"overall line coverage {overall_coverage:.2f}% is below the "
+            f"required {global_threshold:.2f}% floor"
+        )
+
+    class_coverages: dict[str, float] = {}
+    for class_node in root.findall(".//class"):
+        filename = class_node.attrib.get("filename")
+        line_rate = class_node.attrib.get("line-rate")
+        if filename is None or line_rate is None:
+            continue
+        class_coverages[filename] = float(line_rate) * 100
+
+    for module_path, threshold in module_thresholds.items():
+        coverage = _match_module_coverage(class_coverages, module_path)
+        if coverage is None:
+            raise CiWorkflowError(f"coverage.xml does not contain module {module_path}")
+        if coverage < threshold:
+            raise CiWorkflowError(
+                f"line coverage for {module_path} is {coverage:.2f}% which is below "
+                f"the required {threshold:.2f}% floor"
+            )
+
+
+def _match_module_coverage(
+    class_coverages: Mapping[str, float],
+    module_path: str,
+) -> float | None:
+    """Resolve one module's coverage by exact path, suffix, or basename."""
+    module_name = Path(module_path).name
+    for filename, coverage in class_coverages.items():
+        if filename == module_path or filename.endswith(module_path) or filename == module_name:
+            return coverage
+    return None
 
 
 def install_gitleaks(

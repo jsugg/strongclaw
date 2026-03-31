@@ -176,6 +176,10 @@ The default `hypermemory` profile enables the combined `lossless-claw` + `strong
 clawops baseline verify
 ```
 
+Use `clawops baseline verify --degraded` only when you intentionally need
+static or host-only validation and understand that the output is not full
+release-readiness evidence.
+
 It runs:
 
 - `openclaw doctor`
@@ -183,7 +187,10 @@ It runs:
 - `openclaw secrets audit --check`
 - `openclaw memory status --deep`
 - `openclaw memory search --query "ClawOps" --max-results 1`
-- `clawops model-auth check`
+- model/provider auth validation
+- `clawops verify-platform sidecars`
+- `clawops verify-platform observability`
+- `clawops verify-platform channels`
 
 ## 6. Run devflow
 
@@ -198,8 +205,8 @@ clawops devflow audit --run-id <run-id>
 ```
 
 See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run layout, recovery flow, and audit bundle details.
-- `clawops verify-platform sidecars --skip-runtime`
-- `clawops verify-platform observability --skip-runtime`
+- `clawops verify-platform sidecars`
+- `clawops verify-platform observability`
 - `clawops verify-platform channels`
 - companion-tool smoke tests
 

@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 from collections.abc import Callable
+from typing import Literal
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
@@ -40,6 +41,8 @@ from clawops.strongclaw_runtime import (
 )
 from clawops.strongclaw_services import activate_services, render_service_files
 from clawops.strongclaw_varlock_env import configure_varlock_env
+
+CheckStatus = Literal["pass", "fail", "skipped"]
 
 
 def _render_openclaw_config(
@@ -77,6 +80,7 @@ def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--force-bootstrap", action="store_true")
     parser.add_argument("--no-activate-services", action="store_true")
     parser.add_argument("--no-verify", action="store_true")
+    parser.add_argument("--degraded-verify", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     return parser.parse_args(argv)
 
@@ -178,9 +182,15 @@ def _run_check(
     try:
         action()
     except Exception as exc:  # noqa: BLE001
-        checks.append({"name": label, "ok": False, "message": str(exc), "remediation": remediation})
+        _append_check(
+            label,
+            remediation,
+            checks,
+            status="fail",
+            message=str(exc),
+        )
         return
-    checks.append({"name": label, "ok": True, "message": "ok", "remediation": remediation})
+    _append_check(label, remediation, checks, status="pass", message="ok")
 
 
 def _record_skipped_check(
@@ -191,9 +201,70 @@ def _record_skipped_check(
     reason: str,
 ) -> None:
     """Record an intentionally skipped readiness check."""
-    checks.append(
-        {"name": label, "ok": True, "message": f"skipped: {reason}", "remediation": remediation}
+    _append_check(
+        label,
+        remediation,
+        checks,
+        status="skipped",
+        message=f"skipped: {reason}",
     )
+
+
+def _append_check(
+    label: str,
+    remediation: str,
+    checks: list[dict[str, object]],
+    *,
+    status: CheckStatus,
+    message: str,
+) -> None:
+    """Append one normalized readiness check entry."""
+    checks.append(
+        {
+            "name": label,
+            "status": status,
+            "ok": status == "pass",
+            "message": message,
+            "remediation": remediation,
+        }
+    )
+
+
+def _doctor_payload(
+    checks: list[dict[str, object]],
+    *,
+    degraded_mode: bool,
+    mode: str,
+) -> dict[str, object]:
+    """Summarize doctor results with explicit degraded semantics."""
+    passed = 0
+    failed = 0
+    skipped = 0
+    for check in checks:
+        status = check.get("status")
+        if status == "pass":
+            passed += 1
+        elif status == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+    if failed:
+        status = "fail"
+    elif degraded_mode or skipped:
+        status = "degraded"
+    else:
+        status = "pass"
+    return {
+        "ok": status == "pass",
+        "status": status,
+        "mode": mode,
+        "counts": {
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+        },
+        "checks": checks,
+    }
 
 
 def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
@@ -265,11 +336,22 @@ def setup_main(argv: list[str] | None = None) -> int:
     else:
         render_service_files(repo_root)
     if verify_enabled:
-        verify_baseline(repo_root, runs_dir=repo_root / ".tmp" / "harness")
+        baseline_payload = verify_baseline(
+            repo_root,
+            runs_dir=repo_root / ".tmp" / "harness",
+            degraded=bool(args.degraded_verify),
+        )
+    else:
+        baseline_payload = None
     next_steps = [
         "- Control UI: http://127.0.0.1:18789/",
         "- Deep health scan: clawops doctor",
     ]
+    if baseline_payload is not None and bool(baseline_payload.get("degraded")):
+        next_steps.append(
+            "- Baseline verification ran in degraded mode; rerun `clawops baseline verify` "
+            "for live runtime probes before treating the host as release-ready."
+        )
     if model_auth_deferred:
         next_steps.append(
             "- Model/provider auth was deferred because services were not activated; "
@@ -395,6 +477,7 @@ def doctor_main(argv: list[str] | None = None) -> int:
     checks.append(
         {
             "name": "Platform sidecars",
+            "status": "pass" if sidecars_report.ok else "fail",
             "ok": sidecars_report.ok,
             "message": json.dumps(sidecars_report.to_dict()),
             "remediation": "clawops verify-platform sidecars",
@@ -414,6 +497,7 @@ def doctor_main(argv: list[str] | None = None) -> int:
     checks.append(
         {
             "name": "Platform observability",
+            "status": "pass" if observability_report.ok else "fail",
             "ok": observability_report.ok,
             "message": json.dumps(observability_report.to_dict()),
             "remediation": "clawops verify-platform observability",
@@ -441,11 +525,20 @@ def doctor_main(argv: list[str] | None = None) -> int:
     checks.append(
         {
             "name": "Platform channels",
+            "status": "pass" if channels_report.ok else "fail",
             "ok": channels_report.ok,
             "message": json.dumps(channels_report.to_dict()),
             "remediation": "clawops verify-platform channels",
         }
     )
-    payload = {"ok": all(bool(check["ok"]) for check in checks), "checks": checks}
+    payload = _doctor_payload(
+        checks,
+        degraded_mode=bool(args.skip_runtime),
+        mode=(
+            "bounded-local"
+            if _bounded_local_doctor(args)
+            else "runtime-skipped" if args.skip_runtime else "full"
+        ),
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0 if payload["ok"] else 1
+    return 0 if payload["status"] == "pass" else 1

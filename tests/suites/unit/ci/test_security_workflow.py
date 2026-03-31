@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import security_workflow as security_workflow_script
 from tests.utils.helpers import ci_workflows
 from tests.utils.helpers._ci_workflows import security as security_helpers
+from tests.utils.helpers._ci_workflows.common import CiWorkflowError
 
 
 def test_append_coverage_summary_appends_percentage(tmp_path: Path) -> None:
@@ -69,6 +72,65 @@ def test_install_gitleaks_downloads_and_extracts_archive(
     assert ("extract", ("gitleaks_8.28.0_linux_x64.tar.gz", "gitleaks", "gitleaks")) in seen_calls
 
 
+def test_enforce_coverage_thresholds_checks_overall_and_critical_modules(tmp_path: Path) -> None:
+    """Coverage threshold enforcement should reject low overall or critical-module coverage."""
+    coverage_file = tmp_path / "coverage.xml"
+    coverage_file.write_text(
+        "\n".join(
+            [
+                '<coverage line-rate="0.80">',
+                "  <packages>",
+                '    <package name="clawops">',
+                "      <classes>",
+                '        <class filename="src/clawops/strongclaw_recovery.py" line-rate="0.81"/>',
+                '        <class filename="src/clawops/strongclaw_model_auth.py" line-rate="0.76"/>',
+                '        <class filename="src/clawops/strongclaw_varlock_env.py" line-rate="0.75"/>',
+                '        <class filename="src/clawops/strongclaw_bootstrap.py" line-rate="0.75"/>',
+                "      </classes>",
+                "    </package>",
+                "  </packages>",
+                "</coverage>",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ci_workflows.enforce_coverage_thresholds(coverage_file)
+
+    coverage_file.write_text(
+        coverage_file.read_text(encoding="utf-8").replace(
+            'line-rate="0.80"',
+            'line-rate="0.70"',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CiWorkflowError, match="overall line coverage"):
+        ci_workflows.enforce_coverage_thresholds(coverage_file)
+
+    coverage_file.write_text(
+        "\n".join(
+            [
+                '<coverage line-rate="0.80">',
+                "  <packages>",
+                '    <package name="clawops">',
+                "      <classes>",
+                '        <class filename="src/clawops/strongclaw_recovery.py" line-rate="0.40"/>',
+                '        <class filename="src/clawops/strongclaw_model_auth.py" line-rate="0.76"/>',
+                '        <class filename="src/clawops/strongclaw_varlock_env.py" line-rate="0.75"/>',
+                '        <class filename="src/clawops/strongclaw_bootstrap.py" line-rate="0.75"/>',
+                "      </classes>",
+                "    </package>",
+                "  </packages>",
+                "</coverage>",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CiWorkflowError, match="strongclaw_recovery.py"):
+        ci_workflows.enforce_coverage_thresholds(coverage_file)
+
+
 def test_write_empty_sarif_writes_expected_payload(tmp_path: Path) -> None:
     """The placeholder SARIF payload should preserve the expected schema and category driver."""
     output_path = tmp_path / "empty.sarif"
@@ -111,3 +173,31 @@ def test_security_workflow_main_dispatches_write_summary(
     assert seen_calls == [
         ((tmp_path / "coverage.xml").resolve(), (tmp_path / "summary.md").resolve())
     ]
+
+
+def test_security_workflow_main_dispatches_coverage_threshold_enforcement(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch coverage threshold enforcement."""
+    seen_calls: list[Path] = []
+
+    def fake_enforce_coverage_thresholds(coverage_file: Path) -> None:
+        seen_calls.append(coverage_file)
+
+    test_context.patch.patch_object(
+        security_workflow_script,
+        "enforce_coverage_thresholds",
+        new=fake_enforce_coverage_thresholds,
+    )
+
+    exit_code = security_workflow_script.main(
+        [
+            "enforce-coverage-thresholds",
+            "--coverage-file",
+            str(tmp_path / "coverage.xml"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [(tmp_path / "coverage.xml").resolve()]

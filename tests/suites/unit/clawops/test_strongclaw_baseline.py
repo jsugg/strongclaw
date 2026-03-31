@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Sequence
+from typing import cast
 
 import pytest
 
@@ -209,3 +210,208 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
 
     with pytest.raises(CommandError, match="repo tests failed"):
         strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")
+
+
+def test_verify_baseline_defaults_to_runtime_platform_checks(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    """Baseline verify should probe platform runtime surfaces by default."""
+    repo_root = _init_source_checkout(tmp_path / "repo")
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text("{}", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def _require_openclaw(message: str) -> None:
+        del message
+
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
+        assert repo == repo_root
+        return config_path
+
+    def _run_openclaw_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
+        **kwargs: object,
+    ) -> _FakeOpenClawResult:
+        del arguments, kwargs
+        assert repo == repo_root
+        return _FakeOpenClawResult()
+
+    def _ensure_model_auth(
+        repo: pathlib.Path,
+        *,
+        check_only: bool,
+        probe: bool,
+    ) -> dict[str, object]:
+        del check_only
+        assert repo == repo_root
+        return {"ok": True, "probe": probe}
+
+    def _managed_clawops_command(_repo: pathlib.Path, *arguments: str) -> list[str]:
+        return ["clawops", *arguments]
+
+    def _run_command(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del timeout_seconds
+        assert cwd == repo_root
+        commands.append([str(part) for part in command])
+        if "status" in command:
+            return _FakeCommandResult(ok=True, stdout="{}")
+        return _FakeCommandResult(ok=True)
+
+    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "run_openclaw_command",
+        new=_run_openclaw_command,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "ensure_model_auth",
+        new=_ensure_model_auth,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "rendered_openclaw_uses_hypermemory",
+        new=_rendered_openclaw_uses_hypermemory,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "managed_clawops_command",
+        new=_managed_clawops_command,
+    )
+    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
+    test_context.patch.patch_object(
+        strongclaw_baseline, "run_harness_smoke", new=_noop_harness_smoke
+    )
+
+    payload = strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")
+    model_payload = cast(dict[str, object], payload["modelAuth"])
+
+    platform_commands = [
+        command for command in commands if command[:2] == ["clawops", "verify-platform"]
+    ]
+
+    assert payload["degraded"] is False
+    assert payload["verificationMode"] == "runtime"
+    assert model_payload["probe"] is True
+    assert platform_commands == [
+        ["clawops", "verify-platform", "sidecars"],
+        ["clawops", "verify-platform", "observability"],
+        ["clawops", "verify-platform", "channels"],
+    ]
+
+
+def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    """Degraded baseline mode should stay explicit in both commands and payload."""
+    repo_root = _init_source_checkout(tmp_path / "repo")
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text("{}", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    def _require_openclaw(message: str) -> None:
+        del message
+
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
+        assert repo == repo_root
+        return config_path
+
+    def _run_openclaw_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
+        **kwargs: object,
+    ) -> _FakeOpenClawResult:
+        del arguments, kwargs
+        assert repo == repo_root
+        return _FakeOpenClawResult()
+
+    def _ensure_model_auth(
+        repo: pathlib.Path,
+        *,
+        check_only: bool,
+        probe: bool,
+    ) -> dict[str, object]:
+        del check_only
+        assert repo == repo_root
+        return {"ok": True, "probe": probe}
+
+    def _managed_clawops_command(_repo: pathlib.Path, *arguments: str) -> list[str]:
+        return ["clawops", *arguments]
+
+    def _run_command(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del timeout_seconds
+        assert cwd == repo_root
+        commands.append([str(part) for part in command])
+        if "status" in command:
+            return _FakeCommandResult(ok=True, stdout="{}")
+        return _FakeCommandResult(ok=True)
+
+    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "run_openclaw_command",
+        new=_run_openclaw_command,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "ensure_model_auth",
+        new=_ensure_model_auth,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "rendered_openclaw_uses_hypermemory",
+        new=_rendered_openclaw_uses_hypermemory,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "managed_clawops_command",
+        new=_managed_clawops_command,
+    )
+    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
+    test_context.patch.patch_object(
+        strongclaw_baseline, "run_harness_smoke", new=_noop_harness_smoke
+    )
+
+    payload = strongclaw_baseline.verify_baseline(
+        repo_root,
+        runs_dir=tmp_path / "runs",
+        degraded=True,
+    )
+    model_payload = cast(dict[str, object], payload["modelAuth"])
+
+    platform_commands = [
+        command for command in commands if command[:2] == ["clawops", "verify-platform"]
+    ]
+
+    assert payload["degraded"] is True
+    assert payload["verificationMode"] == "degraded"
+    assert model_payload["probe"] is False
+    assert "Runtime probes were skipped" in str(payload["guidance"])
+    assert platform_commands == [
+        ["clawops", "verify-platform", "sidecars", "--skip-runtime"],
+        ["clawops", "verify-platform", "observability", "--skip-runtime"],
+        ["clawops", "verify-platform", "channels"],
+    ]
