@@ -15,12 +15,15 @@ from collections.abc import Mapping, Sequence
 from typing import cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
+from clawops.observability import emit_structured_log
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
     CommandError,
     ensure_docker_backend_ready,
     load_env_assignments,
+    rendered_openclaw_uses_hypermemory,
+    rendered_openclaw_uses_qmd,
     resolve_openclaw_config_path,
     resolve_openclaw_state_dir,
     resolve_repo_local_compose_state_dir,
@@ -46,6 +49,9 @@ SIDECAR_RUNTIME_SERVICE_NAMES = ("litellm", "otel-collector", "qdrant", "neo4j")
 COMPOSE_STATUS_TIMEOUT_SECONDS = 30
 POSTGRES_HEALTH_TIMEOUT_SECONDS = 180
 LITELLM_BOOTSTRAP_TIMEOUT_SECONDS = 1800
+LITELLM_HEALTH_TIMEOUT_SECONDS = 180
+QDRANT_HEALTH_TIMEOUT_SECONDS = 180
+NEO4J_HEALTH_TIMEOUT_SECONDS = 180
 COMPOSE_POLL_INTERVAL_SECONDS = 2.0
 
 
@@ -77,6 +83,19 @@ class _ComposeServiceStatus:
     name: str
     state: str
     health: str | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _SidecarReadinessTarget:
+    """Readiness contract for one sidecar dependency."""
+
+    service_name: str
+    required: bool
+    impact: str
+    reason: str
+    state: str = "running"
+    health: str | None = "healthy"
+    timeout_seconds: int = 180
 
 
 def _compose_state_dir(repo_root: pathlib.Path, *, repo_local_state: bool) -> pathlib.Path:
@@ -269,20 +288,48 @@ def _wait_for_compose_service(
     timeout_seconds: int,
 ) -> None:
     """Wait for one compose service to reach the requested state."""
+    started_at = time.monotonic()
+    target = state if health is None else f"{state}/{health}"
+    emit_structured_log(
+        "clawops.ops.sidecars.wait.start",
+        {
+            "service": service_name,
+            "target": target,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
     deadline = time.monotonic() + timeout_seconds
     last_status: _ComposeServiceStatus | None = None
     while True:
         last_status = _compose_service_statuses(execution).get(service_name)
         if _service_matches(last_status, state=state, health=health):
+            emit_structured_log(
+                "clawops.ops.sidecars.wait.ready",
+                {
+                    "service": service_name,
+                    "target": target,
+                    "state": None if last_status is None else last_status.state,
+                    "health": None if last_status is None else last_status.health,
+                    "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+                },
+            )
             return
         if time.monotonic() >= deadline:
             break
         time.sleep(COMPOSE_POLL_INTERVAL_SECONDS)
-    target = state if health is None else f"{state}/{health}"
     observed = (
         "service not listed in compose status"
         if last_status is None
         else f"state={last_status.state!r}, health={last_status.health or 'n/a'!r}"
+    )
+    emit_structured_log(
+        "clawops.ops.sidecars.wait.timeout",
+        {
+            "service": service_name,
+            "target": target,
+            "observed": observed,
+            "timeout_seconds": timeout_seconds,
+        },
     )
     raise CommandError(
         f"timed out waiting for compose service '{service_name}' to reach {target}; "
@@ -309,10 +356,117 @@ def _run_litellm_schema_bootstrap(execution: _ComposeExecution) -> int:
     )
 
 
+def _resolve_profile_dependency_flags(config_path: pathlib.Path) -> dict[str, object]:
+    """Resolve profile-dependent sidecar flags from one rendered OpenClaw config."""
+    try:
+        uses_qmd = rendered_openclaw_uses_qmd(config_path)
+        uses_hypermemory = rendered_openclaw_uses_hypermemory(config_path)
+        return {
+            "configPath": config_path.as_posix(),
+            "source": "rendered-config",
+            "usesQmd": uses_qmd,
+            "usesHypermemory": uses_hypermemory,
+        }
+    except Exception as exc:
+        # NOTE: missing/invalid config should keep startup checks conservative.
+        return {
+            "configPath": config_path.as_posix(),
+            "source": "fallback-conservative",
+            "usesQmd": True,
+            "usesHypermemory": True,
+            "resolutionError": str(exc),
+        }
+
+
+def _sidecar_readiness_targets(
+    profile_flags: Mapping[str, object],
+) -> tuple[_SidecarReadinessTarget, ...]:
+    """Return the readiness contract for the active profile."""
+    uses_qmd = bool(profile_flags.get("usesQmd"))
+    uses_hypermemory = bool(profile_flags.get("usesHypermemory"))
+    qdrant_required = uses_qmd or uses_hypermemory
+    neo4j_required = uses_hypermemory
+    return (
+        _SidecarReadinessTarget(
+            service_name=POSTGRES_SERVICE_NAME,
+            required=True,
+            impact="fatal",
+            reason="runtime metadata and session state storage",
+            timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
+        ),
+        _SidecarReadinessTarget(
+            service_name=LITELLM_SERVICE_NAME,
+            required=True,
+            impact="fatal",
+            reason="loopback model routing boundary",
+            timeout_seconds=LITELLM_HEALTH_TIMEOUT_SECONDS,
+        ),
+        _SidecarReadinessTarget(
+            service_name="qdrant",
+            required=qdrant_required,
+            impact="degraded",
+            reason="dense/sparse retrieval lanes for qmd or hypermemory profiles",
+            timeout_seconds=QDRANT_HEALTH_TIMEOUT_SECONDS,
+        ),
+        _SidecarReadinessTarget(
+            service_name="neo4j",
+            required=neo4j_required,
+            impact="degraded",
+            reason="graph-backed context expansion for the hypermemory profile",
+            timeout_seconds=NEO4J_HEALTH_TIMEOUT_SECONDS,
+        ),
+        _SidecarReadinessTarget(
+            service_name="otel-collector",
+            required=False,
+            impact="observational",
+            reason="runtime telemetry export",
+            health=None,
+            timeout_seconds=60,
+        ),
+    )
+
+
+def _compose_rows(statuses: Mapping[str, _ComposeServiceStatus]) -> list[dict[str, object]]:
+    """Return stable compose rows from structured statuses."""
+    return [
+        {
+            "Service": status.name,
+            "State": status.state,
+            "Health": status.health,
+        }
+        for status in sorted(statuses.values(), key=lambda item: item.name)
+    ]
+
+
+def _readiness_entries(
+    statuses: Mapping[str, _ComposeServiceStatus],
+    targets: Sequence[_SidecarReadinessTarget],
+) -> list[dict[str, object]]:
+    """Build a structured readiness report from compose statuses."""
+    entries: list[dict[str, object]] = []
+    for target in targets:
+        status = statuses.get(target.service_name)
+        ready = _service_matches(status, state=target.state, health=target.health)
+        entries.append(
+            {
+                "service": target.service_name,
+                "required": target.required,
+                "impact": target.impact,
+                "reason": target.reason,
+                "ready": ready,
+                "targetState": target.state,
+                "targetHealth": target.health,
+                "observedState": None if status is None else status.state,
+                "observedHealth": None if status is None else status.health,
+            }
+        )
+    return entries
+
+
 def gateway_start(repo_root: pathlib.Path) -> int:
     """Run the OpenClaw gateway under Varlock when available."""
     command = wrap_command_with_varlock(repo_root, ["openclaw", "gateway"])
-    return run_command_inherited(command, cwd=repo_root, timeout_seconds=1800)
+    return run_command_inherited(command, cwd=repo_root, timeout_seconds=None)
 
 
 def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
@@ -322,6 +476,9 @@ def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
         compose_name=SIDECARS_COMPOSE_NAME,
         repo_local_state=repo_local_state,
     )
+    config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
+    profile_flags = _resolve_profile_dependency_flags(config_path)
+    targets = _sidecar_readiness_targets(profile_flags)
     postgres_exit = _run_compose_command_with_context(
         execution,
         arguments=("up", "-d", POSTGRES_SERVICE_NAME),
@@ -352,14 +509,41 @@ def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
             for service_name in SIDECAR_RUNTIME_SERVICE_NAMES
             if service_name != LITELLM_SERVICE_NAME
         )
-        return _run_compose_command_with_context(
+        sidecars_exit = _run_compose_command_with_context(
             execution,
             arguments=("up", "-d", *runtime_services),
         )
-    return _run_compose_command_with_context(
-        execution,
-        arguments=("up", "-d", *SIDECAR_RUNTIME_SERVICE_NAMES),
+    else:
+        sidecars_exit = _run_compose_command_with_context(
+            execution,
+            arguments=("up", "-d", *SIDECAR_RUNTIME_SERVICE_NAMES),
+        )
+    if sidecars_exit != 0:
+        return sidecars_exit
+    for target in targets:
+        if not target.required:
+            continue
+        _wait_for_compose_service(
+            execution,
+            service_name=target.service_name,
+            state=target.state,
+            health=target.health,
+            timeout_seconds=target.timeout_seconds,
+        )
+    readiness_entries = _readiness_entries(_compose_service_statuses(execution), targets)
+    required_ready = all(
+        bool(entry["ready"]) for entry in readiness_entries if bool(entry["required"])
     )
+    emit_structured_log(
+        "clawops.ops.sidecars.ready",
+        {
+            "required_ready": required_ready,
+            "required_count": sum(1 for entry in readiness_entries if bool(entry["required"])),
+            "optional_count": sum(1 for entry in readiness_entries if not bool(entry["required"])),
+            "profile_source": str(profile_flags.get("source", "")),
+        },
+    )
+    return 0
 
 
 def sidecars_down(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
@@ -394,23 +578,91 @@ def browser_lab_down(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
 
 def status(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, object]:
     """Return the current sidecar compose status."""
-    compose_name = "docker-compose.aux-stack.yaml"
-    env = _compose_env(repo_root, repo_local_state=repo_local_state, compose_name=compose_name)
-    compose_path = _compose_path(repo_root, compose_name)
-    compose_cwd = resolve_asset_path("platform/compose", repo_root=repo_root)
-    compose_result = run_command(
-        ["docker", "compose", "-f", str(compose_path), "ps", "--format", "json"],
-        cwd=compose_cwd,
-        env=env,
-        timeout_seconds=30,
+    try:
+        execution = _compose_execution(
+            repo_root,
+            compose_name=SIDECARS_COMPOSE_NAME,
+            repo_local_state=repo_local_state,
+        )
+    except CommandError as exc:
+        detail = str(exc)
+        emit_structured_log(
+            "clawops.ops.sidecars.status",
+            {
+                "ok": False,
+                "error": detail,
+            },
+        )
+        return {
+            "ok": False,
+            "composeStateDir": "",
+            "openclawConfig": "",
+            "profile": {},
+            "services": {},
+            "readiness": {
+                "requiredReady": False,
+                "required": [],
+                "optional": [],
+            },
+            "compose": detail,
+        }
+    config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
+    profile_flags = _resolve_profile_dependency_flags(config_path)
+    targets = _sidecar_readiness_targets(profile_flags)
+    try:
+        statuses = _compose_service_statuses(execution)
+    except CommandError as exc:
+        detail = str(exc)
+        emit_structured_log(
+            "clawops.ops.sidecars.status",
+            {
+                "ok": False,
+                "error": detail,
+            },
+        )
+        return {
+            "ok": False,
+            "composeStateDir": execution.env["STRONGCLAW_COMPOSE_STATE_DIR"],
+            "openclawConfig": execution.env["OPENCLAW_CONFIG"],
+            "profile": profile_flags,
+            "services": {},
+            "readiness": {
+                "requiredReady": False,
+                "required": [],
+                "optional": [],
+            },
+            "compose": detail,
+        }
+    entries = _readiness_entries(statuses, targets)
+    required_entries = [entry for entry in entries if bool(entry["required"])]
+    optional_entries = [entry for entry in entries if not bool(entry["required"])]
+    required_ready = all(bool(entry["ready"]) for entry in required_entries)
+    services = {
+        status.name: {"state": status.state, "health": status.health}
+        for status in statuses.values()
+    }
+    compose_rows = _compose_rows(statuses)
+    emit_structured_log(
+        "clawops.ops.sidecars.status",
+        {
+            "ok": required_ready,
+            "required_ready": required_ready,
+            "required_count": len(required_entries),
+            "optional_count": len(optional_entries),
+        },
     )
     return {
-        "ok": compose_result.ok,
-        "composeStateDir": env["STRONGCLAW_COMPOSE_STATE_DIR"],
-        "openclawConfig": env["OPENCLAW_CONFIG"],
-        "compose": (
-            compose_result.stdout.strip() if compose_result.ok else compose_result.stderr.strip()
-        ),
+        "ok": required_ready,
+        "composeStateDir": execution.env["STRONGCLAW_COMPOSE_STATE_DIR"],
+        "openclawConfig": execution.env["OPENCLAW_CONFIG"],
+        "profile": profile_flags,
+        "services": services,
+        "readiness": {
+            "requiredReady": required_ready,
+            "required": required_entries,
+            "optional": optional_entries,
+        },
+        "compose": json.dumps(compose_rows, separators=(",", ":")),
     }
 
 

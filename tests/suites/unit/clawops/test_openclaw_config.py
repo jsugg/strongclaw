@@ -23,6 +23,7 @@ from clawops.openclaw_config import (
     render_openclaw_profile,
     render_qmd_overlay,
 )
+from clawops.strongclaw_runtime import managed_python
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -226,6 +227,7 @@ def test_hypermemory_overlay_template_renders_repo_local_paths() -> None:
 
     plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     assert rendered["plugins"]["slots"]["memory"] == "strongclaw-hypermemory"
+    assert plugin_config["command"] == [managed_python(repo_root).as_posix(), "-m", "clawops"]
     assert plugin_config["configPath"] == f"{memory_config_dir.as_posix()}/hypermemory.sqlite.yaml"
     assert rendered["plugins"]["load"]["paths"] == [
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-hypermemory"
@@ -271,6 +273,7 @@ def test_render_hypermemory_profile_merges_baseline_and_plugin_slots() -> None:
     }
     plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     assert plugin_config["configPath"] == f"{memory_config_dir.as_posix()}/hypermemory.yaml"
+    assert plugin_config["command"] == [managed_python(repo_root).as_posix(), "-m", "clawops"]
     assert plugin_config["autoRecall"] is True
     assert plugin_config["autoReflect"] is False
 

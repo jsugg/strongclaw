@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from clawops.common import write_yaml
-from clawops.typed_values import as_string
+from clawops.typed_values import as_mapping, as_string
 from clawops.workflow_runner import WorkflowRunner
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.cli import write_fake_acpx, write_status_script
@@ -132,6 +132,69 @@ def test_workflow_runner_worker_dispatch_and_poll_support_non_git_workspace(
     assert summary_path.exists()
     assert context_manifest_path.exists()
     assert results[1].message == "succeeded"
+
+
+def test_workflow_runner_worker_dispatch_writes_review_packet_when_approval_is_required(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    test_context.env.apply_profile(
+        "workflow_state",
+        overrides={"STRONGCLAW_STATE_DIR": tmp_path / "state"},
+    )
+    project, workspace, config = build_context_project(tmp_path)
+    (workspace / "main.py").write_text("def run_task():\n    return 'ok'\n", encoding="utf-8")
+    write_yaml(config, {"index": {"db_path": ".clawops/context.sqlite"}})
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_acpx(bin_dir)
+    write_status_script(bin_dir, "codex", stdout_text="Logged in using ChatGPT")
+    test_context.env.prepend_path(bin_dir)
+
+    runner = WorkflowRunner(
+        {
+            "steps": [
+                {
+                    "name": "dispatch",
+                    "kind": "worker_dispatch",
+                    "journal_db": str(tmp_path / "workflow.sqlite"),
+                    "task": {
+                        "project": {"root": str(project)},
+                        "workspace": {"kind": "local_dir", "path": str(workspace)},
+                        "lane": "feature-a",
+                        "role": "developer",
+                        "backend": "codex",
+                        "prompt": "Implement feature A",
+                        "operation_kind": "implement",
+                        "required_auth_mode": "subscription",
+                        "approval_required": True,
+                        "context": {
+                            "provider": "codebase",
+                            "scale": "small",
+                            "config": str(config),
+                            "query": "run_task",
+                        },
+                    },
+                }
+            ]
+        }
+    )
+
+    results = runner.run()
+
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert "approval required before dispatch" in results[0].message
+    review_artifact_path = pathlib.Path(
+        as_string(
+            results[0].details["review_artifact_path"],
+            path="results[0].details.review_artifact_path",
+        )
+    )
+    dispatch = as_mapping(results[0].details["dispatch"], path="results[0].details.dispatch")
+    assert dispatch["dispatched"] is True
+    assert review_artifact_path.exists()
 
 
 def test_workflow_runner_approval_and_artifact_gates(

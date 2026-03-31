@@ -263,6 +263,20 @@ def test_render_service_files_include_isolated_runtime_env(
     assert f"Environment=STRONGCLAW_RUNTIME_ROOT={runtime_root}" in rendered_gateway
 
 
+def test_render_service_files_includes_maintenance_timer_and_service(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    output_dir = tmp_path / "systemd"
+    test_context.patch.patch_object(strongclaw_services, "systemd_dir", new=lambda: output_dir)
+
+    payload = strongclaw_services.render_service_files(REPO_ROOT, service_manager="systemd")
+
+    assert payload["serviceManager"] == "systemd"
+    assert (output_dir / "openclaw-maintenance.service").exists()
+    assert (output_dir / "openclaw-maintenance.timer").exists()
+
+
 def test_render_service_files_omits_launchd_passthrough_env_when_unset(
     test_context: TestContext, tmp_path: pathlib.Path
 ) -> None:
@@ -357,12 +371,13 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
 
     assert activated["activated"] == list(strongclaw_services.LAUNCHD_ACTIVATE_LABELS)
     assert calls == [
+        ("activate", "gui/501:ai.openclaw.sidecars"),
+        ("wait", "ai.openclaw.sidecars:False"),
+        ("activate", "gui/501:ai.openclaw.sidecars"),
+        ("wait", "ai.openclaw.sidecars:False"),
         ("activate", "gui/501:ai.openclaw.gateway"),
         ("wait", "ai.openclaw.gateway:True"),
-        ("activate", "gui/501:ai.openclaw.sidecars"),
-        ("wait", "ai.openclaw.sidecars:False"),
-        ("activate", "gui/501:ai.openclaw.sidecars"),
-        ("wait", "ai.openclaw.sidecars:False"),
+        ("activate", "gui/501:ai.openclaw.maintenance"),
     ]
 
 
@@ -438,8 +453,82 @@ def test_activate_services_uses_launchd_timeout_overrides(
 
     assert activated["activated"] == list(strongclaw_services.LAUNCHD_ACTIVATE_LABELS)
     assert waits == [
-        (strongclaw_services.LAUNCHD_GATEWAY_LABEL, True, 45),
         (strongclaw_services.LAUNCHD_SIDECARS_LABEL, False, 2700),
+        (strongclaw_services.LAUNCHD_GATEWAY_LABEL, True, 45),
+    ]
+
+
+def test_activate_services_enables_systemd_units_in_declared_order(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    payload: dict[str, object] = {
+        "ok": True,
+        "serviceManager": "systemd",
+        "outputDir": str(tmp_path / "systemd"),
+        "stateDir": str(tmp_path / "state"),
+        "renderedFiles": [],
+    }
+    observed_commands: list[tuple[str, ...]] = []
+    observed_events: list[tuple[str, dict[str, object]]] = []
+
+    def _render_service_files(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return payload
+
+    def _run_command(command: list[str], *, timeout_seconds: int = 30) -> ExecResult:
+        del timeout_seconds
+        observed_commands.append(tuple(command))
+        return ExecResult(
+            argv=tuple(command),
+            returncode=0,
+            stdout="",
+            stderr="",
+            duration_ms=1,
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "render_service_files",
+        new=_render_service_files,
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "ensure_docker_backend_ready",
+        new=lambda: None,
+    )
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "run_command",
+        new=_run_command,
+    )
+
+    def _emit_structured_log(event: str, payload: object) -> None:
+        observed_events.append((str(event), cast(dict[str, object], payload)))
+
+    test_context.patch.patch_object(
+        strongclaw_services,
+        "emit_structured_log",
+        new=_emit_structured_log,
+    )
+
+    payload_out = strongclaw_services.activate_services(tmp_path, service_manager="systemd")
+
+    assert payload_out["activated"] == list(strongclaw_services.SYSTEMD_ACTIVATE_UNITS)
+    assert observed_commands == [
+        ("systemctl", "--user", "daemon-reload"),
+        ("systemctl", "--user", "enable", "--now", "openclaw-sidecars.service"),
+        ("systemctl", "--user", "enable", "--now", "openclaw-gateway.service"),
+        ("systemctl", "--user", "enable", "--now", "openclaw-maintenance.timer"),
+    ]
+    assert observed_events[0] == (
+        "clawops.services.activate",
+        {"service_manager": "systemd", "step": "daemon_reload"},
+    )
+    assert [event[1].get("unit") for event in observed_events[1:]] == [
+        "openclaw-sidecars.service",
+        "openclaw-gateway.service",
+        "openclaw-maintenance.timer",
     ]
 
 

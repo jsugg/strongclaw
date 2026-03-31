@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
+from typing import Any, cast
 
 import pytest
 
 import clawops.strongclaw_runtime as runtime
 from clawops.app_paths import strongclaw_varlock_dir
+from clawops.memory_profiles import MANAGED_MEMORY_PROFILE_IDS, MEMORY_PROFILES
 from clawops.strongclaw_runtime import CommandError, ExecResult, write_env_assignments
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
@@ -224,3 +227,66 @@ def test_resolve_openclaw_state_dir_prefers_runtime_root_over_local_env_fallback
     resolved = runtime.resolve_openclaw_state_dir(REPO_ROOT, home_dir=tmp_path / "home")
 
     assert resolved == runtime_root / ".openclaw"
+
+
+def test_run_command_inherited_omits_timeout_when_none(
+    test_context: TestContext,
+) -> None:
+    recorded_kwargs: dict[str, Any] = {}
+
+    def _fake_subprocess_run(*args: object, **kwargs: object) -> object:
+        del args
+        recorded_kwargs.update(cast(dict[str, Any], kwargs))
+        return subprocess.CompletedProcess[str](args=["echo"], returncode=0)
+
+    test_context.patch.patch_object(runtime.subprocess, "run", new=_fake_subprocess_run)
+
+    exit_code = runtime.run_command_inherited(["echo", "ready"], timeout_seconds=None)
+
+    assert exit_code == 0
+    assert "timeout" not in recorded_kwargs
+
+
+def test_run_command_inherited_passes_numeric_timeout(
+    test_context: TestContext,
+) -> None:
+    recorded_kwargs: dict[str, Any] = {}
+
+    def _fake_subprocess_run(*args: object, **kwargs: object) -> object:
+        del args
+        recorded_kwargs.update(cast(dict[str, Any], kwargs))
+        return subprocess.CompletedProcess[str](args=["echo"], returncode=0)
+
+    test_context.patch.patch_object(runtime.subprocess, "run", new=_fake_subprocess_run)
+
+    exit_code = runtime.run_command_inherited(["echo", "ready"], timeout_seconds=45)
+
+    assert exit_code == 0
+    assert recorded_kwargs["timeout"] == 45
+
+
+def test_profile_requirement_helpers_track_managed_registry_flags() -> None:
+    for profile_id in MANAGED_MEMORY_PROFILE_IDS:
+        profile = MEMORY_PROFILES[profile_id]
+        assert runtime.profile_requires_qmd(profile_id) is profile.installs_qmd
+        assert runtime.profile_requires_lossless_claw(profile_id) is profile.installs_lossless_claw
+        assert (
+            runtime.profile_requires_hypermemory_backend(profile_id)
+            is profile.enables_hypermemory_backend
+        )
+        assert runtime.profile_requires_memory_pro_plugin(profile_id) is profile.installs_memory_pro
+
+
+def test_profile_requirement_helpers_return_false_for_unknown_profile() -> None:
+    unknown = "unknown-profile-name"
+
+    assert runtime.profile_requires_qmd(unknown) is False
+    assert runtime.profile_requires_lossless_claw(unknown) is False
+    assert runtime.profile_requires_hypermemory_backend(unknown) is False
+    assert runtime.profile_requires_memory_pro_plugin(unknown) is False
+
+
+def test_profile_requirement_helpers_include_non_managed_runtime_profiles() -> None:
+    assert runtime.profile_requires_qmd("acp") is True
+    assert runtime.profile_requires_lossless_claw("acp") is False
+    assert runtime.profile_requires_hypermemory_backend("acp") is False

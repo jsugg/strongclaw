@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_text, write_text
+from clawops.observability import emit_structured_log
 from clawops.platform_compat import detect_host_platform, resolve_service_manager
 from clawops.runtime_assets import RuntimeLayout, resolve_runtime_layout
 from clawops.strongclaw_runtime import (
@@ -24,11 +25,13 @@ from clawops.strongclaw_runtime import (
 )
 
 LAUNCHD_ACTIVATE_LABELS: Final[tuple[str, ...]] = (
-    "ai.openclaw.gateway",
     "ai.openclaw.sidecars",
+    "ai.openclaw.gateway",
+    "ai.openclaw.maintenance",
 )
 LAUNCHD_GATEWAY_LABEL: Final[str] = "ai.openclaw.gateway"
 LAUNCHD_SIDECARS_LABEL: Final[str] = "ai.openclaw.sidecars"
+LAUNCHD_MAINTENANCE_LABEL: Final[str] = "ai.openclaw.maintenance"
 LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_GATEWAY_TIMEOUT_SECONDS"
 LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS"
 LAUNCHD_PASSTHROUGH_ENV_VARS: Final[tuple[str, ...]] = (
@@ -44,6 +47,7 @@ LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
     "openclaw-sidecars.service",
     "openclaw-gateway.service",
+    "openclaw-maintenance.timer",
 )
 
 
@@ -124,19 +128,20 @@ def render_service_files(
     resolved_state_dir.mkdir(parents=True, exist_ok=True)
     (resolved_state_dir / "logs").mkdir(parents=True, exist_ok=True)
     manager = service_manager or resolve_service_manager(detect_host_platform())
+    template_paths: list[pathlib.Path]
     if manager == "launchd":
         template_dir = resolved_repo_root / "platform" / "launchd"
         output_dir = launchd_dir()
-        pattern = "*.template"
+        template_paths = sorted(template_dir.glob("*.template"))
     elif manager == "systemd":
         template_dir = resolved_repo_root / "platform" / "systemd"
         output_dir = systemd_dir()
-        pattern = "*.service"
+        template_paths = sorted([*template_dir.glob("*.service"), *template_dir.glob("*.timer")])
     else:
         raise ValueError(f"unsupported service manager: {manager}")
     output_dir.mkdir(parents=True, exist_ok=True)
     rendered_files: list[str] = []
-    for template_path in sorted(template_dir.glob(pattern)):
+    for template_path in template_paths:
         if not template_path.is_file():
             continue
         output_name = (
@@ -289,11 +294,14 @@ def activate_services(
         )
         gateway_plist = output_dir / f"{LAUNCHD_GATEWAY_LABEL}.plist"
         sidecars_plist = output_dir / f"{LAUNCHD_SIDECARS_LABEL}.plist"
-        _activate_launchd_service(domain, LAUNCHD_GATEWAY_LABEL, gateway_plist)
-        _wait_for_launchd_service(
-            LAUNCHD_GATEWAY_LABEL,
-            persistent=True,
-            timeout_seconds=gateway_timeout_seconds,
+        maintenance_plist = output_dir / f"{LAUNCHD_MAINTENANCE_LABEL}.plist"
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "launchd",
+                "step": "sidecars_bootstrap",
+                "label": LAUNCHD_SIDECARS_LABEL,
+            },
         )
         _activate_launchd_oneshot_service(
             domain,
@@ -301,10 +309,40 @@ def activate_services(
             sidecars_plist,
             timeout_seconds=sidecars_timeout_seconds,
         )
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "launchd",
+                "step": "gateway_bootstrap",
+                "label": LAUNCHD_GATEWAY_LABEL,
+            },
+        )
+        _activate_launchd_service(domain, LAUNCHD_GATEWAY_LABEL, gateway_plist)
+        _wait_for_launchd_service(
+            LAUNCHD_GATEWAY_LABEL,
+            persistent=True,
+            timeout_seconds=gateway_timeout_seconds,
+        )
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "launchd",
+                "step": "maintenance_bootstrap",
+                "label": LAUNCHD_MAINTENANCE_LABEL,
+            },
+        )
+        _activate_launchd_service(domain, LAUNCHD_MAINTENANCE_LABEL, maintenance_plist)
         return {
             **render_payload,
             "activated": list(LAUNCHD_ACTIVATE_LABELS),
         }
+    emit_structured_log(
+        "clawops.services.activate",
+        {
+            "service_manager": "systemd",
+            "step": "daemon_reload",
+        },
+    )
     reload_result = run_command(["systemctl", "--user", "daemon-reload"], timeout_seconds=30)
     if not reload_result.ok:
         detail = (
@@ -314,6 +352,14 @@ def activate_services(
         )
         raise RuntimeError(detail)
     for unit in SYSTEMD_ACTIVATE_UNITS:
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "systemd",
+                "step": "enable_now",
+                "unit": unit,
+            },
+        )
         enable_result = run_command(
             ["systemctl", "--user", "enable", "--now", unit],
             timeout_seconds=60,

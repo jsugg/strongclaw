@@ -1086,6 +1086,8 @@ class IndexStats:
     indexed_files: int
     skipped_files: int
     deleted_files: int
+    deleted_graph_nodes: int = 0
+    deleted_graph_edges: int = 0
 
     def to_dict(self) -> dict[str, int]:
         """Serialize the stats for CLI/reporting surfaces."""
@@ -1094,6 +1096,8 @@ class IndexStats:
             "indexed_files": self.indexed_files,
             "skipped_files": self.skipped_files,
             "deleted_files": self.deleted_files,
+            "deleted_graph_nodes": self.deleted_graph_nodes,
+            "deleted_graph_edges": self.deleted_graph_edges,
         }
 
 
@@ -1176,6 +1180,14 @@ class GraphNode:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class GraphCleanupStats:
+    """Graph cleanup summary from one backend upsert."""
+
+    deleted_nodes: int = 0
+    deleted_edges: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class GraphConfig:
     """Graph expansion configuration."""
 
@@ -1247,7 +1259,7 @@ class GraphBackend(Protocol):
         nodes: Sequence[GraphNode],
         edges: Sequence[EdgeRecord],
         snapshot_id: str,
-    ) -> None:
+    ) -> GraphCleanupStats:
         """Upsert graph nodes and edges."""
         ...
 
@@ -1281,7 +1293,7 @@ class SqliteGraphBackend:
         nodes: Sequence[GraphNode],
         edges: Sequence[EdgeRecord],
         snapshot_id: str,
-    ) -> None:
+    ) -> GraphCleanupStats:
         """Upsert graph data into SQLite."""
         del nodes, snapshot_id
         with self._conn_factory() as conn:
@@ -1299,6 +1311,7 @@ class SqliteGraphBackend:
                 ],
             )
             conn.commit()
+        return GraphCleanupStats()
 
     def neighbors(
         self,
@@ -1416,10 +1429,10 @@ class Neo4jGraphBackend:
         nodes: Sequence[GraphNode],
         edges: Sequence[EdgeRecord],
         snapshot_id: str,
-    ) -> None:
+    ) -> GraphCleanupStats:
         """Upsert graph nodes and edges into Neo4j."""
         if not nodes:
-            return
+            return GraphCleanupStats()
         self._ensure_constraints()
         node_payload = [
             {
@@ -1466,13 +1479,39 @@ class Neo4jGraphBackend:
                 """,
                 parameters={"edges": edge_payload},
             )
-        self._run_query(
+        stale_edge_records = self._run_query(
+            """
+            MATCH ()-[rel:CODE_EDGE]->()
+            WHERE rel.snapshot_id <> $snapshot_id
+            WITH collect(rel) AS stale_edges
+            FOREACH (edge IN stale_edges | DELETE edge)
+            RETURN size(stale_edges) AS deleted_edges
+            """,
+            parameters={"snapshot_id": snapshot_id},
+        )
+        stale_node_records = self._run_query(
             """
             MATCH (n:CodeNode)
             WHERE n.snapshot_id <> $snapshot_id
-            DETACH DELETE n
+            WITH collect(n) AS stale_nodes
+            FOREACH (node IN stale_nodes | DETACH DELETE node)
+            RETURN size(stale_nodes) AS deleted_nodes
             """,
             parameters={"snapshot_id": snapshot_id},
+        )
+        deleted_edges_raw = (
+            stale_edge_records[0].get("deleted_edges", 0) if stale_edge_records else 0
+        )
+        deleted_nodes_raw = (
+            stale_node_records[0].get("deleted_nodes", 0) if stale_node_records else 0
+        )
+        return GraphCleanupStats(
+            deleted_nodes=(
+                int(deleted_nodes_raw) if isinstance(deleted_nodes_raw, (int, float)) else 0
+            ),
+            deleted_edges=(
+                int(deleted_edges_raw) if isinstance(deleted_edges_raw, (int, float)) else 0
+            ),
         )
 
     def neighbors(
@@ -2376,6 +2415,7 @@ class CodebaseContextService:
                     skipped_files=skipped_files,
                     deleted_files=len(stale_paths),
                 )
+                graph_cleanup = GraphCleanupStats()
                 elapsed_ms = int((time.perf_counter() - started_at) * 1000)
                 snapshot_id = self.index_snapshot_id(conn=conn)
                 conn.executemany(
@@ -2396,10 +2436,15 @@ class CodebaseContextService:
                 features = self._runtime_features()
                 if "graph" in features.backend_modes:
                     graph_backend = self._active_graph_backend()
-                    graph_backend.upsert(
+                    graph_cleanup = graph_backend.upsert(
                         nodes=self._load_graph_nodes(conn),
                         edges=self._load_graph_edges(conn),
                         snapshot_id=snapshot_id,
+                    )
+                    stats = dataclasses.replace(
+                        stats,
+                        deleted_graph_nodes=graph_cleanup.deleted_nodes,
+                        deleted_graph_edges=graph_cleanup.deleted_edges,
                     )
 
             observation: dict[str, bool | int | str] = {
@@ -2410,6 +2455,8 @@ class CodebaseContextService:
                 "indexed_files": stats.indexed_files,
                 "skipped_files": stats.skipped_files,
                 "deleted_files": stats.deleted_files,
+                "deleted_graph_nodes": stats.deleted_graph_nodes,
+                "deleted_graph_edges": stats.deleted_graph_edges,
                 "elapsed_ms": elapsed_ms,
                 "hybrid_sync_pending": self._hybrid_requested() and not self._hybrid_state_ready(),
             }

@@ -15,6 +15,7 @@ from typing import Any, Literal, Mapping, cast
 import requests
 
 from clawops import __version__
+from clawops.approval_dispatch import ApprovalDispatchOutcome, dispatch_pending_approval
 from clawops.common import canonical_json
 from clawops.observability import emit_structured_log, observed_span
 from clawops.op_journal import Operation, OperationJournal
@@ -890,6 +891,17 @@ def prepare_operation(
     decision_payload: Mapping[str, Any],
 ) -> PreparedOperation:
     """Prepare an operation and transition it into a pre-execution state."""
+
+    def _attach_dispatch_payload(
+        result_payload: dict[str, Any] | None,
+        dispatch_outcome: ApprovalDispatchOutcome | None,
+    ) -> dict[str, Any] | None:
+        if result_payload is None or dispatch_outcome is None:
+            return result_payload
+        result_payload["review_artifact_path"] = dispatch_outcome.artifact_path.as_posix()
+        result_payload["dispatch"] = dispatch_outcome.to_dict()
+        return result_payload
+
     op = ctx.journal.begin(
         scope=scope,
         kind=kind,
@@ -898,6 +910,7 @@ def prepare_operation(
         inputs=payload,
     )
     if op.status != "proposed":
+        dispatch_outcome: ApprovalDispatchOutcome | None = None
         decision = decision_from_operation(op)
         if op.status in {"pending_approval", "approved", "running"}:
             op, decision = ensure_execution_contract(
@@ -905,7 +918,13 @@ def prepare_operation(
                 op=op,
                 decision_payload=decision_payload,
             )
-        result = replay_result_from_operation(op, decision=decision, dry_run=ctx.dry_run)
+        if op.status == "pending_approval":
+            dispatch_outcome = dispatch_pending_approval(journal=ctx.journal, operation=op)
+            op = dispatch_outcome.operation
+        result = _attach_dispatch_payload(
+            replay_result_from_operation(op, decision=decision, dry_run=ctx.dry_run),
+            dispatch_outcome,
+        )
         return PreparedOperation(
             op, decision, result=result, should_execute=op.status == "approved" and not ctx.dry_run
         )
@@ -943,11 +962,16 @@ def prepare_operation(
             review_status="pending",
             review_payload_json=(None if not review_payload else canonical_json(review_payload)),
         )
+        dispatch_outcome = dispatch_pending_approval(journal=ctx.journal, operation=updated)
+        updated = dispatch_outcome.operation
         return PreparedOperation(
             updated,
             decision,
-            result=result_from_operation(
-                updated, decision=decision, ok=True, accepted=True, executed=False
+            result=_attach_dispatch_payload(
+                result_from_operation(
+                    updated, decision=decision, ok=True, accepted=True, executed=False
+                ),
+                dispatch_outcome,
             ),
         )
     contract = _build_execution_contract(op, decision)

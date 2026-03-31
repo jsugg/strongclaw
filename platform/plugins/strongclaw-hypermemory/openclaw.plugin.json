@@ -38,6 +38,16 @@
         "type": "number",
         "minimum": 1000,
         "maximum": 120000
+      },
+      "startupTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 120000
+      },
+      "toolTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 120000
       }
     },
     "required": [
