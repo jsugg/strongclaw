@@ -38,6 +38,9 @@ def test_wrapper_replays_pending_approval_without_side_effect(
     assert first["ok"] is True
     assert first["accepted"] is True
     assert first["executed"] is False
+    assert isinstance(first.get("review_artifact_path"), str)
+    dispatch = as_mapping(first["dispatch"], path="first.dispatch")
+    assert dispatch["dispatched"] is True
     assert second == first
     assert calls == []
 
@@ -49,6 +52,8 @@ def test_wrapper_replays_pending_approval_without_side_effect(
     assert persisted.review_mode == "manual"
     assert persisted.review_status == "pending"
     assert persisted.review_payload_json is not None
+    assert persisted.review_artifact_path == first["review_artifact_path"]
+    assert pathlib.Path(str(first["review_artifact_path"])).exists()
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=[spec.name for spec in SPECS])

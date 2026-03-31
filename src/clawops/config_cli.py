@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import pathlib
 from collections.abc import Mapping
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
+from clawops.memory_profiles import (
+    MANAGED_MEMORY_PROFILE_IDS,
+    MEMORY_PROFILES,
+    MemoryProfileSpec,
+    require_memory_profile,
+)
 from clawops.openclaw_config import (
     DEFAULT_OPENCLAW_CONFIG_OUTPUT,
     materialize_runtime_memory_configs,
@@ -20,53 +25,9 @@ from clawops.strongclaw_bootstrap import install_profile_assets
 from clawops.strongclaw_runtime import resolve_home_dir
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class MemoryProfileSpec:
-    """StrongClaw-managed OpenClaw memory profile."""
-
-    profile_id: str
-    render_profile: str
-    description: str
-    installs_qmd: bool = False
-    installs_lossless_claw: bool = False
-    installs_memory_pro: bool = False
-
-
-MEMORY_PROFILES: dict[str, MemoryProfileSpec] = {
-    "hypermemory": MemoryProfileSpec(
-        profile_id="hypermemory",
-        render_profile="hypermemory",
-        description="Default StrongClaw profile: lossless-claw + strongclaw-hypermemory.",
-        installs_lossless_claw=True,
-    ),
-    "openclaw-default": MemoryProfileSpec(
-        profile_id="openclaw-default",
-        render_profile="openclaw-default",
-        description="Built-in OpenClaw defaults: legacy context engine + memory-core.",
-    ),
-    "openclaw-qmd": MemoryProfileSpec(
-        profile_id="openclaw-qmd",
-        render_profile="openclaw-qmd",
-        description="Built-in OpenClaw defaults plus the experimental QMD memory backend.",
-        installs_qmd=True,
-    ),
-    "memory-lancedb-pro": MemoryProfileSpec(
-        profile_id="memory-lancedb-pro",
-        render_profile="memory-lancedb-pro",
-        description="Vendored memory-lancedb-pro with Ollama-backed smart extraction.",
-        installs_qmd=True,
-        installs_memory_pro=True,
-    ),
-}
-
-
 def _memory_profile(profile_id: str) -> MemoryProfileSpec:
     """Resolve one supported StrongClaw memory profile."""
-    try:
-        return MEMORY_PROFILES[profile_id]
-    except KeyError as exc:
-        available = ", ".join(sorted(MEMORY_PROFILES))
-        raise ValueError(f"unknown memory profile: {profile_id} (choose from {available})") from exc
+    return require_memory_profile(profile_id)
 
 
 def _print_payload(payload: Mapping[str, object], *, as_json: bool) -> None:
@@ -123,7 +84,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     memory_parser = subparsers.add_parser("memory", help="Manage StrongClaw memory profiles.")
     memory_parser.add_argument(
         "--set-profile",
-        choices=sorted(MEMORY_PROFILES),
+        choices=sorted(MANAGED_MEMORY_PROFILE_IDS),
         help="Install assets as needed and render the selected memory profile.",
     )
     memory_parser.add_argument(
@@ -162,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                     "description": profile.description,
                 }
                 for profile in MEMORY_PROFILES.values()
+                if profile.managed
             ]
         }
         _print_payload(list_payload, as_json=bool(args.json))

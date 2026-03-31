@@ -116,12 +116,69 @@ async function main() {
   try {
     writeHypermemoryConfig(workspaceDir, memoryConfigPath);
 
+    assert.throws(() => {
+      const missingConfigStub = createPluginApiStub({
+        configPath: path.join(workspaceDir, "missing-config.yaml"),
+      });
+      strongclawHypermemoryPlugin.register(missingConfigStub.api);
+    }, /configPath does not exist/);
+
+    const badCommandStub = createPluginApiStub({
+      configPath: memoryConfigPath,
+      command: ["command-does-not-exist-strongclaw-hypermemory"],
+      autoRecall: false,
+      autoReflect: false,
+      timeoutMs: 5_000,
+      startupTimeoutMs: 5_000,
+      toolTimeoutMs: 5_000,
+    });
+    strongclawHypermemoryPlugin.register(badCommandStub.api);
+    const badSearchTool = badCommandStub.tools.get("memory_search");
+    assert.ok(badSearchTool);
+    const badSearchResult = await badSearchTool.execute("bad-tool", {
+      query: "anything",
+    });
+    assert.equal(badSearchResult.details.disabled, true);
+    assert.match(String(badSearchResult.details.error), /failed to start/);
+
+    const timeoutCommandPath = path.join(runDir, "slow-command.mjs");
+    writeFileSync(
+      timeoutCommandPath,
+      [
+        "#!/usr/bin/env node",
+        "setTimeout(() => {",
+        "  process.stdout.write(\"{}\\n\");",
+        "  process.exit(0);",
+        "}, 1500);",
+      ].join("\n"),
+      { encoding: "utf8", mode: 0o755 },
+    );
+    const timeoutStub = createPluginApiStub({
+      configPath: memoryConfigPath,
+      command: [timeoutCommandPath],
+      autoRecall: false,
+      autoReflect: false,
+      timeoutMs: 20_000,
+      startupTimeoutMs: 1_000,
+      toolTimeoutMs: 1_000,
+    });
+    strongclawHypermemoryPlugin.register(timeoutStub.api);
+    const timeoutSearchTool = timeoutStub.tools.get("memory_search");
+    assert.ok(timeoutSearchTool);
+    const timeoutSearchResult = await timeoutSearchTool.execute("timeout-tool", {
+      query: "anything",
+    });
+    assert.equal(timeoutSearchResult.details.disabled, true);
+    assert.match(String(timeoutSearchResult.details.error), /startup preflight timed out/i);
+
     const stub = createPluginApiStub({
       configPath: memoryConfigPath,
       command: ["uv", "run", "--project", repoRoot, "python", "-m", "clawops"],
       autoRecall: false,
       autoReflect: false,
       timeoutMs: 20_000,
+      startupTimeoutMs: 20_000,
+      toolTimeoutMs: 20_000,
     });
     strongclawHypermemoryPlugin.register(stub.api);
 
@@ -136,6 +193,9 @@ async function main() {
       commands[0].subcommands.map((command) => command.name),
       ["status", "index", "search", "get", "store", "update", "reflect", "forget", "list-facts"],
     );
+    const indexCommand = commands[0].subcommands.find((command) => command.name === "index");
+    assert.ok(indexCommand?.action);
+    await indexCommand.action({ json: true });
 
     const memorySearch = stub.tools.get("memory_search");
     assert.ok(memorySearch);

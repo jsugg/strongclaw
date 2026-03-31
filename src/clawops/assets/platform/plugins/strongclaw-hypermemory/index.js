@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const DEFAULT_COMMAND = ["clawops"];
 const DEFAULT_TIMEOUT_MS = 20000;
@@ -119,6 +120,9 @@ function resolvePluginConfig(rawConfig) {
       "strongclaw-hypermemory requires plugins.entries.strongclaw-hypermemory.config.configPath",
     );
   }
+  if (!existsSync(configPath)) {
+    throw new Error(`strongclaw-hypermemory configPath does not exist: ${configPath}`);
+  }
   const command =
     Array.isArray(input.command) && input.command.length > 0
       ? input.command.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim())
@@ -127,8 +131,18 @@ function resolvePluginConfig(rawConfig) {
     throw new Error("strongclaw-hypermemory command must contain at least one executable");
   }
   const timeoutMs = readNumberParam(input, "timeoutMs");
+  const startupTimeoutMs = readNumberParam(input, "startupTimeoutMs");
+  const toolTimeoutMs = readNumberParam(input, "toolTimeoutMs");
   const recallMaxResults = readNumberParam(input, "recallMaxResults");
   const captureMinMessages = readNumberParam(input, "captureMinMessages");
+  const resolvedTimeoutMs =
+    timeoutMs && timeoutMs >= 1000 ? Math.min(120000, Math.trunc(timeoutMs)) : DEFAULT_TIMEOUT_MS;
+  const resolvedStartupTimeoutMs =
+    startupTimeoutMs && startupTimeoutMs >= 1000
+      ? Math.min(120000, Math.trunc(startupTimeoutMs))
+      : resolvedTimeoutMs;
+  const resolvedToolTimeoutMs =
+    toolTimeoutMs && toolTimeoutMs >= 1000 ? Math.min(120000, Math.trunc(toolTimeoutMs)) : resolvedTimeoutMs;
   return {
     command,
     configPath,
@@ -139,12 +153,17 @@ function resolvePluginConfig(rawConfig) {
       recallMaxResults && recallMaxResults >= 1 ? Math.min(10, Math.trunc(recallMaxResults)) : 3,
     captureMinMessages:
       captureMinMessages && captureMinMessages >= 1 ? Math.min(20, Math.trunc(captureMinMessages)) : 4,
-    timeoutMs:
-      timeoutMs && timeoutMs >= 1000 ? Math.min(120000, Math.trunc(timeoutMs)) : DEFAULT_TIMEOUT_MS,
+    timeoutMs: resolvedTimeoutMs,
+    startupTimeoutMs: resolvedStartupTimeoutMs,
+    toolTimeoutMs: resolvedToolTimeoutMs,
   };
 }
 
-async function runClawopsCommand(pluginConfig, args, { captureJson = true } = {}) {
+async function runClawopsCommand(
+  pluginConfig,
+  args,
+  { captureJson = true, timeoutMs = pluginConfig.toolTimeoutMs, phase = "tool" } = {},
+) {
   const [command, ...commandArgs] = pluginConfig.command;
   const fullArgs = [...commandArgs, "hypermemory", "--config", pluginConfig.configPath, ...args];
   return await new Promise((resolve, reject) => {
@@ -158,7 +177,7 @@ async function runClawopsCommand(pluginConfig, args, { captureJson = true } = {}
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
-    }, pluginConfig.timeoutMs);
+    }, timeoutMs);
     if (captureJson) {
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -167,15 +186,22 @@ async function runClawopsCommand(pluginConfig, args, { captureJson = true } = {}
         stderr += chunk.toString();
       });
     }
-    child.on("error", reject);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `failed to start strongclaw-hypermemory command (${command}): ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       if (timedOut) {
-        reject(new Error(`clawops hypermemory timed out after ${pluginConfig.timeoutMs}ms`));
+        reject(new Error(`clawops hypermemory ${phase} timed out after ${timeoutMs}ms`));
         return;
       }
       if (code !== 0) {
-        reject(new Error(stderr.trim() || `clawops hypermemory exited with code ${code}`));
+        reject(new Error(stderr.trim() || `clawops hypermemory ${phase} exited with code ${code}`));
         return;
       }
       if (!captureJson) {
@@ -193,6 +219,36 @@ async function runClawopsCommand(pluginConfig, args, { captureJson = true } = {}
       }
     });
   });
+}
+
+function createStartupGate(pluginConfig) {
+  let startupPromise;
+  async function ensureReady() {
+    if (startupPromise) {
+      return startupPromise;
+    }
+    startupPromise = runClawopsCommand(pluginConfig, ["status", "--json"], {
+      timeoutMs: pluginConfig.startupTimeoutMs,
+      phase: "startup preflight",
+    }).then((payload) => {
+      if (payload && typeof payload === "object" && payload.ok === false) {
+        const reason =
+          typeof payload.message === "string" && payload.message.trim()
+            ? payload.message.trim()
+            : "status returned ok=false";
+        throw new Error(`strongclaw-hypermemory startup preflight failed: ${reason}`);
+      }
+    });
+    return startupPromise;
+  }
+  function start(logger) {
+    void ensureReady().catch((error) => {
+      if (logger && typeof logger.warn === "function") {
+        logger.warn(`strongclaw-hypermemory startup preflight failed: ${String(error)}`);
+      }
+    });
+  }
+  return { ensureReady, start };
 }
 
 function buildDisabledSearchResult(error) {
@@ -216,8 +272,14 @@ function formatRecallContext(results) {
   return lines.join("\n");
 }
 
-function fireAndForget(pluginConfig, args) {
-  runClawopsCommand(pluginConfig, args).catch(() => {});
+function fireAndForget(pluginConfig, args, { ensureReady } = {}) {
+  const runPromise =
+    typeof ensureReady === "function"
+      ? Promise.resolve()
+          .then(() => ensureReady())
+          .then(() => runClawopsCommand(pluginConfig, args))
+      : runClawopsCommand(pluginConfig, args);
+  runPromise.catch(() => {});
 }
 
 function extractSessionMessages(event) {
@@ -300,14 +362,14 @@ function splitFeedbackIds(entries, responseText) {
   return { confirmed, badRecall };
 }
 
-function registerMemoryCli(program, pluginConfig) {
+function registerMemoryCli(program, runClawops) {
   const memory = program.command("memory").description("Use StrongClaw hypermemory.");
   memory
     .command("status")
     .description("Show StrongClaw hypermemory status.")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
-      await runClawopsCommand(pluginConfig, ["status", ...(opts.json ? ["--json"] : [])], {
+      await runClawops(["status", ...(opts.json ? ["--json"] : [])], {
         captureJson: false,
       });
     });
@@ -317,7 +379,7 @@ function registerMemoryCli(program, pluginConfig) {
     .description("Rebuild the StrongClaw hypermemory index.")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
-      await runClawopsCommand(pluginConfig, ["index", ...(opts.json ? ["--json"] : [])], {
+      await runClawops(["index", ...(opts.json ? ["--json"] : [])], {
         captureJson: false,
       });
     });
@@ -370,7 +432,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 
   memory
@@ -390,7 +452,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 
   memory
@@ -416,7 +478,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 
   memory
@@ -435,7 +497,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 
   memory
@@ -445,7 +507,7 @@ function registerMemoryCli(program, pluginConfig) {
     .option("--json", "Print JSON.")
     .action(async (opts) => {
       const args = ["reflect", "--mode", String(opts.mode ?? "safe"), ...(opts.json ? ["--json"] : [])];
-      await runClawopsCommand(pluginConfig, args, {
+      await runClawops(args, {
         captureJson: false,
       });
     });
@@ -475,7 +537,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 
   memory
@@ -495,7 +557,7 @@ function registerMemoryCli(program, pluginConfig) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawopsCommand(pluginConfig, args, { captureJson: false });
+      await runClawops(args, { captureJson: false });
     });
 }
 
@@ -520,6 +582,8 @@ const strongclawHypermemoryPlugin = {
       captureMinMessages: { type: "number", minimum: 1, maximum: 20 },
       recallMaxResults: { type: "number", minimum: 1, maximum: 10 },
       timeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
+      startupTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
+      toolTimeoutMs: { type: "number", minimum: 1000, maximum: 120000 },
     },
     required: ["configPath"],
   },
@@ -527,6 +591,13 @@ const strongclawHypermemoryPlugin = {
     const pluginConfig = resolvePluginConfig(api.pluginConfig);
     const sessionFeedback = new Map();
     const sessionKeyFor = (event) => String(event?.sessionId ?? event?.conversationId ?? "default");
+    const startupGate = createStartupGate(pluginConfig);
+    const ensureReady = startupGate.ensureReady;
+    startupGate.start(api.logger);
+    const runClawops = async (args, options) => {
+      await ensureReady();
+      return runClawopsCommand(pluginConfig, args, options);
+    };
 
     api.registerTool(
       {
@@ -574,10 +645,14 @@ const strongclawHypermemoryPlugin = {
             if (params?.explain === true) {
               args.push("--explain");
             }
-            const payload = await runClawopsCommand(pluginConfig, args);
+            const payload = await runClawops(args);
             const injectedIds = collectInjectedItemIds(payload?.results);
             if (injectedIds.length > 0) {
-              fireAndForget(pluginConfig, ["access", "--json", "--item-ids", JSON.stringify(injectedIds)]);
+              fireAndForget(
+                pluginConfig,
+                ["access", "--json", "--item-ids", JSON.stringify(injectedIds)],
+                { ensureReady },
+              );
             }
             return jsonResult(payload);
           } catch (error) {
@@ -607,7 +682,7 @@ const strongclawHypermemoryPlugin = {
             args.push("--lines", String(lines));
           }
           try {
-            const payload = await runClawopsCommand(pluginConfig, args);
+            const payload = await runClawops(args);
             return jsonResult(payload);
           } catch (error) {
             return jsonResult({ path, text: "", disabled: true, error: String(error) });
@@ -640,7 +715,7 @@ const strongclawHypermemoryPlugin = {
             if (scope) {
               args.push("--scope", scope);
             }
-            return jsonResult(await runClawopsCommand(pluginConfig, args));
+            return jsonResult(await runClawops(args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
@@ -673,7 +748,7 @@ const strongclawHypermemoryPlugin = {
             if (params?.all === true) {
               args.push("--all");
             }
-            return jsonResult(await runClawopsCommand(pluginConfig, args));
+            return jsonResult(await runClawops(args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
@@ -695,7 +770,7 @@ const strongclawHypermemoryPlugin = {
             if (mode) {
               args.push("--mode", mode);
             }
-            return jsonResult(await runClawopsCommand(pluginConfig, args));
+            return jsonResult(await runClawops(args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
@@ -728,7 +803,7 @@ const strongclawHypermemoryPlugin = {
             if (params?.hardDelete === true) {
               args.push("--hard-delete");
             }
-            return jsonResult(await runClawopsCommand(pluginConfig, args));
+            return jsonResult(await runClawops(args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
@@ -754,7 +829,7 @@ const strongclawHypermemoryPlugin = {
             if (scope) {
               args.push("--scope", scope);
             }
-            return jsonResult(await runClawopsCommand(pluginConfig, args));
+            return jsonResult(await runClawops(args));
           } catch (error) {
             return jsonResult({ ok: false, error: String(error) });
           }
@@ -764,7 +839,7 @@ const strongclawHypermemoryPlugin = {
     );
 
     api.registerCli(({ program }) => {
-      registerMemoryCli(program, pluginConfig);
+      registerMemoryCli(program, runClawops);
     }, { commands: ["memory"] });
 
     if (pluginConfig.autoRecall) {
@@ -774,7 +849,7 @@ const strongclawHypermemoryPlugin = {
           return;
         }
         try {
-          const payload = await runClawopsCommand(pluginConfig, [
+          const payload = await runClawops([
             "search",
             "--json",
             "--query",
@@ -795,7 +870,7 @@ const strongclawHypermemoryPlugin = {
               "--json",
               "--item-ids",
               JSON.stringify(injectedIds),
-            ]);
+            ], { ensureReady });
           }
           return {
             prependContext: formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
@@ -827,7 +902,7 @@ const strongclawHypermemoryPlugin = {
             "--json",
             "--item-ids",
             JSON.stringify(feedback.confirmed),
-          ]);
+          ], { ensureReady });
         }
         if (feedback.badRecall.length > 0) {
           fireAndForget(pluginConfig, [
@@ -835,7 +910,7 @@ const strongclawHypermemoryPlugin = {
             "--json",
             "--item-ids",
             JSON.stringify(feedback.badRecall),
-          ]);
+          ], { ensureReady });
         }
       });
     }
@@ -847,7 +922,7 @@ const strongclawHypermemoryPlugin = {
           if (messages.length < pluginConfig.captureMinMessages) {
             return;
           }
-          await runClawopsCommand(pluginConfig, [
+          await runClawops([
             "capture",
             "--json",
             "--messages",
@@ -862,7 +937,7 @@ const strongclawHypermemoryPlugin = {
     if (pluginConfig.autoReflect) {
       const runReflect = async (hookName) => {
         try {
-          await runClawopsCommand(pluginConfig, ["reflect", "--json"]);
+          await runClawops(["reflect", "--json"]);
         } catch (error) {
           api.logger.warn(`strongclaw-hypermemory ${hookName} reflect failed: ${String(error)}`);
         }
@@ -876,7 +951,7 @@ const strongclawHypermemoryPlugin = {
     }
 
     api.on("session_end", async () => {
-      fireAndForget(pluginConfig, ["flush-metadata", "--json"]);
+      fireAndForget(pluginConfig, ["flush-metadata", "--json"], { ensureReady });
     });
   },
 };

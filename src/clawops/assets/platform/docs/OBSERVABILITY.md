@@ -32,3 +32,29 @@ Collector-side redaction is mandatory before broader trace export. Do not assume
 - vector sync runs and sync failures
 
 Those signals reuse the shared ClawOps telemetry path instead of adding a separate exporter or collector.
+
+## Runtime Bring-Up Events
+
+`clawops ops` now emits structured readiness events:
+
+- `clawops.ops.sidecars.wait.start`
+- `clawops.ops.sidecars.wait.ready`
+- `clawops.ops.sidecars.wait.timeout`
+- `clawops.ops.sidecars.ready`
+- `clawops.ops.sidecars.status`
+
+Wait-timeout events include `service`, `target`, `observed`, and `timeout_seconds` so failed dependencies can be diagnosed without replaying the command interactively.
+
+## Host Service Activation Events
+
+`clawops services install --activate` now emits:
+
+- `clawops.services.activate` with `service_manager=launchd` and `step` values:
+  - `sidecars_bootstrap`
+  - `gateway_bootstrap`
+  - `maintenance_bootstrap`
+- `clawops.services.activate` with `service_manager=systemd` and `step` values:
+  - `daemon_reload`
+  - `enable_now` (`unit` included per activation)
+
+These events are intentionally coarse-grained to avoid high-volume per-poll logging.

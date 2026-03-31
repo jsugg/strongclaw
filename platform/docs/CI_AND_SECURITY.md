@@ -93,3 +93,5 @@ hypermemory Qdrant checks against the official pinned Qdrant GHCR image instead 
 compile-checks the repo, runs targeted devflow tests, and validates `clawops devflow plan --goal "contract smoke"` without live ACP providers.
 - Operators can verify published provenance with GitHub's attestation tooling
 after a tagged release lands.
+
+Canonical plugin support status lives in [Plugin Inventory](./PLUGIN_INVENTORY.md).
