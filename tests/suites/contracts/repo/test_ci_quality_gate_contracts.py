@@ -110,6 +110,16 @@ def test_semgrep_rules_cover_python_repo_risk_surfaces() -> None:
     assert "python-unsafe-deserialization" in rule_ids
 
 
+def test_semgrep_python_rules_avoid_path_filters_that_break_targeted_scans() -> None:
+    """Python Semgrep rules should avoid `paths.include` filters that skip explicit file scans."""
+    payload = yaml.safe_load((REPO_ROOT / "security" / "semgrep" / "semgrep.yml").read_text())
+    python_rules = [rule for rule in payload["rules"] if str(rule["id"]).startswith("python-")]
+
+    assert python_rules
+    for rule in python_rules:
+        assert "paths" not in rule
+
+
 def test_memory_plugin_qdrant_workflow_uses_pinned_ghcr_service_image() -> None:
     workflow = _workflow_text("memory-plugin-verification.yml")
 
