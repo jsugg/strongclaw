@@ -1,0 +1,1 @@
+Trigger file to ensure required PR checks run for docs-only changes (PR #135).
