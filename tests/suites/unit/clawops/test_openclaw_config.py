@@ -250,6 +250,10 @@ def test_hypermemory_overlay_renders_repo_local_paths(
 
     assert rendered["plugins"]["slots"]["contextEngine"] == "lossless-claw"
     assert rendered["plugins"]["slots"]["memory"] == "strongclaw-hypermemory"
+    plugin_config = rendered["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
+    assert plugin_config["timeoutMs"] == 20000
+    assert plugin_config["shortTimeoutMs"] == 12000
+    assert plugin_config["longTimeoutMs"] == 45000
     assert rendered["plugins"]["load"]["paths"] == [
         lossless_dir.as_posix(),
         f"{repo_root.as_posix()}/platform/plugins/strongclaw-hypermemory",

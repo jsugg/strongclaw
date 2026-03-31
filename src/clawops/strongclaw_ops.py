@@ -33,6 +33,8 @@ from clawops.strongclaw_runtime import (
     wrap_command_with_varlock,
 )
 from clawops.typed_values import (
+    as_bool,
+    as_int,
     as_mapping,
     as_mapping_list,
     as_optional_mapping,
@@ -188,12 +190,49 @@ def _run_compose_command_with_context(
     timeout_seconds: int = 1800,
 ) -> int:
     """Run a compose command with inherited stdio for one execution context."""
-    return run_command_inherited(
-        execution.command(*[str(argument) for argument in arguments]),
-        cwd=execution.cwd,
-        env=execution.env,
-        timeout_seconds=timeout_seconds,
+    normalized_arguments = [str(argument) for argument in arguments]
+    arguments_json = json.dumps(normalized_arguments, separators=(",", ":"))
+    command = execution.command(*normalized_arguments)
+    started_at = time.monotonic()
+    emit_structured_log(
+        "clawops.ops.compose.exec.start",
+        {
+            "compose_file": str(execution.compose_path),
+            "arguments": arguments_json,
+            "timeout_seconds": timeout_seconds,
+        },
     )
+    try:
+        return_code = run_command_inherited(
+            command,
+            cwd=execution.cwd,
+            env=execution.env,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        emit_structured_log(
+            "clawops.ops.compose.exec.error",
+            {
+                "compose_file": str(execution.compose_path),
+                "arguments": arguments_json,
+                "timeout_seconds": timeout_seconds,
+                "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        raise
+    emit_structured_log(
+        "clawops.ops.compose.exec.finish",
+        {
+            "compose_file": str(execution.compose_path),
+            "arguments": arguments_json,
+            "timeout_seconds": timeout_seconds,
+            "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+            "returncode": return_code,
+        },
+    )
+    return return_code
 
 
 def _run_compose_command(
@@ -463,14 +502,77 @@ def _readiness_entries(
     return entries
 
 
-def gateway_start(repo_root: pathlib.Path) -> int:
-    """Run the OpenClaw gateway under Varlock when available."""
-    command = wrap_command_with_varlock(repo_root, ["openclaw", "gateway"])
-    return run_command_inherited(command, cwd=repo_root, timeout_seconds=None)
+def _sidecars_report_payload(
+    execution: _ComposeExecution,
+    *,
+    profile_flags: Mapping[str, object],
+    targets: Sequence[_SidecarReadinessTarget],
+    command_steps: Sequence[Mapping[str, object]],
+    command_exit_code: int,
+    error: str | None = None,
+    failed_service: str | None = None,
+) -> dict[str, object]:
+    """Build the structured sidecar bring-up report payload."""
+    compose_detail: str | None = None
+    try:
+        statuses = _compose_service_statuses(execution)
+    except CommandError as exc:
+        statuses = {}
+        compose_detail = str(exc)
+
+    entries = _readiness_entries(statuses, targets)
+    required_entries = [entry for entry in entries if bool(entry["required"])]
+    optional_entries = [entry for entry in entries if not bool(entry["required"])]
+    required_ready = all(bool(entry["ready"]) for entry in required_entries)
+    services = {
+        status.name: {"state": status.state, "health": status.health}
+        for status in statuses.values()
+    }
+    failed_step: str | None = None
+    for step in command_steps:
+        step_exit_code = step.get("exitCode")
+        if isinstance(step_exit_code, bool) or not isinstance(step_exit_code, int):
+            continue
+        if step_exit_code != 0:
+            step_name = step.get("step")
+            failed_step = step_name if isinstance(step_name, str) else None
+            break
+
+    payload: dict[str, object] = {
+        "ok": command_exit_code == 0 and required_ready,
+        "composeStateDir": execution.env["STRONGCLAW_COMPOSE_STATE_DIR"],
+        "openclawConfig": execution.env["OPENCLAW_CONFIG"],
+        "profile": dict(profile_flags),
+        "services": services,
+        "readiness": {
+            "requiredReady": required_ready,
+            "required": required_entries,
+            "optional": optional_entries,
+        },
+        "command": {
+            "exitCode": command_exit_code,
+            "failedStep": failed_step,
+            "steps": [dict(step) for step in command_steps],
+        },
+    }
+    if compose_detail is not None:
+        payload["compose"] = compose_detail
+    else:
+        payload["compose"] = json.dumps(_compose_rows(statuses), separators=(",", ":"))
+    if error is not None:
+        payload["error"] = error
+    if failed_service is not None:
+        payload["failedService"] = failed_service
+    return payload
 
 
-def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
-    """Start the auxiliary sidecar stack."""
+def _sidecars_up_report(
+    repo_root: pathlib.Path,
+    *,
+    repo_local_state: bool,
+    suppress_wait_failures: bool,
+) -> dict[str, object]:
+    """Bring sidecars up and return a structured readiness report."""
     execution = _compose_execution(
         repo_root,
         compose_name=SIDECARS_COMPOSE_NAME,
@@ -479,71 +581,178 @@ def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
     config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
     profile_flags = _resolve_profile_dependency_flags(config_path)
     targets = _sidecar_readiness_targets(profile_flags)
-    postgres_exit = _run_compose_command_with_context(
-        execution,
-        arguments=("up", "-d", POSTGRES_SERVICE_NAME),
+    command_steps: list[dict[str, object]] = []
+
+    def _record_step(step: str, exit_code: int) -> int:
+        command_steps.append({"step": step, "exitCode": exit_code})
+        return exit_code
+
+    postgres_exit = _record_step(
+        "start-postgres",
+        _run_compose_command_with_context(
+            execution,
+            arguments=("up", "-d", POSTGRES_SERVICE_NAME),
+        ),
     )
     if postgres_exit != 0:
-        return postgres_exit
-    _wait_for_compose_service(
-        execution,
-        service_name=POSTGRES_SERVICE_NAME,
-        state="running",
-        health="healthy",
-        timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
-    )
+        return _sidecars_report_payload(
+            execution,
+            profile_flags=profile_flags,
+            targets=targets,
+            command_steps=command_steps,
+            command_exit_code=postgres_exit,
+        )
+    try:
+        _wait_for_compose_service(
+            execution,
+            service_name=POSTGRES_SERVICE_NAME,
+            state="running",
+            health="healthy",
+            timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
+        )
+    except CommandError as exc:
+        if not suppress_wait_failures:
+            raise
+        return _sidecars_report_payload(
+            execution,
+            profile_flags=profile_flags,
+            targets=targets,
+            command_steps=command_steps,
+            command_exit_code=1,
+            error=str(exc),
+            failed_service=POSTGRES_SERVICE_NAME,
+        )
+
     litellm_status = _compose_service_statuses(execution).get(LITELLM_SERVICE_NAME)
     litellm_ready = _service_matches(litellm_status, state="running", health="healthy")
     if not litellm_ready:
-        bootstrap_exit = _run_litellm_schema_bootstrap(execution)
+        bootstrap_exit = _record_step(
+            "bootstrap-litellm-schema",
+            _run_litellm_schema_bootstrap(execution),
+        )
         if bootstrap_exit != 0:
-            return bootstrap_exit
-        litellm_exit = _run_compose_command_with_context(
-            execution,
-            arguments=("up", "-d", "--force-recreate", LITELLM_SERVICE_NAME),
+            return _sidecars_report_payload(
+                execution,
+                profile_flags=profile_flags,
+                targets=targets,
+                command_steps=command_steps,
+                command_exit_code=bootstrap_exit,
+            )
+        litellm_exit = _record_step(
+            "start-litellm",
+            _run_compose_command_with_context(
+                execution,
+                arguments=("up", "-d", "--force-recreate", LITELLM_SERVICE_NAME),
+            ),
         )
         if litellm_exit != 0:
-            return litellm_exit
+            return _sidecars_report_payload(
+                execution,
+                profile_flags=profile_flags,
+                targets=targets,
+                command_steps=command_steps,
+                command_exit_code=litellm_exit,
+            )
         runtime_services = tuple(
             service_name
             for service_name in SIDECAR_RUNTIME_SERVICE_NAMES
             if service_name != LITELLM_SERVICE_NAME
         )
-        sidecars_exit = _run_compose_command_with_context(
-            execution,
-            arguments=("up", "-d", *runtime_services),
+        sidecars_exit = _record_step(
+            "start-runtime-sidecars",
+            _run_compose_command_with_context(
+                execution,
+                arguments=("up", "-d", *runtime_services),
+            ),
         )
     else:
-        sidecars_exit = _run_compose_command_with_context(
-            execution,
-            arguments=("up", "-d", *SIDECAR_RUNTIME_SERVICE_NAMES),
+        sidecars_exit = _record_step(
+            "start-runtime-sidecars",
+            _run_compose_command_with_context(
+                execution,
+                arguments=("up", "-d", *SIDECAR_RUNTIME_SERVICE_NAMES),
+            ),
         )
     if sidecars_exit != 0:
-        return sidecars_exit
+        return _sidecars_report_payload(
+            execution,
+            profile_flags=profile_flags,
+            targets=targets,
+            command_steps=command_steps,
+            command_exit_code=sidecars_exit,
+        )
+
     for target in targets:
         if not target.required:
             continue
-        _wait_for_compose_service(
-            execution,
-            service_name=target.service_name,
-            state=target.state,
-            health=target.health,
-            timeout_seconds=target.timeout_seconds,
-        )
-    readiness_entries = _readiness_entries(_compose_service_statuses(execution), targets)
-    required_ready = all(
-        bool(entry["ready"]) for entry in readiness_entries if bool(entry["required"])
+        try:
+            _wait_for_compose_service(
+                execution,
+                service_name=target.service_name,
+                state=target.state,
+                health=target.health,
+                timeout_seconds=target.timeout_seconds,
+            )
+        except CommandError as exc:
+            if not suppress_wait_failures:
+                raise
+            return _sidecars_report_payload(
+                execution,
+                profile_flags=profile_flags,
+                targets=targets,
+                command_steps=command_steps,
+                command_exit_code=1,
+                error=str(exc),
+                failed_service=target.service_name,
+            )
+
+    payload = _sidecars_report_payload(
+        execution,
+        profile_flags=profile_flags,
+        targets=targets,
+        command_steps=command_steps,
+        command_exit_code=0,
+    )
+    readiness = as_mapping(payload.get("readiness"), path="sidecars up payload.readiness")
+    required_entries = as_mapping_list(
+        readiness.get("required", []),
+        path="sidecars up payload.readiness.required",
+    )
+    optional_entries = as_mapping_list(
+        readiness.get("optional", []),
+        path="sidecars up payload.readiness.optional",
+    )
+    required_ready = as_bool(
+        readiness.get("requiredReady"),
+        path="sidecars up payload.readiness.requiredReady",
     )
     emit_structured_log(
         "clawops.ops.sidecars.ready",
         {
             "required_ready": required_ready,
-            "required_count": sum(1 for entry in readiness_entries if bool(entry["required"])),
-            "optional_count": sum(1 for entry in readiness_entries if not bool(entry["required"])),
+            "required_count": len(required_entries),
+            "optional_count": len(optional_entries),
             "profile_source": str(profile_flags.get("source", "")),
         },
     )
-    return 0
+    return payload
+
+
+def gateway_start(repo_root: pathlib.Path) -> int:
+    """Run the OpenClaw gateway under Varlock when available."""
+    command = wrap_command_with_varlock(repo_root, ["openclaw", "gateway"])
+    return run_command_inherited(command, cwd=repo_root, timeout_seconds=None)
+
+
+def sidecars_up(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
+    """Start the auxiliary sidecar stack."""
+    payload = _sidecars_up_report(
+        repo_root,
+        repo_local_state=repo_local_state,
+        suppress_wait_failures=False,
+    )
+    command = as_mapping(payload.get("command"), path="sidecars up payload.command")
+    return as_int(command.get("exitCode"), path="sidecars up payload.command.exitCode")
 
 
 def sidecars_down(repo_root: pathlib.Path, *, repo_local_state: bool) -> int:
@@ -792,6 +1001,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sidecars_sub = sidecars.add_subparsers(dest="sidecars_command", required=True)
     sidecars_up_parser = sidecars_sub.add_parser("up")
     sidecars_up_parser.add_argument("--repo-local-state", action="store_true")
+    sidecars_up_parser.add_argument("--json", action="store_true")
     sidecars_down_parser = sidecars_sub.add_parser("down")
     sidecars_down_parser.add_argument("--repo-local-state", action="store_true")
 
@@ -830,6 +1040,28 @@ def main(argv: list[str] | None = None) -> int:
         return gateway_start(repo_root)
     if args.command == "sidecars":
         if args.sidecars_command == "up":
+            if bool(args.json):
+                payload = _sidecars_up_report(
+                    repo_root,
+                    repo_local_state=bool(args.repo_local_state),
+                    suppress_wait_failures=True,
+                )
+                print(json.dumps(payload, sort_keys=True))
+                command = as_mapping(payload.get("command"), path="sidecars up payload.command")
+                command_exit_code = as_int(
+                    command.get("exitCode"),
+                    path="sidecars up payload.command.exitCode",
+                )
+                if command_exit_code != 0:
+                    return command_exit_code
+                readiness = as_mapping(
+                    payload.get("readiness"), path="sidecars up payload.readiness"
+                )
+                required_ready = as_bool(
+                    readiness.get("requiredReady"),
+                    path="sidecars up payload.readiness.requiredReady",
+                )
+                return 0 if required_ready else 1
             return sidecars_up(repo_root, repo_local_state=bool(args.repo_local_state))
         return sidecars_down(repo_root, repo_local_state=bool(args.repo_local_state))
     if args.command == "browser-lab":

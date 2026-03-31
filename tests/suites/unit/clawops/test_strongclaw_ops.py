@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import pathlib
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -670,6 +672,154 @@ def test_sidecars_up_fails_when_postgres_never_turns_healthy(
     assert inherited_calls == [
         ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres")
     ]
+
+
+def test_parse_args_accepts_sidecars_up_json_flag() -> None:
+    args = strongclaw_ops.parse_args(["sidecars", "up", "--json"])
+
+    assert args.command == "sidecars"
+    assert args.sidecars_command == "up"
+    assert bool(args.json) is True
+
+
+def test_main_sidecars_up_json_reports_required_failure_and_returns_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _parse_args(_argv: list[str] | None = None) -> argparse.Namespace:
+        return argparse.Namespace(
+            command="sidecars",
+            sidecars_command="up",
+            repo_local_state=False,
+            json=True,
+        )
+
+    def _resolve_asset_root_argument(
+        _args: argparse.Namespace, *, command_name: str
+    ) -> pathlib.Path:
+        del command_name
+        return REPO_ROOT
+
+    def _sidecars_up_report(
+        _repo_root: pathlib.Path,
+        *,
+        repo_local_state: bool,
+        suppress_wait_failures: bool,
+    ) -> dict[str, object]:
+        del repo_local_state, suppress_wait_failures
+        return {
+            "ok": False,
+            "readiness": {"requiredReady": False, "required": [], "optional": []},
+            "command": {"exitCode": 0, "failedStep": None, "steps": []},
+            "failedService": "postgres",
+            "error": "timed out waiting for compose service 'postgres'",
+        }
+
+    monkeypatch.setattr(
+        strongclaw_ops,
+        "parse_args",
+        _parse_args,
+    )
+    monkeypatch.setattr(
+        strongclaw_ops,
+        "resolve_asset_root_argument",
+        _resolve_asset_root_argument,
+    )
+    monkeypatch.setattr(
+        strongclaw_ops,
+        "_sidecars_up_report",
+        _sidecars_up_report,
+    )
+
+    exit_code = strongclaw_ops.main([])
+
+    assert exit_code == 1
+    payload = cast(dict[str, object], json.loads(capsys.readouterr().out.strip()))
+    readiness = cast(dict[str, object], payload["readiness"])
+    assert readiness["requiredReady"] is False
+    assert payload["failedService"] == "postgres"
+    assert "timed out waiting for compose service 'postgres'" in str(payload["error"])
+
+
+def test_run_compose_command_with_context_emits_start_and_finish_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_events: list[tuple[str, dict[str, object]]] = []
+    execution = cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={},
+    )
+
+    def _run_command_inherited(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = 1800,
+    ) -> int:
+        del command, cwd, env, timeout_seconds
+        return 7
+
+    def _emit_structured_log(event: str, payload: object) -> None:
+        observed_events.append((str(event), cast(dict[str, object], payload)))
+
+    monkeypatch.setattr(strongclaw_ops, "run_command_inherited", _run_command_inherited)
+    monkeypatch.setattr(strongclaw_ops, "emit_structured_log", _emit_structured_log)
+
+    return_code = cast(Any, strongclaw_ops)._run_compose_command_with_context(
+        execution,
+        arguments=("up", "-d", "postgres"),
+        timeout_seconds=120,
+    )
+
+    assert return_code == 7
+    assert observed_events[0][0] == "clawops.ops.compose.exec.start"
+    assert observed_events[0][1]["arguments"] == '["up","-d","postgres"]'
+    assert observed_events[1][0] == "clawops.ops.compose.exec.finish"
+    assert observed_events[1][1]["returncode"] == 7
+    assert isinstance(observed_events[1][1]["elapsed_ms"], int)
+
+
+def test_run_compose_command_with_context_emits_error_event_and_reraises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_events: list[tuple[str, dict[str, object]]] = []
+    execution = cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={},
+    )
+
+    def _run_command_inherited(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = 1800,
+    ) -> int:
+        del command, cwd, env, timeout_seconds
+        raise RuntimeError("compose boom")
+
+    def _emit_structured_log(event: str, payload: object) -> None:
+        observed_events.append((str(event), cast(dict[str, object], payload)))
+
+    monkeypatch.setattr(strongclaw_ops, "run_command_inherited", _run_command_inherited)
+    monkeypatch.setattr(strongclaw_ops, "emit_structured_log", _emit_structured_log)
+
+    with pytest.raises(RuntimeError, match="compose boom"):
+        cast(Any, strongclaw_ops)._run_compose_command_with_context(
+            execution,
+            arguments=("up", "-d", "postgres"),
+            timeout_seconds=120,
+        )
+
+    assert observed_events[0][0] == "clawops.ops.compose.exec.start"
+    assert observed_events[1][0] == "clawops.ops.compose.exec.error"
+    assert observed_events[1][1]["error_type"] == "RuntimeError"
+    assert "compose boom" in str(observed_events[1][1]["error"])
 
 
 def test_wait_for_compose_service_emits_start_and_ready_events(

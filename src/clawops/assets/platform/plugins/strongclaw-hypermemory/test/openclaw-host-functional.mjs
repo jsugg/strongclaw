@@ -171,6 +171,59 @@ async function main() {
     assert.equal(timeoutSearchResult.details.disabled, true);
     assert.match(String(timeoutSearchResult.details.error), /startup preflight timed out/i);
 
+    assert.ok("shortTimeoutMs" in strongclawHypermemoryPlugin.configSchema.properties);
+    assert.ok("longTimeoutMs" in strongclawHypermemoryPlugin.configSchema.properties);
+    const timeoutClassCommandPath = path.join(runDir, "timeout-class-command.mjs");
+    writeFileSync(
+      timeoutClassCommandPath,
+      [
+        "#!/usr/bin/env node",
+        "const operation = process.argv[5] || \"\";",
+        "const delayMs = operation === \"search\" || operation === \"store\" ? 1200 : 20;",
+        "setTimeout(() => {",
+        "  if (operation === \"search\") {",
+        "    process.stdout.write(JSON.stringify({ results: [{ path: \"docs/runbook.md\", snippet: \"Gateway Runbook\" }] }) + \"\\n\");",
+        "    process.exit(0);",
+        "    return;",
+        "  }",
+        "  if (operation === \"store\") {",
+        "    process.stdout.write(JSON.stringify({ ok: true, operation }) + \"\\n\");",
+        "    process.exit(0);",
+        "    return;",
+        "  }",
+        "  process.stdout.write(\"{\\\"ok\\\":true}\\n\");",
+        "  process.exit(0);",
+        "}, delayMs);",
+      ].join("\n"),
+      { encoding: "utf8", mode: 0o755 },
+    );
+    const timeoutClassStub = createPluginApiStub({
+      configPath: memoryConfigPath,
+      command: [timeoutClassCommandPath],
+      autoRecall: false,
+      autoReflect: false,
+      timeoutMs: 20_000,
+      startupTimeoutMs: 2_000,
+      toolTimeoutMs: 1_500,
+      shortTimeoutMs: 1_000,
+      longTimeoutMs: 2_000,
+    });
+    strongclawHypermemoryPlugin.register(timeoutClassStub.api);
+    const timeoutClassSearchTool = timeoutClassStub.tools.get("memory_search");
+    assert.ok(timeoutClassSearchTool);
+    const timeoutClassSearchResult = await timeoutClassSearchTool.execute("timeout-class-search", {
+      query: "anything",
+    });
+    assert.equal(timeoutClassSearchResult.details.disabled, true);
+    assert.match(String(timeoutClassSearchResult.details.error), /timed out/i);
+    const timeoutClassStoreTool = timeoutClassStub.tools.get("memory_store");
+    assert.ok(timeoutClassStoreTool);
+    const timeoutClassStoreResult = await timeoutClassStoreTool.execute("timeout-class-store", {
+      type: "fact",
+      text: "Long timeout should permit writes",
+    });
+    assert.equal(timeoutClassStoreResult.details.ok, true);
+
     const stub = createPluginApiStub({
       configPath: memoryConfigPath,
       command: ["uv", "run", "--project", repoRoot, "python", "-m", "clawops"],
