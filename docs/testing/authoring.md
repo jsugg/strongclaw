@@ -40,7 +40,7 @@ Use `tests/plugins/infrastructure/` for structural test runtime behavior such as
 
 Use `tests/fixtures/` for domain-facing pytest fixture plugins only.
 
-Use `tests/utils/helpers/` for builders, subsystem runtimes, AST tooling, and other reusable support code that is not itself a fixture or pytest framework surface.
+Use `tests/utils/` for builders, subsystem runtimes, AST tooling, and other reusable code that is not itself a fixture or pytest framework surface.
 
 Tests consume fixtures by name through pytest injection and should not import from `tests.fixtures`.
 
