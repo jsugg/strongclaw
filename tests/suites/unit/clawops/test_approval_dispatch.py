@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import pathlib
 
-import pytest
-
 from clawops.approval_dispatch import dispatch_pending_approval
 from clawops.op_journal import Operation, OperationJournal
+from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.journal import create_journal
 
 
@@ -58,7 +57,7 @@ def test_dispatch_pending_approval_writes_packet_and_updates_journal(
 
 def test_dispatch_pending_approval_surfaces_local_write_failures(
     tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_context: TestContext,
 ) -> None:
     journal = create_journal(tmp_path / "workflow.sqlite")
     pending = _seed_pending_operation(journal, root=tmp_path)
@@ -69,7 +68,11 @@ def test_dispatch_pending_approval_surfaces_local_write_failures(
 
     import clawops.approval_dispatch as approval_dispatch
 
-    monkeypatch.setattr(approval_dispatch, "write_json", _raise_write_failure)
+    test_context.patch.patch_object(
+        approval_dispatch,
+        "write_json",
+        new=_raise_write_failure,
+    )
 
     outcome = dispatch_pending_approval(journal=journal, operation=pending)
 
