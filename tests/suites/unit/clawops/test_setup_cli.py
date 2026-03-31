@@ -65,8 +65,9 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
         *,
         check_only: bool,
         probe: bool,
+        allow_prompt: bool = True,
     ) -> dict[str, object]:
-        del repo_root, check_only
+        del repo_root, check_only, allow_prompt
         calls.append(f"model:{probe}")
         return {"ok": True}
 
@@ -173,8 +174,9 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
         *,
         check_only: bool,
         probe: bool,
+        allow_prompt: bool = True,
     ) -> dict[str, object]:
-        del repo_root, check_only
+        del repo_root, check_only, allow_prompt
         calls.append(f"model:{probe}")
         return {"ok": True}
 
@@ -522,8 +524,9 @@ def test_setup_cli_can_request_degraded_baseline_verification(
         *,
         check_only: bool,
         probe: bool,
+        allow_prompt: bool = True,
     ) -> dict[str, object]:
-        del repo_root, check_only, probe
+        del repo_root, check_only, probe, allow_prompt
         return {"ok": True}
 
     def _activate_services(repo_root: pathlib.Path) -> None:
