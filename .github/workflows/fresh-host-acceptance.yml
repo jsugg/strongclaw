@@ -6,6 +6,7 @@ on:
       - ".github/workflows/fresh-host-acceptance.yml"
       - ".github/workflows/fresh-host-cache-warm.yml"
       - ".github/workflows/fresh-host-core.yml"
+      - ".github/workflows/nightly.yml"
       - "platform/compose/**"
       - "platform/configs/**"
       - "platform/plugins/**"

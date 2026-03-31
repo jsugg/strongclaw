@@ -115,6 +115,7 @@ def test_fresh_host_acceptance_workflow_limits_pull_request_paths_to_runtime_sur
         '".github/workflows/fresh-host-acceptance.yml"',
         '".github/workflows/fresh-host-cache-warm.yml"',
         '".github/workflows/fresh-host-core.yml"',
+        '".github/workflows/nightly.yml"',
         '"platform/compose/**"',
         '"platform/configs/**"',
         '"platform/plugins/**"',
