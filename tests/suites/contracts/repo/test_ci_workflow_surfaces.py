@@ -275,6 +275,29 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     assert "./tests/scripts/release_workflow.py publish-github-release" in release
 
 
+def test_release_workflow_blocks_publish_on_fresh_host_and_memory_plugin_prerequisites() -> None:
+    """Release publication should depend on reusable fresh-host and plugin verification jobs."""
+    workflow = yaml.safe_load(_workflow_text("release.yml"))
+    jobs = workflow["jobs"]
+
+    assert (
+        jobs["release-fresh-host-acceptance"]["uses"] == "./.github/workflows/fresh-host-core.yml"
+    )
+    assert (
+        jobs["release-memory-plugin-verification"]["uses"]
+        == "./.github/workflows/memory-plugin-verification.yml"
+    )
+    assert "release-fresh-host-acceptance" in jobs["publish-release-artifacts"]["needs"]
+    assert "release-memory-plugin-verification" in jobs["publish-release-artifacts"]["needs"]
+
+
+def test_memory_plugin_workflow_supports_reusable_workflow_invocation() -> None:
+    """The memory-plugin workflow should stay callable from the release workflow."""
+    text = _workflow_text("memory-plugin-verification.yml")
+
+    assert "workflow_call:" in text
+
+
 def test_selected_workflows_ignore_docs_and_static_only_changes() -> None:
     """General CI pull-request and push lanes should skip docs-only and static-only changes."""
     for workflow_name in (

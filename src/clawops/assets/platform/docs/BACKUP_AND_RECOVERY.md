@@ -15,6 +15,10 @@
 - `clawops recovery prune-retention`
 - `clawops recovery rotate-secrets`
 
+`clawops recovery backup-create` now reports whether the archive came from the
+OpenClaw CLI path (`openclaw-cli`) or the local tar fallback path
+(`tar-fallback`) so automation can tell which recovery mode actually ran.
+
 ## Scheduled maintenance
 
 StrongClaw host service activation now installs a daily maintenance schedule at `04:00` local time:
@@ -26,7 +30,14 @@ The scheduled command is:
 
 - `clawops recovery --home-dir <home> prune-retention`
 
-This maintenance path is idempotent and retention-only. It prunes expired StrongClaw recovery artifacts and does not mutate upstream OpenClaw internals.
+This maintenance path is idempotent and retention-only. It prunes expired
+StrongClaw-owned backup and log artifacts and does not mutate upstream
+OpenClaw internals or shared `/tmp/openclaw` state by default.
+
+Only include shared `/tmp/openclaw` cleanup when the operator explicitly owns
+that state:
+
+- `clawops recovery --home-dir <home> prune-retention --include-shared-tmp`
 
 ## Development-mode repo-local compose state
 

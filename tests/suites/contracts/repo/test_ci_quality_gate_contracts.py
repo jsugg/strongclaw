@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import yaml
 
-from clawops.supply_chain import list_workflow_action_pins
+from clawops.supply_chain import QUALITY_GATE_COMMANDS, list_workflow_action_pins
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -24,13 +26,17 @@ def test_security_and_upstream_workflows_use_central_quality_gate() -> None:
 
 
 def test_release_workflow_runs_quality_gate_before_publish() -> None:
-    workflow = _workflow_text("release.yml")
+    workflow = yaml.safe_load(_workflow_text("release.yml"))
+    jobs = workflow["jobs"]
+    quality_gate_job = jobs["release-quality-gate"]
+    publish_job = jobs["publish-release-artifacts"]
+    quality_gate_steps = cast(list[dict[str, object]], quality_gate_job["steps"])
 
-    quality_gate_marker = "uv run python -m clawops supply-chain --repo-root . quality-gate"
-    build_marker = "Build release artifacts"
-    assert quality_gate_marker in workflow
-    assert build_marker in workflow
-    assert workflow.index(quality_gate_marker) < workflow.index(build_marker)
+    assert any(
+        step.get("run") == "uv run python -m clawops supply-chain --repo-root . quality-gate"
+        for step in quality_gate_steps
+    )
+    assert "release-quality-gate" in publish_job["needs"]
 
 
 def test_quality_gate_workflows_install_shellcheck_before_gate() -> None:
@@ -41,6 +47,16 @@ def test_quality_gate_workflows_install_shellcheck_before_gate() -> None:
         workflow = _workflow_text(workflow_name)
         assert install_marker in workflow
         assert workflow.index(install_marker) < workflow.index(quality_gate_marker)
+
+
+def test_quality_gate_enforces_coverage_thresholds() -> None:
+    assert (
+        "python3",
+        "./tests/scripts/security_workflow.py",
+        "enforce-coverage-thresholds",
+        "--coverage-file",
+        "coverage.xml",
+    ) in QUALITY_GATE_COMMANDS
 
 
 def test_pre_commit_shellcheck_uses_system_binary() -> None:
@@ -82,6 +98,16 @@ def test_security_workflow_uses_cli_semgrep_instead_of_docker_action() -> None:
     assert "returntocorp/semgrep-action" not in workflow
     assert 'python3 -m pip install --disable-pip-version-check "semgrep==1.156.0"' in workflow
     assert "semgrep scan --config security/semgrep/semgrep.yml --error ." in workflow
+
+
+def test_semgrep_rules_cover_python_repo_risk_surfaces() -> None:
+    payload = yaml.safe_load((REPO_ROOT / "security" / "semgrep" / "semgrep.yml").read_text())
+    rule_ids = {rule["id"] for rule in payload["rules"]}
+
+    assert "python-unsafe-tarfile-extractall" in rule_ids
+    assert "python-tar-member-path-join" in rule_ids
+    assert "python-subprocess-shell-true" in rule_ids
+    assert "python-unsafe-deserialization" in rule_ids
 
 
 def test_memory_plugin_qdrant_workflow_uses_pinned_ghcr_service_image() -> None:

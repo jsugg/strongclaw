@@ -168,14 +168,19 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
     nested.mkdir(parents=True, exist_ok=True)
     recorded_repo_root: pathlib.Path | None = None
     recorded_runs_dir: pathlib.Path | None = None
+    recorded_degraded: bool | None = None
 
     def _verify_baseline(
-        repo_root_arg: pathlib.Path, *, runs_dir: pathlib.Path
+        repo_root_arg: pathlib.Path,
+        *,
+        runs_dir: pathlib.Path,
+        degraded: bool = False,
     ) -> dict[str, object]:
-        nonlocal recorded_repo_root, recorded_runs_dir
+        nonlocal recorded_repo_root, recorded_runs_dir, recorded_degraded
         recorded_repo_root = repo_root_arg
         recorded_runs_dir = runs_dir
-        return {"ok": True, "runsDir": str(runs_dir)}
+        recorded_degraded = degraded
+        return {"ok": True, "runsDir": str(runs_dir), "degraded": degraded}
 
     test_context.chdir(nested)
     test_context.patch.patch_object(strongclaw_baseline, "verify_baseline", new=_verify_baseline)
@@ -185,6 +190,7 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
     assert exit_code == 0
     assert recorded_repo_root == repo_root.resolve()
     assert recorded_runs_dir == repo_root.resolve() / ".tmp" / "harness"
+    assert recorded_degraded is False
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 

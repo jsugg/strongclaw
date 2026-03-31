@@ -23,6 +23,7 @@ from tests.utils.helpers._ci_workflows.release import (
 )
 from tests.utils.helpers._ci_workflows.security import (
     append_coverage_summary,
+    enforce_coverage_thresholds,
     install_gitleaks,
     install_syft,
     write_empty_sarif,
@@ -38,6 +39,7 @@ __all__ = [
     "assert_lossless_claw_installed",
     "assert_openclaw_profiles_render",
     "clean_artifact_directories",
+    "enforce_coverage_thresholds",
     "install_gitleaks",
     "install_syft",
     "prepare_setup_smoke",

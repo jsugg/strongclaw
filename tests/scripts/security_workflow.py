@@ -16,6 +16,7 @@ for import_root in (SRC_ROOT, REPO_ROOT):
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E402
 from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     append_coverage_summary,
+    enforce_coverage_thresholds,
     install_gitleaks,
     install_syft,
     write_empty_sarif,
@@ -33,6 +34,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     summary_parser.add_argument("--coverage-file", type=Path, required=True)
     summary_parser.add_argument("--summary-file", type=Path, required=True)
+
+    coverage_gate_parser = subparsers.add_parser(
+        "enforce-coverage-thresholds",
+        help="Fail when overall or critical-module coverage drops below policy floors.",
+    )
+    coverage_gate_parser.add_argument("--coverage-file", type=Path, required=True)
 
     gitleaks_parser = subparsers.add_parser("install-gitleaks", help="Install pinned gitleaks.")
     gitleaks_parser.add_argument("--version", required=True)
@@ -68,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.coverage_file).expanduser().resolve(),
                 Path(args.summary_file).expanduser().resolve(),
             )
+            return 0
+        if args.command == "enforce-coverage-thresholds":
+            enforce_coverage_thresholds(Path(args.coverage_file).expanduser().resolve())
             return 0
         if args.command == "install-gitleaks":
             install_gitleaks(

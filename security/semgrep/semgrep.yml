@@ -12,3 +12,61 @@ rules:
     message: "Avoid destructive shell patterns."
     patterns:
       - pattern-regex: 'rm\s+-rf'
+
+  - id: python-unsafe-tarfile-extractall
+    languages: [python]
+    severity: ERROR
+    message: "Reject raw tarfile.extractall(...); validate members before extraction."
+    paths:
+      include:
+        - src/**/*.py
+        - tests/scripts/**/*.py
+    patterns:
+      - pattern-either:
+          - pattern: $ARCHIVE.extractall($DEST)
+          - pattern: $ARCHIVE.extractall(path=$DEST)
+
+  - id: python-tar-member-path-join
+    languages: [python]
+    severity: ERROR
+    message: "Do not join archive member names into filesystem paths without validation."
+    paths:
+      include:
+        - src/**/*.py
+        - tests/scripts/**/*.py
+    patterns:
+      - pattern-either:
+          - pattern: os.path.join($ROOT, $MEMBER.name)
+          - pattern: pathlib.Path($ROOT) / $MEMBER.name
+          - pattern: $ROOT / $MEMBER.name
+
+  - id: python-subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "Avoid subprocess shell=True in repo-managed runtime code."
+    paths:
+      include:
+        - src/**/*.py
+        - tests/scripts/**/*.py
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: subprocess.check_call(..., shell=True, ...)
+          - pattern: subprocess.check_output(..., shell=True, ...)
+
+  - id: python-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: "Avoid unsafe loaders and pickle-based deserialization for untrusted data."
+    paths:
+      include:
+        - src/**/*.py
+        - tests/scripts/**/*.py
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load(..., Loader=yaml.Loader, ...)
+          - pattern: yaml.load(..., Loader=yaml.FullLoader, ...)
+          - pattern: yaml.full_load(...)
+          - pattern: pickle.load(...)
+          - pattern: pickle.loads(...)

@@ -62,6 +62,7 @@ def verify_baseline(
     repo_root: pathlib.Path,
     *,
     runs_dir: pathlib.Path,
+    degraded: bool = False,
 ) -> dict[str, object]:
     """Run the baseline verification flow."""
     layout = resolve_runtime_layout(repo_root=repo_root)
@@ -84,7 +85,7 @@ def verify_baseline(
         ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
     )
 
-    model_payload = ensure_model_auth(repo_root, check_only=True, probe=False)
+    model_payload = ensure_model_auth(repo_root, check_only=True, probe=not degraded)
     if not bool(model_payload.get("ok")):
         raise CommandError(str(model_payload.get("guidance", "OpenClaw model readiness failed.")))
 
@@ -164,8 +165,8 @@ def verify_baseline(
     run_harness_smoke(repo_root, runs_dir)
 
     for target, extra_args in (
-        ("sidecars", ["--skip-runtime"]),
-        ("observability", ["--skip-runtime"]),
+        ("sidecars", ["--skip-runtime"] if degraded else []),
+        ("observability", ["--skip-runtime"] if degraded else []),
         ("channels", []),
     ):
         result = run_command(
@@ -182,9 +183,17 @@ def verify_baseline(
     return {
         "ok": True,
         "config": str(config_path),
+        "degraded": degraded,
         "runsDir": str(runs_dir),
+        "verificationMode": "degraded" if degraded else "runtime",
         "modelAuth": model_payload,
         "hypermemory": hypermemory_payload,
+        "guidance": (
+            "Runtime probes were skipped for model auth, sidecars, and observability. "
+            "Rerun `clawops baseline verify` for full release-readiness evidence."
+            if degraded
+            else "Runtime probes passed."
+        ),
     }
 
 
@@ -194,7 +203,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_source_root_argument(parser)
     parser.add_argument("--runs-dir", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("verify")
+    verify_parser = subparsers.add_parser("verify")
+    verify_parser.add_argument(
+        "--degraded",
+        action="store_true",
+        help="Skip runtime probes and keep the output explicitly marked as degraded.",
+    )
     subparsers.add_parser("harness-smoke")
     return parser.parse_args(argv)
 
@@ -209,6 +223,6 @@ def main(argv: list[str] | None = None) -> int:
         payload = {"ok": True, "runsDir": str(runs_dir)}
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
-    payload = verify_baseline(repo_root, runs_dir=runs_dir)
+    payload = verify_baseline(repo_root, runs_dir=runs_dir, degraded=bool(args.degraded))
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

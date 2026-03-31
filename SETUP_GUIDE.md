@@ -233,6 +233,10 @@ If you used `make setup` or `clawops setup`, this verification already ran. Re-r
 clawops baseline verify
 ```
 
+If you intentionally need static verification without live runtime probes, use
+`clawops baseline verify --degraded` and treat the result as degraded rather
+than release-ready.
+
 Do not continue until all baseline checks are clean.
 
 For the deeper StrongClaw readiness scan, run:
@@ -391,10 +395,10 @@ Reach the gateway over SSH tunnel only:
 ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 ```
 
-Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator workstation. Verify the local-only posture after startup:
+Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator workstation. Browser-lab remains optional and is not covered by `clawops baseline verify` or `clawops verify-platform`. After startup, verify the local-only posture directly from the compose stack:
 
 ```bash
-clawops verify-platform sidecars
+docker compose -f platform/compose/docker-compose.browser-lab.yaml ps
 ```
 
 ## 14. Backups and retention
