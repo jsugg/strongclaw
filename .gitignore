@@ -11,6 +11,7 @@ __pycache__/
 .env.prod
 varlock.types.json
 coverage.xml
+pytest.xml
 htmlcov/
 dist/
 build/
