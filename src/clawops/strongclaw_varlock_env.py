@@ -12,6 +12,7 @@ from typing import Final, cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
     VarlockEnvMode,
     clear_env_assignment,
@@ -23,6 +24,7 @@ from clawops.strongclaw_runtime import (
     resolve_varlock_bin,
     run_command,
     set_env_assignment,
+    use_varlock_env_mode,
     value_is_effective,
     varlock_env_dir,
     varlock_env_template_file,
@@ -159,10 +161,9 @@ def _ensure_required_defaults(
     repo_root: pathlib.Path,
     *,
     check_only: bool,
-    env_mode: VarlockEnvMode,
 ) -> int:
     """Ensure locally-managed secrets and defaults are present."""
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
     values = load_env_assignments(env_file)
     updated = 0
     required_defaults = {
@@ -256,12 +257,11 @@ def _ensure_non_interactive_model_chain(
     *,
     check_only: bool,
     non_interactive: bool,
-    env_mode: VarlockEnvMode,
 ) -> None:
     """Seed a usable local Ollama model chain for non-interactive local setup."""
     if check_only or not non_interactive:
         return
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
     values = load_env_assignments(env_file)
     if _configured_model_chain(values):
         return
@@ -288,9 +288,9 @@ def _ensure_non_interactive_model_chain(
         return
 
 
-def _prompt_model_chain(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) -> None:
+def _prompt_model_chain(repo_root: pathlib.Path) -> None:
     """Interactively configure the default model chain and local credentials."""
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
     values = load_env_assignments(env_file)
     if value_is_effective(values.get("OPENCLAW_DEFAULT_MODEL")):
         return
@@ -344,10 +344,10 @@ def _prompt_model_chain(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) ->
         set_env_assignment(env_file, provider_key, _prompt_value("Moonshot API key", secret=True))
 
 
-def _prompt_secret_backend(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) -> None:
+def _prompt_secret_backend(repo_root: pathlib.Path) -> None:
     """Interactively configure the provider secret backend."""
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
-    plugin_file = varlock_plugin_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
+    plugin_file = varlock_plugin_env_file(repo_root)
     values = load_env_assignments(env_file)
     backend = values.get("VARLOCK_SECRET_BACKEND", "local").strip() or "local"
     if backend != "local" and plugin_file.exists():
@@ -539,13 +539,12 @@ def _ensure_hypermemory_embedding_model(
     *,
     check_only: bool,
     non_interactive: bool,
-    env_mode: VarlockEnvMode,
 ) -> None:
     """Require an embedding model when the hypermemory profile is active."""
     profile = resolve_profile()
     if not profile_requires_hypermemory_backend(profile):
         return
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
     values = load_env_assignments(env_file)
     if value_is_effective(values.get("HYPERMEMORY_EMBEDDING_MODEL")):
         return
@@ -577,11 +576,10 @@ def _validate_secret_backend_configuration(
     *,
     check_only: bool,
     non_interactive: bool,
-    env_mode: VarlockEnvMode,
 ) -> None:
     """Validate local-vs-plugin secret backend wiring."""
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
-    plugin_file = varlock_plugin_env_file(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
+    plugin_file = varlock_plugin_env_file(repo_root)
     values = load_env_assignments(env_file)
     backend = values.get("VARLOCK_SECRET_BACKEND", "local").strip() or "local"
     provider_keys = _configured_provider_keys(values)
@@ -608,14 +606,9 @@ def _validate_secret_backend_configuration(
             )
 
 
-def _validate_with_varlock(
-    repo_root: pathlib.Path,
-    *,
-    check_only: bool,
-    env_mode: VarlockEnvMode,
-) -> bool:
+def _validate_with_varlock(repo_root: pathlib.Path, *, check_only: bool) -> bool:
     """Validate the env contract through Varlock when available."""
-    env_dir = varlock_env_dir(repo_root, env_mode=env_mode)
+    env_dir = varlock_env_dir(repo_root)
     varlock_bin = resolve_varlock_bin()
     if varlock_bin is None:
         if check_only:
@@ -633,11 +626,10 @@ def configure_varlock_env(
     *,
     check_only: bool,
     non_interactive: bool,
-    env_mode: VarlockEnvMode = "managed",
 ) -> dict[str, object]:
     """Create, normalize, and validate the StrongClaw env contract."""
-    env_file = varlock_local_env_file(repo_root, env_mode=env_mode)
-    env_dir = varlock_env_dir(repo_root, env_mode=env_mode)
+    env_file = varlock_local_env_file(repo_root)
+    env_dir = varlock_env_dir(repo_root)
     template_file = varlock_env_template_file(repo_root)
     created = False
     merged_keys: list[str] = []
@@ -654,34 +646,31 @@ def configure_varlock_env(
         target_path=env_file, template_path=template_file
     )
     del merged_values
-    autofilled = _ensure_required_defaults(repo_root, check_only=check_only, env_mode=env_mode)
+    autofilled = _ensure_required_defaults(repo_root, check_only=check_only)
     if _interactive_mode(check_only=check_only, non_interactive=non_interactive):
-        _prompt_secret_backend(repo_root, env_mode=env_mode)
-        _prompt_model_chain(repo_root, env_mode=env_mode)
+        _prompt_secret_backend(repo_root)
+        _prompt_model_chain(repo_root)
     _ensure_non_interactive_model_chain(
         repo_root,
         check_only=check_only,
         non_interactive=non_interactive,
-        env_mode=env_mode,
     )
     _ensure_hypermemory_embedding_model(
         repo_root,
         check_only=check_only,
         non_interactive=non_interactive,
-        env_mode=env_mode,
     )
     _validate_secret_backend_configuration(
         repo_root,
         check_only=check_only,
         non_interactive=non_interactive,
-        env_mode=env_mode,
     )
-    varlock_validated = _validate_with_varlock(repo_root, check_only=check_only, env_mode=env_mode)
+    varlock_validated = _validate_with_varlock(repo_root, check_only=check_only)
     return {
         "ok": True,
         "checkOnly": check_only,
         "envFile": str(env_file),
-        "pluginFile": str(varlock_plugin_env_file(repo_root, env_mode=env_mode)),
+        "pluginFile": str(varlock_plugin_env_file(repo_root)),
         "created": created,
         "mergedKeys": merged_keys,
         "autofilledValues": autofilled,
@@ -695,11 +684,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_asset_root_argument(parser)
     parser.add_argument(
         "--env-mode",
-        choices=("managed", "legacy", "auto"),
+        choices=READINESS_VARLOCK_ENV_MODES,
         default="managed",
-        help=(
-            "Varlock env source for contract checks: managed (default), legacy, or auto-fallback."
-        ),
+        help="Varlock env source for readiness checks (default: managed).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     configure_parser = subparsers.add_parser("configure")
@@ -711,11 +698,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for env-contract management."""
     args = parse_args(argv)
-    payload = configure_varlock_env(
-        resolve_asset_root_argument(args, command_name="clawops varlock-env"),
-        check_only=args.command == "check",
-        non_interactive=bool(getattr(args, "non_interactive", False)),
-        env_mode=cast(VarlockEnvMode, args.env_mode),
-    )
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
+        payload = configure_varlock_env(
+            resolve_asset_root_argument(args, command_name="clawops varlock-env"),
+            check_only=args.command == "check",
+            non_interactive=bool(getattr(args, "non_interactive", False)),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

@@ -228,14 +228,16 @@ def test_operator_docs_surface_plugin_inventory_and_degradation_contract() -> No
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in ci_doc
 
 
-def test_browser_lab_docs_surface_first_class_verification_commands() -> None:
+def test_browser_lab_docs_keep_scope_outside_baseline_verification() -> None:
     browser_lab = (REPO_ROOT / "platform/docs/BROWSER_LAB.md").read_text(encoding="utf-8")
     setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
     ci_doc = (REPO_ROOT / "platform/docs/CI_AND_SECURITY.md").read_text(encoding="utf-8")
 
+    assert "clawops verify-platform sidecars" not in browser_lab
     assert "clawops verify-platform browser-lab" in browser_lab
-    assert "docker compose -f platform/compose/docker-compose.browser-lab.yaml ps" in browser_lab
     assert "clawops baseline verify --include-browser-lab" in browser_lab
+    assert "excluded from baseline verification by default" in browser_lab
     assert "clawops verify-platform browser-lab" in setup
     assert "clawops baseline verify --include-browser-lab" in setup
+    assert "excluded from `clawops baseline verify` by default" in setup
     assert "release quality gate, the reusable fresh-host" in ci_doc

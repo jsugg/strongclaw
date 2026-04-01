@@ -13,6 +13,7 @@ from clawops.cli_roots import add_source_root_argument, resolve_source_root_argu
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
     VarlockEnvMode,
     rendered_openclaw_hypermemory_config_path,
@@ -22,15 +23,11 @@ from clawops.strongclaw_runtime import (
     run_command,
     run_managed_clawops_command,
     run_openclaw_command,
+    use_varlock_env_mode,
 )
 
 
-def run_harness_smoke(
-    repo_root: pathlib.Path,
-    runs_dir: pathlib.Path,
-    *,
-    env_mode: VarlockEnvMode,
-) -> None:
+def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
     """Run the standard harness smoke suites."""
     runs_dir.mkdir(parents=True, exist_ok=True)
     suites = (
@@ -54,7 +51,6 @@ def run_harness_smoke(
             ],
             cwd=repo_root,
             timeout_seconds=1800,
-            env_mode=env_mode,
         )
         if not result.ok:
             detail = result.stderr.strip() or result.stdout.strip() or "harness smoke failed"
@@ -62,12 +58,7 @@ def run_harness_smoke(
 
 
 def _run_checked(
-    repo_root: pathlib.Path,
-    label: str,
-    arguments: list[str],
-    *,
-    timeout_seconds: int = 300,
-    env_mode: VarlockEnvMode,
+    repo_root: pathlib.Path, label: str, arguments: list[str], *, timeout_seconds: int = 300
 ) -> None:
     """Run one OpenClaw command and require success."""
     result = run_openclaw_command(
@@ -75,7 +66,6 @@ def _run_checked(
         arguments,
         cwd=repo_root,
         timeout_seconds=timeout_seconds,
-        env_mode=env_mode,
     )
     if not result.ok:
         detail = result.stderr.strip() or result.stdout.strip() or f"{label} failed"
@@ -88,7 +78,6 @@ def verify_baseline(
     runs_dir: pathlib.Path,
     degraded: bool = False,
     include_browser_lab: bool = False,
-    env_mode: VarlockEnvMode = "managed",
 ) -> dict[str, object]:
     """Run the baseline verification flow."""
     layout = resolve_runtime_layout(repo_root=repo_root)
@@ -97,33 +86,21 @@ def verify_baseline(
             "baseline verify requires a StrongClaw source checkout because it runs repository tests."
         )
     require_openclaw("Baseline verification runs OpenClaw diagnostics and audits.")
-    config_path = resolve_openclaw_config_path(repo_root, env_mode=env_mode)
+    config_path = resolve_openclaw_config_path(repo_root)
     if not config_path.exists():
         raise CommandError(f"Rendered OpenClaw config not found at {config_path}.")
 
-    _run_checked(repo_root, "OpenClaw doctor", ["doctor", "--non-interactive"], env_mode=env_mode)
-    _run_checked(
-        repo_root, "OpenClaw security audit", ["security", "audit", "--deep"], env_mode=env_mode
-    )
-    _run_checked(
-        repo_root, "OpenClaw secrets audit", ["secrets", "audit", "--check"], env_mode=env_mode
-    )
-    _run_checked(
-        repo_root, "OpenClaw memory status", ["memory", "status", "--deep"], env_mode=env_mode
-    )
+    _run_checked(repo_root, "OpenClaw doctor", ["doctor", "--non-interactive"])
+    _run_checked(repo_root, "OpenClaw security audit", ["security", "audit", "--deep"])
+    _run_checked(repo_root, "OpenClaw secrets audit", ["secrets", "audit", "--check"])
+    _run_checked(repo_root, "OpenClaw memory status", ["memory", "status", "--deep"])
     _run_checked(
         repo_root,
         "OpenClaw memory search",
         ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
-        env_mode=env_mode,
     )
 
-    model_payload = ensure_model_auth(
-        repo_root,
-        check_only=True,
-        probe=not degraded,
-        env_mode=env_mode,
-    )
+    model_payload = ensure_model_auth(repo_root, check_only=True, probe=not degraded)
     if not bool(model_payload.get("ok")):
         raise CommandError(str(model_payload.get("guidance", "OpenClaw model readiness failed.")))
 
@@ -145,7 +122,6 @@ def verify_baseline(
             ],
             cwd=repo_root,
             timeout_seconds=300,
-            env_mode=env_mode,
         )
         if not status_result.ok:
             detail = (
@@ -170,7 +146,6 @@ def verify_baseline(
                 ],
                 cwd=repo_root,
                 timeout_seconds=300,
-                env_mode=env_mode,
             )
             if not verify_result.ok:
                 detail = (
@@ -225,7 +200,7 @@ def verify_baseline(
         )
         raise CommandError(detail, result=None)
 
-    run_harness_smoke(repo_root, runs_dir, env_mode=env_mode)
+    run_harness_smoke(repo_root, runs_dir)
 
     verification_targets: list[tuple[str, list[str]]] = [
         ("sidecars", ["--skip-runtime"] if degraded else []),
@@ -234,14 +209,12 @@ def verify_baseline(
     ]
     if include_browser_lab:
         verification_targets.append(("browser-lab", ["--skip-runtime"] if degraded else []))
-
     for target, extra_args in verification_targets:
         result = run_managed_clawops_command(
             repo_root,
             ["verify-platform", target, *extra_args],
             cwd=repo_root,
             timeout_seconds=300,
-            env_mode=env_mode,
         )
         if not result.ok:
             detail = (
@@ -253,11 +226,9 @@ def verify_baseline(
         "ok": True,
         "config": str(config_path),
         "degraded": degraded,
+        "includeBrowserLab": include_browser_lab,
         "runsDir": str(runs_dir),
         "verificationMode": "degraded" if degraded else "runtime",
-        "envMode": env_mode,
-        "includeBrowserLab": include_browser_lab,
-        "verificationTargets": [target for target, _extra_args in verification_targets],
         "modelAuth": model_payload,
         "hypermemory": hypermemory_payload,
         "guidance": (
@@ -273,14 +244,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the baseline CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_source_root_argument(parser)
-    parser.add_argument(
-        "--env-mode",
-        choices=("managed", "legacy", "auto"),
-        default="managed",
-        help=(
-            "Varlock env source for readiness checks: managed (default), legacy, or auto-fallback."
-        ),
-    )
     parser.add_argument("--runs-dir", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify")
@@ -290,9 +253,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip runtime probes and keep the output explicitly marked as degraded.",
     )
     verify_parser.add_argument(
+        "--env-mode",
+        choices=READINESS_VARLOCK_ENV_MODES,
+        default="managed",
+        help="Varlock env source for readiness checks (default: managed).",
+    )
+    verify_parser.add_argument(
         "--include-browser-lab",
         action="store_true",
-        help="Include browser-lab checks in baseline verification.",
+        help="Include browser-lab verification in the baseline gate.",
     )
     subparsers.add_parser("harness-smoke")
     return parser.parse_args(argv)
@@ -304,20 +273,17 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = resolve_source_root_argument(args, command_name="clawops baseline")
     runs_dir = repo_root / ".tmp" / "harness" if args.runs_dir is None else args.runs_dir
     if args.command == "harness-smoke":
-        run_harness_smoke(
-            repo_root,
-            runs_dir,
-            env_mode=cast(VarlockEnvMode, args.env_mode),
-        )
+        run_harness_smoke(repo_root, runs_dir)
         payload = {"ok": True, "runsDir": str(runs_dir)}
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
-    payload = verify_baseline(
-        repo_root,
-        runs_dir=runs_dir,
-        degraded=bool(args.degraded),
-        include_browser_lab=bool(getattr(args, "include_browser_lab", False)),
-        env_mode=cast(VarlockEnvMode, args.env_mode),
-    )
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
+        payload = verify_baseline(
+            repo_root,
+            runs_dir=runs_dir,
+            degraded=bool(args.degraded),
+            include_browser_lab=bool(args.include_browser_lab),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

@@ -15,6 +15,57 @@ from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
 
+def test_resolve_varlock_env_mode_defaults_to_auto() -> None:
+    assert runtime.resolve_varlock_env_mode(environ={}) == "auto"
+
+
+def test_resolve_varlock_env_mode_rejects_unknown_value() -> None:
+    with pytest.raises(CommandError, match="invalid OPENCLAW_VARLOCK_ENV_MODE value"):
+        runtime.resolve_varlock_env_mode(environ={"OPENCLAW_VARLOCK_ENV_MODE": "invalid"})
+
+
+def test_varlock_env_dir_uses_managed_mode_when_requested(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = tmp_path / "assets"
+    legacy_dir = repo_root / "platform" / "configs" / "varlock"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / ".env.local").write_text("OPENCLAW_STATE_DIR=~/.openclaw\n", encoding="utf-8")
+    (legacy_dir / ".env.local.example").write_text("APP_ENV=local\n", encoding="utf-8")
+    (legacy_dir / ".env.schema").write_text("APP_ENV=\n", encoding="utf-8")
+    (legacy_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
+    (legacy_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
+
+    managed_root = tmp_path / "config-root"
+    test_context.env.set("STRONGCLAW_CONFIG_DIR", str(managed_root))
+
+    resolved = runtime.varlock_env_dir(repo_root, env_mode="managed")
+
+    assert resolved == strongclaw_varlock_dir()
+    assert resolved != legacy_dir
+    assert (resolved / ".env.schema").read_text(encoding="utf-8") == "APP_ENV=\n"
+
+
+def test_varlock_env_dir_legacy_mode_requires_legacy_contract(tmp_path: pathlib.Path) -> None:
+    repo_root = tmp_path / "assets"
+    (repo_root / "platform" / "configs" / "varlock").mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(CommandError, match="Legacy Varlock env-mode requested"):
+        runtime.varlock_env_dir(repo_root, env_mode="legacy")
+
+
+def test_varlock_env_dir_legacy_mode_uses_legacy_contract_when_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    repo_root = tmp_path / "assets"
+    legacy_dir = repo_root / "platform" / "configs" / "varlock"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    (legacy_dir / ".env.local").write_text("APP_ENV=local\n", encoding="utf-8")
+
+    assert runtime.varlock_env_dir(repo_root, env_mode="legacy") == legacy_dir
+
+
 def test_write_env_assignments_uses_owner_only_permissions(tmp_path: pathlib.Path) -> None:
     """Env files written by StrongClaw should stay private to the current user."""
 
