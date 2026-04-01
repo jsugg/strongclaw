@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
 
@@ -13,6 +14,7 @@ import pytest
 
 from clawops import strongclaw_model_auth
 from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.assets import make_asset_root
 
 pytestmark = pytest.mark.test_profile("model_setup_skip")
 
@@ -487,3 +489,47 @@ def test_effective_env_assignments_preserves_local_model_chain_when_varlock_env_
     assert values["OLLAMA_API_KEY"] == "ollama-local"
     assert values["OPENCLAW_OLLAMA_MODEL"] == "deepseek-r1:latest"
     assert values["OPENAI_API_KEY"] == "sk-redacted"
+
+
+def test_model_auth_main_honors_env_mode_wrapper(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
+    requested_modes: list[str] = []
+
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
+
+    def _ensure_model_auth(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        probe: bool,
+        probe_max_tokens: int,
+    ) -> dict[str, object]:
+        assert repo_root == asset_root
+        assert check_only is True
+        assert probe is False
+        assert probe_max_tokens == strongclaw_model_auth.DEFAULT_PROBE_MAX_TOKENS
+        return {"ok": True}
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "use_varlock_env_mode",
+        new=_use_varlock_env_mode,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "ensure_model_auth",
+        new=_ensure_model_auth,
+    )
+
+    exit_code = strongclaw_model_auth.main(
+        ["--asset-root", str(asset_root), "--env-mode", "legacy", "check"]
+    )
+
+    assert exit_code == 0
+    assert requested_modes == ["legacy"]

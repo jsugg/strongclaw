@@ -7,7 +7,12 @@ import pathlib
 import pytest
 
 from clawops.common import load_yaml, write_text, write_yaml
-from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
+from clawops.platform_verify import (
+    verify_browser_lab,
+    verify_channels,
+    verify_observability,
+    verify_sidecars,
+)
 from tests.utils.helpers.network import Endpoint
 from tests.utils.helpers.network_runtime import NetworkRuntime
 from tests.utils.helpers.repo import REPO_ROOT
@@ -95,6 +100,27 @@ def _write_observability_inputs(
                         _port_mapping(metrics, 9464),
                     ]
                 }
+            }
+        },
+    )
+
+
+def _write_browser_lab_compose(
+    compose_path: pathlib.Path,
+    *,
+    proxy: Endpoint,
+    playwright: Endpoint,
+) -> None:
+    write_yaml(
+        compose_path,
+        {
+            "services": {
+                "browserlab-proxy": {
+                    "ports": [_port_mapping(proxy, 3128)],
+                },
+                "browserlab-playwright": {
+                    "ports": [_port_mapping(playwright, 9222)],
+                },
             }
         },
     )
@@ -206,6 +232,43 @@ def test_verify_observability_accepts_empty_metrics_body_when_endpoint_is_reacha
         skip_runtime=False,
     )
     assert report.ok is True
+
+
+def test_verify_browser_lab_supports_runtime_probes(
+    tmp_path: pathlib.Path,
+    network_runtime: NetworkRuntime,
+) -> None:
+    compose_path = tmp_path / "browser-lab-compose.yaml"
+    _write_browser_lab_compose(
+        compose_path,
+        proxy=network_runtime.tcp_listener(),
+        playwright=network_runtime.tcp_listener(),
+    )
+
+    report = verify_browser_lab(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is True
+
+
+def test_verify_browser_lab_rejects_non_loopback_bindings(
+    tmp_path: pathlib.Path,
+) -> None:
+    compose_path = tmp_path / "browser-lab-non-loopback.yaml"
+    _write_browser_lab_compose(
+        compose_path,
+        proxy=("0.0.0.0", 3128),
+        playwright=("0.0.0.0", 9222),
+    )
+
+    report = verify_browser_lab(compose_path=compose_path, skip_runtime=True)
+    assert report.ok is False
+    assert any(
+        check.name == "browserlab-proxy-port" and "loopback-only" in check.message
+        for check in report.checks
+    )
+    assert any(
+        check.name == "browserlab-playwright-port" and "loopback-only" in check.message
+        for check in report.checks
+    )
 
 
 def test_verify_channels_matches_repo_docs_and_guidance() -> None:

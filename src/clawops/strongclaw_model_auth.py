@@ -12,7 +12,9 @@ from typing import cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
+    VarlockEnvMode,
     load_env_assignments,
     load_openclaw_config,
     resolve_openclaw_config_path,
@@ -422,9 +424,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_asset_root_argument(parser)
     parser.add_argument(
         "--env-mode",
-        choices=("managed", "legacy"),
+        choices=READINESS_VARLOCK_ENV_MODES,
         default="managed",
-        help="Varlock env source used for readiness checks (default: managed).",
+        help="Varlock env source for readiness checks (default: managed).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -441,7 +443,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for model-auth readiness."""
     args = parse_args(argv)
-    with use_varlock_env_mode(str(args.env_mode), default="managed"):
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
         payload = ensure_model_auth(
             resolve_asset_root_argument(args, command_name="clawops model-auth"),
             check_only=args.command == "check",

@@ -275,6 +275,8 @@ describe("self-improvement", () => {
       const skillContent = readFileSync(absSkillPath, "utf-8");
       assert.match(skillContent, /# Deterministic Fixtures/);
       assert.match(skillContent, new RegExp(`Learning ID: ${learningId}`));
+      assert.match(skillContent, /## Verification/);
+      assert.doesNotMatch(skillContent, /\[TODO\]/);
 
       const learningsPath = path.join(workspaceDir, ".learnings", "LEARNINGS.md");
       const learningsBody = readFileSync(learningsPath, "utf-8");

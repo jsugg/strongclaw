@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 
@@ -637,15 +638,90 @@ def test_setup_cli_can_request_degraded_baseline_verification(
     assert "degraded mode" in capsys.readouterr().out
 
 
-def test_doctor_cli_applies_requested_varlock_env_mode(
+def test_setup_cli_honors_env_mode_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
+    requested_modes: list[str] = []
+
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
+
+    def _bootstrap_state_ready() -> bool:
+        return True
+
+    def _install_profile_assets(
+        repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path | None,
+    ) -> list[str]:
+        del repo_root, profile, home_dir
+        return []
+
+    def _configure_varlock_env(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        non_interactive: bool,
+    ) -> dict[str, object]:
+        del repo_root, check_only, non_interactive
+        return {"ok": True}
+
+    def _render_openclaw_config(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+        profile: str,
+    ) -> pathlib.Path:
+        del repo_root, home_dir, profile
+        return tmp_path / "openclaw.json"
+
+    def _doctor_host_payload(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"ok": True}
+
+    def _render_service_files(repo_root: pathlib.Path) -> dict[str, object]:
+        del repo_root
+        return {"ok": True}
+
+    monkeypatch.setattr(setup_cli, "use_varlock_env_mode", _use_varlock_env_mode)
+    monkeypatch.setattr(setup_cli, "bootstrap_state_ready", _bootstrap_state_ready)
+    monkeypatch.setattr(setup_cli, "install_profile_assets", _install_profile_assets)
+    monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
+    monkeypatch.setattr(setup_cli, "_render_openclaw_config", _render_openclaw_config)
+    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
+    monkeypatch.setattr(setup_cli, "render_service_files", _render_service_files)
+
+    exit_code = setup_cli.setup_main(
+        ["--asset-root", str(asset_root), "--env-mode", "legacy", "--no-activate-services"]
+    )
+
+    assert exit_code == 0
+    assert requested_modes == ["legacy"]
+
+
+def test_doctor_cli_honors_env_mode_wrapper(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     asset_root = make_asset_root(tmp_path / "assets")
-    observed_modes: list[str] = []
+    requested_modes: list[str] = []
 
-    class _Report:
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
+
+    class _OkReport:
         ok = True
 
         def to_dict(self) -> dict[str, object]:
@@ -658,7 +734,6 @@ def test_doctor_cli_applies_requested_varlock_env_mode(
         non_interactive: bool,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
         return {"ok": True}
 
     def _doctor_host_payload(
@@ -667,24 +742,21 @@ def test_doctor_cli_applies_requested_varlock_env_mode(
         home_dir: pathlib.Path | None,
     ) -> dict[str, object]:
         del repo_root, home_dir
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
         return {"ok": True}
 
-    def _verify_sidecars(**kwargs: object) -> _Report:
+    def _verify_sidecars(**kwargs: object) -> _OkReport:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
-        return _Report()
+        return _OkReport()
 
-    def _verify_observability(**kwargs: object) -> _Report:
+    def _verify_observability(**kwargs: object) -> _OkReport:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
-        return _Report()
+        return _OkReport()
 
-    def _verify_channels(**kwargs: object) -> _Report:
+    def _verify_channels(**kwargs: object) -> _OkReport:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
-        return _Report()
+        return _OkReport()
 
+    monkeypatch.setattr(setup_cli, "use_varlock_env_mode", _use_varlock_env_mode)
     monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
     monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
     monkeypatch.setattr(setup_cli, "verify_sidecars", _verify_sidecars)
@@ -705,5 +777,35 @@ def test_doctor_cli_applies_requested_varlock_env_mode(
 
     assert exit_code == 1
     assert payload["status"] == "degraded"
-    assert observed_modes
-    assert set(observed_modes) == {"legacy"}
+    assert requested_modes == ["legacy"]
+
+
+def test_doctor_host_cli_honors_env_mode_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
+    requested_modes: list[str] = []
+
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
+
+    def _doctor_host_payload(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"ok": True}
+
+    monkeypatch.setattr(setup_cli, "use_varlock_env_mode", _use_varlock_env_mode)
+    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
+
+    exit_code = setup_cli.doctor_host_main(
+        ["--asset-root", str(asset_root), "--env-mode", "legacy"]
+    )
+
+    assert exit_code == 0
+    assert requested_modes == ["legacy"]

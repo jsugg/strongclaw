@@ -176,7 +176,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "verify-platform",
         "clawops.platform_verify",
         "main",
-        "Verify sidecars, observability, and channels.",
+        "Verify sidecars, observability, browser-lab, and channels.",
     ),
     CommandSpec(
         "hypermemory",

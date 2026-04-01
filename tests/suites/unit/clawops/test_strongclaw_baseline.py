@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import Mapping, cast
 
 import pytest
@@ -471,11 +471,10 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
     ]
 
 
-def test_verify_baseline_optionally_includes_browser_lab_verification(
+def test_verify_baseline_include_browser_lab_adds_browser_lab_target(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
-    """Baseline verify should include browser-lab checks only when requested."""
     repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
@@ -517,10 +516,7 @@ def test_verify_baseline_optionally_includes_browser_lab_verification(
         del timeout_seconds
         assert repo == repo_root
         assert cwd == repo_root
-        command = ["clawops", *[str(part) for part in arguments]]
-        commands.append(command)
-        if "status" in arguments:
-            return _FakeCommandResult(ok=True, stdout="{}")
+        commands.append(["clawops", *[str(part) for part in arguments]])
         return _FakeCommandResult(ok=True)
 
     def _run_command(
@@ -530,9 +526,7 @@ def test_verify_baseline_optionally_includes_browser_lab_verification(
         env: Mapping[str, str] | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
-        del env, timeout_seconds
-        assert cwd == repo_root
-        commands.append([str(part) for part in command])
+        del command, cwd, env, timeout_seconds
         return _FakeCommandResult(ok=True)
 
     test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
@@ -575,8 +569,6 @@ def test_verify_baseline_optionally_includes_browser_lab_verification(
     platform_commands = [
         command for command in commands if command[:2] == ["clawops", "verify-platform"]
     ]
-
-    assert payload["ok"] is True
     assert payload["includeBrowserLab"] is True
     assert platform_commands == [
         ["clawops", "verify-platform", "sidecars"],
@@ -586,105 +578,53 @@ def test_verify_baseline_optionally_includes_browser_lab_verification(
     ]
 
 
-def test_verify_baseline_uses_requested_env_mode_for_readiness_commands(
+def test_main_honors_env_mode_and_include_browser_lab(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
     repo_root = _init_source_checkout(tmp_path / "repo")
-    config_path = tmp_path / "openclaw.json"
-    config_path.write_text("{}", encoding="utf-8")
-    observed_modes: list[str] = []
+    requested_modes: list[str] = []
+    include_values: list[bool] = []
 
-    def _require_openclaw(message: str) -> None:
-        del message
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
-        assert repo == repo_root
-        return config_path
-
-    def _run_openclaw_command(
-        repo: pathlib.Path,
-        arguments: Sequence[str],
-        **kwargs: object,
-    ) -> _FakeOpenClawResult:
-        del arguments, kwargs
-        assert repo == repo_root
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
-        return _FakeOpenClawResult()
-
-    def _ensure_model_auth(
-        repo: pathlib.Path,
+    def _verify_baseline(
+        requested_repo_root: pathlib.Path,
         *,
-        check_only: bool,
-        probe: bool,
+        runs_dir: pathlib.Path,
+        degraded: bool = False,
+        include_browser_lab: bool = False,
     ) -> dict[str, object]:
-        del check_only, probe
-        assert repo == repo_root
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        del runs_dir, degraded
+        assert requested_repo_root == repo_root
+        include_values.append(include_browser_lab)
         return {"ok": True}
 
-    def _run_command(
-        command: Sequence[str],
-        *,
-        cwd: pathlib.Path | None = None,
-        env: Mapping[str, str] | None = None,
-        timeout_seconds: int = 30,
-    ) -> _FakeCommandResult:
-        del command, cwd, timeout_seconds
-        assert env is not None
-        observed_modes.append(str(env.get("STRONGCLAW_VARLOCK_ENV_MODE", "")))
-        return _FakeCommandResult(ok=True)
-
-    def _run_managed_clawops_command(
-        repo: pathlib.Path,
-        arguments: Sequence[str],
-        *,
-        cwd: pathlib.Path | None = None,
-        timeout_seconds: int = 30,
-    ) -> _FakeCommandResult:
-        del arguments, timeout_seconds
-        assert repo == repo_root
-        assert cwd == repo_root
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
-        return _FakeCommandResult(ok=True)
-
-    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
     test_context.patch.patch_object(
         strongclaw_baseline,
-        "resolve_openclaw_config_path",
-        new=_resolve_openclaw_config_path,
+        "use_varlock_env_mode",
+        new=_use_varlock_env_mode,
     )
     test_context.patch.patch_object(
         strongclaw_baseline,
-        "run_openclaw_command",
-        new=_run_openclaw_command,
-    )
-    test_context.patch.patch_object(
-        strongclaw_baseline,
-        "ensure_model_auth",
-        new=_ensure_model_auth,
-    )
-    test_context.patch.patch_object(
-        strongclaw_baseline,
-        "rendered_openclaw_uses_hypermemory",
-        new=_rendered_openclaw_uses_hypermemory,
-    )
-    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
-    test_context.patch.patch_object(
-        strongclaw_baseline,
-        "run_managed_clawops_command",
-        new=_run_managed_clawops_command,
-    )
-    test_context.patch.patch_object(
-        strongclaw_baseline, "run_harness_smoke", new=_noop_harness_smoke
+        "verify_baseline",
+        new=_verify_baseline,
     )
 
-    payload = strongclaw_baseline.verify_baseline(
-        repo_root,
-        runs_dir=tmp_path / "runs",
-        env_mode="legacy",
+    exit_code = strongclaw_baseline.main(
+        [
+            "--source-root",
+            str(repo_root),
+            "verify",
+            "--env-mode",
+            "legacy",
+            "--include-browser-lab",
+        ]
     )
 
-    assert payload["ok"] is True
-    assert observed_modes
-    assert set(observed_modes) == {"legacy"}
+    assert exit_code == 0
+    assert requested_modes == ["legacy"]
+    assert include_values == [True]

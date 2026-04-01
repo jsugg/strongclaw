@@ -7,7 +7,7 @@ import json
 import os
 import pathlib
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
@@ -18,7 +18,9 @@ from clawops.strongclaw_baseline import verify_baseline
 from clawops.strongclaw_bootstrap import bootstrap_host, install_profile_assets
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
+    VarlockEnvMode,
     bootstrap_state_ready,
     clear_docker_shell_refresh_required,
     command_exists,
@@ -83,6 +85,12 @@ def _setup_parser(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-verify", action="store_true")
     parser.add_argument("--degraded-verify", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument(
+        "--env-mode",
+        choices=READINESS_VARLOCK_ENV_MODES,
+        default="managed",
+        help="Varlock env source for readiness checks (default: managed).",
+    )
     return parser.parse_args(argv)
 
 
@@ -91,14 +99,14 @@ def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a deep StrongClaw readiness scan.")
     add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
-    parser.add_argument(
-        "--env-mode",
-        choices=("managed", "legacy"),
-        default="managed",
-        help="Varlock env source used by readiness checks (default: managed).",
-    )
     parser.add_argument("--skip-runtime", action="store_true")
     parser.add_argument("--no-model-probe", action="store_true")
+    parser.add_argument(
+        "--env-mode",
+        choices=READINESS_VARLOCK_ENV_MODES,
+        default="managed",
+        help="Varlock env source for readiness checks (default: managed).",
+    )
     return parser.parse_args(argv)
 
 
@@ -107,6 +115,12 @@ def _doctor_host_parser(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the host-only StrongClaw readiness scan.")
     add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
+    parser.add_argument(
+        "--env-mode",
+        choices=READINESS_VARLOCK_ENV_MODES,
+        default="managed",
+        help="Varlock env source for readiness checks (default: managed).",
+    )
     return parser.parse_args(argv)
 
 
@@ -171,10 +185,12 @@ def _doctor_host_payload(repo_root: pathlib.Path, *, home_dir: pathlib.Path) -> 
 def doctor_host_main(argv: list[str] | None = None) -> int:
     """Run the host-only StrongClaw doctor."""
     args = _doctor_host_parser(argv)
-    payload = _doctor_host_payload(
-        resolve_asset_root_argument(args, command_name="clawops doctor-host"),
-        home_dir=resolve_home_dir(args.home_dir),
-    )
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
+        payload = _doctor_host_payload(
+            resolve_asset_root_argument(args, command_name="clawops doctor-host"),
+            home_dir=resolve_home_dir(args.home_dir),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
@@ -302,55 +318,59 @@ def setup_main(argv: list[str] | None = None) -> int:
     skip_bootstrap = bool(args.skip_bootstrap)
     if not skip_bootstrap and not args.force_bootstrap and bootstrap_state_ready():
         skip_bootstrap = True
-    if not skip_bootstrap or bool(args.force_bootstrap):
-        bootstrap_host(repo_root, profile=profile, home_dir=home_dir)
-    else:
-        install_profile_assets(repo_root, profile=profile, home_dir=home_dir)
-    configure_varlock_env(
-        repo_root,
-        check_only=False,
-        non_interactive=bool(args.non_interactive),
-    )
-    if args.profile or skip_bootstrap:
-        _render_openclaw_config(repo_root, home_dir=home_dir, profile=profile)
-        _doctor_host_payload(repo_root, home_dir=home_dir)
-    activate_services_enabled = not bool(args.no_activate_services)
-    verify_enabled = not bool(args.no_verify)
-    if not activate_services_enabled:
-        verify_enabled = False
-    model_auth_deferred = not _setup_requires_model_auth(
-        activate_services_enabled=activate_services_enabled
-    )
-    if not model_auth_deferred:
-        model_payload = ensure_model_auth(
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
+        if not skip_bootstrap or bool(args.force_bootstrap):
+            bootstrap_host(repo_root, profile=profile, home_dir=home_dir)
+        else:
+            install_profile_assets(repo_root, profile=profile, home_dir=home_dir)
+        configure_varlock_env(
             repo_root,
             check_only=False,
-            probe=not bool(args.non_interactive),
-            allow_prompt=not bool(args.non_interactive),
+            non_interactive=bool(args.non_interactive),
         )
-        if not bool(model_payload.get("ok")):
-            raise CommandError(str(model_payload.get("guidance", "OpenClaw model auth failed.")))
-    if (
-        activate_services_enabled
-        and os.uname().sysname == "Linux"
-        and docker_shell_refresh_required()
-    ):
-        if docker_backend_ready():
-            clear_docker_shell_refresh_required()
+        if args.profile or skip_bootstrap:
+            _render_openclaw_config(repo_root, home_dir=home_dir, profile=profile)
+            _doctor_host_payload(repo_root, home_dir=home_dir)
+        activate_services_enabled = not bool(args.no_activate_services)
+        verify_enabled = not bool(args.no_verify)
+        if not activate_services_enabled:
+            verify_enabled = False
+        model_auth_deferred = not _setup_requires_model_auth(
+            activate_services_enabled=activate_services_enabled
+        )
+        if not model_auth_deferred:
+            model_payload = ensure_model_auth(
+                repo_root,
+                check_only=False,
+                probe=not bool(args.non_interactive),
+                allow_prompt=not bool(args.non_interactive),
+            )
+            if not bool(model_payload.get("ok")):
+                raise CommandError(
+                    str(model_payload.get("guidance", "OpenClaw model auth failed."))
+                )
+        if (
+            activate_services_enabled
+            and os.uname().sysname == "Linux"
+            and docker_shell_refresh_required()
+        ):
+            if docker_backend_ready():
+                clear_docker_shell_refresh_required()
+            else:
+                _pause_for_linux_docker_refresh(repo_root)
+        if activate_services_enabled:
+            activate_services(repo_root)
         else:
-            _pause_for_linux_docker_refresh(repo_root)
-    if activate_services_enabled:
-        activate_services(repo_root)
-    else:
-        render_service_files(repo_root)
-    if verify_enabled:
-        baseline_payload = verify_baseline(
-            repo_root,
-            runs_dir=repo_root / ".tmp" / "harness",
-            degraded=bool(args.degraded_verify),
-        )
-    else:
-        baseline_payload = None
+            render_service_files(repo_root)
+        if verify_enabled:
+            baseline_payload = verify_baseline(
+                repo_root,
+                runs_dir=repo_root / ".tmp" / "harness",
+                degraded=bool(args.degraded_verify),
+            )
+        else:
+            baseline_payload = None
     next_steps = [
         "- Control UI: http://127.0.0.1:18789/",
         "- Deep health scan: clawops doctor",
@@ -374,8 +394,9 @@ def doctor_main(argv: list[str] | None = None) -> int:
     args = _doctor_parser(argv)
     repo_root = resolve_asset_root_argument(args, command_name="clawops doctor")
     home_dir = resolve_home_dir(args.home_dir)
-    with use_varlock_env_mode(str(args.env_mode), default="managed"):
-        checks: list[dict[str, object]] = []
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    checks: list[dict[str, object]] = []
+    with use_varlock_env_mode(env_mode):
         _run_check(
             "Varlock env contract",
             "clawops varlock-env configure",
@@ -555,14 +576,14 @@ def doctor_main(argv: list[str] | None = None) -> int:
                 "remediation": "clawops verify-platform channels",
             }
         )
-        payload = _doctor_payload(
-            checks,
-            degraded_mode=bool(args.skip_runtime),
-            mode=(
-                "bounded-local"
-                if _bounded_local_doctor(args)
-                else "runtime-skipped" if args.skip_runtime else "full"
-            ),
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0 if payload["status"] == "pass" else 1
+    payload = _doctor_payload(
+        checks,
+        degraded_mode=bool(args.skip_runtime),
+        mode=(
+            "bounded-local"
+            if _bounded_local_doctor(args)
+            else "runtime-skipped" if args.skip_runtime else "full"
+        ),
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0 if payload["status"] == "pass" else 1

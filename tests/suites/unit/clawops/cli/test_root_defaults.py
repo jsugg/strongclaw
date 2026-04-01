@@ -169,6 +169,7 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
     recorded_repo_root: pathlib.Path | None = None
     recorded_runs_dir: pathlib.Path | None = None
     recorded_degraded: bool | None = None
+    recorded_include_browser_lab: bool | None = None
 
     def _verify_baseline(
         repo_root_arg: pathlib.Path,
@@ -176,14 +177,12 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
         runs_dir: pathlib.Path,
         degraded: bool = False,
         include_browser_lab: bool = False,
-        env_mode: str = "managed",
     ) -> dict[str, object]:
-        nonlocal recorded_repo_root, recorded_runs_dir, recorded_degraded
-        assert include_browser_lab is False
-        assert env_mode == "managed"
+        nonlocal recorded_repo_root, recorded_runs_dir, recorded_degraded, recorded_include_browser_lab
         recorded_repo_root = repo_root_arg
         recorded_runs_dir = runs_dir
         recorded_degraded = degraded
+        recorded_include_browser_lab = include_browser_lab
         return {"ok": True, "runsDir": str(runs_dir), "degraded": degraded}
 
     test_context.chdir(nested)
@@ -195,6 +194,7 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
     assert recorded_repo_root == repo_root.resolve()
     assert recorded_runs_dir == repo_root.resolve() / ".tmp" / "harness"
     assert recorded_degraded is False
+    assert recorded_include_browser_lab is False
     assert json.loads(capsys.readouterr().out)["ok"] is True
 
 

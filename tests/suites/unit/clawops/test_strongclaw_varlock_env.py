@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 from clawops import strongclaw_varlock_env
 from clawops.strongclaw_runtime import (
@@ -14,6 +14,7 @@ from clawops.strongclaw_runtime import (
 )
 from clawops.strongclaw_varlock_env import configure_varlock_env
 from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.assets import make_asset_root
 
 
 def _no_op_model_validation(
@@ -214,14 +215,18 @@ def test_configure_varlock_env_non_interactive_autofills_local_ollama_model_chai
     assert values["HYPERMEMORY_EMBEDDING_API_BASE"] == "http://host.docker.internal:11434"
 
 
-def test_main_applies_requested_varlock_env_mode(
-    tmp_path: pathlib.Path,
+def test_varlock_env_main_honors_env_mode_wrapper(
     test_context: TestContext,
+    tmp_path: pathlib.Path,
 ) -> None:
-    observed_mode: dict[str, str] = {}
+    asset_root = make_asset_root(tmp_path / "assets")
+    requested_modes: list[str] = []
+    configure_calls: list[tuple[bool, bool]] = []
 
-    def _resolve_asset_root_argument(*_args: object, **_kwargs: object) -> pathlib.Path:
-        return tmp_path
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
 
     def _configure_varlock_env(
         repo_root: pathlib.Path,
@@ -229,16 +234,14 @@ def test_main_applies_requested_varlock_env_mode(
         check_only: bool,
         non_interactive: bool,
     ) -> dict[str, object]:
-        assert repo_root == tmp_path
-        assert check_only is True
-        assert non_interactive is False
-        observed_mode["value"] = os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", "")
+        assert repo_root == asset_root
+        configure_calls.append((check_only, non_interactive))
         return {"ok": True}
 
     test_context.patch.patch_object(
         strongclaw_varlock_env,
-        "resolve_asset_root_argument",
-        new=_resolve_asset_root_argument,
+        "use_varlock_env_mode",
+        new=_use_varlock_env_mode,
     )
     test_context.patch.patch_object(
         strongclaw_varlock_env,
@@ -246,7 +249,10 @@ def test_main_applies_requested_varlock_env_mode(
         new=_configure_varlock_env,
     )
 
-    exit_code = strongclaw_varlock_env.main(["--env-mode", "legacy", "check"])
+    exit_code = strongclaw_varlock_env.main(
+        ["--asset-root", str(asset_root), "--env-mode", "legacy", "check"]
+    )
 
     assert exit_code == 0
-    assert observed_mode["value"] == "legacy"
+    assert requested_modes == ["legacy"]
+    assert configure_calls == [(True, False)]

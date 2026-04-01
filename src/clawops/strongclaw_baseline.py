@@ -7,13 +7,15 @@ import json
 import os
 import pathlib
 import tempfile
+from typing import cast
 
 from clawops.cli_roots import add_source_root_argument, resolve_source_root_argument
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
-    managed_clawops_command,
+    VarlockEnvMode,
     rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_uses_hypermemory,
     require_openclaw,
@@ -33,9 +35,9 @@ def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
         ("policy_regressions.yaml", "policy.jsonl"),
     )
     for suite_name, output_name in suites:
-        result = run_command(
-            managed_clawops_command(
-                repo_root,
+        result = run_managed_clawops_command(
+            repo_root,
+            [
                 "harness",
                 "--suite",
                 str(
@@ -46,7 +48,7 @@ def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
                 ),
                 "--output",
                 str(runs_dir / output_name),
-            ),
+            ],
             cwd=repo_root,
             timeout_seconds=1800,
         )
@@ -76,186 +78,172 @@ def verify_baseline(
     runs_dir: pathlib.Path,
     degraded: bool = False,
     include_browser_lab: bool = False,
-    env_mode: str = "managed",
 ) -> dict[str, object]:
     """Run the baseline verification flow."""
-    with use_varlock_env_mode(env_mode, default="managed"):
-        layout = resolve_runtime_layout(repo_root=repo_root)
-        if layout.source_checkout_root is None:
-            raise CommandError(
-                "baseline verify requires a StrongClaw source checkout because it runs repository tests."
-            )
-        require_openclaw("Baseline verification runs OpenClaw diagnostics and audits.")
-        config_path = resolve_openclaw_config_path(repo_root)
-        if not config_path.exists():
-            raise CommandError(f"Rendered OpenClaw config not found at {config_path}.")
-
-        _run_checked(repo_root, "OpenClaw doctor", ["doctor", "--non-interactive"])
-        _run_checked(repo_root, "OpenClaw security audit", ["security", "audit", "--deep"])
-        _run_checked(repo_root, "OpenClaw secrets audit", ["secrets", "audit", "--check"])
-        _run_checked(repo_root, "OpenClaw memory status", ["memory", "status", "--deep"])
-        _run_checked(
-            repo_root,
-            "OpenClaw memory search",
-            ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+    layout = resolve_runtime_layout(repo_root=repo_root)
+    if layout.source_checkout_root is None:
+        raise CommandError(
+            "baseline verify requires a StrongClaw source checkout because it runs repository tests."
         )
+    require_openclaw("Baseline verification runs OpenClaw diagnostics and audits.")
+    config_path = resolve_openclaw_config_path(repo_root)
+    if not config_path.exists():
+        raise CommandError(f"Rendered OpenClaw config not found at {config_path}.")
 
-        model_payload = ensure_model_auth(repo_root, check_only=True, probe=not degraded)
-        if not bool(model_payload.get("ok")):
+    _run_checked(repo_root, "OpenClaw doctor", ["doctor", "--non-interactive"])
+    _run_checked(repo_root, "OpenClaw security audit", ["security", "audit", "--deep"])
+    _run_checked(repo_root, "OpenClaw secrets audit", ["secrets", "audit", "--check"])
+    _run_checked(repo_root, "OpenClaw memory status", ["memory", "status", "--deep"])
+    _run_checked(
+        repo_root,
+        "OpenClaw memory search",
+        ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+    )
+
+    model_payload = ensure_model_auth(repo_root, check_only=True, probe=not degraded)
+    if not bool(model_payload.get("ok")):
+        raise CommandError(str(model_payload.get("guidance", "OpenClaw model readiness failed.")))
+
+    hypermemory_payload: dict[str, object] | None = None
+    if rendered_openclaw_uses_hypermemory(config_path):
+        hypermemory_config_path = rendered_openclaw_hypermemory_config_path(config_path)
+        if hypermemory_config_path is None or not hypermemory_config_path.exists():
             raise CommandError(
-                str(model_payload.get("guidance", "OpenClaw model readiness failed."))
+                "strongclaw-hypermemory is enabled, but its configPath is missing or unreadable."
             )
-
-        hypermemory_payload: dict[str, object] | None = None
-        if rendered_openclaw_uses_hypermemory(config_path):
-            hypermemory_config_path = rendered_openclaw_hypermemory_config_path(config_path)
-            if hypermemory_config_path is None or not hypermemory_config_path.exists():
-                raise CommandError(
-                    "strongclaw-hypermemory is enabled, but its configPath is missing or unreadable."
-                )
-            status_result = run_managed_clawops_command(
+        status_result = run_managed_clawops_command(
+            repo_root,
+            [
+                "hypermemory",
+                "--config",
+                str(hypermemory_config_path),
+                "status",
+                "--json",
+            ],
+            cwd=repo_root,
+            timeout_seconds=300,
+        )
+        if not status_result.ok:
+            detail = (
+                status_result.stderr.strip()
+                or status_result.stdout.strip()
+                or "hypermemory status failed"
+            )
+            raise CommandError(detail, result=None)
+        hypermemory_payload = json.loads(status_result.stdout or "{}")
+        if (
+            hypermemory_payload is not None
+            and hypermemory_payload.get("backendActive") == "qdrant_sparse_dense_hybrid"
+        ):
+            verify_result = run_managed_clawops_command(
                 repo_root,
                 [
                     "hypermemory",
                     "--config",
                     str(hypermemory_config_path),
-                    "status",
+                    "verify",
                     "--json",
                 ],
                 cwd=repo_root,
                 timeout_seconds=300,
             )
-            if not status_result.ok:
+            if not verify_result.ok:
                 detail = (
-                    status_result.stderr.strip()
-                    or status_result.stdout.strip()
-                    or "hypermemory status failed"
+                    verify_result.stderr.strip()
+                    or verify_result.stdout.strip()
+                    or "hypermemory verify failed"
                 )
                 raise CommandError(detail, result=None)
-            hypermemory_payload = json.loads(status_result.stdout or "{}")
-            if (
-                hypermemory_payload is not None
-                and hypermemory_payload.get("backendActive") == "qdrant_sparse_dense_hybrid"
-            ):
-                verify_result = run_managed_clawops_command(
-                    repo_root,
-                    [
-                        "hypermemory",
-                        "--config",
-                        str(hypermemory_config_path),
-                        "verify",
-                        "--json",
-                    ],
-                    cwd=repo_root,
-                    timeout_seconds=300,
-                )
-                if not verify_result.ok:
-                    detail = (
-                        verify_result.stderr.strip()
-                        or verify_result.stdout.strip()
-                        or "hypermemory verify failed"
-                    )
-                    raise CommandError(detail, result=None)
 
-        pytest_home_parent = repo_root / ".tmp"
-        pytest_home_parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(
-            prefix="baseline-pytest-home-",
-            dir=pytest_home_parent,
-        ) as isolated_home_dir:
-            isolated_home = pathlib.Path(isolated_home_dir)
-            pytest_env = dict(os.environ)
-            pytest_env["HOME"] = str(isolated_home)
-            pytest_env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
-            pytest_env["XDG_DATA_HOME"] = str(isolated_home / ".local" / "share")
-            pytest_env["XDG_STATE_HOME"] = str(isolated_home / ".local" / "state")
-            for key in (
-                "OPENCLAW_HOME",
-                "OPENCLAW_STATE_DIR",
-                "OPENCLAW_CONFIG_PATH",
-                "OPENCLAW_CONFIG",
-                "OPENCLAW_PROFILE",
-                "STRONGCLAW_RUNTIME_ROOT",
-                "VARLOCK_LOCAL_ENV_FILE",
-            ):
-                pytest_env.pop(key, None)
-            tests_result = run_command(
-                [
-                    "uv",
-                    "run",
-                    "--project",
-                    str(layout.source_checkout_root),
-                    "--locked",
-                    "--group",
-                    "dev",
-                    "pytest",
-                    "-q",
-                    str(layout.source_checkout_root / "tests"),
-                ],
-                cwd=layout.source_checkout_root,
-                env=pytest_env,
-                timeout_seconds=3600,
-            )
-        if not tests_result.ok:
+    pytest_home_parent = repo_root / ".tmp"
+    pytest_home_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="baseline-pytest-home-",
+        dir=pytest_home_parent,
+    ) as isolated_home_dir:
+        isolated_home = pathlib.Path(isolated_home_dir)
+        pytest_env = dict(os.environ)
+        pytest_env["HOME"] = str(isolated_home)
+        pytest_env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
+        pytest_env["XDG_DATA_HOME"] = str(isolated_home / ".local" / "share")
+        pytest_env["XDG_STATE_HOME"] = str(isolated_home / ".local" / "state")
+        for key in (
+            "OPENCLAW_HOME",
+            "OPENCLAW_STATE_DIR",
+            "OPENCLAW_CONFIG_PATH",
+            "OPENCLAW_CONFIG",
+            "OPENCLAW_PROFILE",
+            "STRONGCLAW_RUNTIME_ROOT",
+            "VARLOCK_LOCAL_ENV_FILE",
+        ):
+            pytest_env.pop(key, None)
+        tests_result = run_command(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(layout.source_checkout_root),
+                "--locked",
+                "--group",
+                "dev",
+                "pytest",
+                "-q",
+                str(layout.source_checkout_root / "tests"),
+            ],
+            cwd=layout.source_checkout_root,
+            env=pytest_env,
+            timeout_seconds=3600,
+        )
+    if not tests_result.ok:
+        detail = (
+            tests_result.stderr.strip() or tests_result.stdout.strip() or "repository tests failed"
+        )
+        raise CommandError(detail, result=None)
+
+    run_harness_smoke(repo_root, runs_dir)
+
+    verification_targets: list[tuple[str, list[str]]] = [
+        ("sidecars", ["--skip-runtime"] if degraded else []),
+        ("observability", ["--skip-runtime"] if degraded else []),
+        ("channels", []),
+    ]
+    if include_browser_lab:
+        verification_targets.append(("browser-lab", ["--skip-runtime"] if degraded else []))
+    for target, extra_args in verification_targets:
+        result = run_managed_clawops_command(
+            repo_root,
+            ["verify-platform", target, *extra_args],
+            cwd=repo_root,
+            timeout_seconds=300,
+        )
+        if not result.ok:
             detail = (
-                tests_result.stderr.strip()
-                or tests_result.stdout.strip()
-                or "repository tests failed"
+                result.stderr.strip() or result.stdout.strip() or f"{target} verification failed"
             )
             raise CommandError(detail, result=None)
 
-        run_harness_smoke(repo_root, runs_dir)
-
-        platform_targets: list[tuple[str, list[str]]] = [
-            ("sidecars", ["--skip-runtime"] if degraded else []),
-            ("observability", ["--skip-runtime"] if degraded else []),
-            ("channels", []),
-        ]
-        if include_browser_lab:
-            platform_targets.append(("browser-lab", ["--skip-runtime"] if degraded else []))
-        for target, extra_args in platform_targets:
-            result = run_managed_clawops_command(
-                repo_root,
-                ["verify-platform", target, *extra_args],
-                cwd=repo_root,
-                timeout_seconds=300,
-            )
-            if not result.ok:
-                detail = (
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or f"{target} verification failed"
-                )
-                raise CommandError(detail, result=None)
-
-        return {
-            "ok": True,
-            "config": str(config_path),
-            "degraded": degraded,
-            "runsDir": str(runs_dir),
-            "includeBrowserLab": include_browser_lab,
-            "verificationMode": "degraded" if degraded else "runtime",
-            "modelAuth": model_payload,
-            "hypermemory": hypermemory_payload,
-            "guidance": (
-                "Runtime probes were skipped for model auth, sidecars, and observability. "
-                "Rerun `clawops baseline verify` for full release-readiness evidence."
-                if degraded
-                else "Runtime probes passed."
-            ),
-        }
+    return {
+        "ok": True,
+        "config": str(config_path),
+        "degraded": degraded,
+        "includeBrowserLab": include_browser_lab,
+        "runsDir": str(runs_dir),
+        "verificationMode": "degraded" if degraded else "runtime",
+        "modelAuth": model_payload,
+        "hypermemory": hypermemory_payload,
+        "guidance": (
+            "Runtime probes were skipped for model auth, sidecars, and observability. "
+            "Rerun `clawops baseline verify` for full release-readiness evidence."
+            if degraded
+            else "Runtime probes passed."
+        ),
+    }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the baseline CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_source_root_argument(parser)
-    parser.add_argument(
-        "--env-mode",
-        choices=("managed", "legacy"),
-        default="managed",
-        help="Varlock env source used by readiness probes (default: managed).",
-    )
     parser.add_argument("--runs-dir", type=pathlib.Path, default=None)
     subparsers = parser.add_subparsers(dest="command", required=True)
     verify_parser = subparsers.add_parser("verify")
@@ -265,9 +253,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip runtime probes and keep the output explicitly marked as degraded.",
     )
     verify_parser.add_argument(
+        "--env-mode",
+        choices=READINESS_VARLOCK_ENV_MODES,
+        default="managed",
+        help="Varlock env source for readiness checks (default: managed).",
+    )
+    verify_parser.add_argument(
         "--include-browser-lab",
         action="store_true",
-        help="Include browser-lab platform verification when enabled on this host.",
+        help="Include browser-lab verification in the baseline gate.",
     )
     subparsers.add_parser("harness-smoke")
     return parser.parse_args(argv)
@@ -283,12 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         payload = {"ok": True, "runsDir": str(runs_dir)}
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
-    payload = verify_baseline(
-        repo_root,
-        runs_dir=runs_dir,
-        degraded=bool(args.degraded),
-        include_browser_lab=bool(getattr(args, "include_browser_lab", False)),
-        env_mode=str(args.env_mode),
-    )
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
+        payload = verify_baseline(
+            repo_root,
+            runs_dir=runs_dir,
+            degraded=bool(args.degraded),
+            include_browser_lab=bool(args.include_browser_lab),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

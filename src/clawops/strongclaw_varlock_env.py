@@ -8,11 +8,13 @@ import os
 import pathlib
 import re
 import sys
-from typing import Final
+from typing import Final, cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
+    READINESS_VARLOCK_ENV_MODES,
     CommandError,
+    VarlockEnvMode,
     clear_env_assignment,
     generate_secret_value,
     load_env_assignments,
@@ -682,9 +684,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_asset_root_argument(parser)
     parser.add_argument(
         "--env-mode",
-        choices=("managed", "legacy"),
+        choices=READINESS_VARLOCK_ENV_MODES,
         default="managed",
-        help="Varlock env source used by configure/check operations (default: managed).",
+        help="Varlock env source for readiness checks (default: managed).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     configure_parser = subparsers.add_parser("configure")
@@ -696,7 +698,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for env-contract management."""
     args = parse_args(argv)
-    with use_varlock_env_mode(str(args.env_mode), default="managed"):
+    env_mode = cast(VarlockEnvMode, str(args.env_mode))
+    with use_varlock_env_mode(env_mode):
         payload = configure_varlock_env(
             resolve_asset_root_argument(args, command_name="clawops varlock-env"),
             check_only=args.command == "check",
