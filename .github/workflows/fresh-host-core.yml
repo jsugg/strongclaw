@@ -72,6 +72,8 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare Linux fresh-host context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Ensure Linux fresh-host Docker images
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - name: Run Linux fresh-host scenario
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect Linux fresh-host diagnostics

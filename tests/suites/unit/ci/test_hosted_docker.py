@@ -184,11 +184,11 @@ def test_resolve_compose_images_uses_first_seen_order(
     assert images == ["postgres:16", "qdrant:v1", "browserlab:latest"]
 
 
-def test_ensure_images_noops_when_context_disables_image_warming(
+def test_ensure_images_warms_linux_scenario_images(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Image ensure should no-op for scenarios that do not warm images."""
+    """Linux fresh-host contexts should prewarm compose images before scenario execution."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -203,11 +203,78 @@ def test_ensure_images_noops_when_context_disables_image_warming(
         github_env_file=github_env,
     )
 
+    pulled_payload: dict[str, object] = {}
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del env
+        assert capture_output is True
+        assert timeout_seconds == 120
+        assert cwd == workspace.resolve()
+        return subprocess.CompletedProcess(command, 0, stdout="postgres:16\nbrowserlab:latest\n")
+
+    list_calls = {"count": 0}
+
+    def fake_list_local_images(images: list[str]) -> list[str]:
+        list_calls["count"] += 1
+        if list_calls["count"] == 1:
+            return []
+        return list(images)
+
+    def fake_pull_images(
+        images: list[str],
+        *,
+        parallelism: int,
+        max_attempts: int,
+        pull_timeout_seconds: int = hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
+        recovery_cwd: Path | None = None,
+        recovery_env: dict[str, str] | None = None,
+    ) -> hosted_docker.PullReport:
+        pulled_payload["images"] = list(images)
+        pulled_payload["parallelism"] = parallelism
+        pulled_payload["max_attempts"] = max_attempts
+        pulled_payload["pull_timeout_seconds"] = pull_timeout_seconds
+        pulled_payload["recovery_cwd"] = recovery_cwd
+        pulled_payload["recovery_env"] = dict(recovery_env or {})
+        return hosted_docker.PullReport(
+            exit_code=0,
+            pulled_images=list(images),
+            failed_images=[],
+            attempt_count=1,
+            retried_images=[],
+        )
+
+    test_context.patch.patch_object(hosted_docker_images, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(
+        hosted_docker_images, "list_local_images", new=fake_list_local_images
+    )
+    test_context.patch.patch_object(hosted_docker_images, "pull_images", new=fake_pull_images)
+
     report = hosted_docker.ensure_images(Path(context.context_path))
 
-    assert report.images == []
-    assert report.pull_attempt_count == 0
-    assert context.image_report_path is None
+    assert report.images == ["postgres:16", "browserlab:latest"]
+    assert report.missing_before_pull == ["postgres:16", "browserlab:latest"]
+    assert report.pull_attempt_count == 1
+    assert report.missing_after_pull == []
+    assert pulled_payload["images"] == ["postgres:16", "browserlab:latest"]
+    assert pulled_payload["parallelism"] == context.docker_pull_parallelism
+    assert pulled_payload["max_attempts"] == context.docker_pull_max_attempts
+    assert (
+        pulled_payload["pull_timeout_seconds"] == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
+    )
+    assert pulled_payload["recovery_cwd"] == workspace.resolve()
+    recovery_env = cast(dict[str, str], pulled_payload["recovery_env"])
+    assert recovery_env["NEO4J_PASSWORD"].strip() != ""
+    assert recovery_env["LITELLM_DB_PASSWORD"].strip() != ""
+    assert recovery_env["STRONGCLAW_COMPOSE_STATE_DIR"].endswith("/compose-prepull")
+    assert context.image_report_path is not None
+    assert Path(context.image_report_path).is_file()
 
 
 def test_ensure_images_inherits_repo_local_varlock_assignments(
