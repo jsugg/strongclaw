@@ -67,6 +67,66 @@ def test_pull_images_retries_with_reduced_parallelism(
     assert set(report.pulled_images) == {"postgres:16", "qdrant:v1"}
 
 
+def test_pull_images_waits_for_daemon_recovery_on_connectivity_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image pulls should probe daemon recovery after connectivity failures."""
+    attempts: dict[str, int] = {"postgres:16": 0}
+    recovery_probes: list[tuple[Path, dict[str, str], int]] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        assert timeout_seconds == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
+        attempts[image] += 1
+        if attempts[image] == 1:
+            return (
+                image,
+                1,
+                0.1,
+                (
+                    "Error response from daemon: Unavailable: connection error: "
+                    'desc = "transport: Error while dialing: dial unix '
+                    '/run/containerd/containerd.sock: connect: connection refused"'
+                ),
+            )
+        return image, 0, 0.1, ""
+
+    def fake_wait_for_docker_ready(
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        max_attempts: int = 60,
+    ) -> None:
+        recovery_probes.append((cwd, dict(env), max_attempts))
+
+    monkeypatch.setattr(hosted_docker_images, "pull_one_image", fake_pull_one_image)
+    monkeypatch.setattr(hosted_docker_images, "wait_for_docker_ready", fake_wait_for_docker_ready)
+    monkeypatch.setattr(hosted_docker_images.time, "sleep", _sleep)
+
+    report = hosted_docker.pull_images(
+        ["postgres:16"],
+        parallelism=2,
+        max_attempts=3,
+        recovery_cwd=tmp_path,
+        recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+    )
+
+    assert report.exit_code == 0
+    assert report.attempt_count == 2
+    assert recovery_probes == [(tmp_path, {"DOCKER_HOST": "unix:///tmp/docker.sock"}, 90)]
+
+
+def test_pull_images_requires_recovery_cwd_and_env_together() -> None:
+    """Pull recovery wiring should reject partial recovery configuration."""
+    with pytest.raises(fresh_host.FreshHostError, match="recovery_cwd and recovery_env"):
+        hosted_docker.pull_images(
+            ["postgres:16"],
+            parallelism=1,
+            max_attempts=1,
+            recovery_cwd=Path("/tmp"),
+        )
+
+
 def test_pull_one_image_reports_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Timed-out pulls should return a structured failure result."""
 
