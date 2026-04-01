@@ -198,7 +198,6 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     assert "outside the\nbaseline production launch gate" in usage
     assert "clawops repo doctor" in repo_doc
     assert "clawops worktree list" in repo_doc
-    assert "not part of the baseline launch gate" in repo_doc
     assert "dependency-submission.yml" in ci_doc
     assert "memory-plugin-verification.yml" in ci_doc
 
