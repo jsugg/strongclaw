@@ -277,10 +277,6 @@ Validate the repo layout that ACP workers and rendered overlays expect:
 clawops repo doctor
 ```
 
-This contract is operator/devflow infrastructure and stays outside the
-baseline production launch gate unless your rollout explicitly requires
-repo/worktree automation.
-
 List, create, and prune managed git worktrees under `repo/worktrees`:
 
 ```bash
