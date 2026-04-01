@@ -21,7 +21,7 @@ def test_resolve_varlock_env_mode_defaults_to_auto() -> None:
 
 
 def test_resolve_varlock_env_mode_rejects_unknown_value() -> None:
-    with pytest.raises(CommandError, match="invalid OPENCLAW_VARLOCK_ENV_MODE value"):
+    with pytest.raises(CommandError, match="Unsupported Varlock env mode"):
         runtime.resolve_varlock_env_mode(environ={"OPENCLAW_VARLOCK_ENV_MODE": "invalid"})
 
 
@@ -52,7 +52,7 @@ def test_varlock_env_dir_legacy_mode_requires_legacy_contract(tmp_path: pathlib.
     repo_root = tmp_path / "assets"
     (repo_root / "platform" / "configs" / "varlock").mkdir(parents=True, exist_ok=True)
 
-    with pytest.raises(CommandError, match="Legacy Varlock env-mode requested"):
+    with pytest.raises(CommandError, match="Legacy Varlock env directory not found"):
         runtime.varlock_env_dir(repo_root, env_mode="legacy")
 
 

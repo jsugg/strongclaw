@@ -90,8 +90,11 @@ LOCAL_BASELINE_SANITIZED_ENV_KEYS: Final[tuple[str, ...]] = (
     "AWS_SESSION_TOKEN",
 )
 VarlockEnvMode = Literal["auto", "managed", "legacy"]
+VARLOCK_ENV_MODE_ENV = "STRONGCLAW_VARLOCK_ENV_MODE"
 VARLOCK_ENV_MODE_ENV_KEY = "OPENCLAW_VARLOCK_ENV_MODE"
 VARLOCK_ENV_MODE_AUTO: Final[VarlockEnvMode] = "auto"
+VARLOCK_ENV_MODE_MANAGED: Final[VarlockEnvMode] = "managed"
+VARLOCK_ENV_MODE_LEGACY: Final[VarlockEnvMode] = "legacy"
 READINESS_VARLOCK_ENV_MODES: Final[tuple[str, str]] = ("managed", "legacy")
 SUPPORTED_VARLOCK_ENV_MODES: Final[tuple[str, ...]] = (
     VARLOCK_ENV_MODE_AUTO,
@@ -493,42 +496,61 @@ def value_is_effective(value: str | None) -> bool:
     return not is_placeholder_value(value)
 
 
-def resolve_varlock_env_mode(*, environ: Mapping[str, str] | None = None) -> VarlockEnvMode:
-    """Resolve the active Varlock env-mode selection."""
-    env = os.environ if environ is None else environ
-    candidate = (env.get(VARLOCK_ENV_MODE_ENV_KEY) or VARLOCK_ENV_MODE_AUTO).strip().lower()
+def normalize_varlock_env_mode(
+    value: str | None,
+    *,
+    default: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
+) -> VarlockEnvMode:
+    """Normalize one raw env-mode value and enforce the supported contract."""
+    candidate = (value or default).strip().lower()
     if candidate == "auto":
         return "auto"
     if candidate == "managed":
         return "managed"
     if candidate == "legacy":
         return "legacy"
-    else:
-        raise CommandError(
-            f"invalid {VARLOCK_ENV_MODE_ENV_KEY} value '{candidate}'; "
-            f"use one of: {', '.join(SUPPORTED_VARLOCK_ENV_MODES)}"
-        )
+    raise CommandError(
+        f"Unsupported Varlock env mode '{candidate}'; "
+        f"use one of: {', '.join(SUPPORTED_VARLOCK_ENV_MODES)}"
+    )
+
+
+def resolve_varlock_env_mode(*, environ: Mapping[str, str] | None = None) -> VarlockEnvMode:
+    """Resolve the active Varlock env-mode selection."""
+    env = os.environ if environ is None else environ
+    return normalize_varlock_env_mode(
+        env.get(VARLOCK_ENV_MODE_ENV) or env.get(VARLOCK_ENV_MODE_ENV_KEY),
+        default=VARLOCK_ENV_MODE_AUTO,
+    )
 
 
 @contextmanager
-def use_varlock_env_mode(env_mode: VarlockEnvMode) -> Iterator[None]:
+def use_varlock_env_mode(
+    env_mode: VarlockEnvMode,
+    *,
+    default: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
+) -> Iterator[None]:
     """Temporarily set the process-level Varlock env-mode contract."""
-    if env_mode not in SUPPORTED_VARLOCK_ENV_MODES:
-        raise CommandError(
-            f"invalid env mode '{env_mode}'; use one of: {', '.join(SUPPORTED_VARLOCK_ENV_MODES)}"
-        )
-    previous = os.environ.get(VARLOCK_ENV_MODE_ENV_KEY)
-    if env_mode == VARLOCK_ENV_MODE_AUTO:
+    normalized_mode = normalize_varlock_env_mode(env_mode, default=default)
+    previous_primary = os.environ.get(VARLOCK_ENV_MODE_ENV)
+    previous_alias = os.environ.get(VARLOCK_ENV_MODE_ENV_KEY)
+    if normalized_mode == VARLOCK_ENV_MODE_AUTO:
+        os.environ.pop(VARLOCK_ENV_MODE_ENV, None)
         os.environ.pop(VARLOCK_ENV_MODE_ENV_KEY, None)
     else:
-        os.environ[VARLOCK_ENV_MODE_ENV_KEY] = env_mode
+        os.environ[VARLOCK_ENV_MODE_ENV] = normalized_mode
+        os.environ[VARLOCK_ENV_MODE_ENV_KEY] = normalized_mode
     try:
         yield
     finally:
-        if previous is None:
+        if previous_primary is None:
+            os.environ.pop(VARLOCK_ENV_MODE_ENV, None)
+        else:
+            os.environ[VARLOCK_ENV_MODE_ENV] = previous_primary
+        if previous_alias is None:
             os.environ.pop(VARLOCK_ENV_MODE_ENV_KEY, None)
         else:
-            os.environ[VARLOCK_ENV_MODE_ENV_KEY] = previous
+            os.environ[VARLOCK_ENV_MODE_ENV_KEY] = previous_alias
 
 
 def generate_secret_value() -> str:
@@ -562,9 +584,7 @@ def varlock_env_dir(
             legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
         ).exists():
             return legacy_dir
-        raise CommandError(
-            f"Legacy Varlock env-mode requested, but no legacy env contract exists at {legacy_dir}."
-        )
+        raise CommandError(f"Legacy Varlock env directory not found: {legacy_dir}.")
     if layout.uses_isolated_runtime:
         materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
         return managed_dir
