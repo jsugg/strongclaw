@@ -472,6 +472,82 @@ def test_doctor_cli_skip_runtime_marks_payload_as_degraded(
     assert payload["counts"]["skipped"] == 0
 
 
+def test_doctor_cli_full_runtime_includes_memory_search_check(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Full runtime doctor runs should validate memory search readiness."""
+    asset_root = make_asset_root(tmp_path / "assets")
+
+    class _OkResult:
+        ok = True
+
+    class _OkReport:
+        ok = True
+
+        def to_dict(self) -> dict[str, object]:
+            return {"ok": True}
+
+    openclaw_calls: list[list[str]] = []
+
+    def _configure_varlock_env(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        non_interactive: bool,
+    ) -> dict[str, object]:
+        del repo_root, check_only, non_interactive
+        return {"ok": True}
+
+    def _doctor_host_payload(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        return {"ok": True}
+
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
+        del repo_root, probe
+
+    def _run_openclaw_command(
+        repo_root: pathlib.Path,
+        arguments: list[str],
+        **kwargs: object,
+    ) -> _OkResult:
+        del repo_root, kwargs
+        openclaw_calls.append(arguments)
+        return _OkResult()
+
+    def _verify_sidecars(**kwargs: object) -> _OkReport:
+        del kwargs
+        return _OkReport()
+
+    def _verify_observability(**kwargs: object) -> _OkReport:
+        del kwargs
+        return _OkReport()
+
+    def _verify_channels(**kwargs: object) -> _OkReport:
+        del kwargs
+        return _OkReport()
+
+    monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
+    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
+    monkeypatch.setattr(setup_cli, "_require_model_check_ok", _require_model_check_ok)
+    monkeypatch.setattr(setup_cli, "run_openclaw_command", _run_openclaw_command)
+    monkeypatch.setattr(setup_cli, "verify_sidecars", _verify_sidecars)
+    monkeypatch.setattr(setup_cli, "verify_observability", _verify_observability)
+    monkeypatch.setattr(setup_cli, "verify_channels", _verify_channels)
+
+    exit_code = setup_cli.doctor_main(["--asset-root", str(asset_root)])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "pass"
+    assert ["memory", "search", "--query", "ClawOps", "--max-results", "1"] in openclaw_calls
+
+
 def test_setup_cli_can_request_degraded_baseline_verification(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,

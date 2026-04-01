@@ -468,6 +468,17 @@ def doctor_main(argv: list[str] | None = None) -> int:
                 repo_root, ["memory", "status", "--deep"], timeout_seconds=300, check=True
             ),
         )
+        _run_check(
+            "OpenClaw memory search",
+            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory search --query ClawOps --max-results 1",
+            checks,
+            lambda: run_openclaw_command(
+                repo_root,
+                ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+                timeout_seconds=300,
+                check=True,
+            ),
+        )
     sidecars_report = verify_sidecars(
         compose_path=resolve_asset_path(
             "platform/compose/docker-compose.aux-stack.yaml",
