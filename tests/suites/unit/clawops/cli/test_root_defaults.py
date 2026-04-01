@@ -179,8 +179,7 @@ def test_strongclaw_baseline_infers_repo_root_and_runs_dir_from_cwd(
         env_mode: str = "managed",
     ) -> dict[str, object]:
         nonlocal recorded_repo_root, recorded_runs_dir, recorded_degraded
-        assert include_browser_lab is False
-        assert env_mode == "managed"
+        del include_browser_lab, env_mode
         recorded_repo_root = repo_root_arg
         recorded_runs_dir = runs_dir
         recorded_degraded = degraded

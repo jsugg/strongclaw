@@ -1,6 +1,6 @@
 # Browser Lab
 
-Browser automation is not part of the baseline platform.
+Browser automation is optional and excluded from baseline checks unless explicitly requested.
 
 ## Requirements
 
@@ -29,19 +29,16 @@ Verify the expected local-only bindings after startup:
 docker compose -f platform/compose/docker-compose.browser-lab.yaml ps
 ```
 
-Use the first-class browser-lab verifier for readiness evidence:
+Use first-class browser-lab verification commands when this surface is enabled:
 
 ```bash
 clawops verify-platform browser-lab
-```
-
-When browser-lab is part of rollout readiness, include it in baseline checks:
-
-```bash
 clawops baseline verify --include-browser-lab
 ```
 
-Browser-lab stays outside baseline verification by default unless that flag is set.
+`clawops baseline verify` keeps browser-lab excluded by default. Add
+`--include-browser-lab` only when rollout requires browser automation readiness
+evidence.
 
 ## Included artifacts
 

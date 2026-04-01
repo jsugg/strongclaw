@@ -395,7 +395,7 @@ Reach the gateway over SSH tunnel only:
 ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 ```
 
-Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator workstation. Browser-lab remains optional and is not covered by `clawops baseline verify` or `clawops verify-platform`. After startup, verify the local-only posture directly from the compose stack:
+Do **not** tunnel browser-lab ports such as `9222` or `3128` to an operator workstation. Browser-lab remains optional and is excluded from baseline checks by default. When rollout enables browser automation, run `clawops verify-platform browser-lab` and (optionally) `clawops baseline verify --include-browser-lab`, then verify the local-only posture directly from the compose stack:
 
 ```bash
 docker compose -f platform/compose/docker-compose.browser-lab.yaml ps

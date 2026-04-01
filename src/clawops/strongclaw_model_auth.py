@@ -13,6 +13,7 @@ from typing import cast
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.strongclaw_runtime import (
     CommandError,
+    VarlockEnvMode,
     load_env_assignments,
     load_openclaw_config,
     resolve_openclaw_config_path,
@@ -20,7 +21,6 @@ from clawops.strongclaw_runtime import (
     run_command_inherited,
     run_openclaw_command,
     run_varlock_command,
-    use_varlock_env_mode,
     value_is_effective,
     varlock_available,
     varlock_env_dir,
@@ -62,15 +62,20 @@ def _extract_json_document(output: str) -> object | None:
     return None
 
 
-def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
+def _effective_env_assignments(
+    repo_root: pathlib.Path,
+    *,
+    env_mode: VarlockEnvMode = "managed",
+) -> dict[str, str]:
     """Load the effective env contract, preferring a Varlock snapshot when available."""
-    local_values = load_env_assignments(varlock_local_env_file(repo_root))
-    if not varlock_available() or not varlock_env_dir(repo_root).is_dir():
+    local_values = load_env_assignments(varlock_local_env_file(repo_root, env_mode=env_mode))
+    if not varlock_available() or not varlock_env_dir(repo_root, env_mode=env_mode).is_dir():
         return local_values
     snapshot = run_varlock_command(
         repo_root,
         ["env"],
         timeout_seconds=15,
+        env_mode=env_mode,
     )
     if not snapshot.ok:
         return local_values
@@ -107,9 +112,14 @@ def _extract_agent_ids(payload: object) -> list[str]:
     return []
 
 
-def _list_agent_ids(repo_root: pathlib.Path) -> list[str]:
+def _list_agent_ids(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) -> list[str]:
     """Return the configured OpenClaw agent ids."""
-    result = run_openclaw_command(repo_root, ["agents", "list", "--json"], timeout_seconds=30)
+    result = run_openclaw_command(
+        repo_root,
+        ["agents", "list", "--json"],
+        timeout_seconds=30,
+        env_mode=env_mode,
+    )
     if not result.ok:
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw agents list failed"
         raise CommandError(detail, result=result)
@@ -122,22 +132,26 @@ def _list_agent_ids(repo_root: pathlib.Path) -> list[str]:
     return agent_ids
 
 
-def _models_status_supported(repo_root: pathlib.Path) -> bool:
+def _models_status_supported(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) -> bool:
     """Return whether `openclaw models status` is supported."""
     result = run_openclaw_command(
         repo_root,
         ["models", "status", "--help"],
         timeout_seconds=10,
+        env_mode=env_mode,
     )
     return result.ok
 
 
-def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> bool:
+def _agent_models_available_via_list(
+    repo_root: pathlib.Path, agent_id: str, *, env_mode: VarlockEnvMode
+) -> bool:
     """Return whether one agent has an available model according to list JSON."""
     result = run_openclaw_command(
         repo_root,
         ["models", "--agent", agent_id, "list", "--json"],
         timeout_seconds=30,
+        env_mode=env_mode,
     )
     if not result.ok:
         return False
@@ -163,12 +177,18 @@ def _agent_model_status_ok(
     *,
     probe: bool,
     probe_max_tokens: int,
+    env_mode: VarlockEnvMode,
 ) -> bool:
     """Return whether one agent passes the status check."""
     command = ["models", "status", "--agent", agent_id, "--check"]
     if probe:
         command.extend(["--probe", "--probe-max-tokens", str(probe_max_tokens)])
-    result = run_openclaw_command(repo_root, command, timeout_seconds=60)
+    result = run_openclaw_command(
+        repo_root,
+        command,
+        timeout_seconds=60,
+        env_mode=env_mode,
+    )
     return result.ok
 
 
@@ -177,11 +197,12 @@ def _all_agents_have_models(
     *,
     probe: bool,
     probe_max_tokens: int,
+    env_mode: VarlockEnvMode,
 ) -> tuple[bool, list[str]]:
     """Return whether every configured agent has a usable model."""
-    agent_ids = _list_agent_ids(repo_root)
+    agent_ids = _list_agent_ids(repo_root, env_mode=env_mode)
     failures: list[str] = []
-    use_status = _models_status_supported(repo_root)
+    use_status = _models_status_supported(repo_root, env_mode=env_mode)
     for agent_id in agent_ids:
         ok = (
             _agent_model_status_ok(
@@ -189,9 +210,10 @@ def _all_agents_have_models(
                 agent_id,
                 probe=probe,
                 probe_max_tokens=probe_max_tokens,
+                env_mode=env_mode,
             )
             if use_status
-            else _agent_models_available_via_list(repo_root, agent_id)
+            else _agent_models_available_via_list(repo_root, agent_id, env_mode=env_mode)
         )
         if not ok:
             failures.append(agent_id)
@@ -324,14 +346,14 @@ def _interactive_prompt_allowed() -> bool:
     return os.isatty(0) and os.isatty(1)
 
 
-def _guidance_text(repo_root: pathlib.Path) -> str:
+def _guidance_text(repo_root: pathlib.Path, *, env_mode: VarlockEnvMode) -> str:
     """Return the operator remediation guidance."""
     return (
         "OpenClaw does not have a usable assistant model yet.\n\n"
         "Supported setup paths:\n"
         "- Guided wizard: rerun `clawops model-auth ensure` in a terminal.\n"
         "- Direct provider auth: `openclaw models auth login --provider <id>`.\n"
-        f"- Env-driven: set provider auth in {varlock_local_env_file(repo_root)} and optionally:\n"
+        f"- Env-driven: set provider auth in {varlock_local_env_file(repo_root, env_mode=env_mode)} and optionally:\n"
         "  - OPENCLAW_DEFAULT_MODEL=openai/gpt-5.4\n"
         "  - OPENCLAW_MODEL_FALLBACKS=anthropic/claude-opus-4-6,zai/glm-5\n"
         "  - OLLAMA_API_KEY=ollama-local with OPENCLAW_OLLAMA_MODEL=<pulled-model-with-at-least-16000-context>\n"
@@ -345,9 +367,10 @@ def ensure_model_auth(
     probe: bool,
     probe_max_tokens: int = DEFAULT_PROBE_MAX_TOKENS,
     allow_prompt: bool = True,
+    env_mode: VarlockEnvMode = "managed",
 ) -> dict[str, object]:
     """Ensure or validate that OpenClaw model auth is usable."""
-    config_path = resolve_openclaw_config_path(repo_root)
+    config_path = resolve_openclaw_config_path(repo_root, env_mode=env_mode)
     if not config_path.exists():
         raise CommandError(f"Rendered OpenClaw config not found at {config_path}.")
     setup_mode = os.environ.get("OPENCLAW_MODEL_SETUP_MODE", "auto").strip() or "auto"
@@ -359,6 +382,7 @@ def ensure_model_auth(
         repo_root,
         probe=probe,
         probe_max_tokens=probe_max_tokens,
+        env_mode=env_mode,
     )
     if ready:
         return {"ok": True, "checkedOnly": check_only, "configured": False, "missingAgents": []}
@@ -368,15 +392,16 @@ def ensure_model_auth(
             "checkedOnly": True,
             "configured": False,
             "missingAgents": missing_agents,
-            "guidance": _guidance_text(repo_root),
+            "guidance": _guidance_text(repo_root, env_mode=env_mode),
         }
-    model_chain = _build_model_chain(_effective_env_assignments(repo_root))
+    model_chain = _build_model_chain(_effective_env_assignments(repo_root, env_mode=env_mode))
     if model_chain:
         _apply_model_chain(repo_root, model_chain)
         ready, missing_agents = _all_agents_have_models(
             repo_root,
             probe=probe,
             probe_max_tokens=probe_max_tokens,
+            env_mode=env_mode,
         )
         if ready:
             return {
@@ -388,7 +413,11 @@ def ensure_model_auth(
             }
     if allow_prompt and setup_mode in {"auto", "prompt"} and _interactive_prompt_allowed():
         returncode = run_command_inherited(
-            wrap_command_with_varlock(repo_root, ["openclaw", "configure", "--section", "model"]),
+            wrap_command_with_varlock(
+                repo_root,
+                ["openclaw", "configure", "--section", "model"],
+                env_mode=env_mode,
+            ),
             cwd=repo_root,
             timeout_seconds=1800,
         )
@@ -398,6 +427,7 @@ def ensure_model_auth(
             repo_root,
             probe=probe,
             probe_max_tokens=probe_max_tokens,
+            env_mode=env_mode,
         )
         if ready:
             return {
@@ -412,7 +442,7 @@ def ensure_model_auth(
         "checkedOnly": False,
         "configured": False,
         "missingAgents": missing_agents,
-        "guidance": _guidance_text(repo_root),
+        "guidance": _guidance_text(repo_root, env_mode=env_mode),
     }
 
 
@@ -422,9 +452,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_asset_root_argument(parser)
     parser.add_argument(
         "--env-mode",
-        choices=("managed", "legacy"),
+        choices=("managed", "legacy", "auto"),
         default="managed",
-        help="Varlock env source used for readiness checks (default: managed).",
+        help=(
+            "Varlock env source for readiness checks: managed (default), legacy, or auto-fallback."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -441,12 +473,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for model-auth readiness."""
     args = parse_args(argv)
-    with use_varlock_env_mode(str(args.env_mode), default="managed"):
-        payload = ensure_model_auth(
-            resolve_asset_root_argument(args, command_name="clawops model-auth"),
-            check_only=args.command == "check",
-            probe=bool(args.probe),
-            probe_max_tokens=int(args.probe_max_tokens),
-        )
+    payload = ensure_model_auth(
+        resolve_asset_root_argument(args, command_name="clawops model-auth"),
+        check_only=args.command == "check",
+        probe=bool(args.probe),
+        probe_max_tokens=int(args.probe_max_tokens),
+        env_mode=cast(VarlockEnvMode, args.env_mode),
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if bool(payload.get("ok")) else 1

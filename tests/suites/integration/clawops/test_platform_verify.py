@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import pathlib
+import socket
 
 import pytest
 
 from clawops.common import load_yaml, write_text, write_yaml
-from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
+from clawops.platform_verify import (
+    verify_browser_lab,
+    verify_channels,
+    verify_observability,
+    verify_sidecars,
+)
 from tests.utils.helpers.network import Endpoint
 from tests.utils.helpers.network_runtime import NetworkRuntime
 from tests.utils.helpers.repo import REPO_ROOT
@@ -95,6 +101,23 @@ def _write_observability_inputs(
                         _port_mapping(metrics, 9464),
                     ]
                 }
+            }
+        },
+    )
+
+
+def _write_browser_lab_compose(
+    compose_path: pathlib.Path,
+    *,
+    proxy: Endpoint,
+    playwright: Endpoint,
+) -> None:
+    write_yaml(
+        compose_path,
+        {
+            "services": {
+                "browserlab-proxy": {"ports": [_port_mapping(proxy, 3128)]},
+                "browserlab-playwright": {"ports": [_port_mapping(playwright, 9222)]},
             }
         },
     )
@@ -206,6 +229,45 @@ def test_verify_observability_accepts_empty_metrics_body_when_endpoint_is_reacha
         skip_runtime=False,
     )
     assert report.ok is True
+
+
+def test_verify_browser_lab_supports_runtime_probes(
+    tmp_path: pathlib.Path,
+    network_runtime: NetworkRuntime,
+) -> None:
+    compose_path = tmp_path / "browser-lab-compose.yaml"
+    _write_browser_lab_compose(
+        compose_path,
+        proxy=network_runtime.tcp_listener(),
+        playwright=network_runtime.tcp_listener(),
+    )
+
+    report = verify_browser_lab(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is True
+
+
+def test_verify_browser_lab_reports_runtime_disconnects(
+    tmp_path: pathlib.Path,
+    network_runtime: NetworkRuntime,
+) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_proxy = ("127.0.0.1", int(probe.getsockname()[1]))
+
+    compose_path = tmp_path / "browser-lab-compose.yaml"
+    _write_browser_lab_compose(
+        compose_path,
+        proxy=closed_proxy,
+        playwright=network_runtime.tcp_listener(),
+    )
+
+    report = verify_browser_lab(compose_path=compose_path, skip_runtime=False)
+    assert report.ok is False
+    runtime_check = next(
+        check for check in report.checks if check.name == "browserlab-proxy-runtime"
+    )
+    assert runtime_check.ok is False
+    assert "tcp reachability failed" in runtime_check.message
 
 
 def test_verify_channels_matches_repo_docs_and_guidance() -> None:
