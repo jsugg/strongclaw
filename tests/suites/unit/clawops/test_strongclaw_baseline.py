@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Sequence
-from typing import cast
+from typing import Mapping, cast
 
 import pytest
 
@@ -59,6 +59,7 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
     commands: list[list[str]] = []
+    captured_env: dict[str, str] | None = None
 
     def _require_openclaw(message: str) -> None:
         del message
@@ -90,11 +91,28 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         command: Sequence[str],
         *,
         cwd: pathlib.Path | None = None,
+        env: Mapping[str, str] | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert cwd == repo_root
+        assert env is not None
+        nonlocal captured_env
+        captured_env = dict(env)
         commands.append([str(part) for part in command])
+        return _FakeCommandResult(ok=True)
+
+    def _run_managed_clawops_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del timeout_seconds
+        assert repo == repo_root
+        assert cwd == repo_root
+        commands.append(["clawops", *[str(part) for part in arguments]])
         return _FakeCommandResult(ok=True)
 
     def _run_harness_smoke(repo: pathlib.Path, runs_dir: pathlib.Path) -> None:
@@ -124,6 +142,11 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     )
     test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
     test_context.patch.patch_object(
+        strongclaw_baseline,
+        "run_managed_clawops_command",
+        new=_run_managed_clawops_command,
+    )
+    test_context.patch.patch_object(
         strongclaw_baseline, "run_harness_smoke", new=_run_harness_smoke
     )
 
@@ -135,6 +158,11 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     assert "--group" in pytest_command
     assert "dev" in pytest_command
     assert "--extra" not in pytest_command
+    assert captured_env is not None
+    assert pathlib.Path(captured_env["HOME"]).parent == repo_root / ".tmp"
+    assert captured_env["XDG_CONFIG_HOME"] == f"{captured_env['HOME']}/.config"
+    assert "VARLOCK_LOCAL_ENV_FILE" not in captured_env
+    assert "STRONGCLAW_RUNTIME_ROOT" not in captured_env
 
 
 def test_verify_baseline_surfaces_repo_test_failure_detail(
@@ -175,9 +203,10 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
         command: Sequence[str],
         *,
         cwd: pathlib.Path | None = None,
+        env: Mapping[str, str] | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
-        del cwd, timeout_seconds
+        del cwd, env, timeout_seconds
         if "pytest" in command:
             return _FakeCommandResult(ok=False, stderr="repo tests failed")
         return _FakeCommandResult(ok=True)
@@ -248,20 +277,32 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
         assert repo == repo_root
         return {"ok": True, "probe": probe}
 
-    def _managed_clawops_command(_repo: pathlib.Path, *arguments: str) -> list[str]:
-        return ["clawops", *arguments]
-
-    def _run_command(
-        command: Sequence[str],
+    def _run_managed_clawops_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert cwd == repo_root
-        commands.append([str(part) for part in command])
-        if "status" in command:
+        assert repo == repo_root
+        command = ["clawops", *[str(part) for part in arguments]]
+        commands.append(command)
+        if "status" in arguments:
             return _FakeCommandResult(ok=True, stdout="{}")
+        return _FakeCommandResult(ok=True)
+
+    def _run_command(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del env, timeout_seconds
+        assert cwd == repo_root
+        commands.append([str(part) for part in command])
         return _FakeCommandResult(ok=True)
 
     test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
@@ -287,8 +328,8 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
     )
     test_context.patch.patch_object(
         strongclaw_baseline,
-        "managed_clawops_command",
-        new=_managed_clawops_command,
+        "run_managed_clawops_command",
+        new=_run_managed_clawops_command,
     )
     test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
     test_context.patch.patch_object(
@@ -348,20 +389,32 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
         assert repo == repo_root
         return {"ok": True, "probe": probe}
 
-    def _managed_clawops_command(_repo: pathlib.Path, *arguments: str) -> list[str]:
-        return ["clawops", *arguments]
-
-    def _run_command(
-        command: Sequence[str],
+    def _run_managed_clawops_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert cwd == repo_root
-        commands.append([str(part) for part in command])
-        if "status" in command:
+        assert repo == repo_root
+        command = ["clawops", *[str(part) for part in arguments]]
+        commands.append(command)
+        if "status" in arguments:
             return _FakeCommandResult(ok=True, stdout="{}")
+        return _FakeCommandResult(ok=True)
+
+    def _run_command(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del env, timeout_seconds
+        assert cwd == repo_root
+        commands.append([str(part) for part in command])
         return _FakeCommandResult(ok=True)
 
     test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
@@ -387,8 +440,8 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
     )
     test_context.patch.patch_object(
         strongclaw_baseline,
-        "managed_clawops_command",
-        new=_managed_clawops_command,
+        "run_managed_clawops_command",
+        new=_run_managed_clawops_command,
     )
     test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
     test_context.patch.patch_object(

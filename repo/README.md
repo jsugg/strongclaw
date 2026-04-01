@@ -6,6 +6,8 @@ Populate this directory with:
 - `worktrees/` — per-task git worktrees created by helper scripts
 
 This repository intentionally does not vendor upstream source.
+It is an operator/development workspace, not a requirement for the baseline
+production deployment or launch-readiness checklist.
 
 Validate the layout before enabling ACP workers or path-sensitive overlays:
 

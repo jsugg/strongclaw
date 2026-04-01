@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
+import tempfile
 
 from clawops.cli_roots import add_source_root_argument, resolve_source_root_argument
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_model_auth import ensure_model_auth
 from clawops.strongclaw_runtime import (
     CommandError,
-    managed_clawops_command,
     rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_uses_hypermemory,
     require_openclaw,
     resolve_openclaw_config_path,
     run_command,
+    run_managed_clawops_command,
     run_openclaw_command,
 )
 
@@ -29,15 +31,23 @@ def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
         ("policy_regressions.yaml", "policy.jsonl"),
     )
     for suite_name, output_name in suites:
-        command = managed_clawops_command(
+        result = run_managed_clawops_command(
             repo_root,
-            "harness",
-            "--suite",
-            str(resolve_asset_path(f"platform/configs/harness/{suite_name}", repo_root=repo_root)),
-            "--output",
-            str(runs_dir / output_name),
+            [
+                "harness",
+                "--suite",
+                str(
+                    resolve_asset_path(
+                        f"platform/configs/harness/{suite_name}",
+                        repo_root=repo_root,
+                    )
+                ),
+                "--output",
+                str(runs_dir / output_name),
+            ],
+            cwd=repo_root,
+            timeout_seconds=1800,
         )
-        result = run_command(command, cwd=repo_root, timeout_seconds=1800)
         if not result.ok:
             detail = result.stderr.strip() or result.stdout.strip() or "harness smoke failed"
             raise CommandError(detail, result=None)
@@ -96,15 +106,15 @@ def verify_baseline(
             raise CommandError(
                 "strongclaw-hypermemory is enabled, but its configPath is missing or unreadable."
             )
-        status_result = run_command(
-            managed_clawops_command(
-                repo_root,
+        status_result = run_managed_clawops_command(
+            repo_root,
+            [
                 "hypermemory",
                 "--config",
                 str(hypermemory_config_path),
                 "status",
                 "--json",
-            ),
+            ],
             cwd=repo_root,
             timeout_seconds=300,
         )
@@ -120,15 +130,15 @@ def verify_baseline(
             hypermemory_payload is not None
             and hypermemory_payload.get("backendActive") == "qdrant_sparse_dense_hybrid"
         ):
-            verify_result = run_command(
-                managed_clawops_command(
-                    repo_root,
+            verify_result = run_managed_clawops_command(
+                repo_root,
+                [
                     "hypermemory",
                     "--config",
                     str(hypermemory_config_path),
                     "verify",
                     "--json",
-                ),
+                ],
                 cwd=repo_root,
                 timeout_seconds=300,
             )
@@ -140,22 +150,45 @@ def verify_baseline(
                 )
                 raise CommandError(detail, result=None)
 
-    tests_result = run_command(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(layout.source_checkout_root),
-            "--locked",
-            "--group",
-            "dev",
-            "pytest",
-            "-q",
-            str(layout.source_checkout_root / "tests"),
-        ],
-        cwd=layout.source_checkout_root,
-        timeout_seconds=3600,
-    )
+    pytest_home_parent = repo_root / ".tmp"
+    pytest_home_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="baseline-pytest-home-",
+        dir=pytest_home_parent,
+    ) as isolated_home_dir:
+        isolated_home = pathlib.Path(isolated_home_dir)
+        pytest_env = dict(os.environ)
+        pytest_env["HOME"] = str(isolated_home)
+        pytest_env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
+        pytest_env["XDG_DATA_HOME"] = str(isolated_home / ".local" / "share")
+        pytest_env["XDG_STATE_HOME"] = str(isolated_home / ".local" / "state")
+        for key in (
+            "OPENCLAW_HOME",
+            "OPENCLAW_STATE_DIR",
+            "OPENCLAW_CONFIG_PATH",
+            "OPENCLAW_CONFIG",
+            "OPENCLAW_PROFILE",
+            "STRONGCLAW_RUNTIME_ROOT",
+            "VARLOCK_LOCAL_ENV_FILE",
+        ):
+            pytest_env.pop(key, None)
+        tests_result = run_command(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(layout.source_checkout_root),
+                "--locked",
+                "--group",
+                "dev",
+                "pytest",
+                "-q",
+                str(layout.source_checkout_root / "tests"),
+            ],
+            cwd=layout.source_checkout_root,
+            env=pytest_env,
+            timeout_seconds=3600,
+        )
     if not tests_result.ok:
         detail = (
             tests_result.stderr.strip() or tests_result.stdout.strip() or "repository tests failed"
@@ -169,8 +202,9 @@ def verify_baseline(
         ("observability", ["--skip-runtime"] if degraded else []),
         ("channels", []),
     ):
-        result = run_command(
-            managed_clawops_command(repo_root, "verify-platform", target, *extra_args),
+        result = run_managed_clawops_command(
+            repo_root,
+            ["verify-platform", target, *extra_args],
             cwd=repo_root,
             timeout_seconds=300,
         )

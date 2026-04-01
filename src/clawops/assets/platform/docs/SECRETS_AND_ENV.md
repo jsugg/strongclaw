@@ -24,7 +24,7 @@
    - provider auth can be stored here with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `ZAI_API_KEY`
    - optional model selection overrides: `OPENCLAW_DEFAULT_MODEL`, `OPENCLAW_MODEL_FALLBACKS`
    - local-model setups require `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
-   - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
+   - a fully local dev baseline should use a pulled Ollama model with at least `16000` context tokens, for example `OPENCLAW_OLLAMA_MODEL=deepseek-r1:latest`
    - hypermemory requires `HYPERMEMORY_EMBEDDING_MODEL`
    - for a fully local hypermemory baseline, use `HYPERMEMORY_EMBEDDING_MODEL=ollama/nomic-embed-text`
    - local LiteLLM-to-Ollama routing also needs `HYPERMEMORY_EMBEDDING_API_BASE=http://host.docker.internal:11434`

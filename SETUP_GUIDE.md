@@ -100,7 +100,7 @@ Before bring-up, choose how OpenClaw should authenticate to an LLM provider. Str
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - local models require both `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
-  - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
+  - a fully local dev baseline should use a pulled Ollama model with at least `16000` context tokens, for example `OPENCLAW_OLLAMA_MODEL=deepseek-r1:latest`
 
 ## 5. Preferred baseline bring-up
 
