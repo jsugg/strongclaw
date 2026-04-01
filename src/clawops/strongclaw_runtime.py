@@ -91,6 +91,11 @@ LOCAL_BASELINE_SANITIZED_ENV_KEYS: Final[tuple[str, ...]] = (
 VARLOCK_ENV_MODE_ENV_VAR = "STRONGCLAW_VARLOCK_ENV_MODE"
 VarlockEnvMode = Literal["auto", "managed", "legacy"]
 VALID_VARLOCK_ENV_MODES: Final[tuple[VarlockEnvMode, ...]] = ("auto", "managed", "legacy")
+# Backward-compatible aliases retained for fresh-host helpers.
+VARLOCK_ENV_MODE_ENV = VARLOCK_ENV_MODE_ENV_VAR
+VARLOCK_ENV_MODE_AUTO: Final[VarlockEnvMode] = "auto"
+VARLOCK_ENV_MODE_MANAGED: Final[VarlockEnvMode] = "managed"
+VARLOCK_ENV_MODE_LEGACY: Final[VarlockEnvMode] = "legacy"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

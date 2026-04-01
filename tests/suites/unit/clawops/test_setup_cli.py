@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 
 import pytest
@@ -675,33 +674,35 @@ def test_doctor_cli_applies_requested_varlock_env_mode(
         *,
         check_only: bool,
         non_interactive: bool,
+        env_mode: str,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        observed_modes.append(env_mode)
         return {"ok": True}
 
     def _doctor_host_payload(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        env_mode: str,
     ) -> dict[str, object]:
         del repo_root, home_dir
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        observed_modes.append(env_mode)
         return {"ok": True}
 
     def _verify_sidecars(**kwargs: object) -> _Report:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        observed_modes.append("legacy")
         return _Report()
 
     def _verify_observability(**kwargs: object) -> _Report:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        observed_modes.append("legacy")
         return _Report()
 
     def _verify_channels(**kwargs: object) -> _Report:
         del kwargs
-        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        observed_modes.append("legacy")
         return _Report()
 
     monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)

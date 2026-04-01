@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -251,12 +250,14 @@ def test_main_applies_requested_varlock_env_mode(
         check_only: bool,
         probe: bool,
         probe_max_tokens: int,
+        env_mode: str,
     ) -> dict[str, object]:
         assert repo_root == tmp_path
         assert check_only is True
         assert probe is False
         assert probe_max_tokens == strongclaw_model_auth.DEFAULT_PROBE_MAX_TOKENS
-        observed_mode["value"] = os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", "")
+        assert env_mode == "legacy"
+        observed_mode["value"] = env_mode
         return {"ok": True}
 
     test_context.patch.patch_object(

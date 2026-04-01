@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 from collections.abc import Sequence
 
@@ -231,11 +230,13 @@ def test_main_applies_requested_varlock_env_mode(
         *,
         check_only: bool,
         non_interactive: bool,
+        env_mode: str,
     ) -> dict[str, object]:
         assert repo_root == tmp_path
         assert check_only is True
         assert non_interactive is False
-        observed_mode["value"] = os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", "")
+        assert env_mode == "legacy"
+        observed_mode["value"] = env_mode
         return {"ok": True}
 
     test_context.patch.patch_object(
