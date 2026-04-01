@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -139,6 +140,48 @@ def test_varlock_env_dir_ignores_legacy_asset_env_when_runtime_root_is_isolated(
     assert expected == runtime_root / "strongclaw" / "config" / "varlock"
     assert expected != legacy_dir
     assert (expected / ".env.local.example").read_text(encoding="utf-8") == "APP_ENV=local\n"
+
+
+def test_varlock_env_dir_supports_explicit_legacy_mode(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = tmp_path / "assets"
+    legacy_dir = repo_root / "platform" / "configs" / "varlock"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / ".env.local").write_text("APP_ENV=local\n", encoding="utf-8")
+    test_context.env.set("STRONGCLAW_VARLOCK_ENV_MODE", "legacy")
+
+    expected = runtime.varlock_env_dir(repo_root)
+
+    assert expected == legacy_dir
+
+
+def test_varlock_env_dir_rejects_missing_legacy_mode_directory(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = tmp_path / "assets"
+    test_context.env.set("STRONGCLAW_VARLOCK_ENV_MODE", "legacy")
+
+    with pytest.raises(CommandError, match="Legacy Varlock env directory not found"):
+        runtime.varlock_env_dir(repo_root)
+
+
+def test_use_varlock_env_mode_restores_previous_environment_value(
+    test_context: TestContext,
+) -> None:
+    test_context.env.set("STRONGCLAW_VARLOCK_ENV_MODE", "legacy")
+
+    with runtime.use_varlock_env_mode("managed", default="managed"):
+        assert os.environ["STRONGCLAW_VARLOCK_ENV_MODE"] == "managed"
+
+    assert os.environ["STRONGCLAW_VARLOCK_ENV_MODE"] == "legacy"
+
+
+def test_normalize_varlock_env_mode_rejects_unknown_values() -> None:
+    with pytest.raises(CommandError, match="Unsupported Varlock env mode"):
+        runtime.normalize_varlock_env_mode("invalid-mode")
 
 
 def test_managed_python_falls_back_to_current_interpreter(tmp_path: pathlib.Path) -> None:

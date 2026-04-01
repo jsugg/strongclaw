@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import getpass
 import json
@@ -14,8 +15,8 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Final, cast
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from typing import Any, Final, Literal, cast
 
 from clawops.app_paths import (
     strongclaw_compose_state_dir,
@@ -87,6 +88,15 @@ LOCAL_BASELINE_SANITIZED_ENV_KEYS: Final[tuple[str, ...]] = (
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
+)
+VARLOCK_ENV_MODE_ENV: Final[str] = "STRONGCLAW_VARLOCK_ENV_MODE"
+VARLOCK_ENV_MODE_AUTO: Final[str] = "auto"
+VARLOCK_ENV_MODE_MANAGED: Final[str] = "managed"
+VARLOCK_ENV_MODE_LEGACY: Final[str] = "legacy"
+VARLOCK_ENV_MODES: Final[tuple[str, ...]] = (
+    VARLOCK_ENV_MODE_AUTO,
+    VARLOCK_ENV_MODE_MANAGED,
+    VARLOCK_ENV_MODE_LEGACY,
 )
 
 
@@ -489,6 +499,42 @@ def generate_secret_value() -> str:
     return secrets.token_urlsafe(32)
 
 
+def normalize_varlock_env_mode(
+    mode: str | None,
+    *,
+    default: Literal["auto", "managed", "legacy"] = "auto",
+) -> Literal["auto", "managed", "legacy"]:
+    """Normalize and validate one Varlock env-resolution mode."""
+    candidate = (default if mode is None else mode).strip().lower()
+    if candidate == VARLOCK_ENV_MODE_AUTO:
+        return "auto"
+    if candidate == VARLOCK_ENV_MODE_MANAGED:
+        return "managed"
+    if candidate == VARLOCK_ENV_MODE_LEGACY:
+        return "legacy"
+    choices = ", ".join(VARLOCK_ENV_MODES)
+    raise CommandError(f"Unsupported Varlock env mode {candidate!r}; expected one of: {choices}.")
+
+
+@contextlib.contextmanager
+def use_varlock_env_mode(
+    mode: str | None,
+    *,
+    default: Literal["auto", "managed", "legacy"] = "auto",
+) -> Iterator[None]:
+    """Temporarily set the Varlock env-resolution mode for the current process."""
+    resolved_mode = normalize_varlock_env_mode(mode, default=default)
+    previous = os.environ.get(VARLOCK_ENV_MODE_ENV)
+    os.environ[VARLOCK_ENV_MODE_ENV] = resolved_mode
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(VARLOCK_ENV_MODE_ENV, None)
+        else:
+            os.environ[VARLOCK_ENV_MODE_ENV] = previous
+
+
 def varlock_env_dir(
     repo_root: pathlib.Path,
     *,
@@ -503,6 +549,17 @@ def varlock_env_dir(
     layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir, environ=env)
     managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir, environ=env)
     legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
+    mode = normalize_varlock_env_mode(env.get(VARLOCK_ENV_MODE_ENV))
+    if mode == VARLOCK_ENV_MODE_MANAGED:
+        materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
+        return managed_dir
+    if mode == VARLOCK_ENV_MODE_LEGACY:
+        if not legacy_dir.is_dir():
+            raise CommandError(
+                f"Legacy Varlock env directory not found at {legacy_dir}. "
+                "Pass --env-mode managed or create the legacy env layout."
+            )
+        return legacy_dir
     if layout.uses_isolated_runtime:
         materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
         return managed_dir

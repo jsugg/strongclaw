@@ -14,6 +14,8 @@ from typing import Literal, cast
 
 from clawops.strongclaw_compose import compose_project_name
 from clawops.strongclaw_runtime import (
+    VARLOCK_ENV_MODE_ENV,
+    VARLOCK_ENV_MODE_LEGACY,
     expand_user_path,
     load_env_assignments,
     resolve_openclaw_config_path,
@@ -192,6 +194,12 @@ def _compose_probe_env(
 ) -> dict[str, str]:
     """Build the compose env used by the runtime probe."""
     probe_env = dict(base_env)
+    local_env_lookup = dict(probe_env)
+    if (
+        repo_local_state
+        and (repo_root_path / "platform" / "configs" / "varlock" / ".env.local").is_file()
+    ):
+        local_env_lookup[VARLOCK_ENV_MODE_ENV] = VARLOCK_ENV_MODE_LEGACY
     home_dir = Path(probe_env.get("HOME", Path.home().as_posix())).expanduser().resolve()
     layout = resolve_runtime_layout(
         repo_root=repo_root_path,
@@ -207,7 +215,7 @@ def _compose_probe_env(
         "STRONGCLAW_RUNTIME_ROOT",
     }
     local_env = load_env_assignments(
-        varlock_local_env_file(repo_root_path, home_dir=home_dir, environ=probe_env)
+        varlock_local_env_file(repo_root_path, home_dir=home_dir, environ=local_env_lookup)
     )
     for key, value in local_env.items():
         if layout.uses_isolated_runtime and key in isolated_runtime_keys:

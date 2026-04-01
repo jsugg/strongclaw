@@ -29,9 +29,19 @@ Verify the expected local-only bindings after startup:
 docker compose -f platform/compose/docker-compose.browser-lab.yaml ps
 ```
 
-There is no first-class `clawops verify-platform` target for browser-lab yet.
-Treat browser-lab as an optional, best-effort surface outside baseline
-verification and release-readiness checks.
+Use the first-class browser-lab verifier for readiness evidence:
+
+```bash
+clawops verify-platform browser-lab
+```
+
+When browser-lab is part of rollout readiness, include it in baseline checks:
+
+```bash
+clawops baseline verify --include-browser-lab
+```
+
+Browser-lab stays outside baseline verification by default unless that flag is set.
 
 ## Included artifacts
 

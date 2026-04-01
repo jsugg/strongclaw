@@ -20,6 +20,7 @@ from clawops.strongclaw_runtime import (
     run_command_inherited,
     run_openclaw_command,
     run_varlock_command,
+    use_varlock_env_mode,
     value_is_effective,
     varlock_available,
     varlock_env_dir,
@@ -419,6 +420,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the model-auth CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_asset_root_argument(parser)
+    parser.add_argument(
+        "--env-mode",
+        choices=("managed", "legacy"),
+        default="managed",
+        help="Varlock env source used for readiness checks (default: managed).",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ensure_parser = subparsers.add_parser("ensure")
@@ -434,11 +441,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for model-auth readiness."""
     args = parse_args(argv)
-    payload = ensure_model_auth(
-        resolve_asset_root_argument(args, command_name="clawops model-auth"),
-        check_only=args.command == "check",
-        probe=bool(args.probe),
-        probe_max_tokens=int(args.probe_max_tokens),
-    )
+    with use_varlock_env_mode(str(args.env_mode), default="managed"):
+        payload = ensure_model_auth(
+            resolve_asset_root_argument(args, command_name="clawops model-auth"),
+            check_only=args.command == "check",
+            probe=bool(args.probe),
+            probe_max_tokens=int(args.probe_max_tokens),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if bool(payload.get("ok")) else 1

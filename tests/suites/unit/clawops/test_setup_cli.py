@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 
 import pytest
@@ -634,3 +635,75 @@ def test_setup_cli_can_request_degraded_baseline_verification(
     assert exit_code == 0
     assert calls == ["verify:True"]
     assert "degraded mode" in capsys.readouterr().out
+
+
+def test_doctor_cli_applies_requested_varlock_env_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    asset_root = make_asset_root(tmp_path / "assets")
+    observed_modes: list[str] = []
+
+    class _Report:
+        ok = True
+
+        def to_dict(self) -> dict[str, object]:
+            return {"ok": True}
+
+    def _configure_varlock_env(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        non_interactive: bool,
+    ) -> dict[str, object]:
+        del repo_root, check_only, non_interactive
+        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        return {"ok": True}
+
+    def _doctor_host_payload(
+        repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None,
+    ) -> dict[str, object]:
+        del repo_root, home_dir
+        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        return {"ok": True}
+
+    def _verify_sidecars(**kwargs: object) -> _Report:
+        del kwargs
+        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        return _Report()
+
+    def _verify_observability(**kwargs: object) -> _Report:
+        del kwargs
+        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        return _Report()
+
+    def _verify_channels(**kwargs: object) -> _Report:
+        del kwargs
+        observed_modes.append(os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", ""))
+        return _Report()
+
+    monkeypatch.setattr(setup_cli, "configure_varlock_env", _configure_varlock_env)
+    monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
+    monkeypatch.setattr(setup_cli, "verify_sidecars", _verify_sidecars)
+    monkeypatch.setattr(setup_cli, "verify_observability", _verify_observability)
+    monkeypatch.setattr(setup_cli, "verify_channels", _verify_channels)
+
+    exit_code = setup_cli.doctor_main(
+        [
+            "--asset-root",
+            str(asset_root),
+            "--env-mode",
+            "legacy",
+            "--skip-runtime",
+            "--no-model-probe",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["status"] == "degraded"
+    assert observed_modes
+    assert set(observed_modes) == {"legacy"}

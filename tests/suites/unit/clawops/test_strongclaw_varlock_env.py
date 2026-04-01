@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 from collections.abc import Sequence
 
+from clawops import strongclaw_varlock_env
 from clawops.strongclaw_runtime import (
     ExecResult,
     load_env_assignments,
@@ -210,3 +212,41 @@ def test_configure_varlock_env_non_interactive_autofills_local_ollama_model_chai
     assert values["OPENCLAW_DEFAULT_MODEL"] == "ollama/deepseek-r1:latest"
     assert values["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
     assert values["HYPERMEMORY_EMBEDDING_API_BASE"] == "http://host.docker.internal:11434"
+
+
+def test_main_applies_requested_varlock_env_mode(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    observed_mode: dict[str, str] = {}
+
+    def _resolve_asset_root_argument(*_args: object, **_kwargs: object) -> pathlib.Path:
+        return tmp_path
+
+    def _configure_varlock_env(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        non_interactive: bool,
+    ) -> dict[str, object]:
+        assert repo_root == tmp_path
+        assert check_only is True
+        assert non_interactive is False
+        observed_mode["value"] = os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", "")
+        return {"ok": True}
+
+    test_context.patch.patch_object(
+        strongclaw_varlock_env,
+        "resolve_asset_root_argument",
+        new=_resolve_asset_root_argument,
+    )
+    test_context.patch.patch_object(
+        strongclaw_varlock_env,
+        "configure_varlock_env",
+        new=_configure_varlock_env,
+    )
+
+    exit_code = strongclaw_varlock_env.main(["--env-mode", "legacy", "check"])
+
+    assert exit_code == 0
+    assert observed_mode["value"] == "legacy"

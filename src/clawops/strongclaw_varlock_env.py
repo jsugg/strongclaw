@@ -22,6 +22,7 @@ from clawops.strongclaw_runtime import (
     resolve_varlock_bin,
     run_command,
     set_env_assignment,
+    use_varlock_env_mode,
     value_is_effective,
     varlock_env_dir,
     varlock_env_template_file,
@@ -679,6 +680,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse arguments for the varlock-env CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_asset_root_argument(parser)
+    parser.add_argument(
+        "--env-mode",
+        choices=("managed", "legacy"),
+        default="managed",
+        help="Varlock env source used by configure/check operations (default: managed).",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     configure_parser = subparsers.add_parser("configure")
     configure_parser.add_argument("--non-interactive", action="store_true")
@@ -689,10 +696,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for env-contract management."""
     args = parse_args(argv)
-    payload = configure_varlock_env(
-        resolve_asset_root_argument(args, command_name="clawops varlock-env"),
-        check_only=args.command == "check",
-        non_interactive=bool(getattr(args, "non_interactive", False)),
-    )
+    with use_varlock_env_mode(str(args.env_mode), default="managed"):
+        payload = configure_varlock_env(
+            resolve_asset_root_argument(args, command_name="clawops varlock-env"),
+            check_only=args.command == "check",
+            non_interactive=bool(getattr(args, "non_interactive", False)),
+        )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0

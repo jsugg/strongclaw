@@ -57,12 +57,41 @@ def test_hypermemory_status_reports_dense_and_rerank_configuration(tmp_path: pat
     assert payload["rerankResolvedDevice"] in {"cpu", "cuda", "mps"}
     assert payload["rerankFallbackModel"] == "http-rerank-test"
     assert payload["rerankCandidatePool"] == 32
-    assert payload["rerankOperationalRequired"] is True
+    assert payload["rerankOperationalRequired"] is False
     assert payload["qdrantEnabled"] is True
     assert payload["qdrantHealthy"] is True
     assert payload["vectorItems"] == 0
     assert payload["lastVectorSyncAt"]
     assert payload["missingCorpusPaths"] == []
+
+
+def test_hypermemory_status_marks_rerank_operational_when_fail_closed(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        hybrid=replace(config.hybrid, rerank_candidate_pool=32),
+        rerank=replace(
+            config.rerank,
+            enabled=True,
+            fail_open=False,
+            provider="local-sentence-transformers",
+            fallback_provider="compatible-http",
+        ),
+    )
+    engine = HypermemoryEngine(config)
+    engine.reindex()
+
+    payload = engine.status()
+
+    assert payload["rerankEnabled"] is True
+    assert payload["rerankFailOpen"] is False
+    assert payload["rerankOperationalRequired"] is True
 
 
 def test_hypermemory_rerank_changes_planner_order_before_diversity(

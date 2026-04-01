@@ -38,6 +38,7 @@ from clawops.strongclaw_runtime import (
     resolve_varlock_bin,
     run_command,
     run_openclaw_command,
+    use_varlock_env_mode,
 )
 from clawops.strongclaw_services import activate_services, render_service_files
 from clawops.strongclaw_varlock_env import configure_varlock_env
@@ -90,6 +91,12 @@ def _doctor_parser(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a deep StrongClaw readiness scan.")
     add_asset_root_argument(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
+    parser.add_argument(
+        "--env-mode",
+        choices=("managed", "legacy"),
+        default="managed",
+        help="Varlock env source used by readiness checks (default: managed).",
+    )
     parser.add_argument("--skip-runtime", action="store_true")
     parser.add_argument("--no-model-probe", action="store_true")
     return parser.parse_args(argv)
@@ -367,190 +374,195 @@ def doctor_main(argv: list[str] | None = None) -> int:
     args = _doctor_parser(argv)
     repo_root = resolve_asset_root_argument(args, command_name="clawops doctor")
     home_dir = resolve_home_dir(args.home_dir)
-    checks: list[dict[str, object]] = []
-    _run_check(
-        "Varlock env contract",
-        "clawops varlock-env configure",
-        checks,
-        lambda: configure_varlock_env(repo_root, check_only=True, non_interactive=True),
-    )
-    _run_check(
-        "Host toolchain and rendered config",
-        "clawops setup",
-        checks,
-        lambda: _doctor_host_payload(repo_root, home_dir=home_dir),
-    )
-    if not args.skip_runtime and os.uname().sysname == "Linux" and docker_shell_refresh_required():
+    with use_varlock_env_mode(str(args.env_mode), default="managed"):
+        checks: list[dict[str, object]] = []
         _run_check(
-            "Linux docker session refresh",
-            "Open a fresh login shell, then rerun clawops setup",
+            "Varlock env contract",
+            "clawops varlock-env configure",
             checks,
-            lambda: (
-                clear_docker_shell_refresh_required()
-                if docker_backend_ready()
-                else _pause_for_linux_docker_refresh(repo_root)
-            ),
-        )
-    if _bounded_local_doctor(args):
-        skip_reason = "--skip-runtime and --no-model-probe requested a bounded local doctor"
-        _record_skipped_check(
-            "OpenClaw model readiness",
-            "clawops model-auth ensure",
-            checks,
-            reason=skip_reason,
-        )
-        _record_skipped_check(
-            "OpenClaw doctor",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
-            checks,
-            reason=skip_reason,
-        )
-        _record_skipped_check(
-            "OpenClaw security audit",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
-            checks,
-            reason=skip_reason,
-        )
-        _record_skipped_check(
-            "OpenClaw secrets audit",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
-            checks,
-            reason=skip_reason,
-        )
-    else:
-        _run_check(
-            "OpenClaw model readiness",
-            "clawops model-auth ensure",
-            checks,
-            lambda: _require_model_check_ok(
-                repo_root,
-                probe=not bool(args.skip_runtime or args.no_model_probe),
-            ),
+            lambda: configure_varlock_env(repo_root, check_only=True, non_interactive=True),
         )
         _run_check(
-            "OpenClaw doctor",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
+            "Host toolchain and rendered config",
+            "clawops setup",
             checks,
-            lambda: run_openclaw_command(
-                repo_root, ["doctor", "--non-interactive"], timeout_seconds=300, check=True
+            lambda: _doctor_host_payload(repo_root, home_dir=home_dir),
+        )
+        if (
+            not args.skip_runtime
+            and os.uname().sysname == "Linux"
+            and docker_shell_refresh_required()
+        ):
+            _run_check(
+                "Linux docker session refresh",
+                "Open a fresh login shell, then rerun clawops setup",
+                checks,
+                lambda: (
+                    clear_docker_shell_refresh_required()
+                    if docker_backend_ready()
+                    else _pause_for_linux_docker_refresh(repo_root)
+                ),
+            )
+        if _bounded_local_doctor(args):
+            skip_reason = "--skip-runtime and --no-model-probe requested a bounded local doctor"
+            _record_skipped_check(
+                "OpenClaw model readiness",
+                "clawops model-auth ensure",
+                checks,
+                reason=skip_reason,
+            )
+            _record_skipped_check(
+                "OpenClaw doctor",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
+                checks,
+                reason=skip_reason,
+            )
+            _record_skipped_check(
+                "OpenClaw security audit",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
+                checks,
+                reason=skip_reason,
+            )
+            _record_skipped_check(
+                "OpenClaw secrets audit",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
+                checks,
+                reason=skip_reason,
+            )
+        else:
+            _run_check(
+                "OpenClaw model readiness",
+                "clawops model-auth ensure",
+                checks,
+                lambda: _require_model_check_ok(
+                    repo_root,
+                    probe=not bool(args.skip_runtime or args.no_model_probe),
+                ),
+            )
+            _run_check(
+                "OpenClaw doctor",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw doctor --non-interactive",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root, ["doctor", "--non-interactive"], timeout_seconds=300, check=True
+                ),
+            )
+            _run_check(
+                "OpenClaw security audit",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root, ["security", "audit", "--deep"], timeout_seconds=300, check=True
+                ),
+            )
+            _run_check(
+                "OpenClaw secrets audit",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root, ["secrets", "audit", "--check"], timeout_seconds=300, check=True
+                ),
+            )
+        if not args.skip_runtime:
+            _run_check(
+                "OpenClaw gateway status",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw gateway status --json",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root, ["gateway", "status", "--json"], timeout_seconds=300, check=True
+                ),
+            )
+            _run_check(
+                "OpenClaw memory status",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory status --deep",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root, ["memory", "status", "--deep"], timeout_seconds=300, check=True
+                ),
+            )
+            _run_check(
+                "OpenClaw memory search",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory search --query ClawOps --max-results 1",
+                checks,
+                lambda: run_openclaw_command(
+                    repo_root,
+                    ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+                    timeout_seconds=300,
+                    check=True,
+                ),
+            )
+        sidecars_report = verify_sidecars(
+            compose_path=resolve_asset_path(
+                "platform/compose/docker-compose.aux-stack.yaml",
+                repo_root=repo_root,
+            ),
+            skip_runtime=bool(args.skip_runtime),
+        )
+        checks.append(
+            {
+                "name": "Platform sidecars",
+                "status": "pass" if sidecars_report.ok else "fail",
+                "ok": sidecars_report.ok,
+                "message": json.dumps(sidecars_report.to_dict()),
+                "remediation": "clawops verify-platform sidecars",
+            }
+        )
+        observability_report = verify_observability(
+            overlay_path=resolve_asset_path(
+                "platform/configs/openclaw/50-observability.json5",
+                repo_root=repo_root,
+            ),
+            compose_path=resolve_asset_path(
+                "platform/compose/docker-compose.aux-stack.yaml",
+                repo_root=repo_root,
+            ),
+            skip_runtime=bool(args.skip_runtime),
+        )
+        checks.append(
+            {
+                "name": "Platform observability",
+                "status": "pass" if observability_report.ok else "fail",
+                "ok": observability_report.ok,
+                "message": json.dumps(observability_report.to_dict()),
+                "remediation": "clawops verify-platform observability",
+            }
+        )
+        channels_report = verify_channels(
+            overlay_path=resolve_asset_path(
+                "platform/configs/openclaw/30-channels.json5",
+                repo_root=repo_root,
+            ),
+            channels_doc_path=resolve_asset_path("platform/docs/CHANNELS.md", repo_root=repo_root),
+            telegram_guidance_path=resolve_asset_path(
+                "platform/docs/channels/telegram.md",
+                repo_root=repo_root,
+            ),
+            whatsapp_guidance_path=resolve_asset_path(
+                "platform/docs/channels/whatsapp.md",
+                repo_root=repo_root,
+            ),
+            allowlist_source_path=resolve_asset_path(
+                "platform/configs/source-allowlists.example.yaml",
+                repo_root=repo_root,
             ),
         )
-        _run_check(
-            "OpenClaw security audit",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw security audit --deep",
+        checks.append(
+            {
+                "name": "Platform channels",
+                "status": "pass" if channels_report.ok else "fail",
+                "ok": channels_report.ok,
+                "message": json.dumps(channels_report.to_dict()),
+                "remediation": "clawops verify-platform channels",
+            }
+        )
+        payload = _doctor_payload(
             checks,
-            lambda: run_openclaw_command(
-                repo_root, ["security", "audit", "--deep"], timeout_seconds=300, check=True
+            degraded_mode=bool(args.skip_runtime),
+            mode=(
+                "bounded-local"
+                if _bounded_local_doctor(args)
+                else "runtime-skipped" if args.skip_runtime else "full"
             ),
         )
-        _run_check(
-            "OpenClaw secrets audit",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw secrets audit --check",
-            checks,
-            lambda: run_openclaw_command(
-                repo_root, ["secrets", "audit", "--check"], timeout_seconds=300, check=True
-            ),
-        )
-    if not args.skip_runtime:
-        _run_check(
-            "OpenClaw gateway status",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw gateway status --json",
-            checks,
-            lambda: run_openclaw_command(
-                repo_root, ["gateway", "status", "--json"], timeout_seconds=300, check=True
-            ),
-        )
-        _run_check(
-            "OpenClaw memory status",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory status --deep",
-            checks,
-            lambda: run_openclaw_command(
-                repo_root, ["memory", "status", "--deep"], timeout_seconds=300, check=True
-            ),
-        )
-        _run_check(
-            "OpenClaw memory search",
-            "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory search --query ClawOps --max-results 1",
-            checks,
-            lambda: run_openclaw_command(
-                repo_root,
-                ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
-                timeout_seconds=300,
-                check=True,
-            ),
-        )
-    sidecars_report = verify_sidecars(
-        compose_path=resolve_asset_path(
-            "platform/compose/docker-compose.aux-stack.yaml",
-            repo_root=repo_root,
-        ),
-        skip_runtime=bool(args.skip_runtime),
-    )
-    checks.append(
-        {
-            "name": "Platform sidecars",
-            "status": "pass" if sidecars_report.ok else "fail",
-            "ok": sidecars_report.ok,
-            "message": json.dumps(sidecars_report.to_dict()),
-            "remediation": "clawops verify-platform sidecars",
-        }
-    )
-    observability_report = verify_observability(
-        overlay_path=resolve_asset_path(
-            "platform/configs/openclaw/50-observability.json5",
-            repo_root=repo_root,
-        ),
-        compose_path=resolve_asset_path(
-            "platform/compose/docker-compose.aux-stack.yaml",
-            repo_root=repo_root,
-        ),
-        skip_runtime=bool(args.skip_runtime),
-    )
-    checks.append(
-        {
-            "name": "Platform observability",
-            "status": "pass" if observability_report.ok else "fail",
-            "ok": observability_report.ok,
-            "message": json.dumps(observability_report.to_dict()),
-            "remediation": "clawops verify-platform observability",
-        }
-    )
-    channels_report = verify_channels(
-        overlay_path=resolve_asset_path(
-            "platform/configs/openclaw/30-channels.json5",
-            repo_root=repo_root,
-        ),
-        channels_doc_path=resolve_asset_path("platform/docs/CHANNELS.md", repo_root=repo_root),
-        telegram_guidance_path=resolve_asset_path(
-            "platform/docs/channels/telegram.md",
-            repo_root=repo_root,
-        ),
-        whatsapp_guidance_path=resolve_asset_path(
-            "platform/docs/channels/whatsapp.md",
-            repo_root=repo_root,
-        ),
-        allowlist_source_path=resolve_asset_path(
-            "platform/configs/source-allowlists.example.yaml",
-            repo_root=repo_root,
-        ),
-    )
-    checks.append(
-        {
-            "name": "Platform channels",
-            "status": "pass" if channels_report.ok else "fail",
-            "ok": channels_report.ok,
-            "message": json.dumps(channels_report.to_dict()),
-            "remediation": "clawops verify-platform channels",
-        }
-    )
-    payload = _doctor_payload(
-        checks,
-        degraded_mode=bool(args.skip_runtime),
-        mode=(
-            "bounded-local"
-            if _bounded_local_doctor(args)
-            else "runtime-skipped" if args.skip_runtime else "full"
-        ),
-    )
-    print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0 if payload["status"] == "pass" else 1
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if payload["status"] == "pass" else 1
