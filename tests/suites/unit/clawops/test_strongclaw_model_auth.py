@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -218,3 +219,230 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
         "missingAgents": ["admin"],
         "guidance": guidance_text(tmp_path),
     }
+
+
+def test_apply_model_chain_updates_rendered_openclaw_config_directly(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """Model-chain application should rewrite defaults and agent overrides in config."""
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": {
+                            "primary": "openai/gpt-5.4",
+                            "fallbacks": ["anthropic/claude-opus-4-6"],
+                        },
+                        "models": {
+                            "openai/gpt-5.4": {"alias": "gpt"},
+                        },
+                    },
+                    "list": [
+                        {"id": "admin"},
+                        {"id": "reader", "model": {"primary": "zai/glm-5", "fallbacks": []}},
+                        {
+                            "id": "coder",
+                            "model": {
+                                "primary": "openai-codex/gpt-5.4",
+                                "fallbacks": ["github-copilot/gpt-4o"],
+                            },
+                        },
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    def _raise_unexpected_command(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        raise AssertionError("OpenClaw CLI mutation path should stay unused")
+
+    def _run_command(command: list[str], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        assert command == ["ollama", "show", "deepseek-r1:latest"]
+        return SimpleNamespace(
+            ok=True,
+            stdout=(
+                "  Model\n" "    architecture        qwen2\n" "    context length      131072\n"
+            ),
+            stderr="",
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "run_openclaw_command",
+        new=_raise_unexpected_command,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "run_command",
+        new=_run_command,
+    )
+
+    apply_model_chain = cast(
+        Callable[[pathlib.Path, list[str]], None],
+        vars(strongclaw_model_auth)["_apply_model_chain"],
+    )
+    apply_model_chain(
+        tmp_path,
+        ["ollama/deepseek-r1:latest", "anthropic/claude-opus-4-6"],
+    )
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    expected_model = {
+        "primary": "ollama/deepseek-r1:latest",
+        "fallbacks": ["anthropic/claude-opus-4-6"],
+    }
+
+    assert payload["agents"]["defaults"]["model"] == expected_model
+    assert payload["agents"]["defaults"]["models"]["openai/gpt-5.4"] == {"alias": "gpt"}
+    assert payload["agents"]["defaults"]["models"]["ollama/deepseek-r1:latest"] == {}
+    assert payload["agents"]["defaults"]["models"]["anthropic/claude-opus-4-6"] == {}
+    assert payload["models"]["providers"]["ollama"] == {
+        "baseUrl": "http://127.0.0.1:11434",
+        "api": "ollama",
+        "models": [
+            {
+                "id": "deepseek-r1:latest",
+                "name": "deepseek-r1:latest",
+                "reasoning": True,
+                "input": ["text"],
+                "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                "contextWindow": 131072,
+                "maxTokens": 131072,
+            }
+        ],
+    }
+    assert [agent["model"] for agent in payload["agents"]["list"]] == [
+        expected_model,
+        expected_model,
+        expected_model,
+    ]
+
+
+def test_apply_model_chain_rejects_local_ollama_models_below_openclaw_context_floor(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """Local Ollama models should fail closed when they cannot satisfy OpenClaw probes."""
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"models": {}}, "list": [{"id": "admin"}]}}),
+        encoding="utf-8",
+    )
+
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    def _run_command(command: list[str], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        assert command == ["ollama", "show", "llama3:latest"]
+        return SimpleNamespace(
+            ok=True,
+            stdout="  Model\n    context length      8192\n",
+            stderr="",
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "run_command",
+        new=_run_command,
+    )
+
+    apply_model_chain = cast(
+        Callable[[pathlib.Path, list[str]], None],
+        vars(strongclaw_model_auth)["_apply_model_chain"],
+    )
+
+    with pytest.raises(strongclaw_model_auth.CommandError, match="requires at least 16000"):
+        apply_model_chain(tmp_path, ["ollama/llama3:latest"])
+
+
+def test_effective_env_assignments_preserves_local_model_chain_when_varlock_env_is_redacted(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """Redacted Varlock snapshots should not overwrite local model selection keys."""
+    env_file = tmp_path / ".env.local"
+    env_file.write_text(
+        "\n".join(
+            (
+                "OPENCLAW_DEFAULT_MODEL=ollama/deepseek-r1:latest",
+                "OLLAMA_API_KEY=ollama-local",
+                "OPENCLAW_OLLAMA_MODEL=deepseek-r1:latest",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env_dir = tmp_path / "varlock"
+    env_dir.mkdir()
+
+    def _varlock_local_env_file(_repo_root: pathlib.Path) -> pathlib.Path:
+        return env_file
+
+    def _varlock_available() -> bool:
+        return True
+
+    def _varlock_env_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+        return env_dir
+
+    def _run_varlock_command(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            ok=True,
+            stdout=(
+                "OPENCLAW_DEFAULT_MODEL=ol▒▒▒▒▒\n"
+                "OLLAMA_API_KEY=ol▒▒▒▒▒\n"
+                "OPENCLAW_OLLAMA_MODEL=de▒▒▒▒▒\n"
+                "OPENAI_API_KEY=sk-redacted\n"
+            ),
+            stderr="",
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "varlock_local_env_file",
+        new=_varlock_local_env_file,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "varlock_available",
+        new=_varlock_available,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "varlock_env_dir",
+        new=_varlock_env_dir,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "run_varlock_command",
+        new=_run_varlock_command,
+    )
+
+    effective_env_assignments = cast(
+        Callable[[pathlib.Path], dict[str, str]],
+        vars(strongclaw_model_auth)["_effective_env_assignments"],
+    )
+    values = effective_env_assignments(tmp_path)
+
+    assert values["OPENCLAW_DEFAULT_MODEL"] == "ollama/deepseek-r1:latest"
+    assert values["OLLAMA_API_KEY"] == "ollama-local"
+    assert values["OPENCLAW_OLLAMA_MODEL"] == "deepseek-r1:latest"
+    assert values["OPENAI_API_KEY"] == "sk-redacted"

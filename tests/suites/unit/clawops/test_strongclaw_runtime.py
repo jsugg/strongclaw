@@ -274,6 +274,117 @@ def test_run_command_inherited_passes_numeric_timeout(
     assert recorded_kwargs["timeout"] == 45
 
 
+def test_run_openclaw_command_sanitizes_ambient_provider_env_for_local_ollama_baseline(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """OpenClaw wrapper should ignore unrelated cloud env for a local Ollama baseline."""
+    env_file = tmp_path / ".env.local"
+    write_env_assignments(
+        env_file,
+        {
+            "OPENCLAW_DEFAULT_MODEL": "ollama/deepseek-r1:latest",
+            "OPENCLAW_MODEL_FALLBACKS": "",
+            "OLLAMA_API_KEY": "ollama-local",
+            "OPENCLAW_OLLAMA_MODEL": "deepseek-r1:latest",
+            "HYPERMEMORY_EMBEDDING_MODEL": "ollama/nomic-embed-text",
+        },
+    )
+    captured: dict[str, str] = {}
+
+    def _run_varlock_command(
+        repo_root: pathlib.Path,
+        command: list[str],
+        **kwargs: object,
+    ) -> ExecResult:
+        del repo_root
+        env = cast(dict[str, str], kwargs["env"])
+        captured.update(env)
+        return ExecResult(tuple(command), 0, "", "", 1)
+
+    def _varlock_local_env_file(*_args: object, **_kwargs: object) -> pathlib.Path:
+        return env_file
+
+    def _require_openclaw(_context: str) -> None:
+        return None
+
+    test_context.patch.patch_object(runtime, "varlock_local_env_file", new=_varlock_local_env_file)
+    test_context.patch.patch_object(runtime, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(runtime, "run_varlock_command", new=_run_varlock_command)
+    test_context.env.set("OPENAI_API_KEY", "bad-openai")
+    test_context.env.set("ANTHROPIC_API_KEY", "bad-anthropic")
+    test_context.env.set("ZAI_API_KEY", "bad-zai")
+    test_context.env.set("AWS_PROFILE", "bad-aws")
+    test_context.env.set("GEMINI_API_KEY", "bad-gemini")
+    test_context.env.set("KEEP_ME", "still-here")
+
+    runtime.run_openclaw_command(tmp_path, ["memory", "search", "--query", "ClawOps"])
+
+    assert captured["KEEP_ME"] == "still-here"
+    for key in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "ZAI_API_KEY",
+        "AWS_PROFILE",
+        "GEMINI_API_KEY",
+    ):
+        assert key not in captured
+
+
+def test_run_managed_clawops_command_sanitizes_ambient_provider_env_for_local_ollama_baseline(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """Managed ClawOps wrapper should inherit the same sanitized Varlock env."""
+    env_file = tmp_path / ".env.local"
+    write_env_assignments(
+        env_file,
+        {
+            "OPENCLAW_DEFAULT_MODEL": "ollama/deepseek-r1:latest",
+            "OPENCLAW_MODEL_FALLBACKS": "",
+            "OLLAMA_API_KEY": "ollama-local",
+            "OPENCLAW_OLLAMA_MODEL": "deepseek-r1:latest",
+            "HYPERMEMORY_EMBEDDING_MODEL": "ollama/nomic-embed-text",
+        },
+    )
+    captured_command: list[str] = []
+    captured_env: dict[str, str] = {}
+
+    def _run_varlock_command(
+        repo_root: pathlib.Path,
+        command: list[str],
+        **kwargs: object,
+    ) -> ExecResult:
+        del repo_root
+        captured_command.extend(command)
+        env = cast(dict[str, str], kwargs["env"])
+        captured_env.update(env)
+        return ExecResult(tuple(command), 0, "", "", 1)
+
+    def _varlock_local_env_file(*_args: object, **_kwargs: object) -> pathlib.Path:
+        return env_file
+
+    test_context.patch.patch_object(runtime, "varlock_local_env_file", new=_varlock_local_env_file)
+    test_context.patch.patch_object(runtime, "run_varlock_command", new=_run_varlock_command)
+    test_context.env.set("OPENAI_API_KEY", "bad-openai")
+    test_context.env.set("ANTHROPIC_API_KEY", "bad-anthropic")
+    test_context.env.set("ZAI_API_KEY", "bad-zai")
+    test_context.env.set("AWS_PROFILE", "bad-aws")
+    test_context.env.set("GEMINI_API_KEY", "bad-gemini")
+    test_context.env.set("KEEP_ME", "still-here")
+
+    runtime.run_managed_clawops_command(tmp_path, ["hypermemory", "status", "--json"])
+
+    assert captured_command[-4:] == ["-m", "clawops", "hypermemory", "status", "--json"][-4:]
+    assert captured_env["KEEP_ME"] == "still-here"
+    for key in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "ZAI_API_KEY",
+        "AWS_PROFILE",
+        "GEMINI_API_KEY",
+    ):
+        assert key not in captured_env
+
+
 def test_profile_requirement_helpers_track_managed_registry_flags() -> None:
     for profile_id in MANAGED_MEMORY_PROFILE_IDS:
         profile = MEMORY_PROFILES[profile_id]

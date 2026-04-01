@@ -41,7 +41,7 @@ Before you continue, decide how OpenClaw should authenticate to an LLM provider.
   - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `ZAI_API_KEY`
   - optional `OPENCLAW_DEFAULT_MODEL` and `OPENCLAW_MODEL_FALLBACKS`
   - for local models, set `OLLAMA_API_KEY=ollama-local` and `OPENCLAW_OLLAMA_MODEL=<pulled-model>`
-  - a fully local dev baseline can use `OPENCLAW_OLLAMA_MODEL=llama3:latest`
+  - a fully local dev baseline should use a pulled Ollama model with at least `16000` context tokens, for example `OPENCLAW_OLLAMA_MODEL=deepseek-r1:latest`
 
 StrongClaw now defaults to `hypermemory`, so set `HYPERMEMORY_EMBEDDING_MODEL=<upstream embedding model>` before you run the no-arg setup path. The hypermemory setup path uses loopback defaults for `HYPERMEMORY_EMBEDDING_BASE_URL` and `HYPERMEMORY_QDRANT_URL` unless you override them.
 

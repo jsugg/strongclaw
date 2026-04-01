@@ -14,7 +14,9 @@ from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argume
 from clawops.strongclaw_runtime import (
     CommandError,
     load_env_assignments,
+    load_openclaw_config,
     resolve_openclaw_config_path,
+    run_command,
     run_command_inherited,
     run_openclaw_command,
     run_varlock_command,
@@ -27,6 +29,9 @@ from clawops.strongclaw_runtime import (
 
 DEFAULT_PROBE_MAX_TOKENS = 16
 JSON_DOCUMENT_START_RE = re.compile(r"(?m)^[ \t]*[\[{]")
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_MIN_CONTEXT_WINDOW = 16_000
+OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
 
 
 def _mapping_or_none(value: object) -> dict[str, object] | None:
@@ -34,6 +39,13 @@ def _mapping_or_none(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
     return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
+def _mutable_mapping_or_none(value: object) -> dict[str, object] | None:
+    """Return a mutable string-keyed mapping reference when *value* is mapping-like."""
+    if not isinstance(value, dict):
+        return None
+    return cast(dict[str, object], value)
 
 
 def _extract_json_document(output: str) -> object | None:
@@ -66,6 +78,8 @@ def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
         if not raw_line or "=" not in raw_line:
             continue
         key, value = raw_line.split("=", 1)
+        if value_is_effective(merged.get(key)):
+            continue
         merged[key] = value
     return merged
 
@@ -224,44 +238,84 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
     if not model_chain:
         return
     primary, *fallbacks = [str(item) for item in model_chain]
-    for agent_id in _list_agent_ids(repo_root):
-        set_result = run_openclaw_command(
-            repo_root,
-            ["models", "--agent", agent_id, "set", primary],
-            timeout_seconds=30,
+    config_path = resolve_openclaw_config_path(repo_root)
+    payload = load_openclaw_config(config_path)
+    agents_payload = _mutable_mapping_or_none(payload.get("agents"))
+    if agents_payload is None:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: missing `agents` mapping")
+    defaults_payload = _mutable_mapping_or_none(agents_payload.get("defaults"))
+    if defaults_payload is None:
+        raise CommandError(
+            f"invalid OpenClaw config at {config_path}: missing `agents.defaults` mapping"
         )
-        if not set_result.ok:
-            detail = (
-                set_result.stderr.strip()
-                or set_result.stdout.strip()
-                or "failed to set primary model"
+    model_registry = _mutable_mapping_or_none(defaults_payload.get("models"))
+    if model_registry is None:
+        model_registry = {}
+        defaults_payload["models"] = model_registry
+    for model_ref in (primary, *fallbacks):
+        model_registry.setdefault(model_ref, {})
+    local_ollama_models = [
+        model_ref.removeprefix("ollama/")
+        for model_ref in (primary, *fallbacks)
+        if model_ref.startswith("ollama/")
+    ]
+    if local_ollama_models:
+        models_payload = _mutable_mapping_or_none(payload.get("models"))
+        if models_payload is None:
+            models_payload = {}
+            payload["models"] = models_payload
+        providers_payload = _mutable_mapping_or_none(models_payload.get("providers"))
+        if providers_payload is None:
+            providers_payload = {}
+            models_payload["providers"] = providers_payload
+        providers_payload["ollama"] = {
+            "baseUrl": OLLAMA_BASE_URL,
+            "api": "ollama",
+            "models": [_ollama_provider_model(model_name) for model_name in local_ollama_models],
+        }
+    configured_model = {"primary": primary, "fallbacks": list(fallbacks)}
+    defaults_payload["model"] = configured_model
+    agent_list = agents_payload.get("list")
+    if not isinstance(agent_list, list):
+        raise CommandError(f"invalid OpenClaw config at {config_path}: missing `agents.list` array")
+    for raw_agent in cast(list[object], agent_list):
+        agent = _mutable_mapping_or_none(raw_agent)
+        if agent is None:
+            raise CommandError(
+                f"invalid OpenClaw config at {config_path}: agent entries must be mappings"
             )
-            raise CommandError(detail, result=set_result)
-        clear_result = run_openclaw_command(
-            repo_root,
-            ["models", "--agent", agent_id, "fallbacks", "clear"],
-            timeout_seconds=30,
+        if "id" not in agent:
+            raise CommandError(
+                f"invalid OpenClaw config at {config_path}: agent entry missing `id`"
+            )
+        agent["model"] = {"primary": primary, "fallbacks": list(fallbacks)}
+    config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _ollama_provider_model(model_name: str) -> dict[str, object]:
+    """Build one OpenClaw provider entry for a local Ollama model."""
+    result = run_command(["ollama", "show", model_name], timeout_seconds=30)
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "ollama show failed"
+        raise CommandError(f"failed to inspect local Ollama model {model_name}: {detail}")
+    match = OLLAMA_CONTEXT_LENGTH_RE.search(result.stdout)
+    if match is None:
+        raise CommandError(f"failed to parse context length for local Ollama model {model_name}")
+    context_window = int(match.group(1))
+    if context_window < OLLAMA_MIN_CONTEXT_WINDOW:
+        raise CommandError(
+            f"local Ollama model {model_name} exposes only {context_window} context tokens; "
+            f"OpenClaw requires at least {OLLAMA_MIN_CONTEXT_WINDOW}."
         )
-        if not clear_result.ok:
-            detail = (
-                clear_result.stderr.strip()
-                or clear_result.stdout.strip()
-                or "failed to clear fallbacks"
-            )
-            raise CommandError(detail, result=clear_result)
-        for fallback in fallbacks:
-            add_result = run_openclaw_command(
-                repo_root,
-                ["models", "--agent", agent_id, "fallbacks", "add", fallback],
-                timeout_seconds=30,
-            )
-            if not add_result.ok:
-                detail = (
-                    add_result.stderr.strip()
-                    or add_result.stdout.strip()
-                    or "failed to add fallback model"
-                )
-                raise CommandError(detail, result=add_result)
+    return {
+        "id": model_name,
+        "name": model_name,
+        "reasoning": "r1" in model_name.lower(),
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": context_window,
+        "maxTokens": context_window,
+    }
 
 
 def _interactive_prompt_allowed() -> bool:
@@ -279,7 +333,7 @@ def _guidance_text(repo_root: pathlib.Path) -> str:
         f"- Env-driven: set provider auth in {varlock_local_env_file(repo_root)} and optionally:\n"
         "  - OPENCLAW_DEFAULT_MODEL=openai/gpt-5.4\n"
         "  - OPENCLAW_MODEL_FALLBACKS=anthropic/claude-opus-4-6,zai/glm-5\n"
-        "  - OLLAMA_API_KEY=ollama-local with OPENCLAW_OLLAMA_MODEL=<pulled-model>\n"
+        "  - OLLAMA_API_KEY=ollama-local with OPENCLAW_OLLAMA_MODEL=<pulled-model-with-at-least-16000-context>\n"
     )
 
 

@@ -72,6 +72,22 @@ DEFAULT_VARLOCK_BIN_DIR = (
     pathlib.Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "varlock" / "bin"
 )
 LEGACY_VARLOCK_BIN_DIR = pathlib.Path("~/ .varlock/bin".replace(" ", "")).expanduser()
+LOCAL_BASELINE_SANITIZED_ENV_KEYS: Final[tuple[str, ...]] = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "ZAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "MOONSHOT_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -658,6 +674,31 @@ def run_varlock_command(
     )
 
 
+def _openclaw_command_env(repo_root: pathlib.Path) -> dict[str, str]:
+    """Build the sanitized environment for one Varlock-backed runtime invocation."""
+    env = dict(os.environ)
+    values = load_env_assignments(varlock_local_env_file(repo_root))
+    default_model = values.get("OPENCLAW_DEFAULT_MODEL", "").strip()
+    fallback_models = [
+        candidate.strip()
+        for candidate in values.get("OPENCLAW_MODEL_FALLBACKS", "").split(",")
+        if candidate.strip()
+    ]
+    local_default_selected = default_model.startswith("ollama/") or (
+        not default_model
+        and value_is_effective(values.get("OLLAMA_API_KEY"))
+        and bool(values.get("OPENCLAW_OLLAMA_MODEL", "").strip())
+    )
+    local_fallbacks_only = all(model.startswith("ollama/") for model in fallback_models)
+    local_embeddings_selected = (
+        values.get("HYPERMEMORY_EMBEDDING_MODEL", "").strip().startswith("ollama/")
+    )
+    if (local_default_selected and local_fallbacks_only) or local_embeddings_selected:
+        for key in LOCAL_BASELINE_SANITIZED_ENV_KEYS:
+            env.pop(key, None)
+    return env
+
+
 def default_openclaw_config_path(
     *,
     home_dir: pathlib.Path | None = None,
@@ -722,6 +763,26 @@ def run_openclaw_command(
         repo_root,
         ["openclaw", *arguments],
         cwd=cwd,
+        env=_openclaw_command_env(repo_root),
+        timeout_seconds=timeout_seconds,
+        check=check,
+    )
+
+
+def run_managed_clawops_command(
+    repo_root: pathlib.Path,
+    arguments: Sequence[str],
+    *,
+    cwd: pathlib.Path | None = None,
+    timeout_seconds: int = 30,
+    check: bool = False,
+) -> ExecResult:
+    """Run the repo-managed ClawOps CLI with repo-local Varlock wrapping when available."""
+    return run_varlock_command(
+        repo_root,
+        managed_clawops_command(repo_root, *arguments),
+        cwd=cwd,
+        env=_openclaw_command_env(repo_root),
         timeout_seconds=timeout_seconds,
         check=check,
     )

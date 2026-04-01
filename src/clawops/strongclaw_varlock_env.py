@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 from typing import Final
 
@@ -48,6 +49,9 @@ LOCAL_SECRET_MIN_LENGTHS: Final[dict[str, int]] = {
     "LITELLM_MASTER_KEY": 24,
     "LITELLM_DB_PASSWORD": 16,
 }
+OLLAMA_MIN_CONTEXT_WINDOW: Final[int] = 16_000
+OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
+PREFERRED_OLLAMA_MODEL_PREFIXES: Final[tuple[str, ...]] = ("deepseek-r1",)
 
 
 def _interactive_mode(*, check_only: bool, non_interactive: bool) -> bool:
@@ -219,6 +223,66 @@ def _local_provider_credentials_present(values: dict[str, str]) -> bool:
         if value_is_effective(values.get(key)):
             return True
     return False
+
+
+def _ollama_listed_models(output: str) -> list[str]:
+    """Return model names from `ollama list` output."""
+    models: list[str] = []
+    for line in output.splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        model_name = stripped.split(maxsplit=1)[0].strip()
+        if model_name:
+            models.append(model_name)
+    return models
+
+
+def _ollama_model_context_window(model_name: str) -> int:
+    """Return the parsed Ollama context window for one local model."""
+    result = run_command(["ollama", "show", model_name], timeout_seconds=15)
+    if not result.ok:
+        return 0
+    match = OLLAMA_CONTEXT_LENGTH_RE.search(result.stdout)
+    if match is None:
+        return 0
+    return int(match.group(1))
+
+
+def _ensure_non_interactive_model_chain(
+    repo_root: pathlib.Path,
+    *,
+    check_only: bool,
+    non_interactive: bool,
+) -> None:
+    """Seed a usable local Ollama model chain for non-interactive local setup."""
+    if check_only or not non_interactive:
+        return
+    env_file = varlock_local_env_file(repo_root)
+    values = load_env_assignments(env_file)
+    if _configured_model_chain(values):
+        return
+    ollama_result = run_command(["ollama", "list"], timeout_seconds=15)
+    if not ollama_result.ok:
+        return
+    candidates = _ollama_listed_models(ollama_result.stdout)
+    if not candidates:
+        return
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda name: (
+            0 if any(name.startswith(prefix) for prefix in PREFERRED_OLLAMA_MODEL_PREFIXES) else 1,
+            name,
+        ),
+    )
+    for candidate in ordered_candidates:
+        if _ollama_model_context_window(candidate) < OLLAMA_MIN_CONTEXT_WINDOW:
+            continue
+        if not value_is_effective(values.get("OLLAMA_API_KEY")):
+            set_env_assignment(env_file, "OLLAMA_API_KEY", "ollama-local")
+        set_env_assignment(env_file, "OPENCLAW_OLLAMA_MODEL", candidate)
+        set_env_assignment(env_file, "OPENCLAW_DEFAULT_MODEL", f"ollama/{candidate}")
+        return
 
 
 def _prompt_model_chain(repo_root: pathlib.Path) -> None:
@@ -583,6 +647,11 @@ def configure_varlock_env(
     if _interactive_mode(check_only=check_only, non_interactive=non_interactive):
         _prompt_secret_backend(repo_root)
         _prompt_model_chain(repo_root)
+    _ensure_non_interactive_model_chain(
+        repo_root,
+        check_only=check_only,
+        non_interactive=non_interactive,
+    )
     _ensure_hypermemory_embedding_model(
         repo_root,
         check_only=check_only,
