@@ -7,7 +7,6 @@ from tests.utils.scripts.analyze_fixtures import analyze_fixture_tree
 
 _ALLOWED_DIRECT_MONKEYPATCH_FILES = {
     "tests/suites/contracts/testing/test_env_isolation_contract.py",
-    "tests/suites/unit/ci/test_hosted_docker.py",
     "tests/suites/unit/clawops/hypermemory/test_providers.py",
     "tests/suites/unit/clawops/test_acp_runner.py",
     "tests/suites/unit/clawops/test_config_cli.py",

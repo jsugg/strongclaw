@@ -50,6 +50,8 @@
 
 - If the monkeypatch governance contract fails, migrate the test to
 `TestContext` instead of expanding the allowlist by default.
+- Only keep or add direct-monkeypatch exceptions when there is a documented
+edge-case reason that `TestContext` cannot cover cleanly.
 - If docs or links move, rerun the repository docs contracts so relative-link
 and layout drift is caught early.
 - If a test needs reusable setup by fixture injection, add or extend a fixture.

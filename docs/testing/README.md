@@ -19,5 +19,8 @@ fixture-package-specific guidance only.
 them in a subsystem-specific subdirectory when one exists.
 - Treat `TestContext` as the default path for patching, environment mutation,
 and temporary working-directory changes.
+- Treat raw pytest `monkeypatch` as an exception-only tool: use it only when
+`TestContext` patch/env APIs are clearly insufficient, and keep every such file
+governed by the direct-monkeypatch contract.
 - Keep pytest framework rules and contributor docs together under
 `docs/testing/` instead of scattering them across packaged asset trees.

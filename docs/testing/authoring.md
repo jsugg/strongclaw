@@ -11,7 +11,7 @@ Strongclaw uses four primary default pytest lanes:
 
 The repository also maintains an explicit `framework` lane for pytest-framework self-checks. Framework tests live under `tests/suites/contracts/testing/framework/` and are excluded from default runs. Use that lane only for pytest bootstrap and plugin-registration behavior.
 
-Monkeypatch governance is a default contract, not a framework-only self-check. The direct-monkeypatch contract lives under `tests/suites/contracts/testing/` so ordinary pytest runs fail when new unmanaged `monkeypatch` usage appears in suite code.
+Monkeypatch governance is a default contract, not a framework-only self-check. The direct-monkeypatch contract lives under `tests/suites/contracts/testing/` so ordinary pytest runs fail when new unmanaged `monkeypatch` usage appears in suite code. Treat `TestContext` as the standard path and reserve raw `monkeypatch` for edge cases where `TestContext` patch/env APIs are not a practical fit.
 
 Capability markers are additive and remain module-local:
 
@@ -53,7 +53,7 @@ Environment mutation, working-directory changes, and patching should flow throug
 `prepend_path(...)`
 - use `test_context.chdir(...)` for temporary working-directory changes
 
-Do not add new ordinary-suite tests that depend on raw `monkeypatch` unless the test is an explicit governed exception.
+Do not add new ordinary-suite tests that depend on raw `monkeypatch` unless the test is an explicit governed exception and you can explain why `TestContext` patching is not a practical replacement.
 
 ## Service Resolution
 
