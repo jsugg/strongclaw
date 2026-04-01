@@ -38,6 +38,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         calls.append("varlock")
@@ -57,6 +58,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         calls.append("doctor-host")
@@ -68,6 +70,7 @@ def test_root_cli_setup_render_only_path_skips_model_auth(
         check_only: bool,
         probe: bool,
         allow_prompt: bool = True,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, probe, allow_prompt
         calls.append("model")
@@ -124,6 +127,7 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -132,12 +136,13 @@ def test_root_cli_doctor_bounded_path_skips_openclaw_runtime_audits(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
 
-    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
-        del repo_root, probe
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool, **_kwargs: object) -> None:
+        del repo_root, probe, _kwargs
         nonlocal model_check_calls
         model_check_calls += 1
 
@@ -211,6 +216,7 @@ def test_setup_render_path_uses_isolated_runtime_root(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -230,6 +236,7 @@ def test_setup_render_path_uses_isolated_runtime_root(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}

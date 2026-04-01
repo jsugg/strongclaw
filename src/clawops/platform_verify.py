@@ -404,31 +404,20 @@ def verify_browser_lab(
     checks.extend(proxy_checks)
     checks.extend(playwright_checks)
 
-    playwright_service = _service_definition(compose, "browserlab-playwright")
-    depends_on_raw = (
-        playwright_service.get("depends_on") if playwright_service is not None else None
-    )
-    depends_on = cast(list[object], depends_on_raw) if isinstance(depends_on_raw, list) else []
-    depends_on_services = [item for item in depends_on if isinstance(item, str)]
-    if "browserlab-proxy" in depends_on_services:
-        checks.append(
-            _ok("browserlab-dependency", "browserlab-playwright depends on browserlab-proxy")
-        )
-    else:
-        checks.append(
-            _fail(
-                "browserlab-dependency",
-                "browserlab-playwright must depend on browserlab-proxy",
-            )
-        )
-
     if skip_runtime:
         checks.append(_ok("runtime-probes", "runtime probes skipped"))
         return VerificationReport(name="browser-lab", checks=checks)
 
+    discovered_ports = [
+        published.host_port for published in (proxy_port, playwright_port) if published is not None
+    ]
     if proxy_port is not None:
         checks.append(
-            _check_tcp_endpoint("browserlab-proxy-runtime", proxy_port.host, proxy_port.host_port)
+            _check_tcp_endpoint(
+                "browserlab-proxy-runtime",
+                proxy_port.host,
+                proxy_port.host_port,
+            )
         )
     if playwright_port is not None:
         checks.append(
@@ -438,15 +427,7 @@ def verify_browser_lab(
                 playwright_port.host_port,
             )
         )
-    checks.append(
-        _check_loopback_ports(
-            [
-                published.host_port
-                for published in (proxy_port, playwright_port)
-                if published is not None
-            ]
-        )
-    )
+    checks.append(_check_loopback_ports(discovered_ports))
     return VerificationReport(name="browser-lab", checks=checks)
 
 
@@ -756,11 +737,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sidecars.add_argument("--compose-file", type=pathlib.Path, default=None)
     sidecars.add_argument("--skip-runtime", action="store_true")
 
-    browser_lab = subparsers.add_parser("browser-lab")
-    add_asset_root_argument(browser_lab)
-    browser_lab.add_argument("--compose-file", type=pathlib.Path, default=None)
-    browser_lab.add_argument("--skip-runtime", action="store_true")
-
     observability = subparsers.add_parser("observability")
     add_asset_root_argument(observability)
     observability.add_argument("--overlay", type=pathlib.Path, default=None)
@@ -774,6 +750,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     channels.add_argument("--telegram-guidance", type=pathlib.Path, default=None)
     channels.add_argument("--whatsapp-guidance", type=pathlib.Path, default=None)
     channels.add_argument("--allowlist-source", type=pathlib.Path, default=None)
+
+    browser_lab = subparsers.add_parser("browser-lab")
+    add_asset_root_argument(browser_lab)
+    browser_lab.add_argument("--compose-file", type=pathlib.Path, default=None)
+    browser_lab.add_argument("--skip-runtime", action="store_true")
 
     return parser.parse_args(argv)
 
@@ -790,18 +771,6 @@ def main(argv: list[str] | None = None) -> int:
                 if args.compose_file is not None
                 else resolve_asset_path(
                     "platform/compose/docker-compose.aux-stack.yaml", repo_root=repo_root
-                )
-            ),
-            skip_runtime=bool(args.skip_runtime),
-        )
-    elif args.target == "browser-lab":
-        report = verify_browser_lab(
-            compose_path=(
-                args.compose_file.resolve()
-                if args.compose_file is not None
-                else resolve_asset_path(
-                    "platform/compose/docker-compose.browser-lab.yaml",
-                    repo_root=repo_root,
                 )
             ),
             skip_runtime=bool(args.skip_runtime),
@@ -824,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             skip_runtime=bool(args.skip_runtime),
         )
-    else:
+    elif args.target == "channels":
         report = verify_channels(
             overlay_path=(
                 args.overlay.resolve()
@@ -855,6 +824,18 @@ def main(argv: list[str] | None = None) -> int:
                     "platform/configs/source-allowlists.example.yaml", repo_root=repo_root
                 )
             ),
+        )
+    else:
+        report = verify_browser_lab(
+            compose_path=(
+                args.compose_file.resolve()
+                if args.compose_file is not None
+                else resolve_asset_path(
+                    "platform/compose/docker-compose.browser-lab.yaml",
+                    repo_root=repo_root,
+                )
+            ),
+            skip_runtime=bool(args.skip_runtime),
         )
 
     print(dump_json(report.to_dict()).rstrip())

@@ -37,6 +37,7 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         calls.append("varlock")
@@ -56,6 +57,7 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         calls.append("doctor-host")
@@ -67,6 +69,7 @@ def test_setup_cli_auto_skips_bootstrap_when_state_exists(
         check_only: bool,
         probe: bool,
         allow_prompt: bool = True,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, allow_prompt
         calls.append(f"model:{probe}")
@@ -146,6 +149,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         calls.append("varlock")
@@ -165,6 +169,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         calls.append("doctor-host")
@@ -176,6 +181,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
         check_only: bool,
         probe: bool,
         allow_prompt: bool = True,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, allow_prompt
         calls.append(f"model:{probe}")
@@ -190,6 +196,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
         *,
         runs_dir: pathlib.Path,
         degraded: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, runs_dir
         calls.append(f"verify:{degraded}")
@@ -239,6 +246,7 @@ def test_doctor_cli_reports_failures_without_raising(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         raise RuntimeError("env failed")
@@ -247,12 +255,13 @@ def test_doctor_cli_reports_failures_without_raising(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
 
-    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
-        del repo_root, probe
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool, **_kwargs: object) -> None:
+        del repo_root, probe, _kwargs
 
     def _run_openclaw_command(
         repo_root: pathlib.Path,
@@ -338,6 +347,7 @@ def test_doctor_cli_skips_openclaw_runtime_audits_for_bounded_local_scan(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -346,12 +356,13 @@ def test_doctor_cli_skips_openclaw_runtime_audits_for_bounded_local_scan(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
 
-    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
-        del repo_root, probe
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool, **_kwargs: object) -> None:
+        del repo_root, probe, _kwargs
         nonlocal model_check_calls
         model_check_calls += 1
 
@@ -420,6 +431,7 @@ def test_doctor_cli_skip_runtime_marks_payload_as_degraded(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -428,12 +440,13 @@ def test_doctor_cli_skip_runtime_marks_payload_as_degraded(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
 
-    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
-        del repo_root, probe
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool, **_kwargs: object) -> None:
+        del repo_root, probe, _kwargs
 
     def _run_openclaw_command(
         repo_root: pathlib.Path,
@@ -497,6 +510,7 @@ def test_doctor_cli_full_runtime_includes_memory_search_check(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -505,12 +519,13 @@ def test_doctor_cli_full_runtime_includes_memory_search_check(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
 
-    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool) -> None:
-        del repo_root, probe
+    def _require_model_check_ok(repo_root: pathlib.Path, *, probe: bool, **_kwargs: object) -> None:
+        del repo_root, probe, _kwargs
 
     def _run_openclaw_command(
         repo_root: pathlib.Path,
@@ -575,6 +590,7 @@ def test_setup_cli_can_request_degraded_baseline_verification(
         *,
         check_only: bool,
         non_interactive: bool,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, non_interactive
         return {"ok": True}
@@ -592,6 +608,7 @@ def test_setup_cli_can_request_degraded_baseline_verification(
         repo_root: pathlib.Path,
         *,
         home_dir: pathlib.Path | None,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, home_dir
         return {"ok": True}
@@ -602,6 +619,7 @@ def test_setup_cli_can_request_degraded_baseline_verification(
         check_only: bool,
         probe: bool,
         allow_prompt: bool = True,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, check_only, probe, allow_prompt
         return {"ok": True}
@@ -614,6 +632,7 @@ def test_setup_cli_can_request_degraded_baseline_verification(
         *,
         runs_dir: pathlib.Path,
         degraded: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
         del repo_root, runs_dir
         calls.append(f"verify:{degraded}")

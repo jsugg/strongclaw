@@ -24,8 +24,12 @@ def test_ensure_model_auth_skip_mode_bypasses_agent_probe(
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
 
-    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
-        del repo_root
+    def _resolve_openclaw_config_path(
+        repo_root: pathlib.Path,
+        *,
+        env_mode: str = "managed",
+    ) -> pathlib.Path:
+        del repo_root, env_mode
         return config_path
 
     def _raise_unexpected_probe(*args: object, **kwargs: object) -> tuple[bool, list[str]]:
@@ -61,8 +65,12 @@ def test_ensure_model_auth_check_only_still_inspects_agents_when_skip_is_set(
     config_path.write_text("{}", encoding="utf-8")
     calls: list[tuple[bool, int]] = []
 
-    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
-        del repo_root
+    def _resolve_openclaw_config_path(
+        repo_root: pathlib.Path,
+        *,
+        env_mode: str = "managed",
+    ) -> pathlib.Path:
+        del repo_root, env_mode
         return config_path
 
     def _all_agents_have_models(
@@ -70,8 +78,9 @@ def test_ensure_model_auth_check_only_still_inspects_agents_when_skip_is_set(
         *,
         probe: bool,
         probe_max_tokens: int,
+        env_mode: str = "managed",
     ) -> tuple[bool, list[str]]:
-        del repo_root
+        del repo_root, env_mode
         calls.append((probe, probe_max_tokens))
         return True, []
 
@@ -118,10 +127,10 @@ def test_list_agent_ids_ignores_trailing_non_json_output(
     )
 
     list_agent_ids = cast(
-        Callable[[pathlib.Path], list[str]],
+        Callable[..., list[str]],
         vars(strongclaw_model_auth)["_list_agent_ids"],
     )
-    assert list_agent_ids(tmp_path) == ["admin", "reader"]
+    assert list_agent_ids(tmp_path, env_mode="managed") == ["admin", "reader"]
 
 
 def test_agent_models_available_via_list_ignores_trailing_non_json_output(
@@ -144,10 +153,10 @@ def test_agent_models_available_via_list_ignores_trailing_non_json_output(
     )
 
     models_available = cast(
-        Callable[[pathlib.Path, str], bool],
+        Callable[..., bool],
         vars(strongclaw_model_auth)["_agent_models_available_via_list"],
     )
-    assert models_available(tmp_path, "admin") is True
+    assert models_available(tmp_path, "admin", env_mode="managed") is True
 
 
 def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
@@ -158,8 +167,12 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
 
-    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
-        del repo_root
+    def _resolve_openclaw_config_path(
+        repo_root: pathlib.Path,
+        *,
+        env_mode: str = "managed",
+    ) -> pathlib.Path:
+        del repo_root, env_mode
         return config_path
 
     def _all_agents_have_models(
@@ -167,8 +180,9 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
         *,
         probe: bool,
         probe_max_tokens: int,
+        env_mode: str = "managed",
     ) -> tuple[bool, list[str]]:
-        del repo_root, probe, probe_max_tokens
+        del repo_root, probe, probe_max_tokens, env_mode
         return False, ["admin"]
 
     test_context.patch.patch_object(
@@ -202,7 +216,7 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
     )
 
     guidance_text = cast(
-        Callable[[pathlib.Path], str],
+        Callable[..., str],
         vars(strongclaw_model_auth)["_guidance_text"],
     )
 
@@ -218,7 +232,7 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
         "checkedOnly": False,
         "configured": False,
         "missingAgents": ["admin"],
-        "guidance": guidance_text(tmp_path),
+        "guidance": guidance_text(tmp_path, env_mode="managed"),
     }
 
 
@@ -435,13 +449,13 @@ def test_effective_env_assignments_preserves_local_model_chain_when_varlock_env_
     env_dir = tmp_path / "varlock"
     env_dir.mkdir()
 
-    def _varlock_local_env_file(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _varlock_local_env_file(*_args: object, **_kwargs: object) -> pathlib.Path:
         return env_file
 
     def _varlock_available() -> bool:
         return True
 
-    def _varlock_env_dir(_repo_root: pathlib.Path) -> pathlib.Path:
+    def _varlock_env_dir(*_args: object, **_kwargs: object) -> pathlib.Path:
         return env_dir
 
     def _run_varlock_command(*_args: object, **_kwargs: object) -> SimpleNamespace:

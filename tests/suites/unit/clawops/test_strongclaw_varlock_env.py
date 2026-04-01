@@ -21,8 +21,9 @@ def _no_op_model_validation(
     *,
     check_only: bool,
     non_interactive: bool,
+    env_mode: str = "managed",
 ) -> None:
-    del repo_root, check_only, non_interactive
+    del repo_root, check_only, non_interactive, env_mode
 
 
 def _no_op_secret_backend_validation(
@@ -30,16 +31,18 @@ def _no_op_secret_backend_validation(
     *,
     check_only: bool,
     non_interactive: bool,
+    env_mode: str = "managed",
 ) -> None:
-    del repo_root, check_only, non_interactive
+    del repo_root, check_only, non_interactive, env_mode
 
 
 def _varlock_validation_success(
     repo_root: pathlib.Path,
     *,
     check_only: bool,
+    env_mode: str = "managed",
 ) -> bool:
-    del repo_root, check_only
+    del repo_root, check_only, env_mode
     return True
 
 
