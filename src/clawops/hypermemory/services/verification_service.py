@@ -113,7 +113,9 @@ class VerificationService:
             "probeQuery": "",
             "rerank": {
                 "required": (
-                    self._config.rerank.enabled and self._config.hybrid.rerank_candidate_pool > 0
+                    self._config.rerank.enabled
+                    and self._config.hybrid.rerank_candidate_pool > 0
+                    and not self._config.rerank.fail_open
                 ),
                 "candidatePool": self._config.hybrid.rerank_candidate_pool,
             },

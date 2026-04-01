@@ -132,7 +132,9 @@ class QueryService:
                 ),
                 "rerankCandidatePool": self._config.hybrid.rerank_candidate_pool,
                 "rerankOperationalRequired": (
-                    self._config.rerank.enabled and self._config.hybrid.rerank_candidate_pool > 0
+                    self._config.rerank.enabled
+                    and self._config.hybrid.rerank_candidate_pool > 0
+                    and not self._config.rerank.fail_open
                 ),
                 "qdrantEnabled": bool(qdrant_health.get("enabled", False)),
                 "qdrantHealthy": bool(qdrant_health.get("healthy", False)),

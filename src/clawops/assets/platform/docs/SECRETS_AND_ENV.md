@@ -32,8 +32,10 @@
    - hypermemory defaults `HYPERMEMORY_QDRANT_URL=http://127.0.0.1:6333`
 4. if you chose a managed backend, let guided setup generate `.env.plugins`, or maintain that file manually for hybrid setups
 5. run `clawops varlock-env configure` or `varlock load --path ~/.config/strongclaw/varlock`
-6. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `clawops setup` do it for you
-7. launch gateway / sidecars with `varlock run -- ...`
+6. readiness commands (`clawops doctor`, `clawops baseline verify`, `clawops model-auth`, `clawops varlock-env`) default to managed env resolution
+   - for explicit migration diagnostics, pass `--env-mode legacy`
+7. complete `openclaw configure --section model` during setup, or let `make setup` / `clawops setup` / `clawops setup` do it for you
+8. launch gateway / sidecars with `varlock run -- ...`
 
 ## Backend notes
 

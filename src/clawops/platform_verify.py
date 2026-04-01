@@ -1,4 +1,4 @@
-"""Verify sidecar, observability, and channel platform contracts."""
+"""Verify sidecar, browser-lab, observability, and channel platform contracts."""
 
 from __future__ import annotations
 
@@ -380,6 +380,76 @@ def verify_sidecars(
     return VerificationReport(name="sidecars", checks=checks)
 
 
+def verify_browser_lab(
+    *,
+    compose_path: pathlib.Path,
+    skip_runtime: bool = False,
+) -> VerificationReport:
+    """Verify browser-lab compose contracts and runtime reachability."""
+    compose = _load_mapping_yaml(compose_path)
+    checks: list[Check] = []
+
+    proxy_checks, proxy_port = _check_required_service(
+        compose,
+        service_name="browserlab-proxy",
+        container_port=3128,
+        require_healthcheck=False,
+    )
+    playwright_checks, playwright_port = _check_required_service(
+        compose,
+        service_name="browserlab-playwright",
+        container_port=9222,
+        require_healthcheck=False,
+    )
+    checks.extend(proxy_checks)
+    checks.extend(playwright_checks)
+
+    playwright_service = _service_definition(compose, "browserlab-playwright")
+    depends_on_raw = (
+        playwright_service.get("depends_on") if playwright_service is not None else None
+    )
+    depends_on = cast(list[object], depends_on_raw) if isinstance(depends_on_raw, list) else []
+    depends_on_services = [item for item in depends_on if isinstance(item, str)]
+    if "browserlab-proxy" in depends_on_services:
+        checks.append(
+            _ok("browserlab-dependency", "browserlab-playwright depends on browserlab-proxy")
+        )
+    else:
+        checks.append(
+            _fail(
+                "browserlab-dependency",
+                "browserlab-playwright must depend on browserlab-proxy",
+            )
+        )
+
+    if skip_runtime:
+        checks.append(_ok("runtime-probes", "runtime probes skipped"))
+        return VerificationReport(name="browser-lab", checks=checks)
+
+    if proxy_port is not None:
+        checks.append(
+            _check_tcp_endpoint("browserlab-proxy-runtime", proxy_port.host, proxy_port.host_port)
+        )
+    if playwright_port is not None:
+        checks.append(
+            _check_tcp_endpoint(
+                "browserlab-playwright-runtime",
+                playwright_port.host,
+                playwright_port.host_port,
+            )
+        )
+    checks.append(
+        _check_loopback_ports(
+            [
+                published.host_port
+                for published in (proxy_port, playwright_port)
+                if published is not None
+            ]
+        )
+    )
+    return VerificationReport(name="browser-lab", checks=checks)
+
+
 def verify_observability(
     *,
     overlay_path: pathlib.Path,
@@ -686,6 +756,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sidecars.add_argument("--compose-file", type=pathlib.Path, default=None)
     sidecars.add_argument("--skip-runtime", action="store_true")
 
+    browser_lab = subparsers.add_parser("browser-lab")
+    add_asset_root_argument(browser_lab)
+    browser_lab.add_argument("--compose-file", type=pathlib.Path, default=None)
+    browser_lab.add_argument("--skip-runtime", action="store_true")
+
     observability = subparsers.add_parser("observability")
     add_asset_root_argument(observability)
     observability.add_argument("--overlay", type=pathlib.Path, default=None)
@@ -715,6 +790,18 @@ def main(argv: list[str] | None = None) -> int:
                 if args.compose_file is not None
                 else resolve_asset_path(
                     "platform/compose/docker-compose.aux-stack.yaml", repo_root=repo_root
+                )
+            ),
+            skip_runtime=bool(args.skip_runtime),
+        )
+    elif args.target == "browser-lab":
+        report = verify_browser_lab(
+            compose_path=(
+                args.compose_file.resolve()
+                if args.compose_file is not None
+                else resolve_asset_path(
+                    "platform/compose/docker-compose.browser-lab.yaml",
+                    repo_root=repo_root,
                 )
             ),
             skip_runtime=bool(args.skip_runtime),

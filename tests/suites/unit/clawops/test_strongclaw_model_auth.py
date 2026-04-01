@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -219,6 +220,46 @@ def test_ensure_model_auth_non_interactive_mode_skips_wizard_fallback(
         "missingAgents": ["admin"],
         "guidance": guidance_text(tmp_path),
     }
+
+
+def test_main_applies_requested_varlock_env_mode(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    observed_mode: dict[str, str] = {}
+
+    def _resolve_asset_root_argument(*_args: object, **_kwargs: object) -> pathlib.Path:
+        return tmp_path
+
+    def _ensure_model_auth(
+        repo_root: pathlib.Path,
+        *,
+        check_only: bool,
+        probe: bool,
+        probe_max_tokens: int,
+    ) -> dict[str, object]:
+        assert repo_root == tmp_path
+        assert check_only is True
+        assert probe is False
+        assert probe_max_tokens == strongclaw_model_auth.DEFAULT_PROBE_MAX_TOKENS
+        observed_mode["value"] = os.environ.get("STRONGCLAW_VARLOCK_ENV_MODE", "")
+        return {"ok": True}
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "resolve_asset_root_argument",
+        new=_resolve_asset_root_argument,
+    )
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "ensure_model_auth",
+        new=_ensure_model_auth,
+    )
+
+    exit_code = strongclaw_model_auth.main(["--env-mode", "legacy", "check"])
+
+    assert exit_code == 0
+    assert observed_mode["value"] == "legacy"
 
 
 def test_apply_model_chain_updates_rendered_openclaw_config_directly(
