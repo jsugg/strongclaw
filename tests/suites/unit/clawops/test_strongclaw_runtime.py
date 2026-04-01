@@ -224,7 +224,7 @@ def test_varlock_env_dir_legacy_mode_requires_existing_contract(
     (legacy_dir / ".env.ci.example").write_text("APP_ENV=ci\n", encoding="utf-8")
     (legacy_dir / ".env.prod.example").write_text("APP_ENV=prod\n", encoding="utf-8")
 
-    with pytest.raises(CommandError, match="Varlock env mode `legacy` requires an existing legacy"):
+    with pytest.raises(CommandError, match="Legacy Varlock env directory not found"):
         runtime.varlock_env_dir(repo_root, env_mode="legacy")
 
 

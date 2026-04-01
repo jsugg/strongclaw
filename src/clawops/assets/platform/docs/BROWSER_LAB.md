@@ -29,7 +29,7 @@ Verify the expected local-only bindings after startup:
 clawops verify-platform browser-lab
 ```
 
-Browser-lab stays optional but it is not excluded from baseline verification by default.
+Browser-lab stays optional but it is not excluded from baseline verification by default. This way, we guarantee that it'll pass the verification in case you decide to use it.
 If your rollout does not enable browser-lab, exclude it from the baseline gate:
 
 ```bash
