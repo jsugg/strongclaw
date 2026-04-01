@@ -351,6 +351,7 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
         ["clawops", "verify-platform", "sidecars"],
         ["clawops", "verify-platform", "observability"],
         ["clawops", "verify-platform", "channels"],
+        ["clawops", "verify-platform", "browser-lab"],
     ]
 
 
@@ -468,10 +469,11 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
         ["clawops", "verify-platform", "sidecars", "--skip-runtime"],
         ["clawops", "verify-platform", "observability", "--skip-runtime"],
         ["clawops", "verify-platform", "channels"],
+        ["clawops", "verify-platform", "browser-lab", "--skip-runtime"],
     ]
 
 
-def test_verify_baseline_include_browser_lab_adds_browser_lab_target(
+def test_verify_baseline_exclude_browser_lab_omits_browser_lab_target(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
@@ -563,28 +565,28 @@ def test_verify_baseline_include_browser_lab_adds_browser_lab_target(
     payload = strongclaw_baseline.verify_baseline(
         repo_root,
         runs_dir=tmp_path / "runs",
-        include_browser_lab=True,
+        exclude_browser_lab=True,
     )
 
     platform_commands = [
         command for command in commands if command[:2] == ["clawops", "verify-platform"]
     ]
-    assert payload["includeBrowserLab"] is True
+    assert payload["includeBrowserLab"] is False
+    assert payload["excludeBrowserLab"] is True
     assert platform_commands == [
         ["clawops", "verify-platform", "sidecars"],
         ["clawops", "verify-platform", "observability"],
         ["clawops", "verify-platform", "channels"],
-        ["clawops", "verify-platform", "browser-lab"],
     ]
 
 
-def test_main_honors_env_mode_and_include_browser_lab(
+def test_main_honors_env_mode_and_exclude_browser_lab(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
     repo_root = _init_source_checkout(tmp_path / "repo")
     requested_modes: list[str] = []
-    include_values: list[bool] = []
+    exclude_values: list[bool] = []
 
     @contextmanager
     def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
@@ -596,11 +598,11 @@ def test_main_honors_env_mode_and_include_browser_lab(
         *,
         runs_dir: pathlib.Path,
         degraded: bool = False,
-        include_browser_lab: bool = False,
+        exclude_browser_lab: bool = False,
     ) -> dict[str, object]:
         del runs_dir, degraded
         assert requested_repo_root == repo_root
-        include_values.append(include_browser_lab)
+        exclude_values.append(exclude_browser_lab)
         return {"ok": True}
 
     test_context.patch.patch_object(
@@ -621,10 +623,10 @@ def test_main_honors_env_mode_and_include_browser_lab(
             "verify",
             "--env-mode",
             "legacy",
-            "--include-browser-lab",
+            "--exclude-browser-lab",
         ]
     )
 
     assert exit_code == 0
     assert requested_modes == ["legacy"]
-    assert include_values == [True]
+    assert exclude_values == [True]

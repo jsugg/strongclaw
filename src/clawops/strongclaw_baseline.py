@@ -77,7 +77,7 @@ def verify_baseline(
     *,
     runs_dir: pathlib.Path,
     degraded: bool = False,
-    include_browser_lab: bool = False,
+    exclude_browser_lab: bool = False,
 ) -> dict[str, object]:
     """Run the baseline verification flow."""
     layout = resolve_runtime_layout(repo_root=repo_root)
@@ -207,7 +207,7 @@ def verify_baseline(
         ("observability", ["--skip-runtime"] if degraded else []),
         ("channels", []),
     ]
-    if include_browser_lab:
+    if not exclude_browser_lab:
         verification_targets.append(("browser-lab", ["--skip-runtime"] if degraded else []))
     for target, extra_args in verification_targets:
         result = run_managed_clawops_command(
@@ -226,7 +226,8 @@ def verify_baseline(
         "ok": True,
         "config": str(config_path),
         "degraded": degraded,
-        "includeBrowserLab": include_browser_lab,
+        "excludeBrowserLab": exclude_browser_lab,
+        "includeBrowserLab": not exclude_browser_lab,
         "runsDir": str(runs_dir),
         "verificationMode": "degraded" if degraded else "runtime",
         "modelAuth": model_payload,
@@ -259,9 +260,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Varlock env source for readiness checks (default: managed).",
     )
     verify_parser.add_argument(
-        "--include-browser-lab",
+        "--exclude-browser-lab",
         action="store_true",
-        help="Include browser-lab verification in the baseline gate.",
+        help="Exclude browser-lab verification from the baseline gate.",
     )
     subparsers.add_parser("harness-smoke")
     return parser.parse_args(argv)
@@ -283,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             repo_root,
             runs_dir=runs_dir,
             degraded=bool(args.degraded),
-            include_browser_lab=bool(args.include_browser_lab),
+            exclude_browser_lab=bool(args.exclude_browser_lab),
         )
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
