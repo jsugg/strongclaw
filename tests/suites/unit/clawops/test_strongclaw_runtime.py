@@ -24,6 +24,36 @@ def test_resolve_varlock_env_mode_rejects_unknown_value() -> None:
         runtime.resolve_varlock_env_mode(environ={"OPENCLAW_VARLOCK_ENV_MODE": "invalid"})
 
 
+def test_generate_secret_value_prefixes_non_alnum_first_character(
+    test_context: TestContext,
+) -> None:
+    def _token_urlsafe(_bytes: int) -> str:
+        return "-leading-secret"
+
+    test_context.patch.patch_object(
+        runtime.secrets,
+        "token_urlsafe",
+        new=_token_urlsafe,
+    )
+
+    assert runtime.generate_secret_value() == "n-leading-secret"
+
+
+def test_generate_secret_value_leaves_alnum_first_character_unchanged(
+    test_context: TestContext,
+) -> None:
+    def _token_urlsafe(_bytes: int) -> str:
+        return "a-leading-secret"
+
+    test_context.patch.patch_object(
+        runtime.secrets,
+        "token_urlsafe",
+        new=_token_urlsafe,
+    )
+
+    assert runtime.generate_secret_value() == "a-leading-secret"
+
+
 def test_varlock_env_dir_uses_managed_mode_when_requested(
     tmp_path: pathlib.Path,
     test_context: TestContext,

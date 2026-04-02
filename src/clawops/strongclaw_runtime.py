@@ -555,7 +555,12 @@ def use_varlock_env_mode(
 
 def generate_secret_value() -> str:
     """Return a StrongClaw-managed random secret."""
-    return secrets.token_urlsafe(32)
+    value = secrets.token_urlsafe(32)
+    if not value:
+        return "n"
+    if not value[0].isalnum():
+        return f"n{value}"
+    return value
 
 
 def varlock_env_dir(
