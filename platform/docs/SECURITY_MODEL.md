@@ -26,6 +26,10 @@ Require an independent reviewer for:
 - dependency changes
 - browser automation enablement
 
+Repository enforcement:
+- `.github/workflows/security.yml` runs `tests/scripts/security_workflow.py enforce-independent-review`.
+- The check inspects pull-request file changes in security-critical paths and fails unless there is at least one non-author `APPROVED` review.
+
 ## Skill intake
 
 Use: `clawops skill-scan --source <path> --quarantine <dir> --report <file>`

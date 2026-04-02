@@ -121,7 +121,7 @@ The hypermemory env contract requires `HYPERMEMORY_EMBEDDING_MODEL`. Guided setu
 
 The shipped hypermemory configs also enable planner-stage reranking. The primary provider is `local-sentence-transformers` with `BAAI/bge-reranker-v2-m3`; the fallback is `compatible-http`, which activates when `HYPERMEMORY_RERANK_BASE_URL` is configured and reachable. If neither provider is available, search fails open and keeps the provisional hybrid planner order.
 
-Plain `uv sync` keeps the primary local rerank path on host/Python combinations with known upstream wheel support: macOS arm64, macOS x86_64 on Python 3.12, and Linux x86_64 or aarch64/arm64 on Python 3.12 or 3.13. For Raspberry Pi, that means Raspberry Pi 4/5 with 64-bit Raspberry Pi OS or Ubuntu arm64 stay on the primary local rerank path. Unsupported combinations such as 32-bit Pi Linux skip the local dependency and use `compatible-http` or fail-open behavior instead of blocking setup.
+Plain `uv sync` keeps the primary local rerank path on host/Python combinations with known upstream wheel support. Launch-grade CI coverage currently proves that path on Linux x86_64 with Python 3.12/3.13. Compatibility pins for macOS arm64/x86_64 and Linux aarch64/arm64 (including 64-bit Raspberry Pi 4/5) remain operator-validated best-effort until they are promoted into CI. Unsupported combinations such as 32-bit Pi Linux skip the local dependency and use `compatible-http` or fail-open behavior instead of blocking setup.
 
 Optional fallback env vars:
 

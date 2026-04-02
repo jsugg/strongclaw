@@ -45,6 +45,10 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
+      - name: Enforce independent review for security-critical PR changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py enforce-independent-review --event-path "${GITHUB_EVENT_PATH}" --repository "${GITHUB_REPOSITORY}"
       - name: Verify channels rollout contract
         run: uv run --project . python3 ./tests/scripts/security_workflow.py verify-channels-contract --repo-root .
       - name: Run recovery backup/restore smoke

@@ -117,6 +117,8 @@ def test_scenario_phase_names_deactivate_host_services_before_repo_local_sidecar
         "verify-launchd",
         "deactivate-services",
         "exercise-sidecars",
+        "exercise-channels-runtime",
+        "exercise-recovery-smoke",
     ]
 
 
@@ -940,6 +942,122 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
     assert calls[3].endswith("sidecars down --repo-local-state")
 
 
+def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Linux channels runtime phase should verify sidecars and channel contracts before teardown."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    def _fake_verify_sidecars(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 120,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, timeout_seconds, repo_root_path, repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
+    test_context.patch.patch_object(
+        fresh_host_linux,
+        "wait_for_docker_backend",
+        new=_fake_wait_for_docker_backend,
+    )
+    test_context.patch.patch_object(
+        fresh_host_linux,
+        "run_command",
+        new=_fake_run_command,
+    )
+    test_context.patch.patch_object(
+        fresh_host_linux,
+        "verify_sidecar_services_running",
+        new=_fake_verify_sidecars,
+    )
+
+    fresh_host_linux.exercise_linux_channels_runtime(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.aux-stack.yaml"
+    assert "verify-platform channels --asset-root ." in calls[3]
+    assert "security_workflow.py verify-channels-contract --repo-root ." in calls[4]
+    assert calls[5].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_linux_recovery_smoke_runs_security_workflow_command(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Linux recovery phase should execute the semantic security workflow helper."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    seen_commands: list[str] = []
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        seen_commands.append(" ".join(command))
+
+    test_context.patch.patch_object(
+        fresh_host_linux,
+        "run_command",
+        new=_fake_run_command,
+    )
+
+    fresh_host_linux.exercise_linux_recovery_smoke(context)
+
+    assert len(seen_commands) == 1
+    assert "security_workflow.py run-recovery-smoke --tmp-root" in seen_commands[0]
+
+
 def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
     tmp_path: Path,
     test_context: TestContext,
@@ -1082,6 +1200,122 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         == fresh_host_macos.HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS
     )
     assert verify_kwargs["repo_local_state"] is True
+
+
+def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Hosted macOS channels runtime phase should verify sidecars and channel contracts."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    def _fake_verify_sidecars(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 120,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, timeout_seconds, repo_root_path, repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        new=_fake_wait_for_docker_backend,
+    )
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "run_command",
+        new=_fake_run_command,
+    )
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        new=_fake_verify_sidecars,
+    )
+
+    fresh_host_macos.exercise_macos_channels_runtime(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
+    assert "verify-platform channels --asset-root ." in calls[3]
+    assert "security_workflow.py verify-channels-contract --repo-root ." in calls[4]
+    assert calls[5].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_macos_recovery_smoke_runs_security_workflow_command(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Hosted macOS recovery phase should execute the semantic security helper."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    seen_commands: list[str] = []
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        seen_commands.append(" ".join(command))
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "run_command",
+        new=_fake_run_command,
+    )
+
+    fresh_host_macos.exercise_macos_recovery_smoke(context)
+
+    assert len(seen_commands) == 1
+    assert "security_workflow.py run-recovery-smoke --tmp-root" in seen_commands[0]
 
 
 def test_deactivate_macos_host_services_limits_teardown_to_active_sidecars_services(

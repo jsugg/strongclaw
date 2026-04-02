@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Final, cast
@@ -10,7 +11,14 @@ import yaml
 
 from tests.utils.helpers.repo import REPO_ROOT
 
-_ARTIFACT_ROOT: Final[Path] = REPO_ROOT / ".omx" / "plans"
+_DEFAULT_ARTIFACT_ROOT: Final[Path] = (
+    REPO_ROOT / "tests" / "fixtures" / "launch_readiness" / "audit_packet"
+)
+_ARTIFACT_ROOT: Final[Path] = (
+    Path(os.environ.get("STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT", str(_DEFAULT_ARTIFACT_ROOT)))
+    .expanduser()
+    .resolve()
+)
 _REQUIRED_ARTIFACTS: Final[tuple[str, ...]] = (
     "launch-readiness-surface-manifest.yaml",
     "launch-readiness-workflow-matrix.yaml",
@@ -299,13 +307,13 @@ def test_report_and_decision_packet_include_release_decision_signals() -> None:
     )
 
     assert "Recommendation:" in report_text
-    assert "NO-GO" in report_text
+    assert "GO for first launch" in report_text
     assert "Blockers" in report_text
     assert "Residual Risks" in report_text
     assert "Assumptions" in report_text
     assert "Closure Path" in report_text
 
     assert "Decision:" in decision_text
-    assert "NO-GO" in decision_text
+    assert "Decision: **GO**" in decision_text
     assert "Blockers" in decision_text
     assert "Required Next Actions" in decision_text

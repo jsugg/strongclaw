@@ -106,6 +106,7 @@ steps can continue.
 workflows delegate their nontrivial operational steps to `tests/scripts/` helper CLIs instead of embedding shell blobs or Python heredocs directly in YAML.
 - Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
 before invoking the shared gate, and the repo's `pre-commit` hook now uses that system binary instead of a Docker-backed hook.
+- `.github/workflows/security.yml` enforces independent review for pull requests touching security-critical paths (auth, secrets, CI/infrastructure, dependency manifests, and browser-lab surfaces) via `tests/scripts/security_workflow.py enforce-independent-review`.
 - `.github/workflows/security.yml` installs a pinned `semgrep` CLI directly
 instead of relying on the Docker-backed Semgrep action, which keeps the lane off Docker Hub.
 - The Semgrep ruleset covers the repo's Python-heavy risk surfaces, including
@@ -118,6 +119,7 @@ tarball SHA-256 digests before extracting the binaries through the dedicated hel
 (`verify-channels-contract`) plus a disposable backup/verify/restore cycle
 (`run-recovery-smoke`) so launch-critical channel and recovery paths produce
 executable CI evidence.
+- `.github/workflows/fresh-host-core.yml` now includes explicit fresh-host phases for channel acceptance (`exercise-channels-runtime`) and recovery smoke (`exercise-recovery-smoke`) in the Linux and macOS sidecar scenarios, so release prerequisites also carry those evidentiary checks.
 - `.github/workflows/release.yml` now blocks publication on three repo-controlled
 prerequisites: the centralized release quality gate, the reusable fresh-host
 acceptance workflow, and the reusable memory-plugin verification workflow. It

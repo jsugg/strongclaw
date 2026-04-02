@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E4
 from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     append_coverage_summary,
     enforce_coverage_thresholds,
+    enforce_independent_review,
     install_gitleaks,
     install_syft,
     run_recovery_smoke,
@@ -85,6 +87,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
     )
 
+    review_parser = subparsers.add_parser(
+        "enforce-independent-review",
+        help="Require one non-author approval for security-critical pull-request changes.",
+    )
+    review_parser.add_argument(
+        "--event-path",
+        type=Path,
+        default=None,
+        help="Path to the GitHub event payload. Defaults to $GITHUB_EVENT_PATH.",
+    )
+    review_parser.add_argument(
+        "--repository",
+        default=None,
+        help="Repository slug (owner/repo). Defaults to $GITHUB_REPOSITORY.",
+    )
+    review_parser.add_argument(
+        "--github-api-base",
+        default="https://api.github.com",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -139,6 +161,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run-recovery-smoke":
             run_recovery_smoke(
                 tmp_root=Path(args.tmp_root).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "enforce-independent-review":
+            event_path_text = args.event_path or os.environ.get("GITHUB_EVENT_PATH")
+            repository = args.repository or os.environ.get("GITHUB_REPOSITORY")
+            github_token = os.environ.get("GITHUB_TOKEN", "")
+            if event_path_text is None:
+                raise CiWorkflowError(
+                    "missing event payload path: set --event-path or GITHUB_EVENT_PATH"
+                )
+            if repository is None:
+                raise CiWorkflowError("missing repository: set --repository or GITHUB_REPOSITORY")
+            enforce_independent_review(
+                event_path=Path(event_path_text).expanduser().resolve(),
+                repository=str(repository),
+                github_token=github_token,
+                github_api_base=str(args.github_api_base),
             )
             return 0
     except CiWorkflowError as exc:
