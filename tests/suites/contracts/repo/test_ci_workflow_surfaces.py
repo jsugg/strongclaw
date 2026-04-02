@@ -156,6 +156,7 @@ def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls(
     assert "inputs.macos_runtime_provider" in text
     assert "inputs.docker_pull_parallelism" in text
     assert "inputs.docker_pull_max_attempts" in text
+    assert "inputs.enable_homebrew_cache" in text
     assert "inputs.enable_runtime_download_cache" in text
     assert "cancel-in-progress: true" in text
 
@@ -183,6 +184,7 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert "Restore hosted macOS Homebrew download cache" in text
     assert "Restore hosted macOS runtime download cache" in text
     assert "Restore hosted macOS Docker image cache" in text
+    assert "Re-check hosted macOS Docker image cache after runtime install" in text
     assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
     assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text

@@ -1,4 +1,4 @@
-name: Fresh Host Acceptance
+name: Acceptance Tests
 
 on:
   pull_request:
@@ -40,12 +40,13 @@ concurrency:
     fresh-host-acceptance-${{ github.workflow }}-${{
       github.event_name == 'workflow_dispatch'
       && format(
-        '{0}-{1}-{2}-{3}-{4}-{5}',
+        '{0}-{1}-{2}-{3}-{4}-{5}-{6}',
         github.ref,
         inputs.macos_runtime_provider,
         inputs.docker_pull_parallelism,
         inputs.docker_pull_max_attempts,
         inputs.enable_package_cache,
+        inputs.enable_homebrew_cache,
         inputs.enable_runtime_download_cache
       )
       || github.event.pull_request.number
@@ -58,7 +59,7 @@ permissions:
 
 jobs:
   fresh-host-acceptance:
-    name: Fresh Host Acceptance
+    name: Fresh Host
     uses: ./.github/workflows/fresh-host-core.yml
     with:
       macos_runtime_provider: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_runtime_provider || 'colima' }}

@@ -691,6 +691,106 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
     )
 
 
+def test_save_image_cache_allows_partial_export_when_some_images_are_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Image cache save should not fail when some compose images remain unavailable."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    image_set = [
+        "postgres:16-alpine@sha256:abc",
+        "ubuntu/squid:latest@sha256:def",
+    ]
+    pull_attempts: list[list[str]] = []
+    save_commands: list[list[str]] = []
+
+    def fake_resolve_compose_images(
+        compose_files: list[Path],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> list[str]:
+        del compose_files, cwd, env
+        return list(image_set)
+
+    def fake_list_local_images(images: list[str]) -> list[str]:
+        if images == image_set:
+            return [image_set[0]]
+        return []
+
+    def fake_pull_images(
+        images: list[str],
+        *,
+        parallelism: int,
+        max_attempts: int,
+        pull_timeout_seconds: int = hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
+        recovery_cwd: Path | None = None,
+        recovery_env: dict[str, str] | None = None,
+    ) -> hosted_docker.PullReport:
+        del parallelism, max_attempts, pull_timeout_seconds, recovery_cwd, recovery_env
+        pull_attempts.append(list(images))
+        return hosted_docker.PullReport(
+            exit_code=1,
+            pulled_images=[],
+            failed_images=list(images),
+            attempt_count=1,
+            retried_images=[],
+        )
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        save_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "resolve_compose_images",
+        new=fake_resolve_compose_images,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "list_local_images",
+        new=fake_list_local_images,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "pull_images",
+        new=fake_pull_images,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    archive_path = hosted_docker.save_image_cache(Path(context.context_path))
+
+    assert pull_attempts == [[image_set[1]]]
+    assert archive_path == (cache_root.resolve() / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME)
+    assert save_commands == [["docker", "image", "save", "-o", str(archive_path), image_set[0]]]
+
+
 def test_hosted_docker_cli_dispatches_image_cache_commands(
     tmp_path: Path,
     test_context: TestContext,

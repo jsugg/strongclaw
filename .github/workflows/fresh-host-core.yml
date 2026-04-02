@@ -172,6 +172,15 @@ jobs:
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Install hosted macOS Docker runtime
         run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Re-check hosted macOS Docker image cache after runtime install
+        id: macos_image_cache_retry
+        if: ${{ steps.macos_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: .github-cache/docker-images
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          restore-keys: |
+            fresh-host-macos-images-${{ runner.arch }}-
       - name: Restore hosted macOS Docker images from cache
         run: ./tests/scripts/hosted_docker.py restore-image-cache --context "${FRESH_HOST_CONTEXT}"
       - name: Ensure hosted macOS Docker images
