@@ -112,6 +112,11 @@ raw tar extraction, traversal-prone archive-member joins, `subprocess`
 `shell=True`, and unsafe deserialization helpers.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
 tarball SHA-256 digests before extracting the binaries through the dedicated helper script.
+- That same security lane now executes two operational smoke checks through
+`tests/scripts/security_workflow.py`: channel rollout contract parity
+(`verify-channels-contract`) plus a disposable backup/verify/restore cycle
+(`run-recovery-smoke`) so launch-critical channel and recovery paths produce
+executable CI evidence.
 - `.github/workflows/release.yml` now blocks publication on three repo-controlled
 prerequisites: the centralized release quality gate, the reusable fresh-host
 acceptance workflow, and the reusable memory-plugin verification workflow. It
