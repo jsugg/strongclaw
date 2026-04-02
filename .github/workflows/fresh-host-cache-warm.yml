@@ -18,6 +18,7 @@ env:
   npm_config_prefer_offline: "true"
   HOMEBREW_CACHE: ${{ github.workspace }}/.github-cache/homebrew
   FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/.github-cache/macos-runtime-tools
+  FRESH_HOST_DOCKER_IMAGE_CACHE_DIR: ${{ github.workspace }}/.github-cache/docker-images
 
 jobs:
   linux-package-cache:
@@ -34,7 +35,7 @@ jobs:
           package-manager-cache: false
       - name: Restore package download caches
         id: linux_package_cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             .github-cache/npm
@@ -45,7 +46,7 @@ jobs:
       - name: Warm Linux fresh-host package cache
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - if: ${{ success() && steps.linux_package_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             .github-cache/npm
@@ -66,7 +67,7 @@ jobs:
           package-manager-cache: false
       - name: Restore package download caches
         id: macos_package_cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             .github-cache/npm
@@ -76,7 +77,7 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Restore hosted macOS Homebrew download cache
         id: macos_homebrew_cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ${{ env.HOMEBREW_CACHE }}
           key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
@@ -84,12 +85,20 @@ jobs:
             fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-
       - name: Restore hosted macOS runtime download cache
         id: macos_runtime_download_cache
-        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/macos-runtime-tools
           key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
           restore-keys: |
             fresh-host-macos-runtime-tools-${{ runner.arch }}-
+      - name: Restore hosted macOS Docker image cache
+        id: macos_image_cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: .github-cache/docker-images
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          restore-keys: |
+            fresh-host-macos-images-${{ runner.arch }}-
       - name: Warm macOS fresh-host package cache
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - name: Prepare macOS cache warm context
@@ -98,24 +107,35 @@ jobs:
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Warm hosted macOS runtime downloads
         run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Restore hosted macOS Docker images from cache
+        run: ./tests/scripts/hosted_docker.py restore-image-cache --context "${FRESH_HOST_CONTEXT}"
+      - name: Ensure hosted macOS Docker images
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Save hosted macOS Docker image cache archive
+        run: ./tests/scripts/hosted_docker.py save-image-cache --context "${FRESH_HOST_CONTEXT}"
       - name: Clean up macOS cache warm context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
       - if: ${{ success() && steps.macos_package_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             .github-cache/npm
             .github-cache/uv
           key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
       - if: ${{ success() && steps.macos_homebrew_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ${{ env.HOMEBREW_CACHE }}
           key: fresh-host-homebrew-${{ runner.os }}-${{ runner.arch }}-docker-tooling
       - if: ${{ success() && steps.macos_runtime_download_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/macos-runtime-tools
           key: fresh-host-macos-runtime-tools-${{ runner.arch }}-${{ env.MACOS_LIMA_VERSION }}-${{ env.MACOS_COLIMA_VERSION }}
+      - if: ${{ success() && steps.macos_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: .github-cache/docker-images
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}

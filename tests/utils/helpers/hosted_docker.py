@@ -1,6 +1,11 @@
 """Public hosted-docker helper facade."""
 
 from tests.utils.helpers._hosted_docker.diagnostics import collect_runtime_diagnostics
+from tests.utils.helpers._hosted_docker.image_cache import (
+    DOCKER_IMAGE_CACHE_ARCHIVE_NAME,
+    restore_image_cache,
+    save_image_cache,
+)
 from tests.utils.helpers._hosted_docker.images import (
     ensure_images,
     list_local_images,
@@ -33,9 +38,12 @@ __all__ = [
     "_run_command",
     "_wait_for_docker_ready",
     "collect_runtime_diagnostics",
+    "DOCKER_IMAGE_CACHE_ARCHIVE_NAME",
     "ensure_images",
     "install_runtime",
     "list_local_images",
     "pull_images",
+    "restore_image_cache",
     "resolve_compose_images",
+    "save_image_cache",
 ]
