@@ -174,6 +174,15 @@ def verify_baseline(
             "OPENCLAW_CONFIG",
             "OPENCLAW_PROFILE",
             "STRONGCLAW_RUNTIME_ROOT",
+            "STRONGCLAW_CONFIG_DIR",
+            "STRONGCLAW_DATA_DIR",
+            "STRONGCLAW_STATE_DIR",
+            "STRONGCLAW_LOG_DIR",
+            "STRONGCLAW_MEMORY_CONFIG_DIR",
+            "STRONGCLAW_VARLOCK_ENV_PATH",
+            "STRONGCLAW_VARLOCK_ENV_MODE",
+            "OPENCLAW_VARLOCK_ENV_MODE",
+            "VARLOCK_ENV_DIR",
             "VARLOCK_LOCAL_ENV_FILE",
         ):
             pytest_env.pop(key, None)
