@@ -18,6 +18,8 @@ from tests.utils.helpers.hosted_docker import (  # noqa: E402
     collect_runtime_diagnostics,
     ensure_images,
     install_runtime,
+    restore_image_cache,
+    save_image_cache,
 )
 
 
@@ -34,6 +36,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "ensure-images", help="Ensure compose images exist locally."
     )
     ensure_parser.add_argument("--context", type=Path, required=True)
+
+    restore_parser = subparsers.add_parser(
+        "restore-image-cache",
+        help="Restore Docker images from the workflow cache archive.",
+    )
+    restore_parser.add_argument("--context", type=Path, required=True)
+
+    save_parser = subparsers.add_parser(
+        "save-image-cache",
+        help="Save Docker images into the workflow cache archive.",
+    )
+    save_parser.add_argument("--context", type=Path, required=True)
 
     diagnostics_parser = subparsers.add_parser(
         "collect-diagnostics",
@@ -60,6 +74,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "ensure-images":
             ensure_images(Path(args.context).expanduser().resolve())
+            return 0
+        if args.command == "restore-image-cache":
+            restore_image_cache(Path(args.context).expanduser().resolve())
+            return 0
+        if args.command == "save-image-cache":
+            save_image_cache(Path(args.context).expanduser().resolve())
             return 0
         if args.command == "collect-diagnostics":
             collect_runtime_diagnostics(Path(args.context).expanduser().resolve())

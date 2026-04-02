@@ -29,6 +29,7 @@ _NON_IMPACTFUL_PATH_FILTER_MARKERS = (
     '"**/*.pdf"',
     '"LICENSE*"',
 )
+_CACHE_ACTION_NODE24_SHA = "668228422ae6a00e4ad889ee87cd7109ec5666a7"
 
 
 def _workflow_text(workflow_name: str) -> str:
@@ -126,6 +127,7 @@ def test_fresh_host_core_workflow_uses_semantic_test_scripts() -> None:
     assert "./tests/scripts/fresh_host.py cleanup" in text
     assert "./tests/scripts/fresh_host.py write-summary" in text
     assert "./tests/scripts/hosted_docker.py install-runtime" in text
+    assert "./tests/scripts/hosted_docker.py restore-image-cache" in text
     assert "./tests/scripts/hosted_docker.py ensure-images" in text
     assert "./tests/scripts/hosted_docker.py collect-diagnostics" in text
 
@@ -180,9 +182,12 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert "Restore package download caches" in text
     assert "Restore hosted macOS Homebrew download cache" in text
     assert "Restore hosted macOS runtime download cache" in text
-    assert "actions/cache/restore" in text
+    assert "Restore hosted macOS Docker image cache" in text
+    assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
+    assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text
     assert "FRESH_HOST_MACOS_RUNTIME_DOWNLOAD_CACHE_DIR" in text
+    assert "FRESH_HOST_DOCKER_IMAGE_CACHE_DIR" in text
 
 
 def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
@@ -193,8 +198,13 @@ def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
     assert "./tests/scripts/fresh_host.py prepare-context" in text
     assert "./tests/scripts/fresh_host.py preview-context" in text
     assert "./tests/scripts/hosted_docker.py install-runtime" in text
-    assert "actions/cache/restore" in text
-    assert "actions/cache/save" in text
+    assert "./tests/scripts/hosted_docker.py restore-image-cache" in text
+    assert "./tests/scripts/hosted_docker.py ensure-images" in text
+    assert "./tests/scripts/hosted_docker.py save-image-cache" in text
+    assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
+    assert f"actions/cache/save@{_CACHE_ACTION_NODE24_SHA}" in text
+    assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
+    assert "actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "Warm Linux Fresh Host Package Cache" in text
     assert "Warm macOS Fresh Host Caches" in text
 

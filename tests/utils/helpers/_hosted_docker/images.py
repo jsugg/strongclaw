@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Final
 
 from clawops.strongclaw_runtime import load_env_assignments, varlock_local_env_file
-from tests.utils.helpers._fresh_host.models import FreshHostError
+from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
 from tests.utils.helpers._hosted_docker.models import (
@@ -31,6 +31,30 @@ DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "/run/containerd/containerd.sock",
     "error while dialing",
 )
+
+
+def compose_probe_env(
+    *,
+    context: FreshHostContext,
+    repo_root: Path,
+    compose_state_dir_name: str,
+) -> dict[str, str]:
+    """Build an environment suitable for compose image resolution calls."""
+    compose_state_dir = Path(context.tmp_root).resolve() / compose_state_dir_name
+    compose_state_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
+        if value and not env.get(key, "").strip():
+            env[key] = value
+    # `docker compose config --images` still resolves env interpolation before setup creates
+    # the repo-local Varlock contract, so pre-fill required secrets with placeholders.
+    for key in ("LITELLM_DB_PASSWORD", "NEO4J_PASSWORD"):
+        if not env.get(key, "").strip():
+            env[key] = COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER
+    env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(compose_state_dir)
+    if context.compose_variant is not None:
+        env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
+    return env
 
 
 def resolve_compose_images(
@@ -199,20 +223,9 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
     report_path = Path(context.image_report_path).resolve() if context.image_report_path else None
     repo_root = Path(context.repo_root).resolve()
     compose_files = [Path(path).resolve() for path in context.compose_files]
-    compose_state_dir = Path(context.tmp_root).resolve() / "compose-prepull"
-    compose_state_dir.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    for key, value in load_env_assignments(varlock_local_env_file(repo_root)).items():
-        if value and not env.get(key, "").strip():
-            env[key] = value
-    # `docker compose config --images` still resolves env interpolation before setup creates
-    # the repo-local Varlock contract, so pre-fill the required secrets with placeholders.
-    for key in ("LITELLM_DB_PASSWORD", "NEO4J_PASSWORD"):
-        if not env.get(key, "").strip():
-            env[key] = COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER
-    env["STRONGCLAW_COMPOSE_STATE_DIR"] = str(compose_state_dir)
-    if context.compose_variant is not None:
-        env["STRONGCLAW_COMPOSE_VARIANT"] = context.compose_variant
+    env = compose_probe_env(
+        context=context, repo_root=repo_root, compose_state_dir_name="compose-prepull"
+    )
 
     if not context.ensure_images:
         report = ImageEnsureReport(

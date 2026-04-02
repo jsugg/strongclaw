@@ -41,7 +41,7 @@ sidecars and browser-lab mutable data live in Docker-managed volumes instead of 
 - `workflow_dispatch` can benchmark cache toggles for the supported hosted
 macOS path without changing the required PR gate.
 - The workflow stays declarative by delegating runtime setup, image warming,
-diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Hosted macOS image warming still resolves the pinned compose images ahead of the scenario run, but now uses bounded retries and heartbeat logging instead of restoring immutable Docker image tarballs from the workflow cache.
+diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Hosted macOS image warming restores a cached Docker image archive when available, then verifies compose image availability with bounded retries and heartbeat logging as a fallback.
 - Repository workflow contract tests verify that shell steps invoking
 `tests/scripts/*.py` either call an explicit Python interpreter or target an executable script, so nightly cache warming cannot silently regress on file mode drift.
 

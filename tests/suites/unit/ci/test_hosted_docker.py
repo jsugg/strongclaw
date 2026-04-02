@@ -10,9 +10,11 @@ import pytest
 
 from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.plugins.infrastructure.context import TestContext
+from tests.scripts import hosted_docker as hosted_docker_script
 from tests.utils.helpers import fresh_host, hosted_docker
 from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
+from tests.utils.helpers._hosted_docker import image_cache as hosted_docker_image_cache
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
 
@@ -511,3 +513,220 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
     assert compose_commands
     assert all(env["NEO4J_PASSWORD"] == "runtime-secret" for env in compose_commands)
     assert all("COMPOSE_PROJECT_NAME" in env for env in compose_commands)
+
+
+def test_hosted_docker_facade_exports_image_cache_helpers() -> None:
+    """The public hosted-docker facade should expose image-cache helpers."""
+    assert hasattr(hosted_docker, "restore_image_cache")
+    assert hasattr(hosted_docker, "save_image_cache")
+
+
+def test_restore_image_cache_loads_archive_when_present(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Image cache restore should load the archive into the daemon when available."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    cache_root.mkdir()
+    archive_path = cache_root / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME
+    archive_path.write_text("fake-image-cache", encoding="utf-8")
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[tuple[list[str], Path, int]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del env, capture_output
+        calls.append((command, cwd, timeout_seconds))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    restored = hosted_docker.restore_image_cache(Path(context.context_path))
+
+    assert restored is True
+    assert calls == [
+        (
+            ["docker", "image", "load", "-i", str(archive_path)],
+            workspace.resolve(),
+            1800,
+        )
+    ]
+
+
+def test_restore_image_cache_skips_when_archive_is_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Image cache restore should no-op when no archive is available."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_run_checked(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("run_checked should not execute when archive is missing")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    restored = hosted_docker.restore_image_cache(Path(context.context_path))
+
+    assert restored is False
+
+
+def test_save_image_cache_exports_hosted_macos_compose_images(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Image cache save should export hosted macOS compose images to one archive."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    resolved_compose_files: list[Path] = []
+    image_set = [
+        "postgres:16-alpine@sha256:abc",
+        "qdrant/qdrant:v1.15.5@sha256:def",
+    ]
+    save_commands: list[list[str]] = []
+
+    def fake_resolve_compose_images(
+        compose_files: list[Path],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> list[str]:
+        del cwd, env
+        resolved_compose_files.extend(compose_files)
+        return list(image_set)
+
+    def fake_list_local_images(images: list[str]) -> list[str]:
+        return list(images)
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        save_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "resolve_compose_images",
+        new=fake_resolve_compose_images,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "list_local_images",
+        new=fake_list_local_images,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    archive_path = hosted_docker.save_image_cache(Path(context.context_path))
+
+    assert archive_path == (cache_root.resolve() / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME)
+    assert save_commands == [["docker", "image", "save", "-o", str(archive_path), *image_set]]
+    assert sorted(path.name for path in resolved_compose_files) == sorted(
+        [
+            "docker-compose.aux-stack.ci-hosted-macos.yaml",
+            "docker-compose.browser-lab.ci-hosted-macos.yaml",
+        ]
+    )
+
+
+def test_hosted_docker_cli_dispatches_image_cache_commands(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """CLI should dispatch image-cache subcommands through helper facade calls."""
+    context_file = tmp_path / "context.json"
+    context_file.write_text("{}", encoding="utf-8")
+    calls: list[tuple[str, Path]] = []
+
+    def fake_restore_image_cache(context_path: Path) -> bool:
+        calls.append(("restore", context_path))
+        return True
+
+    def fake_save_image_cache(context_path: Path) -> Path:
+        calls.append(("save", context_path))
+        return context_path
+
+    test_context.patch.patch_object(
+        hosted_docker_script,
+        "restore_image_cache",
+        new=fake_restore_image_cache,
+    )
+    test_context.patch.patch_object(
+        hosted_docker_script,
+        "save_image_cache",
+        new=fake_save_image_cache,
+    )
+
+    restore_exit = hosted_docker_script.main(
+        ["restore-image-cache", "--context", str(context_file)]
+    )
+    save_exit = hosted_docker_script.main(["save-image-cache", "--context", str(context_file)])
+
+    assert restore_exit == 0
+    assert save_exit == 0
+    assert calls == [
+        ("restore", context_file.resolve()),
+        ("save", context_file.resolve()),
+    ]
