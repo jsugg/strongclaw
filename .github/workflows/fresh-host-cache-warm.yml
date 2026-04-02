@@ -94,6 +94,8 @@ jobs:
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - name: Prepare macOS cache warm context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Preview macOS cache warm context
+        run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Warm hosted macOS runtime downloads
         run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
       - name: Clean up macOS cache warm context

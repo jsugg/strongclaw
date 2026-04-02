@@ -198,6 +198,42 @@ def test_fresh_host_cli_linux_sidecars_verifies_runtime_before_teardown(tmp_path
     ]
 
 
+def test_fresh_host_cli_preview_context_writes_preview_artifacts(tmp_path: Path) -> None:
+    """The CLI should render context preview JSON and summary output."""
+    env, exports, _ = _prepare_linux_context(tmp_path)
+    context_path = Path(exports["FRESH_HOST_CONTEXT"])
+    summary_path = tmp_path / "summary.md"
+    preview_path = Path(exports["FRESH_HOST_REPORT_DIR"]) / "context-preview.json"
+
+    completed = _run_fresh_host(
+        _fresh_host_command(
+            "preview-context",
+            "--context",
+            str(context_path),
+            "--summary-file",
+            str(summary_path),
+        ),
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    preview_payload = json.loads(preview_path.read_text(encoding="utf-8"))
+    assert preview_payload["scenario_id"] == "linux"
+    assert preview_payload["platform"] == "linux"
+    assert preview_payload["job_name"] == "Linux Fresh Host"
+    assert preview_payload["phase_names"]
+    assert preview_payload["compose_files"]
+    assert preview_payload["context_path"] == str(context_path)
+    assert preview_payload["report_path"] == exports["FRESH_HOST_REPORT_JSON"]
+    assert preview_payload["report_dir"] == exports["FRESH_HOST_REPORT_DIR"]
+
+    summary_text = summary_path.read_text(encoding="utf-8")
+    assert "### Fresh-Host Context Preview" in summary_text
+    assert "| Scenario | linux |" in summary_text
+    assert "| Platform | linux |" in summary_text
+    assert "| Ensure images | True |" in summary_text
+
+
 def test_fresh_host_cli_linux_browser_lab_verifies_runtime_before_teardown(
     tmp_path: Path,
 ) -> None:

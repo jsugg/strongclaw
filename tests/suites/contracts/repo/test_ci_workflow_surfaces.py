@@ -120,6 +120,7 @@ def test_fresh_host_core_workflow_uses_semantic_test_scripts() -> None:
     text = _workflow_text("fresh-host-core.yml")
 
     assert "./tests/scripts/fresh_host.py prepare-context" in text
+    assert "./tests/scripts/fresh_host.py preview-context" in text
     assert "./tests/scripts/fresh_host.py run-scenario" in text
     assert "./tests/scripts/fresh_host.py collect-diagnostics" in text
     assert "./tests/scripts/fresh_host.py cleanup" in text
@@ -190,6 +191,7 @@ def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
 
     assert "./tests/scripts/fresh_host_cache.py warm-packages" in text
     assert "./tests/scripts/fresh_host.py prepare-context" in text
+    assert "./tests/scripts/fresh_host.py preview-context" in text
     assert "./tests/scripts/hosted_docker.py install-runtime" in text
     assert "actions/cache/restore" in text
     assert "actions/cache/save" in text
