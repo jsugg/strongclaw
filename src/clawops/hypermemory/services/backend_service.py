@@ -143,6 +143,38 @@ class BackendService:
             emit_structured_log("clawops.hypermemory.embedding", payload)
             return vectors
 
+    def _embed_rows_with_split_retry(
+        self,
+        vector_rows: Sequence[VectorRow],
+        *,
+        purpose: str,
+    ) -> list[list[float]]:
+        """Embed rows, splitting batches when larger calls fail."""
+        if not vector_rows:
+            return []
+        texts = [str(entry["content"]) for entry in vector_rows]
+        try:
+            return self.embed_texts(texts, purpose=purpose)
+        except Exception:
+            if len(vector_rows) == 1:
+                raise
+            midpoint = len(vector_rows) // 2
+            if midpoint <= 0:
+                raise
+            emit_structured_log(
+                "clawops.hypermemory.embedding.batch_split_retry",
+                {"purpose": purpose, "batchSize": len(vector_rows)},
+            )
+            left_vectors = self._embed_rows_with_split_retry(
+                vector_rows[:midpoint],
+                purpose=purpose,
+            )
+            right_vectors = self._embed_rows_with_split_retry(
+                vector_rows[midpoint:],
+                purpose=purpose,
+            )
+            return [*left_vectors, *right_vectors]
+
     def dense_search(
         self,
         *,
@@ -289,10 +321,7 @@ class BackendService:
                 points: list[VectorPoint] = []
                 embedded_vectors: list[EmbeddedVectorRow] = []
                 for batch in self.embedding_batches(vector_rows):
-                    vectors = self.embed_texts(
-                        [str(entry["content"]) for entry in batch],
-                        purpose="index",
-                    )
+                    vectors = self._embed_rows_with_split_retry(batch, purpose="index")
                     for entry, vector in zip(batch, vectors, strict=True):
                         sparse_payload: SparseVectorPayload | None = None
                         if include_sparse:

@@ -655,6 +655,128 @@ def test_sidecars_up_skips_bootstrap_when_litellm_is_already_healthy(
     ]
 
 
+def test_sidecars_up_recreates_postgres_after_initial_wait_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Sidecars startup should recover once by recreating Postgres after an initial timeout."""
+    compose_path = tmp_path / "compose.yaml"
+    compose_path.write_text("services: {}\n", encoding="utf-8")
+    inherited_calls: list[tuple[str, ...]] = []
+    waited_services: list[str] = []
+    postgres_wait_attempts = 0
+
+    def _compose_path_override(_repo_root: pathlib.Path, _compose_name: str) -> pathlib.Path:
+        return compose_path
+
+    monkeypatch.setattr(strongclaw_ops, "ensure_docker_backend_ready", lambda: None)
+    monkeypatch.setattr(strongclaw_ops, "_compose_path", _compose_path_override)
+    monkeypatch.setattr(strongclaw_ops, "_compose_env", _fixed_compose_env)
+    monkeypatch.setattr(strongclaw_ops, "wrap_command_with_varlock", _identity_varlock_command)
+
+    def _profile_flags(_path: pathlib.Path) -> dict[str, bool | str]:
+        return {
+            "usesQmd": True,
+            "usesHypermemory": True,
+            "source": "test",
+        }
+
+    monkeypatch.setattr(
+        strongclaw_ops,
+        "_resolve_profile_dependency_flags",
+        _profile_flags,
+    )
+
+    def _compose_service_statuses(_execution: object) -> dict[str, object]:
+        return {
+            "postgres": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="postgres",
+                state="running",
+                health="healthy",
+            ),
+            "litellm": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="litellm",
+                state="running",
+                health="healthy",
+            ),
+            "qdrant": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="qdrant",
+                state="running",
+                health="healthy",
+            ),
+            "neo4j": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="neo4j",
+                state="running",
+                health="healthy",
+            ),
+            "otel-collector": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="otel-collector",
+                state="running",
+                health=None,
+            ),
+        }
+
+    def _wait_for_compose_service(
+        _execution: object,
+        *,
+        service_name: str,
+        state: str,
+        health: str | None = None,
+        timeout_seconds: int,
+    ) -> None:
+        del state, health, timeout_seconds
+        nonlocal postgres_wait_attempts
+        waited_services.append(service_name)
+        if service_name == "postgres":
+            postgres_wait_attempts += 1
+            if postgres_wait_attempts == 1:
+                raise strongclaw_ops.CommandError(
+                    "timed out waiting for compose service 'postgres'"
+                )
+
+    def fake_run_command_inherited(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 1800,
+    ) -> int:
+        del cwd, env, timeout_seconds
+        inherited_calls.append(tuple(command))
+        return 0
+
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _compose_service_statuses)
+    monkeypatch.setattr(strongclaw_ops, "_wait_for_compose_service", _wait_for_compose_service)
+    monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+
+    assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
+    assert waited_services == ["postgres", "postgres", "postgres", "litellm", "qdrant", "neo4j"]
+    assert inherited_calls == [
+        ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres"),
+        (
+            "docker",
+            "compose",
+            "-f",
+            str(compose_path),
+            "up",
+            "-d",
+            "--force-recreate",
+            "postgres",
+        ),
+        (
+            "docker",
+            "compose",
+            "-f",
+            str(compose_path),
+            "up",
+            "-d",
+            "litellm",
+            "otel-collector",
+            "qdrant",
+            "neo4j",
+        ),
+    ]
+
+
 def test_sidecars_up_fails_when_postgres_never_turns_healthy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
@@ -722,7 +844,17 @@ def test_sidecars_up_fails_when_postgres_never_turns_healthy(
         strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False)
 
     assert inherited_calls == [
-        ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres")
+        ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres"),
+        (
+            "docker",
+            "compose",
+            "-f",
+            str(compose_path),
+            "up",
+            "-d",
+            "--force-recreate",
+            "postgres",
+        ),
     ]
 
 
