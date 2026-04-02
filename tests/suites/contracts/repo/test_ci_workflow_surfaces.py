@@ -156,6 +156,7 @@ def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls(
     assert "inputs.macos_runtime_provider" in text
     assert "inputs.docker_pull_parallelism" in text
     assert "inputs.docker_pull_max_attempts" in text
+    assert "inputs.enable_homebrew_cache" in text
     assert "inputs.enable_runtime_download_cache" in text
     assert "cancel-in-progress: true" in text
 
