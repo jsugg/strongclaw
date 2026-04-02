@@ -162,8 +162,20 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     assert captured_env is not None
     assert pathlib.Path(captured_env["HOME"]).parent == repo_root / ".tmp"
     assert captured_env["XDG_CONFIG_HOME"] == f"{captured_env['HOME']}/.config"
-    assert "VARLOCK_LOCAL_ENV_FILE" not in captured_env
-    assert "STRONGCLAW_RUNTIME_ROOT" not in captured_env
+    for isolated_key in (
+        "VARLOCK_LOCAL_ENV_FILE",
+        "VARLOCK_ENV_DIR",
+        "STRONGCLAW_RUNTIME_ROOT",
+        "STRONGCLAW_CONFIG_DIR",
+        "STRONGCLAW_DATA_DIR",
+        "STRONGCLAW_STATE_DIR",
+        "STRONGCLAW_LOG_DIR",
+        "STRONGCLAW_MEMORY_CONFIG_DIR",
+        "STRONGCLAW_VARLOCK_ENV_PATH",
+        "STRONGCLAW_VARLOCK_ENV_MODE",
+        "OPENCLAW_VARLOCK_ENV_MODE",
+    ):
+        assert isolated_key not in captured_env
 
 
 def test_verify_baseline_surfaces_repo_test_failure_detail(
