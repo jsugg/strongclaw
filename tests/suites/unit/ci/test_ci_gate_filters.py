@@ -27,12 +27,13 @@ def _select(*changed_paths: str) -> CiGateSelection:
     return selection_from_filter_matches(matches)
 
 
-def test_docs_only_change_requires_docs_parity_and_skips_heavy_lanes() -> None:
+def test_security_critical_doc_change_routes_to_security_lane() -> None:
     selection = _select("platform/docs/CI_AND_SECURITY.md")
 
     assert selection.docs_only is True
-    assert selection.any_heavy is False
-    assert selection.docs_parity_required is True
+    assert selection.security is True
+    assert selection.any_heavy is True
+    assert selection.docs_parity_required is False
 
 
 def test_docs_plus_docs_parity_contract_change_stays_in_docs_parity_lane() -> None:
@@ -43,6 +44,14 @@ def test_docs_plus_docs_parity_contract_change_stays_in_docs_parity_lane() -> No
     assert selection.security is False
     assert selection.any_heavy is False
     assert selection.docs_parity_required is True
+
+
+def test_security_model_doc_change_routes_to_security_lane() -> None:
+    selection = _select("platform/docs/SECURITY_MODEL.md")
+
+    assert selection.docs_only is True
+    assert selection.security is True
+    assert selection.docs_parity_required is False
 
 
 def test_core_runtime_change_routes_to_heavy_lanes() -> None:

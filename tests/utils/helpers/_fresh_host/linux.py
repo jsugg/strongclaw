@@ -34,7 +34,7 @@ def run_clawops_bootstrap(
         "--home-dir",
         context.app_home,
         "--profile",
-        "openclaw-default",
+        context.profile,
     ]
     run_command(full_command, cwd=repo_root, env=env)
     return full_command
@@ -61,7 +61,7 @@ def linux_setup(context: FreshHostContext) -> list[str]:
         "--home-dir",
         context.app_home,
         "--profile",
-        "openclaw-default",
+        context.profile,
         "--non-interactive",
         "--no-verify",
         "--no-activate-services",
@@ -167,6 +167,7 @@ def exercise_linux_recovery_smoke(context: FreshHostContext) -> list[str]:
         "run-recovery-smoke",
         "--tmp-root",
         context.tmp_root,
+        "--require-openclaw-cli",
     ]
     run_command(command, cwd=repo_root, env=phase_env(context))
     return command

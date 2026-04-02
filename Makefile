@@ -16,7 +16,7 @@ DOCTOR_ARGS ?=
 PREFERRED_PYTHON := $(shell $(PYTHON) src/clawops/platform_compat.py --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
-.PHONY: help install setup doctor dev dev-shell fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-framework test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup
+.PHONY: help install setup doctor dev dev-shell fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-framework test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup sync-runtime-assets
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -125,3 +125,6 @@ run-harness: ## Execute the harness smoke suite.
 
 backup: ## Create a recovery backup bundle.
 	$(RUN) clawops recovery backup-create
+
+sync-runtime-assets: ## Synchronize tracked platform assets into src/clawops/assets/platform.
+	$(PYTHON) ./tests/scripts/sync_runtime_assets.py --repo-root .

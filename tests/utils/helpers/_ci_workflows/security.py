@@ -26,8 +26,8 @@ from tests.utils.helpers._ci_workflows.common import (
 GLOBAL_COVERAGE_THRESHOLD = 75.0
 CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_recovery.py": 80.0,
-    "src/clawops/strongclaw_model_auth.py": 18.0,
-    "src/clawops/strongclaw_varlock_env.py": 19.0,
+    "src/clawops/strongclaw_model_auth.py": 50.0,
+    "src/clawops/strongclaw_varlock_env.py": 30.0,
     "src/clawops/strongclaw_bootstrap.py": 28.0,
 }
 _GITHUB_API_BASE: Final[str] = "https://api.github.com"
@@ -322,25 +322,62 @@ def verify_channels_contract(*, repo_root: Path) -> None:
 
 def run_recovery_smoke(*, tmp_root: Path) -> None:
     """Exercise backup/verify/restore against a disposable OpenClaw home."""
+    run_recovery_smoke_with_modes(tmp_root=tmp_root, require_openclaw_cli=False)
+
+
+def run_recovery_smoke_with_modes(
+    *,
+    tmp_root: Path,
+    require_openclaw_cli: bool,
+) -> None:
+    """Exercise recovery in both CLI-preferred and forced-fallback modes."""
     resolved_tmp_root = tmp_root.expanduser().resolve()
-    home_dir = resolved_tmp_root / "recovery-home"
+    openclaw_available = recovery_helpers.shutil.which("openclaw") is not None
+    if openclaw_available:
+        _run_recovery_cycle(
+            resolved_tmp_root=resolved_tmp_root,
+            mode_label="openclaw-cli",
+            force_tar_fallback=False,
+        )
+    elif require_openclaw_cli:
+        raise CiWorkflowError(
+            "openclaw-cli recovery smoke was required but openclaw is not available in PATH"
+        )
+
+    _run_recovery_cycle(
+        resolved_tmp_root=resolved_tmp_root,
+        mode_label="tar-fallback",
+        force_tar_fallback=True,
+    )
+
+
+def _run_recovery_cycle(
+    *,
+    resolved_tmp_root: Path,
+    mode_label: str,
+    force_tar_fallback: bool,
+) -> None:
+    """Run one backup/verify/restore cycle and assert marker restoration."""
+    home_dir = resolved_tmp_root / f"recovery-home-{mode_label}"
     state_dir = home_dir / ".openclaw"
     marker_path = state_dir / "logs" / "smoke.log"
     marker_path.parent.mkdir(parents=True, exist_ok=True)
-    marker_path.write_text("recovery smoke marker\n", encoding="utf-8")
+    marker_path.write_text(f"recovery smoke marker ({mode_label})\n", encoding="utf-8")
     (state_dir / "settings.json").write_text('{"ok":true}\n', encoding="utf-8")
 
-    with _force_tar_fallback_for_recovery():
+    recovery_context = (
+        _force_tar_fallback_for_recovery() if force_tar_fallback else contextlib.nullcontext()
+    )
+    with recovery_context:
         archive_path = create_backup(home_dir=home_dir)
         verified_archive = verify_backup(archive_path, home_dir=home_dir)
-
-        restore_destination = resolved_tmp_root / "recovery-restore"
+        restore_destination = resolved_tmp_root / f"recovery-restore-{mode_label}"
         restore_backup(verified_archive, destination=restore_destination, home_dir=home_dir)
 
     restored_marker = restore_destination / ".openclaw" / "logs" / "smoke.log"
     if not restored_marker.exists():
         raise CiWorkflowError(
-            "recovery smoke failed: restored marker missing after backup/verify/restore cycle"
+            f"recovery smoke failed in mode={mode_label}: restored marker missing"
         )
 
 

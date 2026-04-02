@@ -1,4 +1,5 @@
 graft src/clawops/assets/platform
+prune src/clawops/assets/platform/compose/state
 global-exclude __pycache__
 global-exclude *.py[cod]
 global-exclude .DS_Store

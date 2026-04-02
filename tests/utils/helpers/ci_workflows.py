@@ -19,7 +19,9 @@ from tests.utils.helpers._ci_workflows.memory_plugin import (
 from tests.utils.helpers._ci_workflows.release import (
     clean_artifact_directories,
     publish_github_release,
+    run_release_runtime_readiness,
     verify_release_artifacts,
+    verify_tag_version_parity,
 )
 from tests.utils.helpers._ci_workflows.security import (
     append_coverage_summary,
@@ -27,6 +29,7 @@ from tests.utils.helpers._ci_workflows.security import (
     install_gitleaks,
     install_syft,
     run_recovery_smoke,
+    run_recovery_smoke_with_modes,
     verify_channels_contract,
     write_empty_sarif,
 )
@@ -46,12 +49,15 @@ __all__ = [
     "install_syft",
     "prepare_setup_smoke",
     "publish_github_release",
+    "run_release_runtime_readiness",
     "resolve_setup_smoke_paths",
     "run_recovery_smoke",
+    "run_recovery_smoke_with_modes",
     "run_clawops_memory_migration",
     "run_vendored_host_checks",
     "verify_channels_contract",
     "verify_release_artifacts",
+    "verify_tag_version_parity",
     "wait_for_qdrant",
     "write_empty_sarif",
 ]

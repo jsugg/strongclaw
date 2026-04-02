@@ -21,7 +21,7 @@ from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     enforce_independent_review,
     install_gitleaks,
     install_syft,
-    run_recovery_smoke,
+    run_recovery_smoke_with_modes,
     verify_channels_contract,
     write_empty_sarif,
 )
@@ -85,6 +85,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--tmp-root",
         type=Path,
         required=True,
+    )
+    recovery_parser.add_argument(
+        "--require-openclaw-cli",
+        action="store_true",
+        help="Fail when the openclaw-cli recovery path cannot be exercised.",
     )
 
     review_parser = subparsers.add_parser(
@@ -159,8 +164,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.command == "run-recovery-smoke":
-            run_recovery_smoke(
+            run_recovery_smoke_with_modes(
                 tmp_root=Path(args.tmp_root).expanduser().resolve(),
+                require_openclaw_cli=bool(args.require_openclaw_cli),
             )
             return 0
         if args.command == "enforce-independent-review":

@@ -29,14 +29,22 @@ def test_release_workflow_runs_quality_gate_before_publish() -> None:
     workflow = yaml.safe_load(_workflow_text("release.yml"))
     jobs = workflow["jobs"]
     quality_gate_job = jobs["release-quality-gate"]
+    runtime_readiness_job = jobs["release-runtime-readiness"]
     publish_job = jobs["publish-release-artifacts"]
     quality_gate_steps = cast(list[dict[str, object]], quality_gate_job["steps"])
+    runtime_readiness_steps = cast(list[dict[str, object]], runtime_readiness_job["steps"])
 
     assert any(
         step.get("run") == "uv run python -m clawops supply-chain --repo-root . quality-gate"
         for step in quality_gate_steps
     )
+    assert any(
+        step.get("run")
+        == "python3 ./tests/scripts/release_workflow.py runtime-readiness --repo-root ."
+        for step in runtime_readiness_steps
+    )
     assert "release-quality-gate" in publish_job["needs"]
+    assert "release-runtime-readiness" in publish_job["needs"]
 
 
 def test_quality_gate_workflows_install_shellcheck_before_gate() -> None:

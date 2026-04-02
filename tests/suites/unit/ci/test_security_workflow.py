@@ -168,48 +168,13 @@ def test_verify_channels_contract_raises_ci_error_when_report_fails(
         ci_workflows.verify_channels_contract(repo_root=tmp_path)
 
 
-def test_run_recovery_smoke_executes_backup_verify_restore_flow(
+def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_available(
     test_context: TestContext,
     tmp_path: Path,
 ) -> None:
-    """Recovery smoke should execute backup, verify, and restore in sequence."""
-    seen_calls: list[tuple[str, Path, Path | None]] = []
-    archive_path = tmp_path / "archive.tar.gz"
-
-    def fake_create_backup(*, home_dir: Path) -> Path:
-        seen_calls.append(("create", home_dir, None))
-        archive_path.write_text("archive", encoding="utf-8")
-        return archive_path
-
-    def fake_verify_backup(target: Path, *, home_dir: Path) -> Path:
-        seen_calls.append(("verify", home_dir, target))
-        return target
-
-    def fake_restore_backup(target: Path, *, destination: Path, home_dir: Path) -> Path:
-        seen_calls.append(("restore", home_dir, target))
-        marker = destination / ".openclaw" / "logs" / "smoke.log"
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("restored\n", encoding="utf-8")
-        return destination
-
-    test_context.patch.patch_object(security_helpers, "create_backup", new=fake_create_backup)
-    test_context.patch.patch_object(security_helpers, "verify_backup", new=fake_verify_backup)
-    test_context.patch.patch_object(security_helpers, "restore_backup", new=fake_restore_backup)
-
-    ci_workflows.run_recovery_smoke(tmp_root=tmp_path)
-
-    assert seen_calls[0][0] == "create"
-    assert seen_calls[1][0] == "verify"
-    assert seen_calls[2][0] == "restore"
-
-
-def test_run_recovery_smoke_forces_tar_fallback_when_openclaw_is_available(
-    test_context: TestContext,
-    tmp_path: Path,
-) -> None:
-    """Recovery smoke should bypass OpenClaw CLI verification in CI helper mode."""
-    archive_path = tmp_path / "archive.tar.gz"
+    """Recovery smoke should execute backup, verify, and restore in both modes."""
     seen_openclaw_resolution: list[str | None] = []
+    archive_path = tmp_path / "archive.tar.gz"
 
     def fake_which(command: str, *_args: object, **_kwargs: object) -> str | None:
         if command == "openclaw":
@@ -217,15 +182,18 @@ def test_run_recovery_smoke_forces_tar_fallback_when_openclaw_is_available(
         return None
 
     def fake_create_backup(*, home_dir: Path) -> Path:
+        del home_dir
         seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
         archive_path.write_text("archive", encoding="utf-8")
         return archive_path
 
     def fake_verify_backup(target: Path, *, home_dir: Path) -> Path:
+        del home_dir
         seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
         return target
 
     def fake_restore_backup(target: Path, *, destination: Path, home_dir: Path) -> Path:
+        del home_dir, target
         seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
         marker = destination / ".openclaw" / "logs" / "smoke.log"
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -241,9 +209,35 @@ def test_run_recovery_smoke_forces_tar_fallback_when_openclaw_is_available(
     test_context.patch.patch_object(security_helpers, "verify_backup", new=fake_verify_backup)
     test_context.patch.patch_object(security_helpers, "restore_backup", new=fake_restore_backup)
 
-    ci_workflows.run_recovery_smoke(tmp_root=tmp_path)
+    ci_workflows.run_recovery_smoke_with_modes(tmp_root=tmp_path, require_openclaw_cli=False)
 
-    assert seen_openclaw_resolution == [None, None, None]
+    assert seen_openclaw_resolution == [
+        "/usr/local/bin/openclaw",
+        "/usr/local/bin/openclaw",
+        "/usr/local/bin/openclaw",
+        None,
+        None,
+        None,
+    ]
+
+
+def test_run_recovery_smoke_requires_openclaw_cli_when_requested(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Strict mode should fail when OpenClaw CLI cannot be exercised."""
+
+    def fake_which(command: str, *_args: object, **_kwargs: object) -> str | None:
+        del command
+        return None
+
+    test_context.patch.patch_object(
+        security_helpers.recovery_helpers.shutil,
+        "which",
+        new=fake_which,
+    )
+    with pytest.raises(CiWorkflowError, match="openclaw-cli recovery smoke was required"):
+        ci_workflows.run_recovery_smoke_with_modes(tmp_root=tmp_path, require_openclaw_cli=True)
 
 
 def test_security_workflow_main_dispatches_write_summary(
@@ -339,15 +333,15 @@ def test_security_workflow_main_dispatches_run_recovery_smoke(
     tmp_path: Path,
 ) -> None:
     """The CLI should dispatch recovery smoke execution."""
-    seen_calls: list[Path] = []
+    seen_calls: list[tuple[Path, bool]] = []
 
-    def fake_run_recovery_smoke(*, tmp_root: Path) -> None:
-        seen_calls.append(tmp_root)
+    def fake_run_recovery_smoke_with_modes(*, tmp_root: Path, require_openclaw_cli: bool) -> None:
+        seen_calls.append((tmp_root, require_openclaw_cli))
 
     test_context.patch.patch_object(
         security_workflow_script,
-        "run_recovery_smoke",
-        new=fake_run_recovery_smoke,
+        "run_recovery_smoke_with_modes",
+        new=fake_run_recovery_smoke_with_modes,
     )
 
     exit_code = security_workflow_script.main(
@@ -355,11 +349,12 @@ def test_security_workflow_main_dispatches_run_recovery_smoke(
             "run-recovery-smoke",
             "--tmp-root",
             str(tmp_path),
+            "--require-openclaw-cli",
         ]
     )
 
     assert exit_code == 0
-    assert seen_calls == [tmp_path.resolve()]
+    assert seen_calls == [(tmp_path.resolve(), True)]
 
 
 def test_enforce_independent_review_rejects_missing_non_author_approval(

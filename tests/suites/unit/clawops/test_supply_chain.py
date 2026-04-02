@@ -185,8 +185,17 @@ def test_quality_gate_cli_runs_declared_commands(
         ["uv", "run", "pyright"],
         ["uv", "run", "mypy"],
         [
+            "python3",
+            "./tests/scripts/launch_readiness.py",
+            "generate-audit-packet",
+            "--output-dir",
+            ".tmp/launch-readiness/audit-packet",
+        ],
+        [
             "bash",
             "-lc",
+            "export STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE=live; "
+            "export STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT=.tmp/launch-readiness/audit-packet; "
             "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
             "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
         ],
@@ -246,6 +255,12 @@ def test_propose_refresh_runs_quality_gate_sbom_commit_and_pr(
         if command[:3] == ["uv", "run", "pyright"]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
         if command[:3] == ["uv", "run", "mypy"]:
+            return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
+        if command[:3] == [
+            "python3",
+            "./tests/scripts/launch_readiness.py",
+            "generate-audit-packet",
+        ]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)
         if command[:2] == ["bash", "-lc"] and "uv run pytest" in command[-1]:
             return CommandResult(returncode=0, stdout="quality ok", stderr="", duration_ms=1)

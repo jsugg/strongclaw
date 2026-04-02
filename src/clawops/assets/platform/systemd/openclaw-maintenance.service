@@ -13,4 +13,6 @@ Environment=OPENCLAW_CONFIG=__OPENCLAW_CONFIG__
 Environment=OPENCLAW_PROFILE=__OPENCLAW_PROFILE__
 Environment=STRONGCLAW_RUNTIME_ROOT=__STRONGCLAW_RUNTIME_ROOT__
 Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=__PYTHON_EXECUTABLE__ -m clawops recovery --home-dir __HOME_DIR__ backup-create
+ExecStart=__PYTHON_EXECUTABLE__ -m clawops recovery --home-dir __HOME_DIR__ backup-verify latest
 ExecStart=__PYTHON_EXECUTABLE__ -m clawops recovery --home-dir __HOME_DIR__ prune-retention
