@@ -1,0 +1,288 @@
+version: 1
+generated_at: 2026-04-02
+surfaces:
+  - surface_id: acp_workers
+    declared_sources:
+      - platform/docs/ACP_WORKERS.md:1-26
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 7
+    mapping_status: mapped
+
+  - surface_id: architecture_baseline
+    declared_sources:
+      - README.md:3-27
+      - platform/docs/ARCHITECTURE.md:3-53
+    surface_type: baseline
+    owner_lane: baseline_architecture
+    launch_blocker_default: "yes"
+    dependency_order_hint: 1
+    mapping_status: mapped
+
+  - surface_id: backup_recovery
+    declared_sources:
+      - README.md:12-13
+      - platform/docs/BACKUP_AND_RECOVERY.md:1-65
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:14-20
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 10
+    mapping_status: mapped
+
+  - surface_id: browser_lab
+    declared_sources:
+      - README.md:10-13
+      - platform/docs/BROWSER_LAB.md:1-44
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:18-20
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 8
+    mapping_status: mapped
+
+  - surface_id: channels
+    declared_sources:
+      - README.md:11-13
+      - platform/docs/CHANNELS.md:1-21
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:17-17
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 9
+    mapping_status: mapped
+
+  - surface_id: context_service
+    declared_sources:
+      - README.md:8-9
+      - platform/docs/CONTEXT_SERVICE.md:1-185
+      - platform/docs/ARCHITECTURE.md:16-21
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 5
+    mapping_status: mapped
+
+  - surface_id: degradation_semantics
+    declared_sources:
+      - README.md:27-27
+      - platform/docs/DEGRADATION.md:1-38
+    surface_type: crosscutting
+    owner_lane: host_and_degradation
+    launch_blocker_default: "yes"
+    dependency_order_hint: 4
+    mapping_status: mapped
+
+  - surface_id: devflow
+    declared_sources:
+      - README.md:213-222
+      - platform/docs/DEVFLOW.md:1-85
+      - platform/docs/POLICY_ENGINE_AND_WRAPPERS.md:140-149
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 11
+    mapping_status: mapped
+
+  - surface_id: host_platforms
+    declared_sources:
+      - README.md:21-24
+      - README.md:71-75
+      - platform/docs/HOST_PLATFORMS.md:1-114
+    surface_type: baseline
+    owner_lane: host_and_degradation
+    launch_blocker_default: "yes"
+    dependency_order_hint: 3
+    mapping_status: mapped
+
+  - surface_id: hypermemory
+    declared_sources:
+      - README.md:110-132
+      - platform/docs/HYPERMEMORY.md:1-248
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 6
+    mapping_status: mapped
+
+  - surface_id: observability
+    declared_sources:
+      - README.md:9-13
+      - platform/docs/OBSERVABILITY.md:1-60
+    surface_type: crosscutting
+    owner_lane: optional_surfaces
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 17
+    mapping_status: mapped
+
+  - surface_id: plugin_inventory
+    declared_sources:
+      - platform/docs/PLUGIN_INVENTORY.md:1-22
+      - platform/docs/HYPERMEMORY.md:93-123
+    surface_type: optional_exposed
+    owner_lane: optional_surfaces
+    launch_blocker_default: "yes"
+    dependency_order_hint: 12
+    mapping_status: mapped
+
+  - surface_id: policy_engine_wrappers
+    declared_sources:
+      - README.md:7-7
+      - platform/docs/POLICY_ENGINE_AND_WRAPPERS.md:1-149
+    surface_type: crosscutting
+    owner_lane: policy_security
+    launch_blocker_default: "yes"
+    dependency_order_hint: 2
+    mapping_status: mapped
+
+  - surface_id: production_readiness_checklist
+    declared_sources:
+      - README.md:24-24
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:1-24
+    surface_type: crosscutting
+    owner_lane: baseline_architecture
+    launch_blocker_default: "yes"
+    dependency_order_hint: 20
+    mapping_status: mapped
+
+  - surface_id: secrets_env_contract
+    declared_sources:
+      - README.md:56-58
+      - platform/docs/SECRETS_AND_ENV.md:1-50
+    surface_type: crosscutting
+    owner_lane: policy_security
+    launch_blocker_default: "yes"
+    dependency_order_hint: 2
+    mapping_status: mapped
+
+  - surface_id: security_model_trust_zones
+    declared_sources:
+      - README.md:53-59
+      - platform/docs/SECURITY_MODEL.md:1-33
+    surface_type: crosscutting
+    owner_lane: policy_security
+    launch_blocker_default: "yes"
+    dependency_order_hint: 2
+    mapping_status: mapped
+
+  - surface_id: workflow_ci_gate
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:23-40
+      - .github/workflows/ci-gate.yml:1-148
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 12
+    mapping_status: mapped
+
+  - surface_id: workflow_compatibility_matrix
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:33-38
+      - .github/workflows/compatibility-matrix.yml:1-71
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 13
+    mapping_status: mapped
+
+  - surface_id: workflow_dependency_submission
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:95-100
+      - .github/workflows/dependency-submission.yml:1-45
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 18
+    mapping_status: mapped
+
+  - surface_id: workflow_devflow_contract
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:127-129
+      - .github/workflows/devflow-contract.yml:1-42
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 21
+    mapping_status: mapped
+
+  - surface_id: workflow_fresh_host_acceptance
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:42-66
+      - .github/workflows/fresh-host-acceptance.yml:1-101
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 15
+    mapping_status: mapped
+
+  - surface_id: workflow_fresh_host_core
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:42-66
+      - .github/workflows/fresh-host-core.yml:1-221
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 16
+    mapping_status: mapped
+
+  - surface_id: workflow_harness
+    declared_sources:
+      - platform/docs/ARCHITECTURE.md:34-40
+      - platform/docs/CI_AND_SECURITY.md:18-21
+      - .github/workflows/harness.yml:1-34
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 14
+    mapping_status: mapped
+
+  - surface_id: workflow_memory_plugin_verification
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:67-87
+      - .github/workflows/memory-plugin-verification.yml:1-96
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 17
+    mapping_status: mapped
+
+  - surface_id: workflow_nightly
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:9-16
+      - .github/workflows/nightly.yml:1-68
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 19
+    mapping_status: mapped
+
+  - surface_id: workflow_release
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:115-130
+      - .github/workflows/release.yml:1-96
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 22
+    mapping_status: mapped
+
+  - surface_id: workflow_security
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:95-115
+      - .github/workflows/security.yml:1-109
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "yes"
+    dependency_order_hint: 18
+    mapping_status: mapped
+
+  - surface_id: workflow_upstream_merge_validation
+    declared_sources:
+      - platform/docs/CI_AND_SECURITY.md:123-124
+      - .github/workflows/upstream-merge-validation.yml:1-41
+    surface_type: workflow_evidence
+    owner_lane: workflow_evidence
+    launch_blocker_default: "conditional"
+    dependency_order_hint: 23
+    mapping_status: mapped
