@@ -17,6 +17,7 @@ from tests.utils.helpers._ci_workflows.change_router import (  # noqa: E402
     build_results,
     emit_filters_for_github_output,
     evaluate_verdict,
+    evidence_from_output_file_lists,
     render_selection_summary,
     render_verdict_summary,
     selection_from_output_flags,
@@ -43,6 +44,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Summarize gate lane selection and emit derived outputs.",
     )
     _add_lane_flag_args(summarize)
+    _add_lane_file_args(summarize)
     summarize.add_argument("--github-output-file", type=Path)
     summarize.add_argument("--github-summary-file", type=Path)
 
@@ -78,6 +80,15 @@ def _add_lane_flag_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--compatibility-matrix", required=True)
 
 
+def _add_lane_file_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--docs-only-files", default="[]")
+    parser.add_argument("--fresh-host-files", default="[]")
+    parser.add_argument("--security-files", default="[]")
+    parser.add_argument("--harness-files", default="[]")
+    parser.add_argument("--memory-plugin-files", default="[]")
+    parser.add_argument("--compatibility-matrix-files", default="[]")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the requested CI gate command."""
     args = _parse_args(argv)
@@ -103,6 +114,14 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if args.command == "summarize-selection":
+            evidence = evidence_from_output_file_lists(
+                docs_only_files=str(args.docs_only_files),
+                fresh_host_files=str(args.fresh_host_files),
+                security_files=str(args.security_files),
+                harness_files=str(args.harness_files),
+                memory_plugin_files=str(args.memory_plugin_files),
+                compatibility_matrix_files=str(args.compatibility_matrix_files),
+            )
             write_github_output(
                 {
                     "any_heavy": str(selection.any_heavy).lower(),
@@ -115,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             )
             write_github_summary(
-                markdown=render_selection_summary(selection),
+                markdown=render_selection_summary(selection, evidence=evidence),
                 github_summary_file=(
                     Path(args.github_summary_file).expanduser().resolve()
                     if args.github_summary_file is not None

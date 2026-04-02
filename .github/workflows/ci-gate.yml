@@ -35,9 +35,10 @@ jobs:
         uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
         with:
           filters: ${{ steps.export_filters.outputs.filters }}
+          list-files: json
       - id: selection
         name: Summarize lane selection
-        run: python3 ./tests/scripts/ci_gate.py summarize-selection --docs-only "${{ steps.filter.outputs.docs_only }}" --fresh-host "${{ steps.filter.outputs.fresh_host }}" --security "${{ steps.filter.outputs.security }}" --harness "${{ steps.filter.outputs.harness }}" --memory-plugin "${{ steps.filter.outputs.memory_plugin }}" --compatibility-matrix "${{ steps.filter.outputs.compatibility_matrix }}" --github-output-file "$GITHUB_OUTPUT" --github-summary-file "$GITHUB_STEP_SUMMARY"
+        run: python3 ./tests/scripts/ci_gate.py summarize-selection --docs-only "${{ steps.filter.outputs.docs_only }}" --fresh-host "${{ steps.filter.outputs.fresh_host }}" --security "${{ steps.filter.outputs.security }}" --harness "${{ steps.filter.outputs.harness }}" --memory-plugin "${{ steps.filter.outputs.memory_plugin }}" --compatibility-matrix "${{ steps.filter.outputs.compatibility_matrix }}" --docs-only-files "${{ steps.filter.outputs.docs_only_files }}" --fresh-host-files "${{ steps.filter.outputs.fresh_host_files }}" --security-files "${{ steps.filter.outputs.security_files }}" --harness-files "${{ steps.filter.outputs.harness_files }}" --memory-plugin-files "${{ steps.filter.outputs.memory_plugin_files }}" --compatibility-matrix-files "${{ steps.filter.outputs.compatibility_matrix_files }}" --github-output-file "$GITHUB_OUTPUT" --github-summary-file "$GITHUB_STEP_SUMMARY"
 
   docs_parity:
     name: Docs Parity

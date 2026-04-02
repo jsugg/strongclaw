@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -57,6 +58,18 @@ class CiGateResults:
     security: str
 
 
+@dataclass(frozen=True, slots=True)
+class CiGateEvidence:
+    """Changed-file evidence captured for each lane filter."""
+
+    docs_only: tuple[str, ...]
+    fresh_host: tuple[str, ...]
+    security: tuple[str, ...]
+    harness: tuple[str, ...]
+    memory_plugin: tuple[str, ...]
+    compatibility_matrix: tuple[str, ...]
+
+
 def parse_github_boolean(raw_value: str, *, label: str) -> bool:
     """Parse a GitHub Actions boolean output into a Python bool."""
     normalized = raw_value.strip().lower()
@@ -85,6 +98,50 @@ def selection_from_output_flags(
         memory_plugin=parse_github_boolean(memory_plugin, label="memory_plugin"),
         compatibility_matrix=parse_github_boolean(
             compatibility_matrix, label="compatibility_matrix"
+        ),
+    )
+
+
+def parse_output_file_list(raw_value: str, *, label: str) -> tuple[str, ...]:
+    """Parse a dorny/paths-filter `list-files: json` output value."""
+    normalized = raw_value.strip()
+    if not normalized:
+        return ()
+
+    try:
+        payload = json.loads(normalized)
+    except json.JSONDecodeError as exc:
+        raise CiWorkflowError(f"{label} files output is not valid JSON: {exc}") from exc
+    if not isinstance(payload, list):
+        raise CiWorkflowError(f"{label} files output must decode to a list")
+
+    validated: list[str] = []
+    for entry in cast(list[object], payload):
+        if not isinstance(entry, str):
+            raise CiWorkflowError(f"{label} files output must contain only strings")
+        validated.append(entry)
+    return tuple(validated)
+
+
+def evidence_from_output_file_lists(
+    *,
+    docs_only_files: str,
+    fresh_host_files: str,
+    security_files: str,
+    harness_files: str,
+    memory_plugin_files: str,
+    compatibility_matrix_files: str,
+) -> CiGateEvidence:
+    """Construct changed-file evidence from action outputs."""
+    return CiGateEvidence(
+        docs_only=parse_output_file_list(docs_only_files, label="docs_only"),
+        fresh_host=parse_output_file_list(fresh_host_files, label="fresh_host"),
+        security=parse_output_file_list(security_files, label="security"),
+        harness=parse_output_file_list(harness_files, label="harness"),
+        memory_plugin=parse_output_file_list(memory_plugin_files, label="memory_plugin"),
+        compatibility_matrix=parse_output_file_list(
+            compatibility_matrix_files,
+            label="compatibility_matrix",
         ),
     )
 
@@ -190,7 +247,11 @@ def evaluate_verdict(
     return (not failures, tuple(failures))
 
 
-def render_selection_summary(selection: CiGateSelection) -> str:
+def render_selection_summary(
+    selection: CiGateSelection,
+    *,
+    evidence: CiGateEvidence | None = None,
+) -> str:
     """Render a markdown summary of lane requirements."""
     lines = [
         "### CI Gate Classification",
@@ -206,6 +267,45 @@ def render_selection_summary(selection: CiGateSelection) -> str:
         f"| any_heavy | {selection.any_heavy} |",
         f"| docs_parity_required | {selection.docs_parity_required} |",
     ]
+
+    lane_rows: tuple[tuple[str, bool, tuple[str, ...]], ...] = (
+        ("docs_only", selection.docs_only, evidence.docs_only if evidence else ()),
+        ("harness", selection.harness, evidence.harness if evidence else ()),
+        (
+            "compatibility_matrix",
+            selection.compatibility_matrix,
+            evidence.compatibility_matrix if evidence else (),
+        ),
+        ("memory_plugin", selection.memory_plugin, evidence.memory_plugin if evidence else ()),
+        ("fresh_host", selection.fresh_host, evidence.fresh_host if evidence else ()),
+        ("security", selection.security, evidence.security if evidence else ()),
+    )
+
+    lines.append("")
+    lines.append("Why these values:")
+    for lane_name, required, lane_files in lane_rows:
+        if required:
+            lines.append(
+                f"- `{lane_name}` is `True` because matching changes were detected ({_format_file_examples(lane_files)})."
+            )
+        else:
+            lines.append(
+                f"- `{lane_name}` is `False` because no changed files matched this lane filter."
+            )
+
+    if selection.docs_parity_required:
+        lines.append(
+            "- `docs_parity_required` is `True` because the change set is docs-only and no heavy lane was selected."
+        )
+    elif selection.docs_only:
+        lines.append(
+            "- `docs_parity_required` is `False` even with `docs_only=True` because heavy lanes are also required for non-doc changes in this PR."
+        )
+    else:
+        lines.append(
+            "- `docs_parity_required` is `False` because docs-only classification did not match the change set."
+        )
+
     return "\n".join(lines)
 
 
@@ -325,3 +425,12 @@ def _glob_match(path: str, pattern: str) -> bool:
     if pattern.startswith("**/"):
         return fnmatch(path, pattern) or fnmatch(path, pattern[len("**/") :])
     return fnmatch(path, pattern)
+
+
+def _format_file_examples(paths: tuple[str, ...]) -> str:
+    if not paths:
+        return "the matching files list was empty"
+    preview = ", ".join(f"`{path}`" for path in paths[:3])
+    if len(paths) > 3:
+        preview = f"{preview}, and {len(paths) - 3} more"
+    return preview
