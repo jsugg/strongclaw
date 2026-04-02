@@ -73,6 +73,13 @@ def test_security_config_change_routes_to_security_lane() -> None:
     assert selection.docs_parity_required is False
 
 
+def test_dot_github_workflow_path_is_not_stripped_from_filter_matching() -> None:
+    selection = _select(".github/workflows/fresh-host-acceptance.yml")
+
+    assert selection.fresh_host is True
+    assert selection.docs_only is False
+
+
 def test_ci_gate_filters_file_exists() -> None:
     assert Path(_FILTERS_FILE).is_file()
 

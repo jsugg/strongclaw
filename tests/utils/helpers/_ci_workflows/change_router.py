@@ -405,7 +405,7 @@ def _validate_job_result(raw_result: str, *, label: str) -> str:
 
 
 def _path_matches_filter(*, path: str, patterns: tuple[str, ...]) -> bool:
-    normalized_path = path.strip().lstrip("./")
+    normalized_path = path.strip().removeprefix("./")
     matched = False
     for pattern in patterns:
         is_exclusion = pattern.startswith("!")
