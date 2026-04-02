@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -159,6 +160,11 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     assert "--group" in pytest_command
     assert "dev" in pytest_command
     assert "--extra" not in pytest_command
+    assert "--ignore" in pytest_command
+    ignore_flag_index = pytest_command.index("--ignore")
+    assert pytest_command[ignore_flag_index + 1] == str(
+        repo_root / "tests/suites/contracts/repo/launch_readiness"
+    )
     assert captured_env is not None
     assert pathlib.Path(captured_env["HOME"]).parent == repo_root / ".tmp"
     assert captured_env["XDG_CONFIG_HOME"] == f"{captured_env['HOME']}/.config"
@@ -589,6 +595,198 @@ def test_verify_baseline_exclude_browser_lab_omits_browser_lab_target(
         ["clawops", "verify-platform", "sidecars"],
         ["clawops", "verify-platform", "observability"],
         ["clawops", "verify-platform", "channels"],
+    ]
+
+
+def test_verify_baseline_reindexes_hypermemory_before_verify_when_status_is_dirty(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = _init_source_checkout(tmp_path / "repo")
+    config_path = tmp_path / "openclaw.json"
+    hypermemory_config_path = tmp_path / "hypermemory.yaml"
+    config_path.write_text("{}", encoding="utf-8")
+    hypermemory_config_path.write_text("storage:\n  db_path: /tmp/h.sqlite\n", encoding="utf-8")
+    commands: list[list[str]] = []
+    status_calls = 0
+
+    def _require_openclaw(message: str) -> None:
+        del message
+
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
+        assert repo == repo_root
+        return config_path
+
+    def _rendered_openclaw_uses_hypermemory(_path: pathlib.Path) -> bool:
+        return True
+
+    def _rendered_openclaw_hypermemory_config_path(_path: pathlib.Path) -> pathlib.Path:
+        return hypermemory_config_path
+
+    def _run_openclaw_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
+        **kwargs: object,
+    ) -> _FakeOpenClawResult:
+        del arguments, kwargs
+        assert repo == repo_root
+        return _FakeOpenClawResult()
+
+    def _ensure_model_auth(
+        repo: pathlib.Path,
+        *,
+        check_only: bool,
+        probe: bool,
+    ) -> dict[str, object]:
+        del check_only, probe
+        assert repo == repo_root
+        return {"ok": True}
+
+    def _run_managed_clawops_command(
+        repo: pathlib.Path,
+        arguments: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del timeout_seconds
+        assert repo == repo_root
+        assert cwd == repo_root
+        command = ["clawops", *[str(part) for part in arguments]]
+        commands.append(command)
+        nonlocal status_calls
+        if command == [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "status",
+            "--json",
+        ]:
+            status_calls += 1
+            payload = (
+                {
+                    "backendActive": "qdrant_sparse_dense_hybrid",
+                    "dirty": True,
+                    "vectorItems": 0,
+                    "sparseVectorItems": 0,
+                }
+                if status_calls == 1
+                else {
+                    "backendActive": "qdrant_sparse_dense_hybrid",
+                    "dirty": False,
+                    "vectorItems": 42,
+                    "sparseVectorItems": 42,
+                }
+            )
+            return _FakeCommandResult(ok=True, stdout=json.dumps(payload))
+        if command == [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "index",
+            "--json",
+        ]:
+            return _FakeCommandResult(ok=True, stdout="{}")
+        if command == [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "verify",
+            "--json",
+        ]:
+            return _FakeCommandResult(ok=True, stdout='{"ok": true}')
+        return _FakeCommandResult(ok=True)
+
+    def _run_command(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: int = 30,
+    ) -> _FakeCommandResult:
+        del command, timeout_seconds
+        assert cwd == repo_root
+        assert env is not None
+        return _FakeCommandResult(ok=True)
+
+    test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "rendered_openclaw_uses_hypermemory",
+        new=_rendered_openclaw_uses_hypermemory,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "rendered_openclaw_hypermemory_config_path",
+        new=_rendered_openclaw_hypermemory_config_path,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "run_openclaw_command",
+        new=_run_openclaw_command,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "ensure_model_auth",
+        new=_ensure_model_auth,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "run_managed_clawops_command",
+        new=_run_managed_clawops_command,
+    )
+    test_context.patch.patch_object(strongclaw_baseline, "run_command", new=_run_command)
+    test_context.patch.patch_object(
+        strongclaw_baseline, "run_harness_smoke", new=_noop_harness_smoke
+    )
+
+    payload = strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")
+
+    assert payload["ok"] is True
+    hypermemory_commands = [
+        command for command in commands if command[:2] == ["clawops", "hypermemory"]
+    ]
+    assert hypermemory_commands[:4] == [
+        [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "status",
+            "--json",
+        ],
+        [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "index",
+            "--json",
+        ],
+        [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "status",
+            "--json",
+        ],
+        [
+            "clawops",
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "verify",
+            "--json",
+        ],
     ]
 
 

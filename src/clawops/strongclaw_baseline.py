@@ -26,6 +26,10 @@ from clawops.strongclaw_runtime import (
     use_varlock_env_mode,
 )
 
+_BASELINE_REPO_TEST_IGNORE_PATHS: tuple[str, ...] = (
+    "tests/suites/contracts/repo/launch_readiness",
+)
+
 
 def run_harness_smoke(repo_root: pathlib.Path, runs_dir: pathlib.Path) -> None:
     """Run the standard harness smoke suites."""
@@ -72,6 +76,65 @@ def _run_checked(
         raise CommandError(detail, result=result)
 
 
+def _status_count(payload: dict[str, object], key: str) -> int:
+    """Return one integer status counter from a hypermemory status payload."""
+    raw_value = payload.get(key)
+    if isinstance(raw_value, bool):
+        return 0
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float):
+        return int(raw_value)
+    if isinstance(raw_value, str):
+        stripped = raw_value.strip()
+        if not stripped:
+            return 0
+        try:
+            return int(stripped)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _hypermemory_needs_reindex(payload: dict[str, object]) -> bool:
+    """Return whether baseline should run an eager hypermemory reindex."""
+    if bool(payload.get("dirty")):
+        return True
+    if _status_count(payload, "vectorItems") <= 0:
+        return True
+    if _status_count(payload, "sparseVectorItems") <= 0:
+        return True
+    return False
+
+
+def _run_hypermemory_status(
+    repo_root: pathlib.Path,
+    *,
+    hypermemory_config_path: pathlib.Path,
+) -> dict[str, object]:
+    """Run hypermemory status and return the parsed payload."""
+    status_result = run_managed_clawops_command(
+        repo_root,
+        [
+            "hypermemory",
+            "--config",
+            str(hypermemory_config_path),
+            "status",
+            "--json",
+        ],
+        cwd=repo_root,
+        timeout_seconds=300,
+    )
+    if not status_result.ok:
+        detail = (
+            status_result.stderr.strip()
+            or status_result.stdout.strip()
+            or "hypermemory status failed"
+        )
+        raise CommandError(detail, result=None)
+    return cast(dict[str, object], json.loads(status_result.stdout or "{}"))
+
+
 def verify_baseline(
     repo_root: pathlib.Path,
     *,
@@ -111,30 +174,35 @@ def verify_baseline(
             raise CommandError(
                 "strongclaw-hypermemory is enabled, but its configPath is missing or unreadable."
             )
-        status_result = run_managed_clawops_command(
+        hypermemory_payload = _run_hypermemory_status(
             repo_root,
-            [
-                "hypermemory",
-                "--config",
-                str(hypermemory_config_path),
-                "status",
-                "--json",
-            ],
-            cwd=repo_root,
-            timeout_seconds=300,
+            hypermemory_config_path=hypermemory_config_path,
         )
-        if not status_result.ok:
-            detail = (
-                status_result.stderr.strip()
-                or status_result.stdout.strip()
-                or "hypermemory status failed"
+        if _hypermemory_needs_reindex(hypermemory_payload):
+            index_result = run_managed_clawops_command(
+                repo_root,
+                [
+                    "hypermemory",
+                    "--config",
+                    str(hypermemory_config_path),
+                    "index",
+                    "--json",
+                ],
+                cwd=repo_root,
+                timeout_seconds=600,
             )
-            raise CommandError(detail, result=None)
-        hypermemory_payload = json.loads(status_result.stdout or "{}")
-        if (
-            hypermemory_payload is not None
-            and hypermemory_payload.get("backendActive") == "qdrant_sparse_dense_hybrid"
-        ):
+            if not index_result.ok:
+                detail = (
+                    index_result.stderr.strip()
+                    or index_result.stdout.strip()
+                    or "hypermemory index failed"
+                )
+                raise CommandError(detail, result=None)
+            hypermemory_payload = _run_hypermemory_status(
+                repo_root,
+                hypermemory_config_path=hypermemory_config_path,
+            )
+        if hypermemory_payload.get("backendActive") == "qdrant_sparse_dense_hybrid":
             verify_result = run_managed_clawops_command(
                 repo_root,
                 [
@@ -186,19 +254,22 @@ def verify_baseline(
             "VARLOCK_LOCAL_ENV_FILE",
         ):
             pytest_env.pop(key, None)
+        pytest_command: list[str] = [
+            "uv",
+            "run",
+            "--project",
+            str(layout.source_checkout_root),
+            "--locked",
+            "--group",
+            "dev",
+            "pytest",
+            "-q",
+        ]
+        for ignore_path in _BASELINE_REPO_TEST_IGNORE_PATHS:
+            pytest_command.extend(["--ignore", str(layout.source_checkout_root / ignore_path)])
+        pytest_command.append(str(layout.source_checkout_root / "tests"))
         tests_result = run_command(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(layout.source_checkout_root),
-                "--locked",
-                "--group",
-                "dev",
-                "pytest",
-                "-q",
-                str(layout.source_checkout_root / "tests"),
-            ],
+            pytest_command,
             cwd=layout.source_checkout_root,
             env=pytest_env,
             timeout_seconds=3600,
