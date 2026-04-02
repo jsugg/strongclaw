@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -93,6 +94,37 @@ def _list_length(payload: dict[str, object], key: str) -> int:
     """Return the length of one JSON list field when present."""
     value = payload.get(key)
     return len(cast(list[object], value)) if isinstance(value, list) else 0
+
+
+def _load_child_report(path_text: str | None) -> dict[str, object] | None:
+    """Load one optional child report payload."""
+    if path_text is None:
+        return None
+    path = context_path(path_text)
+    if not path.is_file():
+        return None
+    return read_json(path)
+
+
+def _duration_seconds(payload: dict[str, object] | None) -> float | None:
+    """Extract one duration field from a child report when available."""
+    if payload is None:
+        return None
+    raw_seconds = payload.get("duration_seconds")
+    if isinstance(raw_seconds, bool) or not isinstance(raw_seconds, (int, float)):
+        return None
+    seconds = float(raw_seconds)
+    return seconds if seconds >= 0 else None
+
+
+def _report_window_seconds(report: FreshHostReport) -> float | None:
+    """Compute the report timeline duration from report metadata."""
+    try:
+        created_at = datetime.fromisoformat(report.created_at)
+        updated_at = datetime.fromisoformat(report.updated_at)
+    except ValueError:
+        return None
+    return max((updated_at - created_at).total_seconds(), 0.0)
 
 
 def collect_diagnostics(context_file: Path) -> FreshHostReport:
@@ -186,24 +218,81 @@ def cleanup(context_file: Path) -> FreshHostReport:
     return report
 
 
-def _append_phase_table(lines: list[str], report: FreshHostReport) -> None:
+def _append_phase_table(lines: list[str], report: FreshHostReport) -> float:
     """Append the per-phase summary table."""
     if not report.phases:
         lines.extend(["No phase timings were recorded.", ""])
-        return
+        return 0.0
     lines.extend(["| Phase | Status | Duration |", "| --- | --- | --- |"])
     for phase in report.phases:
         lines.append(
             f"| {phase.name} | {phase.status} | {format_duration(phase.duration_seconds)} |"
         )
     total_seconds = sum(phase.duration_seconds for phase in report.phases)
-    lines.extend(["", f"Known phase total: {format_duration(total_seconds)}", ""])
+    lines.extend(
+        ["", f"Scenario phase total (fresh-host phases only): {format_duration(total_seconds)}", ""]
+    )
+    return total_seconds
 
 
-def _append_child_report_sections(lines: list[str], report: FreshHostReport) -> None:
+def _append_timing_kpis(
+    lines: list[str],
+    *,
+    report: FreshHostReport,
+    scenario_phase_seconds: float,
+    runtime_report: dict[str, object] | None,
+    image_report: dict[str, object] | None,
+) -> None:
+    """Append high-level timing KPIs for CI triage."""
+    runtime_install_seconds = _duration_seconds(runtime_report)
+    image_ensure_seconds = _duration_seconds(image_report)
+    tracked_execution_seconds = (
+        scenario_phase_seconds + (runtime_install_seconds or 0.0) + (image_ensure_seconds or 0.0)
+    )
+    report_window_seconds = _report_window_seconds(report)
+    unattributed_seconds = (
+        max(report_window_seconds - tracked_execution_seconds, 0.0)
+        if report_window_seconds is not None
+        else None
+    )
+    lines.extend(
+        [
+            "| Timing KPI | Value |",
+            "| --- | --- |",
+            (
+                "| Scenario phase total (fresh-host phases only) | "
+                f"{format_duration(scenario_phase_seconds)} |"
+            ),
+            (
+                "| Hosted runtime install | "
+                f"{format_duration(runtime_install_seconds) if runtime_install_seconds is not None else 'n/a'} |"
+            ),
+            (
+                "| Hosted image ensure | "
+                f"{format_duration(image_ensure_seconds) if image_ensure_seconds is not None else 'n/a'} |"
+            ),
+            f"| Tracked execution total | {format_duration(tracked_execution_seconds)} |",
+            (
+                "| Execution window (report timeline) | "
+                f"{format_duration(report_window_seconds) if report_window_seconds is not None else 'n/a'} |"
+            ),
+            (
+                "| Unattributed execution | "
+                f"{format_duration(unattributed_seconds) if unattributed_seconds is not None else 'n/a'} |"
+            ),
+            "",
+        ]
+    )
+
+
+def _append_child_report_sections(
+    lines: list[str],
+    *,
+    runtime_report: dict[str, object] | None,
+    image_report: dict[str, object] | None,
+) -> None:
     """Append runtime/image child report summaries when present."""
-    if report.image_report_path is not None and context_path(report.image_report_path).is_file():
-        image_report = read_json(context_path(report.image_report_path))
+    if image_report is not None:
         lines.extend(
             [
                 "| Image ensure field | Value |",
@@ -217,11 +306,7 @@ def _append_child_report_sections(lines: list[str], report: FreshHostReport) -> 
                 "",
             ]
         )
-    if (
-        report.runtime_report_path is not None
-        and context_path(report.runtime_report_path).is_file()
-    ):
-        runtime_report = read_json(context_path(report.runtime_report_path))
+    if runtime_report is not None:
         if runtime_report.get("host_cpu_count") and runtime_report.get("host_memory_gib"):
             lines.append(
                 f"Host resources: {runtime_report['host_cpu_count']} CPU / {runtime_report['host_memory_gib']} GiB"
@@ -263,8 +348,21 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         if raw_value is not None:
             lines.append(f"| {label} | {str(raw_value).lower()} |")
     lines.append("")
-    _append_phase_table(lines, report)
-    _append_child_report_sections(lines, report)
+    runtime_report = _load_child_report(report.runtime_report_path)
+    image_report = _load_child_report(report.image_report_path)
+    scenario_phase_seconds = _append_phase_table(lines, report)
+    _append_timing_kpis(
+        lines,
+        report=report,
+        scenario_phase_seconds=scenario_phase_seconds,
+        runtime_report=runtime_report,
+        image_report=image_report,
+    )
+    _append_child_report_sections(
+        lines,
+        runtime_report=runtime_report,
+        image_report=image_report,
+    )
     lines.append(f"Diagnostics artifact root: `{report.diagnostics_dir}`")
     lines.append("")
     summary_file.parent.mkdir(parents=True, exist_ok=True)

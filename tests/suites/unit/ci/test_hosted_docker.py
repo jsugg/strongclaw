@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -277,6 +278,11 @@ def test_ensure_images_warms_linux_scenario_images(
     assert recovery_env["STRONGCLAW_COMPOSE_STATE_DIR"].endswith("/compose-prepull")
     assert context.image_report_path is not None
     assert Path(context.image_report_path).is_file()
+    image_report_payload = json.loads(Path(context.image_report_path).read_text(encoding="utf-8"))
+    assert isinstance(image_report_payload.get("started_at"), str)
+    assert isinstance(image_report_payload.get("finished_at"), str)
+    assert isinstance(image_report_payload.get("duration_seconds"), (int, float))
+    assert cast(float, image_report_payload["duration_seconds"]) >= 0
 
 
 def test_ensure_images_inherits_repo_local_varlock_assignments(

@@ -1401,6 +1401,9 @@ def test_write_summary_includes_child_reports(
                 "host_memory_gib": 8,
                 "docker_host": "unix:///tmp/docker.sock",
                 "failure_reason": None,
+                "started_at": "2026-03-25T00:00:00+00:00",
+                "finished_at": "2026-03-25T00:01:05+00:00",
+                "duration_seconds": 65.0,
             }
         ),
         encoding="utf-8",
@@ -1414,6 +1417,9 @@ def test_write_summary_includes_child_reports(
                 "retried_images": ["postgres:16"],
                 "pulled_images": ["postgres:16"],
                 "failure_reason": None,
+                "started_at": "2026-03-25T00:01:05+00:00",
+                "finished_at": "2026-03-25T00:01:24+00:00",
+                "duration_seconds": 19.0,
             }
         ),
         encoding="utf-8",
@@ -1426,4 +1432,60 @@ def test_write_summary_includes_child_reports(
     assert "## macOS Fresh Host Sidecars" in summary_text
     assert "| Package cache | true |" in summary_text
     assert "| Runtime provider | colima |" in summary_text
+    assert "Scenario phase total (fresh-host phases only): 0m 12s" in summary_text
+    assert "| Hosted runtime install | 1m 5s |" in summary_text
+    assert "| Hosted image ensure | 0m 19s |" in summary_text
+    assert "| Tracked execution total | 1m 36s |" in summary_text
+    assert "| Execution window (report timeline) |" in summary_text
+    assert "| Unattributed execution |" in summary_text
+    assert "Known phase total" not in summary_text
     assert "| Images requested | 1 |" in summary_text
+
+
+def test_write_summary_marks_missing_child_durations_as_na(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Summary timing rows should stay readable when child durations are unavailable."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    report_path = Path(context.report_path)
+    report = fresh_host.load_report(report_path)
+    report.status = "success"
+    report.phases.append(
+        fresh_host.PhaseResult(
+            name="bootstrap",
+            status="success",
+            duration_seconds=5.0,
+            started_at="2026-03-25T00:00:00+00:00",
+            finished_at="2026-03-25T00:00:05+00:00",
+            command=["echo", "bootstrap"],
+        )
+    )
+    fresh_host.write_report(report, report_path)
+    Path(context.runtime_report_path or "").write_text(
+        json.dumps({"runtime_provider": "colima", "host_cpu_count": 4, "host_memory_gib": 8}),
+        encoding="utf-8",
+    )
+    Path(context.image_report_path or "").write_text(
+        json.dumps({"images": [], "missing_before_pull": [], "pull_attempt_count": 0}),
+        encoding="utf-8",
+    )
+
+    summary_path = tmp_path / "summary.md"
+    fresh_host.write_summary(Path(context.context_path), summary_path)
+
+    summary_text = summary_path.read_text(encoding="utf-8")
+    assert "| Hosted runtime install | n/a |" in summary_text
+    assert "| Hosted image ensure | n/a |" in summary_text
