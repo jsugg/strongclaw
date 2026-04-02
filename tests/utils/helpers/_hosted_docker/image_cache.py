@@ -11,6 +11,7 @@ from tests.utils.helpers._fresh_host.storage import load_context
 from tests.utils.helpers._hosted_docker.images import (
     compose_probe_env,
     list_local_images,
+    pull_images,
     resolve_compose_images,
 )
 from tests.utils.helpers._hosted_docker.io import log
@@ -93,13 +94,35 @@ def save_image_cache(context_path: Path) -> Path:
     missing_images = [image for image in images if image not in local_images]
     if missing_images:
         missing_joined = ", ".join(missing_images)
-        raise FreshHostError(
-            "Cannot save Docker image cache because some compose images are missing locally: "
-            f"{missing_joined}"
+        log(
+            "Some compose images are missing locally before cache export; "
+            f"attempting pulls: {missing_joined}"
         )
+        pull_report = pull_images(
+            missing_images,
+            parallelism=context.docker_pull_parallelism,
+            max_attempts=context.docker_pull_max_attempts,
+            recovery_cwd=repo_root,
+            recovery_env=env,
+        )
+        if pull_report.exit_code != 0:
+            failed_joined = ", ".join(pull_report.failed_images)
+            log(
+                "Some compose images are still unavailable after pull attempts; "
+                f"continuing with partial cache export: {failed_joined}"
+            )
+        local_images = set(list_local_images(images))
+
+    images_to_save = [image for image in images if image in local_images]
+    missing_after_pull = [image for image in images if image not in local_images]
+    if missing_after_pull:
+        log("Skipping unavailable images during cache export: " + ", ".join(missing_after_pull))
+    if not images_to_save:
+        log("No local compose images are available for cache export; skipping archive save.")
+        return archive_path
 
     run_checked(
-        ["docker", "image", "save", "-o", str(archive_path), *images],
+        ["docker", "image", "save", "-o", str(archive_path), *images_to_save],
         cwd=repo_root,
         env=dict(os.environ),
         timeout_seconds=3600,
