@@ -26,8 +26,12 @@ semantic helper entrypoints under `tests/scripts/`, with unit coverage in `tests
 
 - Each run writes a GitHub job summary with the runner label, runtime provider,
 cache toggles, phase timings, and the effective hosted macOS Colima sizing.
+- Each run now renders an explicit context preview immediately after
+`prepare-context`, so operators can inspect planned phases, compose targets,
+runtime settings, and scenario paths before runtime install or scenario
+execution begins.
 - Each run uploads a `fresh-host-reports` artifact subtree with runtime
-diagnostics (`docker info`, image inventory, launchd state, and runtime status output) alongside the rendered host artifacts.
+diagnostics (`docker info`, image inventory, launchd state, and runtime status output), context preview JSON, and rendered host artifacts.
 - Hosted macOS acceptance is pinned to `macos-15-intel`. GitHub's standard
 `macos-15` arm64 runners are available on public repositories, but GitHub documents that nested virtualization is not supported on arm64 macOS hosted runners, so Colima/OrbStack cannot provide a Docker backend there.
 - The hosted macOS job installs Lima and Colima directly, then sizes Colima for

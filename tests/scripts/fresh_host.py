@@ -18,6 +18,7 @@ from tests.utils.helpers.fresh_host import (  # noqa: E402
     cleanup,
     collect_diagnostics,
     prepare_context,
+    preview_context,
     run_scenario,
     write_summary,
 )
@@ -38,6 +39,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prepare_parser.add_argument("--runner-temp", type=Path, required=True)
     prepare_parser.add_argument("--workspace", type=Path, default=REPO_ROOT)
     prepare_parser.add_argument("--github-env-file", type=Path)
+
+    preview_parser = subparsers.add_parser(
+        "preview-context",
+        help="Render a context preview for the prepared scenario.",
+    )
+    preview_parser.add_argument("--context", type=Path, required=True)
+    preview_parser.add_argument("--summary-file", type=Path)
 
     run_parser = subparsers.add_parser("run-scenario", help="Run a prepared fresh-host scenario.")
     run_parser.add_argument("--context", type=Path, required=True)
@@ -71,6 +79,16 @@ def main(argv: list[str] | None = None) -> int:
                 github_env_file=(
                     Path(args.github_env_file).expanduser().resolve()
                     if args.github_env_file is not None
+                    else None
+                ),
+            )
+            return 0
+        if args.command == "preview-context":
+            preview_context(
+                Path(args.context).expanduser().resolve(),
+                summary_file=(
+                    Path(args.summary_file).expanduser().resolve()
+                    if args.summary_file is not None
                     else None
                 ),
             )

@@ -1,6 +1,6 @@
 """Public fresh-host helper facade."""
 
-from tests.utils.helpers._fresh_host.context import prepare_context
+from tests.utils.helpers._fresh_host.context import prepare_context, preview_context
 from tests.utils.helpers._fresh_host.macos import (
     deactivate_macos_host_services as _deactivate_macos_host_services,
 )
@@ -41,6 +41,7 @@ __all__ = [
     "load_context",
     "load_report",
     "prepare_context",
+    "preview_context",
     "run_scenario",
     "scenario_phase_names",
     "write_report",

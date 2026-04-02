@@ -72,6 +72,8 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare Linux fresh-host context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Preview Linux fresh-host context
+        run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Ensure Linux fresh-host Docker images
         run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - name: Run Linux fresh-host scenario
@@ -157,6 +159,8 @@ jobs:
             fresh-host-macos-runtime-tools-${{ runner.arch }}-
       - name: Prepare macOS fresh-host context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Preview macOS fresh-host context
+        run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Install hosted macOS Docker runtime
         run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
       - name: Ensure hosted macOS Docker images

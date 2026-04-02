@@ -175,6 +175,101 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
     assert browser_lab.scenario == "macos-browser-lab"
 
 
+def test_fresh_host_cli_accepts_preview_context_command() -> None:
+    """The executable CLI should accept the preview-context subcommand."""
+    parsed = _parse_args(
+        [
+            "preview-context",
+            "--context",
+            "/tmp/fresh-host/context.json",
+            "--summary-file",
+            "/tmp/fresh-host/summary.md",
+        ]
+    )
+
+    assert parsed.context == Path("/tmp/fresh-host/context.json")
+    assert parsed.summary_file == Path("/tmp/fresh-host/summary.md")
+
+
+def test_preview_context_writes_preview_json_and_summary(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Context preview should write both JSON and a summary section."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    summary_file = tmp_path / "summary.md"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    preview = fresh_host.preview_context(
+        Path(context.context_path),
+        summary_file=summary_file,
+    )
+
+    preview_path = Path(context.report_dir) / "context-preview.json"
+    assert preview_path.is_file()
+    assert preview["scenario_id"] == "linux"
+    assert preview["platform"] == "linux"
+    assert preview["job_name"] == "Linux Fresh Host"
+    assert preview["context_path"] == context.context_path
+    assert preview["report_path"] == context.report_path
+    assert preview["diagnostics_dir"] == context.diagnostics_dir
+    assert preview["phase_names"] == context.phase_names
+    assert preview["ensure_images"] is True
+    assert preview["activate_services"] is False
+
+    summary_text = summary_file.read_text(encoding="utf-8")
+    assert "### Fresh-Host Context Preview" in summary_text
+    assert "| Scenario | linux |" in summary_text
+    assert "| Platform | linux |" in summary_text
+    assert "| Ensure images | True |" in summary_text
+    assert "| Activate services in setup | False |" in summary_text
+
+
+def test_preview_context_cli_invokes_preview_helper(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """CLI preview-context should dispatch to the preview helper."""
+    context_file = tmp_path / "context.json"
+    summary_file = tmp_path / "summary.md"
+    context_file.write_text("{}", encoding="utf-8")
+    calls: list[tuple[Path, Path | None]] = []
+
+    def fake_preview_context(path: Path, *, summary_file: Path | None = None) -> dict[str, object]:
+        calls.append((path, summary_file))
+        return {}
+
+    test_context.patch.patch_object(
+        fresh_host_script,
+        "preview_context",
+        new=fake_preview_context,
+    )
+
+    exit_code = fresh_host_script.main(
+        [
+            "preview-context",
+            "--context",
+            str(context_file),
+            "--summary-file",
+            str(summary_file),
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == [(context_file.resolve(), summary_file.resolve())]
+
+
 def test_load_context_rejects_directory_path(tmp_path: Path) -> None:
     """Loading a context should fail cleanly when the path is not a JSON file."""
     with pytest.raises(fresh_host.FreshHostError, match="expected JSON file"):

@@ -13,6 +13,7 @@ from tests.utils.helpers._fresh_host.models import (
     FreshHostReport,
 )
 from tests.utils.helpers._fresh_host.storage import (
+    load_context,
     log,
     now_iso,
     require_scenario,
@@ -169,3 +170,81 @@ def prepare_context(
     write_github_env(exports, github_env_file)
     log(f"Prepared context for scenario={context.scenario_id} at {context.context_path}.")
     return context
+
+
+def _display_path(path: Path, *, repo_root: Path) -> str:
+    """Return one display path, relative to repo root when possible."""
+    resolved_path = path.expanduser().resolve()
+    try:
+        return str(resolved_path.relative_to(repo_root))
+    except ValueError:
+        return str(resolved_path)
+
+
+def preview_context(
+    context_file: Path,
+    *,
+    summary_file: Path | None = None,
+) -> dict[str, object]:
+    """Write one human-readable context preview for the prepared scenario."""
+    context = load_context(context_file.expanduser().resolve())
+    repo_root = Path(context.repo_root).expanduser().resolve()
+    report_dir = Path(context.report_dir).expanduser().resolve()
+    preview_path = report_dir / "context-preview.json"
+
+    compose_files = [
+        _display_path(Path(compose_path), repo_root=repo_root)
+        for compose_path in context.compose_files
+    ]
+    payload: dict[str, object] = {
+        "scenario_id": context.scenario_id,
+        "platform": context.platform,
+        "job_name": context.job_name,
+        "runtime_provider": context.runtime_provider,
+        "docker_pull_parallelism": context.docker_pull_parallelism,
+        "docker_pull_max_attempts": context.docker_pull_max_attempts,
+        "activate_services": context.activate_services,
+        "ensure_images": context.ensure_images,
+        "phase_names": list(context.phase_names),
+        "compose_files": compose_files,
+        "context_path": context.context_path,
+        "report_path": context.report_path,
+        "report_dir": context.report_dir,
+        "diagnostics_dir": context.diagnostics_dir,
+        "preview_path": str(preview_path),
+        "created_at": now_iso(),
+    }
+    write_json(payload, preview_path)
+
+    if summary_file is not None:
+        summary_lines = [
+            "### Fresh-Host Context Preview",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Scenario | {context.scenario_id} |",
+            f"| Platform | {context.platform} |",
+            f"| Job | {context.job_name} |",
+            f"| Runtime provider | {context.runtime_provider or 'n/a'} |",
+            f"| Ensure images | {context.ensure_images} |",
+            f"| Activate services in setup | {context.activate_services} |",
+            f"| Docker pull parallelism | {context.docker_pull_parallelism} |",
+            f"| Docker pull max attempts | {context.docker_pull_max_attempts} |",
+            f"| Context JSON | `{context.context_path}` |",
+            f"| Report JSON | `{context.report_path}` |",
+            f"| Diagnostics dir | `{context.diagnostics_dir}` |",
+            f"| Preview JSON | `{preview_path}` |",
+            "",
+            "Planned phases:",
+            "",
+        ]
+        summary_lines.extend(f"- `{phase_name}`" for phase_name in context.phase_names)
+        summary_lines.extend(["", "Compose files:", ""])
+        summary_lines.extend(f"- `{compose_file}`" for compose_file in compose_files)
+        summary_lines.append("")
+        summary_file.parent.mkdir(parents=True, exist_ok=True)
+        with summary_file.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(summary_lines))
+
+    log(f"Context preview written to {preview_path}.")
+    return payload
