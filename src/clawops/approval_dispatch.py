@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import pathlib
 
 from clawops.common import write_json
@@ -11,6 +12,8 @@ from clawops.op_journal import Operation, OperationJournal
 
 REVIEW_PACKET_VERSION = 1
 LOCAL_DISPATCH_CHANNEL = "local_file"
+_OWNER_ONLY_DIR_MODE = 0o700
+_OWNER_ONLY_FILE_MODE = 0o600
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -48,6 +51,18 @@ def _decode_json(value: str | None, *, field_name: str) -> object:
 def _default_artifact_path(journal: OperationJournal, *, op_id: str) -> pathlib.Path:
     """Return the default on-disk reviewer packet path for one operation."""
     return journal.db_path.parent / "reviews" / f"{op_id}.json"
+
+
+def _normalize_permissions(path: pathlib.Path, mode: int) -> None:
+    """Apply owner-only permissions on supported hosts."""
+    if os.name == "nt":
+        return
+    try:
+        current_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        return
+    if current_mode != mode:
+        path.chmod(mode)
 
 
 def build_review_packet(operation: Operation) -> dict[str, object]:
@@ -101,6 +116,8 @@ def dispatch_pending_approval(
     payload = build_review_packet(operation)
     try:
         write_json(artifact_path, payload)
+        _normalize_permissions(artifact_path.parent, _OWNER_ONLY_DIR_MODE)
+        _normalize_permissions(artifact_path, _OWNER_ONLY_FILE_MODE)
         updated = journal.transition(
             operation.op_id,
             "pending_approval",

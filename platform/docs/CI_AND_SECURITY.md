@@ -41,7 +41,7 @@ any required lane does not complete successfully.
 
 ## Fresh-host acceptance
 
-`.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap, setup, service activation, and repo-local sidecar/browser-lab flows on hosted Linux and macOS runners.
+`.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap, setup, service activation, and repo-local sidecar/browser-lab flows on hosted Linux and macOS runners. It delegates the reusable execution lane to `.github/workflows/fresh-host-core.yml`.
 
 - Each run writes a GitHub job summary with the runner label, runtime provider,
 cache toggles, phase timings, and the effective hosted macOS Colima sizing.
@@ -61,6 +61,7 @@ sidecars and browser-lab mutable data live in Docker-managed volumes instead of 
 macOS path without changing the required PR gate.
 - The workflow stays declarative by delegating runtime setup, image warming,
 diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Hosted macOS image warming restores a cached Docker image archive when available, then verifies compose image availability with bounded retries and heartbeat logging as a fallback.
+- `.github/workflows/nightly.yml` warms the fresh-host caches before it calls the reusable fresh-host core lane for the scheduled validation sweep.
 - Repository workflow contract tests verify that shell steps invoking
 `tests/scripts/*.py` either call an explicit Python interpreter or target an executable script, so nightly cache warming cannot silently regress on file mode drift.
 
@@ -112,6 +113,11 @@ raw tar extraction, traversal-prone archive-member joins, `subprocess`
 `shell=True`, and unsafe deserialization helpers.
 - `.github/workflows/security.yml` verifies the pinned `gitleaks` and `syft`
 tarball SHA-256 digests before extracting the binaries through the dedicated helper script.
+- That same security lane now executes two operational smoke checks through
+`tests/scripts/security_workflow.py`: channel rollout contract parity
+(`verify-channels-contract`) plus a disposable backup/verify/restore cycle
+(`run-recovery-smoke`) so launch-critical channel and recovery paths produce
+executable CI evidence.
 - `.github/workflows/release.yml` now blocks publication on three repo-controlled
 prerequisites: the centralized release quality gate, the reusable fresh-host
 acceptance workflow, and the reusable memory-plugin verification workflow. It

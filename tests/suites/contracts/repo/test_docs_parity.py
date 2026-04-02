@@ -81,6 +81,20 @@ def test_operator_docs_surface_codebase_context_commands() -> None:
         assert "clawops context pack" not in text
 
 
+def test_readme_entrypoints_surface_launch_readiness_docs() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "platform/docs/ARCHITECTURE.md" in readme
+    assert "platform/docs/PRODUCTION_READINESS_CHECKLIST.md" in readme
+    assert "platform/docs/SECURITY_MODEL.md" in readme
+    assert "platform/docs/SECRETS_AND_ENV.md" in readme
+    assert "platform/docs/POLICY_ENGINE_AND_WRAPPERS.md" in readme
+    assert "platform/docs/CI_AND_SECURITY.md" in readme
+    assert "platform/docs/DEVFLOW.md" in readme
+    assert "platform/docs/PLUGIN_INVENTORY.md" in readme
+    assert "platform/docs/DEGRADATION.md" in readme
+
+
 def test_operator_docs_surface_platform_verification_commands() -> None:
     quickstart = (REPO_ROOT / "QUICKSTART.md").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
@@ -112,6 +126,9 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "Continuously validated on Linux `x86_64`" in host_platforms
     assert "platform-native user-management tooling" in macos_runbook
     assert "platform-native user-management tooling" in linux_runbook
+    assert "platform/docs/POLICY_ENGINE_AND_WRAPPERS.md" in readme
+    assert "platform/docs/SECRETS_AND_ENV.md" in readme
+    assert "platform/docs/SECURITY_MODEL.md" in readme
 
 
 def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
@@ -198,8 +215,17 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     assert "clawops repo doctor" in repo_doc
     assert "clawops worktree list" in repo_doc
     assert "ci-gate.yml" in ci_doc
+    assert "compatibility-matrix.yml" in ci_doc
+    assert "harness.yml" in ci_doc
+    assert "fresh-host-acceptance.yml" in ci_doc
+    assert "fresh-host-core.yml" in ci_doc
+    assert "security.yml" in ci_doc
+    assert "nightly.yml" in ci_doc
+    assert "release.yml" in ci_doc
     assert "CI / Verdict" in ci_doc
     assert "dependency-submission.yml" in ci_doc
+    assert "upstream-merge-validation.yml" in ci_doc
+    assert "devflow-contract.yml" in ci_doc
     assert "memory-plugin-verification.yml" in ci_doc
 
 
@@ -228,6 +254,24 @@ def test_operator_docs_surface_plugin_inventory_and_degradation_contract() -> No
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in hypermemory
     assert "[Degradation Contract](./DEGRADATION.md)" in hypermemory
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in ci_doc
+
+
+def test_production_readiness_checklist_surfaces_launch_verification_commands() -> None:
+    checklist = (REPO_ROOT / "platform/docs/PRODUCTION_READINESS_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "clawops doctor" in checklist
+    assert "clawops baseline verify" in checklist
+    assert "clawops verify-platform sidecars" in checklist
+    assert "clawops verify-platform observability" in checklist
+    assert "clawops verify-platform channels" in checklist
+    assert "clawops recovery backup-create" in checklist
+    assert "clawops recovery backup-verify <archive>" in checklist
+    assert "clawops recovery restore <archive> <clean-home>" in checklist
+    assert "clawops doctor-host" in checklist
+    assert "release-ready substitutes for `clawops doctor`" in checklist
+    assert "clawops repo doctor" in checklist
 
 
 def test_browser_lab_docs_surface_first_class_verification_commands() -> None:

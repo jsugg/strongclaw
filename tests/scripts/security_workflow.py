@@ -19,6 +19,8 @@ from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     enforce_coverage_thresholds,
     install_gitleaks,
     install_syft,
+    run_recovery_smoke,
+    verify_channels_contract,
     write_empty_sarif,
 )
 
@@ -61,6 +63,26 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sarif_parser.add_argument(
         "--information-uri",
         default="https://github.com/jsugg/strongclaw",
+    )
+
+    channels_parser = subparsers.add_parser(
+        "verify-channels-contract",
+        help="Validate shipped channels/docs/allowlist parity in one semantic command.",
+    )
+    channels_parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=REPO_ROOT,
+    )
+
+    recovery_parser = subparsers.add_parser(
+        "run-recovery-smoke",
+        help="Exercise backup-create, backup-verify, and restore against a disposable home.",
+    )
+    recovery_parser.add_argument(
+        "--tmp-root",
+        type=Path,
+        required=True,
     )
 
     return parser.parse_args(argv)
@@ -107,6 +129,16 @@ def main(argv: list[str] | None = None) -> int:
             write_empty_sarif(
                 Path(args.output).expanduser().resolve(),
                 information_uri=str(args.information_uri),
+            )
+            return 0
+        if args.command == "verify-channels-contract":
+            verify_channels_contract(
+                repo_root=Path(args.repo_root).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "run-recovery-smoke":
+            run_recovery_smoke(
+                tmp_root=Path(args.tmp_root).expanduser().resolve(),
             )
             return 0
     except CiWorkflowError as exc:

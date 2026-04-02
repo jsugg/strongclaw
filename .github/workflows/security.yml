@@ -45,10 +45,14 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
+      - name: Verify channels rollout contract
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py verify-channels-contract --repo-root .
+      - name: Run recovery backup/restore smoke
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py run-recovery-smoke --tmp-root "${RUNNER_TEMP}"
       - name: Run repository quality gate
         run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - name: Coverage summary
-        run: python3 ./tests/scripts/security_workflow.py write-coverage-summary --coverage-file coverage.xml --summary-file "${GITHUB_STEP_SUMMARY}"
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py write-coverage-summary --coverage-file coverage.xml --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Install Semgrep CLI
         run: python3 -m pip install --disable-pip-version-check "semgrep==1.156.0"
       - name: Run Semgrep
@@ -57,14 +61,14 @@ jobs:
         env:
           GITLEAKS_VERSION: "8.28.0"
           GITLEAKS_SHA256: "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb"
-        run: python3 ./tests/scripts/security_workflow.py install-gitleaks --version "${GITLEAKS_VERSION}" --sha256 "${GITLEAKS_SHA256}" --runner-temp "${RUNNER_TEMP}" --github-path-file "${GITHUB_PATH}"
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py install-gitleaks --version "${GITLEAKS_VERSION}" --sha256 "${GITLEAKS_SHA256}" --runner-temp "${RUNNER_TEMP}" --github-path-file "${GITHUB_PATH}"
       - name: Run gitleaks
         run: gitleaks git --no-banner --no-color --exit-code 1 --log-level warn --redact
       - name: Install syft CLI
         env:
           SYFT_VERSION: "v1.42.2"
           SYFT_SHA256: "1d3cc98b13ce3dfb6083ef42f64f1033e40d7dea292e8ea85ed1cf88efb2f542"
-        run: python3 ./tests/scripts/security_workflow.py install-syft --version "${SYFT_VERSION}" --sha256 "${SYFT_SHA256}" --runner-temp "${RUNNER_TEMP}" --github-path-file "${GITHUB_PATH}"
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py install-syft --version "${SYFT_VERSION}" --sha256 "${SYFT_SHA256}" --runner-temp "${RUNNER_TEMP}" --github-path-file "${GITHUB_PATH}"
       - name: Generate SBOM
         run: syft dir:. -o spdx-json=sbom.spdx.json
       - uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
@@ -75,7 +79,7 @@ jobs:
           trivy-config: security/trivy/trivy.yaml
       - name: Preserve historical code-scanning categories
         if: always()
-        run: python3 ./tests/scripts/security_workflow.py write-empty-sarif --output "${RUNNER_TEMP}/empty-security.sarif" --information-uri "https://github.com/jsugg/strongclaw"
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py write-empty-sarif --output "${RUNNER_TEMP}/empty-security.sarif" --information-uri "https://github.com/jsugg/strongclaw"
       - uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8 # v4
         if: always()
         with:

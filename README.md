@@ -22,9 +22,13 @@ Read these in order:
 4. [`USAGE_GUIDE.md`](USAGE_GUIDE.md)
 5. [`platform/docs/ARCHITECTURE.md`](platform/docs/ARCHITECTURE.md)
 6. [`platform/docs/PRODUCTION_READINESS_CHECKLIST.md`](platform/docs/PRODUCTION_READINESS_CHECKLIST.md)
-7. [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md)
-8. [`platform/docs/PLUGIN_INVENTORY.md`](platform/docs/PLUGIN_INVENTORY.md)
-9. [`platform/docs/DEGRADATION.md`](platform/docs/DEGRADATION.md)
+7. [`platform/docs/SECURITY_MODEL.md`](platform/docs/SECURITY_MODEL.md)
+8. [`platform/docs/SECRETS_AND_ENV.md`](platform/docs/SECRETS_AND_ENV.md)
+9. [`platform/docs/POLICY_ENGINE_AND_WRAPPERS.md`](platform/docs/POLICY_ENGINE_AND_WRAPPERS.md)
+10. [`platform/docs/CI_AND_SECURITY.md`](platform/docs/CI_AND_SECURITY.md)
+11. [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md)
+12. [`platform/docs/PLUGIN_INVENTORY.md`](platform/docs/PLUGIN_INVENTORY.md)
+13. [`platform/docs/DEGRADATION.md`](platform/docs/DEGRADATION.md)
 
 ## Repository map
 
