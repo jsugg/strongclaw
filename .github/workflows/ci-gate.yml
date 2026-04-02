@@ -143,5 +143,6 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Evaluate final verdict
         run: python3 ./tests/scripts/ci_gate.py verdict --docs-only "${{ needs.classify.outputs.docs_only }}" --fresh-host "${{ needs.classify.outputs.fresh_host }}" --security "${{ needs.classify.outputs.security }}" --harness "${{ needs.classify.outputs.harness }}" --memory-plugin "${{ needs.classify.outputs.memory_plugin }}" --compatibility-matrix "${{ needs.classify.outputs.compatibility_matrix }}" --classify-result "${{ needs.classify.result }}" --docs-parity-result "${{ needs.docs_parity.result }}" --harness-result "${{ needs.harness.result }}" --compatibility-matrix-result "${{ needs.compatibility_matrix.result }}" --memory-plugin-result "${{ needs.memory_plugin.result }}" --fresh-host-result "${{ needs.fresh_host.result }}" --security-result "${{ needs.security.result }}" --github-summary-file "$GITHUB_STEP_SUMMARY"

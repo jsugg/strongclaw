@@ -123,6 +123,33 @@ def test_ci_gate_workflow_runs_on_pull_requests_and_emits_verdict() -> None:
     assert "docs_parity_required" in text
 
 
+def test_ci_gate_verdict_job_checks_out_repository_before_running_script() -> None:
+    """The verdict job must checkout the repository before invoking local scripts."""
+    loaded_workflow: object = yaml.safe_load(_workflow_text("ci-gate.yml"))
+    assert isinstance(loaded_workflow, dict)
+    workflow = cast(dict[object, object], loaded_workflow)
+
+    jobs = _as_str_object_dict(workflow.get("jobs"))
+    assert jobs is not None
+    verdict = _as_str_object_dict(jobs.get("verdict"))
+    assert verdict is not None
+
+    steps_value = verdict.get("steps")
+    assert isinstance(steps_value, list)
+
+    has_checkout = False
+    for step_value in cast(list[object], steps_value):
+        step = _as_str_object_dict(step_value)
+        if step is None:
+            continue
+        uses = step.get("uses")
+        if isinstance(uses, str) and uses.startswith("actions/checkout@"):
+            has_checkout = True
+            break
+
+    assert has_checkout
+
+
 def test_ci_gate_workflow_calls_reusable_heavy_lanes() -> None:
     """The CI gate should orchestrate heavy lanes through reusable workflow calls."""
     text = _workflow_text("ci-gate.yml")
