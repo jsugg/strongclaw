@@ -230,6 +230,24 @@ def test_operator_docs_surface_plugin_inventory_and_degradation_contract() -> No
     assert "[Plugin Inventory](./PLUGIN_INVENTORY.md)" in ci_doc
 
 
+def test_production_readiness_checklist_surfaces_launch_verification_commands() -> None:
+    checklist = (REPO_ROOT / "platform/docs/PRODUCTION_READINESS_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "clawops doctor" in checklist
+    assert "clawops baseline verify" in checklist
+    assert "clawops verify-platform sidecars" in checklist
+    assert "clawops verify-platform observability" in checklist
+    assert "clawops verify-platform channels" in checklist
+    assert "clawops recovery backup-create" in checklist
+    assert "clawops recovery backup-verify <archive>" in checklist
+    assert "clawops recovery restore <archive> <clean-home>" in checklist
+    assert "clawops doctor-host" in checklist
+    assert "release-ready substitutes for `clawops doctor`" in checklist
+    assert "clawops repo doctor" in checklist
+
+
 def test_browser_lab_docs_surface_first_class_verification_commands() -> None:
     browser_lab = (REPO_ROOT / "platform/docs/BROWSER_LAB.md").read_text(encoding="utf-8")
     setup = (REPO_ROOT / "SETUP_GUIDE.md").read_text(encoding="utf-8")
