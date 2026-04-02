@@ -36,6 +36,7 @@ env:
   DEFAULT_MACOS_RUNTIME_PROVIDER: "colima"
   FRESH_HOST_DOCKER_PULL_PARALLELISM: "2"
   FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS: "3"
+  FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION: "v2"
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
@@ -163,8 +164,9 @@ jobs:
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/docker-images
-          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
+            fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-
             fresh-host-macos-images-${{ runner.arch }}-
       - name: Prepare macOS fresh-host context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
@@ -178,8 +180,9 @@ jobs:
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/docker-images
-          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
+            fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-
             fresh-host-macos-images-${{ runner.arch }}-
       - name: Restore hosted macOS Docker images from cache
         run: ./tests/scripts/hosted_docker.py restore-image-cache --context "${FRESH_HOST_CONTEXT}"

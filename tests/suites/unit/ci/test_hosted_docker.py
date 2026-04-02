@@ -538,7 +538,12 @@ def test_restore_image_cache_loads_archive_when_present(
     workspace.mkdir()
     cache_root = tmp_path / "docker-images"
     cache_root.mkdir()
-    archive_path = cache_root / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME
+    archive_path = (
+        cache_root
+        / hosted_docker_image_cache.DOCKER_IMAGE_CACHE_ARCHIVE_TEMPLATE.format(
+            scenario_id="macos-sidecars"
+        )
+    )
     archive_path.write_text("fake-image-cache", encoding="utf-8")
     test_context.env.set("GITHUB_EVENT_NAME", "push")
     test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
@@ -577,9 +582,58 @@ def test_restore_image_cache_loads_archive_when_present(
         (
             ["docker", "image", "load", "-i", str(archive_path)],
             workspace.resolve(),
-            1800,
+            hosted_docker_image_cache.DEFAULT_DOCKER_IMAGE_LOAD_TIMEOUT_SECONDS,
         )
     ]
+
+
+def test_restore_image_cache_uses_legacy_archive_name_as_fallback(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Restore should fall back to the legacy single-archive filename when present."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    cache_root.mkdir()
+    archive_path = cache_root / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME
+    archive_path.write_text("legacy-image-cache", encoding="utf-8")
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-browser-lab",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    commands: list[list[str]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    restored = hosted_docker.restore_image_cache(Path(context.context_path))
+
+    assert restored is True
+    assert commands == [["docker", "image", "load", "-i", str(archive_path)]]
 
 
 def test_restore_image_cache_skips_when_archive_is_missing(
@@ -621,7 +675,7 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Image cache save should export hosted macOS compose images to one archive."""
+    """Image cache save should export hosted macOS compose images to scenario archives."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -638,9 +692,12 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
         github_env_file=github_env,
     )
     resolved_compose_files: list[Path] = []
-    image_set = [
+    sidecars_image_set = [
         "postgres:16-alpine@sha256:abc",
         "qdrant/qdrant:v1.15.5@sha256:def",
+    ]
+    browser_lab_image_set = [
+        "mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:ghi",
     ]
     save_commands: list[list[str]] = []
 
@@ -652,7 +709,11 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
     ) -> list[str]:
         del cwd, env
         resolved_compose_files.extend(compose_files)
-        return list(image_set)
+        if compose_files[0].name == "docker-compose.aux-stack.ci-hosted-macos.yaml":
+            return list(sidecars_image_set)
+        if compose_files[0].name == "docker-compose.browser-lab.ci-hosted-macos.yaml":
+            return list(browser_lab_image_set)
+        raise AssertionError("unexpected compose files")
 
     def fake_list_local_images(images: list[str]) -> list[str]:
         return list(images)
@@ -687,8 +748,13 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
 
     archive_path = hosted_docker.save_image_cache(Path(context.context_path))
 
-    assert archive_path == (cache_root.resolve() / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME)
-    assert save_commands == [["docker", "image", "save", "-o", str(archive_path), *image_set]]
+    sidecars_archive = cache_root.resolve() / "hosted-macos-images-macos-sidecars.tar"
+    browser_lab_archive = cache_root.resolve() / "hosted-macos-images-macos-browser-lab.tar"
+    assert archive_path == sidecars_archive
+    assert save_commands == [
+        ["docker", "image", "save", "-o", str(sidecars_archive), *sidecars_image_set],
+        ["docker", "image", "save", "-o", str(browser_lab_archive), *browser_lab_image_set],
+    ]
     assert sorted(path.name for path in resolved_compose_files) == sorted(
         [
             "docker-compose.aux-stack.ci-hosted-macos.yaml",
@@ -717,9 +783,12 @@ def test_save_image_cache_allows_partial_export_when_some_images_are_missing(
         workspace=workspace,
         github_env_file=github_env,
     )
-    image_set = [
+    sidecars_image_set = [
         "postgres:16-alpine@sha256:abc",
-        "ubuntu/squid:latest@sha256:def",
+        "otel/opentelemetry-collector-contrib:0.120.0@sha256:def",
+    ]
+    browser_lab_image_set = [
+        "mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:ghi",
     ]
     pull_attempts: list[list[str]] = []
     save_commands: list[list[str]] = []
@@ -730,12 +799,17 @@ def test_save_image_cache_allows_partial_export_when_some_images_are_missing(
         cwd: Path,
         env: dict[str, str],
     ) -> list[str]:
-        del compose_files, cwd, env
-        return list(image_set)
+        del cwd, env
+        if compose_files[0].name == "docker-compose.aux-stack.ci-hosted-macos.yaml":
+            return list(sidecars_image_set)
+        if compose_files[0].name == "docker-compose.browser-lab.ci-hosted-macos.yaml":
+            return list(browser_lab_image_set)
+        raise AssertionError("unexpected compose files")
 
     def fake_list_local_images(images: list[str]) -> list[str]:
-        if images == image_set:
-            return [image_set[0]]
+        union_image_set = sidecars_image_set + browser_lab_image_set
+        if images == union_image_set:
+            return [sidecars_image_set[0]]
         return []
 
     def fake_pull_images(
@@ -792,9 +866,18 @@ def test_save_image_cache_allows_partial_export_when_some_images_are_missing(
 
     archive_path = hosted_docker.save_image_cache(Path(context.context_path))
 
-    assert pull_attempts == [[image_set[1]]]
-    assert archive_path == (cache_root.resolve() / hosted_docker.DOCKER_IMAGE_CACHE_ARCHIVE_NAME)
-    assert save_commands == [["docker", "image", "save", "-o", str(archive_path), image_set[0]]]
+    assert pull_attempts == [[sidecars_image_set[1], browser_lab_image_set[0]]]
+    assert archive_path == (cache_root.resolve() / "hosted-macos-images-macos-sidecars.tar")
+    assert save_commands == [
+        [
+            "docker",
+            "image",
+            "save",
+            "-o",
+            str(cache_root.resolve() / "hosted-macos-images-macos-sidecars.tar"),
+            sidecars_image_set[0],
+        ]
+    ]
 
 
 def test_hosted_docker_cli_dispatches_image_cache_commands(
