@@ -203,6 +203,49 @@ def test_run_recovery_smoke_executes_backup_verify_restore_flow(
     assert seen_calls[2][0] == "restore"
 
 
+def test_run_recovery_smoke_forces_tar_fallback_when_openclaw_is_available(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Recovery smoke should bypass OpenClaw CLI verification in CI helper mode."""
+    archive_path = tmp_path / "archive.tar.gz"
+    seen_openclaw_resolution: list[str | None] = []
+
+    def fake_which(command: str, *_args: object, **_kwargs: object) -> str | None:
+        if command == "openclaw":
+            return "/usr/local/bin/openclaw"
+        return None
+
+    def fake_create_backup(*, home_dir: Path) -> Path:
+        seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
+        archive_path.write_text("archive", encoding="utf-8")
+        return archive_path
+
+    def fake_verify_backup(target: Path, *, home_dir: Path) -> Path:
+        seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
+        return target
+
+    def fake_restore_backup(target: Path, *, destination: Path, home_dir: Path) -> Path:
+        seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
+        marker = destination / ".openclaw" / "logs" / "smoke.log"
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("restored\n", encoding="utf-8")
+        return destination
+
+    test_context.patch.patch_object(
+        security_helpers.recovery_helpers.shutil,
+        "which",
+        new=fake_which,
+    )
+    test_context.patch.patch_object(security_helpers, "create_backup", new=fake_create_backup)
+    test_context.patch.patch_object(security_helpers, "verify_backup", new=fake_verify_backup)
+    test_context.patch.patch_object(security_helpers, "restore_backup", new=fake_restore_backup)
+
+    ci_workflows.run_recovery_smoke(tmp_root=tmp_path)
+
+    assert seen_openclaw_resolution == [None, None, None]
+
+
 def test_security_workflow_main_dispatches_write_summary(
     test_context: TestContext,
     tmp_path: Path,
