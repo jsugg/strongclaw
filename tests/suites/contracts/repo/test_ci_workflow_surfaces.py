@@ -337,6 +337,8 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     assert "./tests/scripts/memory_plugin_verification.py run-vendored-host-checks" in memory_plugin
     assert "./tests/scripts/memory_plugin_verification.py wait-for-qdrant" in memory_plugin
     assert "./tests/scripts/security_workflow.py write-coverage-summary" in security
+    assert "./tests/scripts/security_workflow.py verify-channels-contract --repo-root ." in security
+    assert "./tests/scripts/security_workflow.py run-recovery-smoke --tmp-root" in security
     assert "./tests/scripts/security_workflow.py install-gitleaks" in security
     assert "./tests/scripts/security_workflow.py install-syft" in security
     assert "./tests/scripts/security_workflow.py write-empty-sarif" in security

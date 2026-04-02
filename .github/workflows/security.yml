@@ -45,6 +45,10 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
+      - name: Verify channels rollout contract
+        run: python3 ./tests/scripts/security_workflow.py verify-channels-contract --repo-root .
+      - name: Run recovery backup/restore smoke
+        run: python3 ./tests/scripts/security_workflow.py run-recovery-smoke --tmp-root "${RUNNER_TEMP}"
       - name: Run repository quality gate
         run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - name: Coverage summary

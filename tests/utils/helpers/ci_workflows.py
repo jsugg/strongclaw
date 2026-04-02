@@ -26,6 +26,8 @@ from tests.utils.helpers._ci_workflows.security import (
     enforce_coverage_thresholds,
     install_gitleaks,
     install_syft,
+    run_recovery_smoke,
+    verify_channels_contract,
     write_empty_sarif,
 )
 
@@ -45,8 +47,10 @@ __all__ = [
     "prepare_setup_smoke",
     "publish_github_release",
     "resolve_setup_smoke_paths",
+    "run_recovery_smoke",
     "run_clawops_memory_migration",
     "run_vendored_host_checks",
+    "verify_channels_contract",
     "verify_release_artifacts",
     "wait_for_qdrant",
     "write_empty_sarif",
