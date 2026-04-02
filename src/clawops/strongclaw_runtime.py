@@ -14,7 +14,8 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from typing import Any, Final, Literal, cast
 
 from clawops.app_paths import (
@@ -88,14 +89,17 @@ LOCAL_BASELINE_SANITIZED_ENV_KEYS: Final[tuple[str, ...]] = (
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
 )
-VARLOCK_ENV_MODE_ENV_VAR = "STRONGCLAW_VARLOCK_ENV_MODE"
 VarlockEnvMode = Literal["auto", "managed", "legacy"]
-VALID_VARLOCK_ENV_MODES: Final[tuple[VarlockEnvMode, ...]] = ("auto", "managed", "legacy")
-# Backward-compatible aliases retained for fresh-host helpers.
-VARLOCK_ENV_MODE_ENV = VARLOCK_ENV_MODE_ENV_VAR
+VARLOCK_ENV_MODE_ENV = "STRONGCLAW_VARLOCK_ENV_MODE"
+VARLOCK_ENV_MODE_ENV_KEY = "OPENCLAW_VARLOCK_ENV_MODE"
 VARLOCK_ENV_MODE_AUTO: Final[VarlockEnvMode] = "auto"
 VARLOCK_ENV_MODE_MANAGED: Final[VarlockEnvMode] = "managed"
 VARLOCK_ENV_MODE_LEGACY: Final[VarlockEnvMode] = "legacy"
+READINESS_VARLOCK_ENV_MODES: Final[tuple[str, str]] = ("managed", "legacy")
+SUPPORTED_VARLOCK_ENV_MODES: Final[tuple[str, ...]] = (
+    VARLOCK_ENV_MODE_AUTO,
+    *READINESS_VARLOCK_ENV_MODES,
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -492,29 +496,66 @@ def value_is_effective(value: str | None) -> bool:
     return not is_placeholder_value(value)
 
 
+def normalize_varlock_env_mode(
+    value: str | None,
+    *,
+    default: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
+) -> VarlockEnvMode:
+    """Normalize one raw env-mode value and enforce the supported contract."""
+    candidate = (value or default).strip().lower()
+    if candidate == "auto":
+        return "auto"
+    if candidate == "managed":
+        return "managed"
+    if candidate == "legacy":
+        return "legacy"
+    raise CommandError(
+        f"Unsupported Varlock env mode '{candidate}'; "
+        f"use one of: {', '.join(SUPPORTED_VARLOCK_ENV_MODES)}"
+    )
+
+
+def resolve_varlock_env_mode(*, environ: Mapping[str, str] | None = None) -> VarlockEnvMode:
+    """Resolve the active Varlock env-mode selection."""
+    env = os.environ if environ is None else environ
+    return normalize_varlock_env_mode(
+        env.get(VARLOCK_ENV_MODE_ENV) or env.get(VARLOCK_ENV_MODE_ENV_KEY),
+        default=VARLOCK_ENV_MODE_AUTO,
+    )
+
+
+@contextmanager
+def use_varlock_env_mode(
+    env_mode: VarlockEnvMode,
+    *,
+    default: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
+) -> Iterator[None]:
+    """Temporarily set the process-level Varlock env-mode contract."""
+    normalized_mode = normalize_varlock_env_mode(env_mode, default=default)
+    previous_primary = os.environ.get(VARLOCK_ENV_MODE_ENV)
+    previous_alias = os.environ.get(VARLOCK_ENV_MODE_ENV_KEY)
+    if normalized_mode == VARLOCK_ENV_MODE_AUTO:
+        os.environ.pop(VARLOCK_ENV_MODE_ENV, None)
+        os.environ.pop(VARLOCK_ENV_MODE_ENV_KEY, None)
+    else:
+        os.environ[VARLOCK_ENV_MODE_ENV] = normalized_mode
+        os.environ[VARLOCK_ENV_MODE_ENV_KEY] = normalized_mode
+    try:
+        yield
+    finally:
+        if previous_primary is None:
+            os.environ.pop(VARLOCK_ENV_MODE_ENV, None)
+        else:
+            os.environ[VARLOCK_ENV_MODE_ENV] = previous_primary
+        if previous_alias is None:
+            os.environ.pop(VARLOCK_ENV_MODE_ENV_KEY, None)
+        else:
+            os.environ[VARLOCK_ENV_MODE_ENV_KEY] = previous_alias
+
+
 def generate_secret_value() -> str:
     """Return a StrongClaw-managed random secret."""
     return secrets.token_urlsafe(32)
-
-
-def _normalize_varlock_env_mode(
-    env_mode: VarlockEnvMode | None,
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> VarlockEnvMode:
-    """Resolve one validated Varlock env mode."""
-    env = os.environ if environ is None else environ
-    raw_mode = env_mode if env_mode is not None else env.get(VARLOCK_ENV_MODE_ENV_VAR, "auto")
-    normalized_mode = raw_mode.strip().lower()
-    if normalized_mode == "auto":
-        return "auto"
-    if normalized_mode == "managed":
-        return "managed"
-    if normalized_mode == "legacy":
-        return "legacy"
-    raise CommandError(
-        f"Invalid Varlock env mode `{raw_mode}`; expected one of {', '.join(VALID_VARLOCK_ENV_MODES)}."
-    )
 
 
 def varlock_env_dir(
@@ -522,32 +563,31 @@ def varlock_env_dir(
     *,
     home_dir: pathlib.Path | None = None,
     environ: Mapping[str, str] | None = None,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> pathlib.Path:
     """Return the Varlock env directory."""
     env = os.environ if environ is None else environ
     override = env.get("OPENCLAW_VARLOCK_ENV_PATH") or env.get("VARLOCK_ENV_DIR")
     if override:
         return expand_user_path(override, home_dir=home_dir)
-    mode = _normalize_varlock_env_mode(env_mode, environ=env)
     layout = resolve_runtime_layout(repo_root=repo_root, home_dir=home_dir, environ=env)
     managed_dir = strongclaw_varlock_dir(home_dir=layout.home_dir, environ=env)
     legacy_dir = layout.asset_root / DEFAULT_VARLOCK_ENV_RELATIVE
-    if layout.uses_isolated_runtime:
+    active_mode = env_mode
+    if env_mode == VARLOCK_ENV_MODE_AUTO:
+        active_mode = resolve_varlock_env_mode(environ=env)
+    if active_mode == "managed":
         materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
         return managed_dir
-    if mode == "managed":
-        materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
-        return managed_dir
-    if mode == "legacy":
+    if active_mode == "legacy":
         if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
             legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
         ).exists():
             return legacy_dir
-        raise CommandError(
-            "Varlock env mode `legacy` requires an existing legacy env contract at "
-            f"{legacy_dir}."
-        )
+        raise CommandError(f"Legacy Varlock env directory not found: {legacy_dir}.")
+    if layout.uses_isolated_runtime:
+        materialize_runtime_varlock_assets(repo_root, home_dir=layout.home_dir)
+        return managed_dir
     if (legacy_dir / DEFAULT_VARLOCK_LOCAL_ENV_NAME).exists() or (
         legacy_dir / DEFAULT_VARLOCK_PLUGIN_ENV_NAME
     ).exists():
@@ -565,7 +605,7 @@ def varlock_local_env_file(
     *,
     home_dir: pathlib.Path | None = None,
     environ: Mapping[str, str] | None = None,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> pathlib.Path:
     """Return the local Varlock env file path."""
     env = os.environ if environ is None else environ
@@ -588,7 +628,7 @@ def varlock_plugin_env_file(
     *,
     home_dir: pathlib.Path | None = None,
     environ: Mapping[str, str] | None = None,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> pathlib.Path:
     """Return the plugin-backed Varlock env overlay path."""
     env = os.environ if environ is None else environ
@@ -689,7 +729,9 @@ def varlock_available() -> bool:
 
 
 def build_varlock_prefix(
-    repo_root: pathlib.Path, *, env_mode: VarlockEnvMode | None = None
+    repo_root: pathlib.Path,
+    *,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> list[str]:
     """Build the Varlock command prefix for the repo-local env."""
     varlock_bin = resolve_varlock_bin()
@@ -708,7 +750,7 @@ def wrap_command_with_varlock(
     repo_root: pathlib.Path,
     command: Sequence[str],
     *,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> list[str]:
     """Wrap a command in `varlock run` when available."""
     if varlock_available() and varlock_env_dir(repo_root, env_mode=env_mode).is_dir():
@@ -727,7 +769,7 @@ def run_varlock_command(
     env: Mapping[str, str] | None = None,
     timeout_seconds: int = 30,
     check: bool = False,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> ExecResult:
     """Run a command through Varlock when available."""
     return run_command(
@@ -740,7 +782,9 @@ def run_varlock_command(
 
 
 def _openclaw_command_env(
-    repo_root: pathlib.Path, *, env_mode: VarlockEnvMode | None = None
+    repo_root: pathlib.Path,
+    *,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> dict[str, str]:
     """Build the sanitized environment for one Varlock-backed runtime invocation."""
     env = dict(os.environ)
@@ -780,7 +824,6 @@ def resolve_openclaw_config_path(
     *,
     home_dir: pathlib.Path | None = None,
     environ: Mapping[str, str] | None = None,
-    env_mode: VarlockEnvMode | None = None,
 ) -> pathlib.Path:
     """Return the rendered OpenClaw config path."""
     env = os.environ if environ is None else environ
@@ -794,12 +837,7 @@ def resolve_openclaw_config_path(
     if layout.uses_isolated_runtime:
         return layout.openclaw_config_path
     local_env = load_env_assignments(
-        varlock_local_env_file(
-            repo_root,
-            home_dir=home_dir,
-            environ=env,
-            env_mode=env_mode,
-        )
+        varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
     )
     local_config_path = local_env.get("OPENCLAW_CONFIG_PATH", "").strip()
     if local_config_path:
@@ -829,7 +867,7 @@ def run_openclaw_command(
     cwd: pathlib.Path | None = None,
     timeout_seconds: int = 30,
     check: bool = False,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> ExecResult:
     """Run the OpenClaw CLI with repo-local Varlock wrapping when available."""
     require_openclaw("This operation requires the OpenClaw CLI.")
@@ -851,7 +889,7 @@ def run_managed_clawops_command(
     cwd: pathlib.Path | None = None,
     timeout_seconds: int = 30,
     check: bool = False,
-    env_mode: VarlockEnvMode | None = None,
+    env_mode: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
 ) -> ExecResult:
     """Run the repo-managed ClawOps CLI with repo-local Varlock wrapping when available."""
     return run_varlock_command(
@@ -1187,7 +1225,6 @@ def resolve_openclaw_state_dir(
     *,
     home_dir: pathlib.Path | None = None,
     environ: Mapping[str, str] | None = None,
-    env_mode: VarlockEnvMode | None = None,
 ) -> pathlib.Path:
     """Return the configured OpenClaw state directory."""
     env = os.environ if environ is None else environ
@@ -1198,12 +1235,7 @@ def resolve_openclaw_state_dir(
     if layout.uses_isolated_runtime:
         return layout.openclaw_state_dir
     local_env = load_env_assignments(
-        varlock_local_env_file(
-            repo_root,
-            home_dir=home_dir,
-            environ=env,
-            env_mode=env_mode,
-        )
+        varlock_local_env_file(repo_root, home_dir=home_dir, environ=env)
     )
     raw_value = local_env.get("OPENCLAW_STATE_DIR", "").strip()
     if raw_value:

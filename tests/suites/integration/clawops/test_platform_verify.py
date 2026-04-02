@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pathlib
-import socket
 
 import pytest
 
@@ -116,8 +115,12 @@ def _write_browser_lab_compose(
         compose_path,
         {
             "services": {
-                "browserlab-proxy": {"ports": [_port_mapping(proxy, 3128)]},
-                "browserlab-playwright": {"ports": [_port_mapping(playwright, 9222)]},
+                "browserlab-proxy": {
+                    "ports": [_port_mapping(proxy, 3128)],
+                },
+                "browserlab-playwright": {
+                    "ports": [_port_mapping(playwright, 9222)],
+                },
             }
         },
     )
@@ -246,28 +249,26 @@ def test_verify_browser_lab_supports_runtime_probes(
     assert report.ok is True
 
 
-def test_verify_browser_lab_reports_runtime_disconnects(
+def test_verify_browser_lab_rejects_non_loopback_bindings(
     tmp_path: pathlib.Path,
-    network_runtime: NetworkRuntime,
 ) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        closed_proxy = ("127.0.0.1", int(probe.getsockname()[1]))
-
-    compose_path = tmp_path / "browser-lab-compose.yaml"
+    compose_path = tmp_path / "browser-lab-non-loopback.yaml"
     _write_browser_lab_compose(
         compose_path,
-        proxy=closed_proxy,
-        playwright=network_runtime.tcp_listener(),
+        proxy=("0.0.0.0", 3128),
+        playwright=("0.0.0.0", 9222),
     )
 
-    report = verify_browser_lab(compose_path=compose_path, skip_runtime=False)
+    report = verify_browser_lab(compose_path=compose_path, skip_runtime=True)
     assert report.ok is False
-    runtime_check = next(
-        check for check in report.checks if check.name == "browserlab-proxy-runtime"
+    assert any(
+        check.name == "browserlab-proxy-port" and "loopback-only" in check.message
+        for check in report.checks
     )
-    assert runtime_check.ok is False
-    assert "tcp reachability failed" in runtime_check.message
+    assert any(
+        check.name == "browserlab-playwright-port" and "loopback-only" in check.message
+        for check in report.checks
+    )
 
 
 def test_verify_channels_matches_repo_docs_and_guidance() -> None:

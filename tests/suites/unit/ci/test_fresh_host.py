@@ -1117,6 +1117,62 @@ def test_deactivate_macos_host_services_raises_for_active_bootout_failure(
     )
 
 
+def test_cleanup_macos_skips_clawops_teardown_when_venv_is_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Cleanup should remain best-effort when setup never created the managed venv."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    executed_commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, check, capture_output, text, timeout
+        assert command[:2] == ["launchctl", "print"]
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def fake_best_effort(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> str | None:
+        del cwd, env
+        executed_commands.append(command)
+        return None
+
+    test_context.patch.patch_object(fresh_host_macos.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_macos, "best_effort", new=fake_best_effort)
+
+    result = fresh_host_macos.cleanup_macos(context)
+
+    assert len(executed_commands) == 2
+    assert all(command[:2] == ["launchctl", "bootout"] for command in executed_commands)
+    assert all(".venv/bin/python" not in " ".join(command) for command in executed_commands)
+    assert any("managed venv entrypoint is missing" in note for note in result.notes)
+    assert result.command == executed_commands[-1]
+
+
 def test_cleanup_cli_returns_nonzero_and_records_failure_when_cleanup_raises(
     tmp_path: Path,
     test_context: TestContext,

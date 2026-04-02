@@ -21,9 +21,16 @@ from tests.utils.helpers._hosted_docker.models import (
     ImageEnsureReport,
     PullReport,
 )
-from tests.utils.helpers._hosted_docker.shell import run_checked
+from tests.utils.helpers._hosted_docker.shell import run_checked, wait_for_docker_ready
 
 COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
+DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
+    "connection refused",
+    "connection reset by peer",
+    "cannot connect to the docker daemon",
+    "/run/containerd/containerd.sock",
+    "error while dialing",
+)
 
 
 def resolve_compose_images(
@@ -87,16 +94,26 @@ def pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, s
     return image, result.returncode, time.monotonic() - started, output
 
 
+def _is_daemon_connectivity_failure(output: str) -> bool:
+    """Return whether a pull failure output indicates daemon connectivity problems."""
+    lowered = output.lower()
+    return any(marker in lowered for marker in DOCKER_DAEMON_FAILURE_MARKERS)
+
+
 def pull_images(
     images: Sequence[str],
     *,
     parallelism: int,
     max_attempts: int,
     pull_timeout_seconds: int = DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
+    recovery_cwd: Path | None = None,
+    recovery_env: dict[str, str] | None = None,
 ) -> PullReport:
     """Pull images with bounded retries and reduced retry parallelism."""
     if parallelism < 1 or max_attempts < 1 or pull_timeout_seconds < 1:
         raise FreshHostError("parallelism, max_attempts, and pull_timeout_seconds must be positive")
+    if (recovery_cwd is None) != (recovery_env is None):
+        raise FreshHostError("recovery_cwd and recovery_env must be provided together")
     outstanding = list(images)
     pulled_images: list[str] = []
     retried_images: list[str] = []
@@ -110,6 +127,7 @@ def pull_images(
             f"(attempt {attempt_count}/{max_attempts})."
         )
         failures: list[str] = []
+        daemon_connectivity_failure = False
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=min(attempt_parallelism, len(outstanding))
         ) as executor:
@@ -136,6 +154,8 @@ def pull_images(
                     log(f"[failed] {image} in {duration_seconds:.1f}s")
                     if output:
                         print(output, flush=True)
+                        if _is_daemon_connectivity_failure(output):
+                            daemon_connectivity_failure = True
                     failures.append(image)
         outstanding = failures
         if not outstanding or attempt_count >= max_attempts:
@@ -144,6 +164,19 @@ def pull_images(
             if image not in seen_retries:
                 seen_retries.add(image)
                 retried_images.append(image)
+        if daemon_connectivity_failure and recovery_cwd is not None and recovery_env is not None:
+            log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
+            try:
+                wait_for_docker_ready(cwd=recovery_cwd, env=recovery_env, max_attempts=90)
+            except FreshHostError as exc:
+                log(f"Docker daemon recovery probe failed: {exc}")
+                return PullReport(
+                    exit_code=1,
+                    pulled_images=pulled_images,
+                    failed_images=outstanding,
+                    attempt_count=attempt_count,
+                    retried_images=retried_images,
+                )
         next_parallelism = max(1, attempt_parallelism // 2)
         if next_parallelism != attempt_parallelism:
             log(f"Reducing retry parallelism {attempt_parallelism}->{next_parallelism}.")
@@ -208,6 +241,8 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
             missing_before_pull,
             parallelism=context.docker_pull_parallelism,
             max_attempts=context.docker_pull_max_attempts,
+            recovery_cwd=repo_root,
+            recovery_env=env,
         )
     local_after_pull = list_local_images(images)
     missing_after_pull = [image for image in images if image not in local_after_pull]

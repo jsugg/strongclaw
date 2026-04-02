@@ -16,7 +16,7 @@
 - [ ] backup and restore tested
 - [ ] channel allowlists durable
 - [ ] browser lab isolated or disabled
-- [ ] if browser-lab is enabled, run `clawops verify-platform browser-lab` (and optionally `clawops baseline verify --include-browser-lab`) and confirm loopback-only bindings
+- [ ] if browser-lab is enabled, run `clawops verify-platform browser-lab` and confirm loopback-only bindings (`clawops baseline verify` includes browser-lab by default; use `--exclude-browser-lab` only when browser-lab is intentionally out of scope)
 - [ ] remote operator access uses SSH tunnel to gateway only
 
 `clawops repo doctor` remains an operator/development contract for `repo/upstream`

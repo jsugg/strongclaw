@@ -1,4 +1,4 @@
-"""Verify sidecar, browser-lab, observability, and channel platform contracts."""
+"""Verify sidecar, observability, browser-lab, and channel platform contracts."""
 
 from __future__ import annotations
 
@@ -380,57 +380,6 @@ def verify_sidecars(
     return VerificationReport(name="sidecars", checks=checks)
 
 
-def verify_browser_lab(
-    *,
-    compose_path: pathlib.Path,
-    skip_runtime: bool = False,
-) -> VerificationReport:
-    """Verify browser-lab compose contracts and runtime reachability."""
-    compose = _load_mapping_yaml(compose_path)
-    checks: list[Check] = []
-
-    proxy_checks, proxy_port = _check_required_service(
-        compose,
-        service_name="browserlab-proxy",
-        container_port=3128,
-        require_healthcheck=False,
-    )
-    playwright_checks, playwright_port = _check_required_service(
-        compose,
-        service_name="browserlab-playwright",
-        container_port=9222,
-        require_healthcheck=False,
-    )
-    checks.extend(proxy_checks)
-    checks.extend(playwright_checks)
-
-    if skip_runtime:
-        checks.append(_ok("runtime-probes", "runtime probes skipped"))
-        return VerificationReport(name="browser-lab", checks=checks)
-
-    discovered_ports = [
-        published.host_port for published in (proxy_port, playwright_port) if published is not None
-    ]
-    if proxy_port is not None:
-        checks.append(
-            _check_tcp_endpoint(
-                "browserlab-proxy-runtime",
-                proxy_port.host,
-                proxy_port.host_port,
-            )
-        )
-    if playwright_port is not None:
-        checks.append(
-            _check_tcp_endpoint(
-                "browserlab-playwright-runtime",
-                playwright_port.host,
-                playwright_port.host_port,
-            )
-        )
-    checks.append(_check_loopback_ports(discovered_ports))
-    return VerificationReport(name="browser-lab", checks=checks)
-
-
 def verify_observability(
     *,
     overlay_path: pathlib.Path,
@@ -724,6 +673,62 @@ def verify_channels(
         ]
     )
     return VerificationReport(name="channels", checks=checks)
+
+
+def verify_browser_lab(
+    *,
+    compose_path: pathlib.Path,
+    skip_runtime: bool = False,
+) -> VerificationReport:
+    """Verify browser-lab compose contracts and runtime reachability."""
+    compose = _load_mapping_yaml(compose_path)
+    checks: list[Check] = []
+
+    proxy_checks, proxy_port = _check_required_service(
+        compose,
+        service_name="browserlab-proxy",
+        container_port=3128,
+        require_healthcheck=False,
+    )
+    playwright_checks, playwright_port = _check_required_service(
+        compose,
+        service_name="browserlab-playwright",
+        container_port=9222,
+        require_healthcheck=False,
+    )
+    checks.extend(proxy_checks)
+    checks.extend(playwright_checks)
+
+    if skip_runtime:
+        checks.append(_ok("runtime-probes", "runtime probes skipped"))
+        return VerificationReport(name="browser-lab", checks=checks)
+
+    if proxy_port is not None:
+        checks.append(
+            _check_tcp_endpoint(
+                "browserlab-proxy-runtime",
+                proxy_port.host,
+                proxy_port.host_port,
+            )
+        )
+    if playwright_port is not None:
+        checks.append(
+            _check_tcp_endpoint(
+                "browserlab-cdp-runtime",
+                playwright_port.host,
+                playwright_port.host_port,
+            )
+        )
+    checks.append(
+        _check_loopback_ports(
+            [
+                published.host_port
+                for published in (proxy_port, playwright_port)
+                if published is not None
+            ]
+        )
+    )
+    return VerificationReport(name="browser-lab", checks=checks)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

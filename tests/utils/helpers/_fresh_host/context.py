@@ -91,7 +91,7 @@ def prepare_context(
     runtime_report = (
         report_dir / "runtime-install-report.json" if spec.platform == "macos" else None
     )
-    image_report = report_dir / "image-ensure-report.json" if spec.platform == "macos" else None
+    image_report = report_dir / "image-ensure-report.json" if spec.ensure_images else None
 
     context = FreshHostContext(
         version=1,

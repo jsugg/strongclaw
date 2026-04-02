@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from typing import Mapping, cast
 
 import pytest
@@ -47,7 +48,7 @@ def _rendered_openclaw_uses_hypermemory(_path: pathlib.Path) -> bool:
     return False
 
 
-def _noop_harness_smoke(_repo: pathlib.Path, _runs_dir: pathlib.Path, **_kwargs: object) -> None:
+def _noop_harness_smoke(_repo: pathlib.Path, _runs_dir: pathlib.Path) -> None:
     """Provide a typed no-op harness smoke stub for failure-path tests."""
 
 
@@ -64,7 +65,7 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     def _require_openclaw(message: str) -> None:
         del message
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path, **_kwargs: object) -> pathlib.Path:
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
         assert repo == repo_root
         return config_path
 
@@ -82,7 +83,6 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         *,
         check_only: bool,
         probe: bool,
-        **_kwargs: object,
     ) -> dict[str, object]:
         del check_only, probe
         assert repo == repo_root
@@ -109,7 +109,6 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
-        **_kwargs: object,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert repo == repo_root
@@ -117,7 +116,7 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         commands.append(["clawops", *[str(part) for part in arguments]])
         return _FakeCommandResult(ok=True)
 
-    def _run_harness_smoke(repo: pathlib.Path, runs_dir: pathlib.Path, **_kwargs: object) -> None:
+    def _run_harness_smoke(repo: pathlib.Path, runs_dir: pathlib.Path) -> None:
         assert repo == repo_root
         assert runs_dir == tmp_path / "runs"
 
@@ -178,7 +177,7 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
     def _require_openclaw(message: str) -> None:
         del message
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path, **_kwargs: object) -> pathlib.Path:
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
         assert repo == repo_root
         return config_path
 
@@ -196,7 +195,6 @@ def test_verify_baseline_surfaces_repo_test_failure_detail(
         *,
         check_only: bool,
         probe: bool,
-        **_kwargs: object,
     ) -> dict[str, object]:
         del check_only, probe
         assert repo == repo_root
@@ -257,7 +255,7 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
     def _require_openclaw(message: str) -> None:
         del message
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path, **_kwargs: object) -> pathlib.Path:
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
         assert repo == repo_root
         return config_path
 
@@ -275,7 +273,6 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
         *,
         check_only: bool,
         probe: bool,
-        **_kwargs: object,
     ) -> dict[str, object]:
         del check_only
         assert repo == repo_root
@@ -287,7 +284,6 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
-        **_kwargs: object,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert cwd == repo_root
@@ -355,6 +351,7 @@ def test_verify_baseline_defaults_to_runtime_platform_checks(
         ["clawops", "verify-platform", "sidecars"],
         ["clawops", "verify-platform", "observability"],
         ["clawops", "verify-platform", "channels"],
+        ["clawops", "verify-platform", "browser-lab"],
     ]
 
 
@@ -371,7 +368,7 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
     def _require_openclaw(message: str) -> None:
         del message
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path, **_kwargs: object) -> pathlib.Path:
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
         assert repo == repo_root
         return config_path
 
@@ -389,7 +386,6 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
         *,
         check_only: bool,
         probe: bool,
-        **_kwargs: object,
     ) -> dict[str, object]:
         del check_only
         assert repo == repo_root
@@ -401,7 +397,6 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
-        **_kwargs: object,
     ) -> _FakeCommandResult:
         del timeout_seconds
         assert cwd == repo_root
@@ -474,14 +469,14 @@ def test_verify_baseline_degraded_mode_marks_payload_and_skips_runtime_probes(
         ["clawops", "verify-platform", "sidecars", "--skip-runtime"],
         ["clawops", "verify-platform", "observability", "--skip-runtime"],
         ["clawops", "verify-platform", "channels"],
+        ["clawops", "verify-platform", "browser-lab", "--skip-runtime"],
     ]
 
 
-def test_verify_baseline_can_optionally_include_browser_lab(
+def test_verify_baseline_exclude_browser_lab_omits_browser_lab_target(
     tmp_path: pathlib.Path,
     test_context: TestContext,
 ) -> None:
-    """Baseline verify should include browser-lab checks only when requested."""
     repo_root = _init_source_checkout(tmp_path / "repo")
     config_path = tmp_path / "openclaw.json"
     config_path.write_text("{}", encoding="utf-8")
@@ -490,7 +485,7 @@ def test_verify_baseline_can_optionally_include_browser_lab(
     def _require_openclaw(message: str) -> None:
         del message
 
-    def _resolve_openclaw_config_path(repo: pathlib.Path, **_kwargs: object) -> pathlib.Path:
+    def _resolve_openclaw_config_path(repo: pathlib.Path) -> pathlib.Path:
         assert repo == repo_root
         return config_path
 
@@ -508,11 +503,10 @@ def test_verify_baseline_can_optionally_include_browser_lab(
         *,
         check_only: bool,
         probe: bool,
-        **_kwargs: object,
     ) -> dict[str, object]:
-        del check_only
+        del check_only, probe
         assert repo == repo_root
-        return {"ok": True, "probe": probe}
+        return {"ok": True}
 
     def _run_managed_clawops_command(
         repo: pathlib.Path,
@@ -520,15 +514,11 @@ def test_verify_baseline_can_optionally_include_browser_lab(
         *,
         cwd: pathlib.Path | None = None,
         timeout_seconds: int = 30,
-        **_kwargs: object,
     ) -> _FakeCommandResult:
         del timeout_seconds
-        assert cwd == repo_root
         assert repo == repo_root
-        command = ["clawops", *[str(part) for part in arguments]]
-        commands.append(command)
-        if "status" in arguments:
-            return _FakeCommandResult(ok=True, stdout="{}")
+        assert cwd == repo_root
+        commands.append(["clawops", *[str(part) for part in arguments]])
         return _FakeCommandResult(ok=True)
 
     def _run_command(
@@ -538,9 +528,7 @@ def test_verify_baseline_can_optionally_include_browser_lab(
         env: Mapping[str, str] | None = None,
         timeout_seconds: int = 30,
     ) -> _FakeCommandResult:
-        del env, timeout_seconds
-        assert cwd == repo_root
-        commands.append([str(part) for part in command])
+        del command, cwd, env, timeout_seconds
         return _FakeCommandResult(ok=True)
 
     test_context.patch.patch_object(strongclaw_baseline, "require_openclaw", new=_require_openclaw)
@@ -577,23 +565,68 @@ def test_verify_baseline_can_optionally_include_browser_lab(
     payload = strongclaw_baseline.verify_baseline(
         repo_root,
         runs_dir=tmp_path / "runs",
-        include_browser_lab=True,
+        exclude_browser_lab=True,
     )
 
     platform_commands = [
         command for command in commands if command[:2] == ["clawops", "verify-platform"]
     ]
-
-    assert payload["includeBrowserLab"] is True
-    assert payload["verificationTargets"] == [
-        "sidecars",
-        "observability",
-        "channels",
-        "browser-lab",
-    ]
+    assert payload["includeBrowserLab"] is False
+    assert payload["excludeBrowserLab"] is True
     assert platform_commands == [
         ["clawops", "verify-platform", "sidecars"],
         ["clawops", "verify-platform", "observability"],
         ["clawops", "verify-platform", "channels"],
-        ["clawops", "verify-platform", "browser-lab"],
     ]
+
+
+def test_main_honors_env_mode_and_exclude_browser_lab(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo_root = _init_source_checkout(tmp_path / "repo")
+    requested_modes: list[str] = []
+    exclude_values: list[bool] = []
+
+    @contextmanager
+    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+        requested_modes.append(env_mode)
+        yield
+
+    def _verify_baseline(
+        requested_repo_root: pathlib.Path,
+        *,
+        runs_dir: pathlib.Path,
+        degraded: bool = False,
+        exclude_browser_lab: bool = False,
+    ) -> dict[str, object]:
+        del runs_dir, degraded
+        assert requested_repo_root == repo_root
+        exclude_values.append(exclude_browser_lab)
+        return {"ok": True}
+
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "use_varlock_env_mode",
+        new=_use_varlock_env_mode,
+    )
+    test_context.patch.patch_object(
+        strongclaw_baseline,
+        "verify_baseline",
+        new=_verify_baseline,
+    )
+
+    exit_code = strongclaw_baseline.main(
+        [
+            "--source-root",
+            str(repo_root),
+            "verify",
+            "--env-mode",
+            "legacy",
+            "--exclude-browser-lab",
+        ]
+    )
+
+    assert exit_code == 0
+    assert requested_modes == ["legacy"]
+    assert exclude_values == [True]

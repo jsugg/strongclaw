@@ -123,6 +123,15 @@ def _run_macos_teardown(
     notes: list[str] = []
     active_labels: set[str] = set()
     last_command: list[str] | None = None
+    venv_entrypoint = repo_root / ".venv" / "bin" / "python"
+    skip_venv_teardown = include_repo_local_state and not venv_entrypoint.is_file()
+    if skip_venv_teardown:
+        note = (
+            "Skipping clawops teardown commands: managed venv entrypoint is missing "
+            f"({venv_entrypoint})."
+        )
+        notes.append(note)
+        log(note)
 
     for label in _managed_launchd_labels(context):
         if not _launchd_service_is_loaded(cwd=repo_root, env=env, domain=domain, label=label):
@@ -138,11 +147,15 @@ def _run_macos_teardown(
     for component in _managed_host_components(context):
         if _launchd_label_for_component(component) not in active_labels:
             continue
+        if skip_venv_teardown:
+            continue
         command = venv_clawops_command(context, "ops", "--asset-root", ".", component, "down")
         _run_actionable_command(command, cwd=repo_root, env=env)
         last_command = command
 
     if include_repo_local_state:
+        if skip_venv_teardown:
+            return _MacosCleanupResult(command=last_command, notes=notes)
         for component in _repo_local_components(context):
             command = venv_clawops_command(
                 context,

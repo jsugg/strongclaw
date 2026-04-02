@@ -127,7 +127,7 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
             "exercise-browser-lab",
         ),
         activate_services=False,
-        ensure_images=False,
+        ensure_images=True,
         normalize_machine_name=False,
         verify_launchd=False,
         verify_rendered_files=True,
