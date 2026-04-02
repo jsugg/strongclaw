@@ -20,6 +20,25 @@ Workflow policy:
 - GitHub Actions workflows stay thin. Multi-step operational logic lives in
 semantic helper entrypoints under `tests/scripts/`, with unit coverage in `tests/suites/unit/ci/` and repo contract coverage under `tests/suites/contracts/repo/`.
 
+## Pull-request gate orchestration
+
+Pull requests now flow through `.github/workflows/ci-gate.yml`, which is the
+single required branch-protection check for `main` via the stable
+`CI / Verdict` context.
+
+- The gate always runs on `pull_request` and classifies file changes with
+`dorny/paths-filter` using `.github/ci/ci-gate-filters.yml`.
+- Docs-only pull requests run only the lightweight docs parity lane:
+`uv run pytest -q tests/suites/contracts/repo/test_docs_parity.py`.
+- Heavy CI lanes are orchestrated as reusable workflow calls from the gate:
+`harness.yml`, `compatibility-matrix.yml`, `memory-plugin-verification.yml`,
+`fresh-host-acceptance.yml`, and `security.yml`.
+- Stage ordering keeps fast signals first (`harness`, `compatibility_matrix`,
+`memory_plugin`) and gates long lanes (`fresh_host`, `security`) on stage-one
+success.
+- The final `Verdict` job always runs, summarizes lane outcomes, and fails when
+any required lane does not complete successfully.
+
 ## Fresh-host acceptance
 
 `.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap, setup, service activation, and repo-local sidecar/browser-lab flows on hosted Linux and macOS runners.

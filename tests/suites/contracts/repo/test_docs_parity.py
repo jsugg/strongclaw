@@ -197,6 +197,8 @@ def test_operator_docs_surface_repo_memory_and_skill_commands() -> None:
     assert "clawops skills promote" in usage
     assert "clawops repo doctor" in repo_doc
     assert "clawops worktree list" in repo_doc
+    assert "ci-gate.yml" in ci_doc
+    assert "CI / Verdict" in ci_doc
     assert "dependency-submission.yml" in ci_doc
     assert "memory-plugin-verification.yml" in ci_doc
 

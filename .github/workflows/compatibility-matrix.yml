@@ -1,20 +1,7 @@
 name: Compatibility Matrix
 
 on:
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.txt"
-      - "**/*.rst"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
-      - "**/*.svg"
-      - "**/*.webp"
-      - "**/*.ico"
-      - "**/*.pdf"
-      - "LICENSE*"
+  workflow_call:
   push:
     branches: [main]
     paths-ignore:
