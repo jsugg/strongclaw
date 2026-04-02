@@ -183,6 +183,7 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert "Restore hosted macOS Homebrew download cache" in text
     assert "Restore hosted macOS runtime download cache" in text
     assert "Restore hosted macOS Docker image cache" in text
+    assert "Re-check hosted macOS Docker image cache after runtime install" in text
     assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
     assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text
