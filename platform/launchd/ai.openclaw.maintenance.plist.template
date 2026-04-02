@@ -6,13 +6,9 @@
     <string>ai.openclaw.maintenance</string>
     <key>ProgramArguments</key>
     <array>
-      <string>__PYTHON_EXECUTABLE__</string>
-      <string>-m</string>
-      <string>clawops</string>
-      <string>recovery</string>
-      <string>--home-dir</string>
-      <string>__HOME_DIR__</string>
-      <string>prune-retention</string>
+      <string>/bin/sh</string>
+      <string>-lc</string>
+      <string>set -euo pipefail; "__PYTHON_EXECUTABLE__" -m clawops recovery --home-dir "__HOME_DIR__" backup-create; "__PYTHON_EXECUTABLE__" -m clawops recovery --home-dir "__HOME_DIR__" backup-verify latest; "__PYTHON_EXECUTABLE__" -m clawops recovery --home-dir "__HOME_DIR__" prune-retention</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO_ROOT__</string>

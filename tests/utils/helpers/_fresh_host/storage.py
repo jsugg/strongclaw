@@ -147,6 +147,7 @@ def load_context(path: Path) -> FreshHostContext:
             path="context.image_report_path",
         ),
         diagnostics_dir=as_string(payload.get("diagnostics_dir"), path="context.diagnostics_dir"),
+        profile=as_string(payload.get("profile"), path="context.profile"),
         runtime_provider=as_optional_string(
             payload.get("runtime_provider"),
             path="context.runtime_provider",

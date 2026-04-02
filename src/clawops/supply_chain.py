@@ -37,8 +37,17 @@ QUALITY_GATE_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("uv", "run", "pyright"),
     ("uv", "run", "mypy"),
     (
+        "python3",
+        "./tests/scripts/launch_readiness.py",
+        "generate-audit-packet",
+        "--output-dir",
+        ".tmp/launch-readiness/audit-packet",
+    ),
+    (
         "bash",
         "-lc",
+        "export STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE=live; "
+        "export STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT=.tmp/launch-readiness/audit-packet; "
         "ulimit -n 4096 && uv run pytest -q --junitxml=pytest.xml "
         "--cov=src/clawops --cov-report=xml --cov-report=term-missing",
     ),

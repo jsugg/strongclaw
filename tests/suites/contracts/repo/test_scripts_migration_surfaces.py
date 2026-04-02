@@ -84,8 +84,9 @@ def test_service_templates_call_repo_venv_python() -> None:
     assert "Unit=openclaw-maintenance.service" in maintenance_timer
     assert "__PYTHON_EXECUTABLE__" in launchd_gateway
     assert "__PYTHON_EXECUTABLE__" in launchd_maintenance
-    assert "<string>recovery</string>" in launchd_maintenance
-    assert "<string>prune-retention</string>" in launchd_maintenance
+    assert "backup-create" in launchd_maintenance
+    assert "backup-verify latest" in launchd_maintenance
+    assert "prune-retention" in launchd_maintenance
     assert (
         "Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         in gateway

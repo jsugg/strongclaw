@@ -206,7 +206,7 @@ def macos_setup(context: FreshHostContext) -> list[str]:
         "--home-dir",
         context.app_home,
         "--profile",
-        "openclaw-default",
+        context.profile,
         "--non-interactive",
         "--no-verify",
     )
@@ -360,6 +360,7 @@ def exercise_macos_recovery_smoke(context: FreshHostContext) -> list[str]:
         "run-recovery-smoke",
         "--tmp-root",
         context.tmp_root,
+        "--require-openclaw-cli",
     ]
     run_command(command, cwd=repo_root, env=phase_env(context))
     return command

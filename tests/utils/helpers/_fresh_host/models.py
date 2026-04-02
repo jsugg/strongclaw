@@ -76,6 +76,7 @@ class FreshHostContext:
     runtime_report_path: str | None
     image_report_path: str | None
     diagnostics_dir: str
+    profile: str
     runtime_provider: str | None
     docker_pull_parallelism: int
     docker_pull_max_attempts: int

@@ -43,7 +43,7 @@ def phase_env(context: FreshHostContext) -> dict[str, str]:
     env.update(
         {
             "HOME": context.app_home,
-            "OPENCLAW_CONFIG_PROFILE": "openclaw-default",
+            "OPENCLAW_CONFIG_PROFILE": context.profile,
             "OPENCLAW_MODEL_SETUP_MODE": "skip",
             "PYTHONPATH": "src",
             "XDG_CONFIG_HOME": f"{context.app_home}/.config",

@@ -14,11 +14,29 @@ from tests.utils.helpers.repo import REPO_ROOT
 _DEFAULT_ARTIFACT_ROOT: Final[Path] = (
     REPO_ROOT / "tests" / "fixtures" / "launch_readiness" / "audit_packet"
 )
-_ARTIFACT_ROOT: Final[Path] = (
-    Path(os.environ.get("STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT", str(_DEFAULT_ARTIFACT_ROOT)))
-    .expanduser()
-    .resolve()
+_ARTIFACT_MODE: Final[str] = (
+    os.environ.get("STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE", "fixture").strip().lower()
 )
+if _ARTIFACT_MODE not in {"fixture", "live"}:
+    raise AssertionError("STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE must be one of: fixture, live")
+
+
+def _resolve_artifact_root() -> Path:
+    """Resolve the artifact root for fixture or live packet mode."""
+    if _ARTIFACT_MODE == "live":
+        artifact_root_override = os.environ.get(
+            "STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT",
+            "",
+        ).strip()
+        if not artifact_root_override:
+            raise AssertionError(
+                "STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT is required when mode=live"
+            )
+        return Path(artifact_root_override).expanduser().resolve()
+    return _DEFAULT_ARTIFACT_ROOT.expanduser().resolve()
+
+
+_ARTIFACT_ROOT: Final[Path] = _resolve_artifact_root()
 _REQUIRED_ARTIFACTS: Final[tuple[str, ...]] = (
     "launch-readiness-surface-manifest.yaml",
     "launch-readiness-workflow-matrix.yaml",
@@ -307,13 +325,14 @@ def test_report_and_decision_packet_include_release_decision_signals() -> None:
     )
 
     assert "Recommendation:" in report_text
-    assert "GO for first launch" in report_text
     assert "Blockers" in report_text
     assert "Residual Risks" in report_text
     assert "Assumptions" in report_text
     assert "Closure Path" in report_text
 
     assert "Decision:" in decision_text
-    assert "Decision: **GO**" in decision_text
     assert "Blockers" in decision_text
     assert "Required Next Actions" in decision_text
+    if _ARTIFACT_MODE == "fixture":
+        assert "GO for first launch" in report_text
+        assert "Decision: **GO**" in decision_text

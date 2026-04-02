@@ -36,6 +36,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("linux", "macos-sidecars", "macos-browser-lab"),
     )
     prepare_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    prepare_parser.add_argument(
+        "--profile",
+        default="openclaw-default",
+        choices=("openclaw-default", "hypermemory"),
+    )
     prepare_parser.add_argument("--runner-temp", type=Path, required=True)
     prepare_parser.add_argument("--workspace", type=Path, default=REPO_ROOT)
     prepare_parser.add_argument("--github-env-file", type=Path)
@@ -73,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "prepare-context":
             prepare_context(
                 scenario_id=str(args.scenario),
+                profile=str(args.profile),
                 repo_root=Path(args.repo_root).expanduser().resolve(),
                 runner_temp=Path(args.runner_temp).expanduser().resolve(),
                 workspace=Path(args.workspace).expanduser().resolve(),

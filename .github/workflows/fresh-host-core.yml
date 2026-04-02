@@ -49,9 +49,15 @@ env:
 
 jobs:
   linux-fresh-host:
-    name: Linux Fresh Host
+    name: Linux Fresh Host (${{ matrix.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - openclaw-default
+          - hypermemory
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -73,7 +79,7 @@ jobs:
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare Linux fresh-host context
-        run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --profile "${{ matrix.profile }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
       - name: Preview Linux fresh-host context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Ensure Linux fresh-host Docker images
@@ -93,7 +99,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: linux-fresh-host-artifacts
+          name: linux-fresh-host-artifacts-${{ matrix.profile }}
           path: |
             ${{ runner.temp }}/strongclaw-linux-host/home/.openclaw
             ${{ runner.temp }}/strongclaw-linux-host/home/.config/systemd/user
@@ -109,12 +115,24 @@ jobs:
       matrix:
         include:
           - scenario_id: macos-sidecars
-            job_name: macOS Fresh Host Sidecars
-            artifact_name: macos-sidecars-fresh-host-artifacts
+            profile: openclaw-default
+            job_name: macOS Fresh Host Sidecars (openclaw-default)
+            artifact_name: macos-sidecars-openclaw-default-fresh-host-artifacts
+            report_dir_name: macos-sidecars
+          - scenario_id: macos-sidecars
+            profile: hypermemory
+            job_name: macOS Fresh Host Sidecars (hypermemory)
+            artifact_name: macos-sidecars-hypermemory-fresh-host-artifacts
             report_dir_name: macos-sidecars
           - scenario_id: macos-browser-lab
-            job_name: macOS Fresh Host Browser Lab
-            artifact_name: macos-browser-lab-fresh-host-artifacts
+            profile: openclaw-default
+            job_name: macOS Fresh Host Browser Lab (openclaw-default)
+            artifact_name: macos-browser-lab-openclaw-default-fresh-host-artifacts
+            report_dir_name: macos-browser-lab
+          - scenario_id: macos-browser-lab
+            profile: hypermemory
+            job_name: macOS Fresh Host Browser Lab (hypermemory)
+            artifact_name: macos-browser-lab-hypermemory-fresh-host-artifacts
             report_dir_name: macos-browser-lab
     env:
       FRESH_HOST_RUNTIME_PROVIDER: ${{ inputs.macos_runtime_provider }}
@@ -169,7 +187,7 @@ jobs:
             fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-
             fresh-host-macos-images-${{ runner.arch }}-
       - name: Prepare macOS fresh-host context
-        run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario_id }}" --profile "${{ matrix.profile }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
       - name: Preview macOS fresh-host context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Install hosted macOS Docker runtime

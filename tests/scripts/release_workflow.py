@@ -17,7 +17,9 @@ from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E4
 from tests.utils.helpers._ci_workflows.release import (  # noqa: E402
     clean_artifact_directories,
     publish_github_release,
+    run_release_runtime_readiness,
     verify_release_artifacts,
+    verify_tag_version_parity,
 )
 
 
@@ -34,6 +36,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run release artifact verification and install smoke tests.",
     )
     verify_parser.add_argument("--dist-dir", type=Path, required=True)
+
+    tag_parser = subparsers.add_parser(
+        "verify-tag-version",
+        help="Assert that the release tag matches package versions.",
+    )
+    tag_parser.add_argument("--tag", required=True)
+    tag_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+
+    readiness_parser = subparsers.add_parser(
+        "runtime-readiness",
+        help="Run release runtime-readiness command checks.",
+    )
+    readiness_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
 
     publish_parser = subparsers.add_parser(
         "publish-github-release",
@@ -55,6 +70,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "verify-artifacts":
             verify_release_artifacts(Path(args.dist_dir).expanduser().resolve())
+            return 0
+        if args.command == "verify-tag-version":
+            verify_tag_version_parity(
+                tag=str(args.tag),
+                repo_root=Path(args.repo_root).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "runtime-readiness":
+            run_release_runtime_readiness(repo_root=Path(args.repo_root).expanduser().resolve())
             return 0
         if args.command == "publish-github-release":
             publish_github_release(

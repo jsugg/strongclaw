@@ -59,7 +59,24 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "clawops.hypermemory" = ["resources/*.yaml", "resources/*.sql"]
-"clawops.assets" = ["platform/**/*", "platform/**/.*"]
+"clawops.assets" = [
+  "platform/configs/**/*",
+  "platform/configs/**/.*",
+  "platform/compose/**/*.yaml",
+  "platform/compose/**/*.yml",
+  "platform/docs/**/*",
+  "platform/examples/**/*",
+  "platform/launchd/**/*",
+  "platform/plugins/**/*",
+  "platform/skills/**/*",
+  "platform/systemd/**/*",
+  "platform/workers/**/*",
+  "platform/workspace/**/*",
+  "platform/**/.gitkeep",
+]
+
+[tool.setuptools.exclude-package-data]
+"clawops.assets" = ["platform/compose/state/**"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

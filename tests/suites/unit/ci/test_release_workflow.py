@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+import tarfile
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import ci_workflows
@@ -37,6 +43,7 @@ def test_verify_release_artifacts_runs_twine_and_smoke_tests(
     wheel_path.write_text("wheel", encoding="utf-8")
     sdist_path.write_text("sdist", encoding="utf-8")
     seen_commands: list[list[str]] = []
+    smoke_targets: list[Path] = []
 
     def fake_run_checked(
         command: list[str],
@@ -50,17 +57,34 @@ def test_verify_release_artifacts_runs_twine_and_smoke_tests(
         seen_commands.append(command)
         return None
 
+    def fake_smoke_test(
+        venv_dir: Path,
+        artifact_path: Path,
+        *,
+        smoke_workspace_root: Path,
+    ) -> None:
+        del venv_dir, smoke_workspace_root
+        smoke_targets.append(artifact_path)
+
+    def fake_policy_check(artifact_path: Path) -> None:
+        del artifact_path
+
     test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(
+        release_helpers,
+        "_install_and_smoke_test",
+        new=fake_smoke_test,
+    )
+    test_context.patch.patch_object(
+        release_helpers,
+        "_enforce_artifact_content_policy",
+        new=fake_policy_check,
+    )
 
     ci_workflows.verify_release_artifacts(dist_dir)
 
     assert seen_commands[0][:3] == ["uv", "run", "twine"]
-    assert any(command[-1] == str(wheel_path) for command in seen_commands if "install" in command)
-    assert any(command[-1] == str(sdist_path) for command in seen_commands if "install" in command)
-    assert any(
-        command[-1].startswith("import importlib.metadata as metadata;")
-        for command in seen_commands
-    )
+    assert smoke_targets == [wheel_path, sdist_path]
 
 
 def test_publish_github_release_creates_when_missing(
@@ -121,3 +145,141 @@ def test_release_workflow_main_dispatches_verify_artifacts(
 
     assert exit_code == 0
     assert seen_calls == [(tmp_path / "dist").resolve()]
+
+
+def test_release_workflow_main_dispatches_verify_tag_version(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch tag/version parity verification."""
+    from tests.scripts import release_workflow as release_workflow_script
+
+    seen_calls: list[tuple[str, Path]] = []
+
+    def fake_verify_tag_version_parity(*, tag: str, repo_root: Path) -> None:
+        seen_calls.append((tag, repo_root))
+
+    test_context.patch.patch_object(
+        release_workflow_script,
+        "verify_tag_version_parity",
+        new=fake_verify_tag_version_parity,
+    )
+
+    exit_code = release_workflow_script.main(
+        [
+            "verify-tag-version",
+            "--tag",
+            "v0.1.0",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [("v0.1.0", tmp_path.resolve())]
+
+
+def test_release_workflow_main_dispatches_runtime_readiness(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch runtime-readiness checks."""
+    from tests.scripts import release_workflow as release_workflow_script
+
+    seen_calls: list[Path] = []
+
+    def fake_run_release_runtime_readiness(*, repo_root: Path) -> None:
+        seen_calls.append(repo_root)
+
+    test_context.patch.patch_object(
+        release_workflow_script,
+        "run_release_runtime_readiness",
+        new=fake_run_release_runtime_readiness,
+    )
+
+    exit_code = release_workflow_script.main(
+        [
+            "runtime-readiness",
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [tmp_path.resolve()]
+
+
+def test_verify_tag_version_parity_rejects_mismatched_tag(tmp_path: Path) -> None:
+    """Parity checks should fail when the release tag mismatches package metadata."""
+    (tmp_path / "src" / "clawops").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "clawops"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "clawops" / "__init__.py").write_text(
+        '__version__ = "0.1.0"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ci_workflows.CiWorkflowError, match="release tag/version mismatch"):
+        ci_workflows.verify_tag_version_parity(tag="v0.1.1", repo_root=tmp_path)
+
+
+def test_run_release_runtime_readiness_executes_expected_commands(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Runtime readiness should execute the checklist commands in sequence."""
+    seen_commands: list[list[str]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        capture_output: bool = False,
+    ) -> Any:
+        del env, timeout_seconds, capture_output
+        if command[:3] != [sys.executable, "-m", "openclaw"]:
+            assert cwd == tmp_path
+        seen_commands.append(command)
+        if command[:3] == [sys.executable, "-m", "openclaw"]:
+            return SimpleNamespace(stdout="", stderr="")
+        return None
+
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(release_helpers.shutil, "which", return_value=None)
+
+    ci_workflows.run_release_runtime_readiness(repo_root=tmp_path)
+
+    assert seen_commands[0][:4] == [sys.executable, "-m", "clawops", "doctor"]
+    assert any(command[:3] == [sys.executable, "-m", "openclaw"] for command in seen_commands)
+
+
+def test_release_policy_rejects_forbidden_path_in_wheel(tmp_path: Path) -> None:
+    """Artifact policy should fail when a forbidden runtime-state path ships in a wheel."""
+    wheel_path = tmp_path / "clawops-0.1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel_path, mode="w") as archive:
+        archive.writestr(
+            "clawops/assets/platform/compose/state/neo4j/data.db",
+            "bad",
+        )
+
+    with pytest.raises(ci_workflows.CiWorkflowError, match="contains forbidden path"):
+        release_helpers.enforce_artifact_content_policy(wheel_path)
+
+
+def test_release_policy_rejects_forbidden_path_in_sdist(tmp_path: Path) -> None:
+    """Artifact policy should fail when a forbidden runtime-state path ships in an sdist."""
+    sdist_path = tmp_path / "clawops-0.1.0.tar.gz"
+    payload_path = tmp_path / "state.db"
+    payload_path.write_text("bad", encoding="utf-8")
+    with tarfile.open(sdist_path, mode="w:gz") as archive:
+        archive.add(
+            payload_path,
+            arcname="clawops-0.1.0/clawops/assets/platform/compose/state/state.db",
+        )
+
+    with pytest.raises(ci_workflows.CiWorkflowError, match="contains forbidden path"):
+        release_helpers.enforce_artifact_content_policy(sdist_path)

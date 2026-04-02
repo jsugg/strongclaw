@@ -24,7 +24,7 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 | ACPX | `0.3.0` | Setup installs this exact CLI version. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
-| Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; compatibility pins also exist for macOS `arm64`, macOS `x86_64`, and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
+| Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; this is the current launch-supported local rerank path. Compatibility pins also exist for macOS `arm64`, macOS `x86_64`, and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI. | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
 
 CI enforces this support statement through:
 
@@ -35,9 +35,9 @@ CI enforces this support statement through:
 
 For low-end or older hosts, this split matters:
 
-- x86_64 Linux hosts stay on the continuously validated local rerank path
-- Apple Silicon Macs, Intel Macs, and Linux arm64 hosts can use the documented compatibility pins, but those combinations are best-effort until they are added to CI
-- Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64 should be treated as operator-validated, best-effort local rerank surfaces
+- x86_64 Linux hosts stay on the continuously validated local rerank path and represent the launch-supported local rerank baseline.
+- Apple Silicon Macs, Intel Macs, and Linux arm64 hosts can use the documented compatibility pins, but those combinations are best-effort until they are added to CI.
+- Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64 should be treated as operator-validated, best-effort local rerank surfaces.
 - 32-bit Raspberry Pi Linux hosts skip the local rerank dependency and should use `compatible-http` if reranking is required
 
 ## Runtime data locations
