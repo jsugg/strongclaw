@@ -1,0 +1,352 @@
+version: 1
+generated_at: 2026-04-02
+findings:
+  - finding_id: LR-001
+    surface_id: architecture_baseline
+    status: solid_covered
+    owner_lane: baseline_architecture
+    launch_blocker_decision: non_blocker
+    dependency_order: 1
+    severity: medium
+    citations:
+      - README.md:3-27
+      - platform/docs/ARCHITECTURE.md:3-53
+      - .github/workflows/ci-gate.yml:15-148
+    evidence_summary: Baseline architecture and release verification lanes are explicitly documented and present in repository workflows.
+
+  - finding_id: LR-002
+    surface_id: policy_engine_wrappers
+    status: solid_covered
+    owner_lane: policy_security
+    launch_blocker_decision: non_blocker
+    dependency_order: 2
+    severity: medium
+    citations:
+      - platform/docs/POLICY_ENGINE_AND_WRAPPERS.md:21-89
+      - tests/suites/unit/clawops/test_approval_dispatch.py:38-55
+      - tests/suites/unit/clawops/wrappers/test_wrapper_execution.py:21-62
+    evidence_summary: Policy wrappers and approval dispatch behavior have repo-documented contracts and unit coverage.
+
+  - finding_id: LR-003
+    surface_id: secrets_env_contract
+    status: solid_covered
+    owner_lane: policy_security
+    launch_blocker_decision: non_blocker
+    dependency_order: 2
+    severity: medium
+    citations:
+      - platform/docs/SECRETS_AND_ENV.md:1-50
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:7-13
+      - tests/suites/integration/clawops/test_platform_verify.py:95-134
+    evidence_summary: Secret and environment contract is documented and checked by integration verification paths.
+
+  - finding_id: LR-004
+    surface_id: security_model_trust_zones
+    status: high_risk_unproven
+    owner_lane: policy_security
+    launch_blocker_decision: blocker
+    dependency_order: 1
+    severity: high
+    citations:
+      - platform/docs/SECURITY_MODEL.md:19-27
+      - .github/workflows/ci-gate.yml:65-148
+      - .github/workflows/security.yml:31-109
+    evidence_summary: Independent-review enforcement for security-critical classes is documented but not directly provable from repo-contained gate logic.
+
+  - finding_id: LR-005
+    surface_id: host_platforms
+    status: high_risk_unproven
+    owner_lane: host_and_degradation
+    launch_blocker_decision: blocker
+    dependency_order: 2
+    severity: high
+    citations:
+      - platform/docs/HOST_PLATFORMS.md:27-41
+      - .github/workflows/compatibility-matrix.yml:29-71
+      - .github/workflows/fresh-host-core.yml:103-118
+    evidence_summary: Some publicly claimed host combinations remain best-effort and are not fully represented in CI evidence.
+
+  - finding_id: LR-006
+    surface_id: degradation_semantics
+    status: solid_covered
+    owner_lane: host_and_degradation
+    launch_blocker_decision: non_blocker
+    dependency_order: 3
+    severity: medium
+    citations:
+      - platform/docs/DEGRADATION.md:1-38
+      - tests/suites/integration/clawops/test_platform_verify.py:136-193
+    evidence_summary: Degradation modes and fallback semantics are explicitly documented and exercised by integration checks.
+
+  - finding_id: LR-007
+    surface_id: acp_workers
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 4
+    severity: medium
+    citations:
+      - platform/docs/ACP_WORKERS.md:1-26
+      - tests/suites/integration/clawops/hypermemory/test_shipped_sqlite_profile.py:28-34
+    evidence_summary: ACP workers surface is documented and covered by repository docs/contracts checks.
+
+  - finding_id: LR-008
+    surface_id: browser_lab
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 4
+    severity: medium
+    citations:
+      - platform/docs/BROWSER_LAB.md:5-37
+      - tests/suites/unit/clawops/test_platform_verify_browser_lab.py:42-63
+      - .github/workflows/fresh-host-core.yml:171-192
+    evidence_summary: Browser-lab guardrails and fresh-host scenarios provide concrete launch-path evidence.
+
+  - finding_id: LR-009
+    surface_id: channels
+    status: high_risk_unproven
+    owner_lane: optional_surfaces
+    launch_blocker_decision: blocker
+    dependency_order: 3
+    severity: high
+    citations:
+      - platform/docs/CHANNELS.md:3-21
+      - tests/suites/integration/clawops/test_platform_verify.py:274-283
+      - platform/docs/CI_AND_SECURITY.md:23-40
+    evidence_summary: Channels are exposed but lack dedicated launch-grade runtime acceptance evidence in current CI lanes.
+
+  - finding_id: LR-010
+    surface_id: context_service
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 5
+    severity: medium
+    citations:
+      - platform/docs/CONTEXT_SERVICE.md:137-153
+      - tests/suites/contracts/clawops/context/test_codebase_provider_contract.py:14-25
+      - .github/workflows/nightly.yml:41-44
+    evidence_summary: Context service configuration and behavior are exercised through contracts and recurring workflows.
+
+  - finding_id: LR-011
+    surface_id: hypermemory
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 5
+    severity: medium
+    citations:
+      - platform/docs/HYPERMEMORY.md:65-123
+      - .github/workflows/memory-plugin-verification.yml:55-96
+      - tests/suites/integration/clawops/hypermemory/test_qdrant_integration.py:117-208
+    evidence_summary: Hypermemory behavior has strong documentation plus CI and integration evidence.
+
+  - finding_id: LR-012
+    surface_id: observability
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 6
+    severity: low
+    citations:
+      - platform/docs/OBSERVABILITY.md:21-60
+      - tests/suites/integration/clawops/test_observability.py:27-94
+      - tests/suites/integration/clawops/hypermemory/test_hypermemory_observability.py:98-181
+    evidence_summary: Observability and telemetry signals are specified and integration-tested.
+
+  - finding_id: LR-013
+    surface_id: backup_recovery
+    status: high_risk_unproven
+    owner_lane: optional_surfaces
+    launch_blocker_decision: blocker
+    dependency_order: 4
+    severity: high
+    citations:
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:14-20
+      - platform/docs/BACKUP_AND_RECOVERY.md:10-65
+      - tests/suites/unit/clawops/test_strongclaw_recovery.py:42-154
+    evidence_summary: Backup and restore are required for readiness, but evidence remains helper-level and not release-lane execution proof.
+
+  - finding_id: LR-014
+    surface_id: plugin_inventory
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 5
+    severity: low
+    citations:
+      - platform/docs/PLUGIN_INVENTORY.md:5-22
+      - .github/workflows/memory-plugin-verification.yml:55-96
+    evidence_summary: Plugin inventory is documented with active verification workflow coverage.
+
+  - finding_id: LR-015
+    surface_id: devflow
+    status: solid_covered
+    owner_lane: optional_surfaces
+    launch_blocker_decision: non_blocker
+    dependency_order: 6
+    severity: medium
+    citations:
+      - platform/docs/DEVFLOW.md:3-15
+      - .github/workflows/devflow-contract.yml:27-42
+      - tests/suites/integration/clawops/test_devflow_plan_run.py:21-120
+    evidence_summary: Devflow is an exposed surface with dedicated workflow and integration evidence.
+
+  - finding_id: LR-016
+    surface_id: production_readiness_checklist
+    status: solid_covered
+    owner_lane: baseline_architecture
+    launch_blocker_decision: non_blocker
+    dependency_order: 7
+    severity: medium
+    citations:
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:1-24
+      - tests/suites/contracts/repo/test_docs_parity.py:234-249
+    evidence_summary: Launch checklist is present and represented in contracts as a governed launch artifact.
+
+  - finding_id: LR-017
+    surface_id: workflow_ci_gate
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 8
+    severity: medium
+    citations:
+      - .github/workflows/ci-gate.yml:15-148
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:114-199
+    evidence_summary: CI gate orchestrates heavy reusable lanes and provides stable verdict behavior.
+
+  - finding_id: LR-018
+    surface_id: workflow_compatibility_matrix
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 9
+    severity: medium
+    citations:
+      - .github/workflows/compatibility-matrix.yml:29-71
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:164-177
+    evidence_summary: Compatibility matrix workflow is present and bound into CI gate orchestration.
+
+  - finding_id: LR-019
+    surface_id: workflow_harness
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 9
+    severity: medium
+    citations:
+      - .github/workflows/harness.yml:13-34
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:164-177
+    evidence_summary: Harness workflow remains a reusable verification lane invoked by CI gate.
+
+  - finding_id: LR-020
+    surface_id: workflow_memory_plugin_verification
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 10
+    severity: medium
+    citations:
+      - .github/workflows/memory-plugin-verification.yml:28-96
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:164-177
+    evidence_summary: Memory plugin verification workflow is wired to gate and validates plugin launch surfaces.
+
+  - finding_id: LR-021
+    surface_id: workflow_fresh_host_acceptance
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 10
+    severity: medium
+    citations:
+      - .github/workflows/fresh-host-acceptance.yml:1-101
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:105-113
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:204-225
+    evidence_summary: Fresh-host acceptance workflow remains reusable and parameterized for launch bring-up checks.
+
+  - finding_id: LR-022
+    surface_id: workflow_fresh_host_core
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 11
+    severity: medium
+    citations:
+      - .github/workflows/fresh-host-core.yml:50-221
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:180-203
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:228-257
+    evidence_summary: Fresh-host core workflow encapsulates runtime setup, scenario execution, diagnostics, and cleanup.
+
+  - finding_id: LR-023
+    surface_id: workflow_security
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 11
+    severity: medium
+    citations:
+      - .github/workflows/security.yml:31-109
+      - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:164-177
+    evidence_summary: Security workflow is part of CI gate and enforces static and supply-chain checks.
+
+  - finding_id: LR-024
+    surface_id: workflow_nightly
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 12
+    severity: low
+    citations:
+      - .github/workflows/nightly.yml:15-68
+      - platform/docs/CI_AND_SECURITY.md:9-16
+    evidence_summary: Nightly workflow provides recurring regression evidence across key readiness areas.
+
+  - finding_id: LR-025
+    surface_id: workflow_release
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 12
+    severity: medium
+    citations:
+      - .github/workflows/release.yml:17-96
+      - platform/docs/CI_AND_SECURITY.md:115-130
+    evidence_summary: Release workflow provides build and provenance controls required for shipping.
+
+  - finding_id: LR-026
+    surface_id: workflow_dependency_submission
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 13
+    severity: low
+    citations:
+      - .github/workflows/dependency-submission.yml:28-45
+      - platform/docs/CI_AND_SECURITY.md:95-100
+    evidence_summary: Dependency submission lane contributes provenance visibility for launch decisions.
+
+  - finding_id: LR-027
+    surface_id: workflow_upstream_merge_validation
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 13
+    severity: low
+    citations:
+      - .github/workflows/upstream-merge-validation.yml:13-41
+      - platform/docs/CI_AND_SECURITY.md:123-124
+    evidence_summary: Upstream merge validation offers post-merge regression assurance for launch stability.
+
+  - finding_id: LR-028
+    surface_id: workflow_devflow_contract
+    status: solid_covered
+    owner_lane: workflow_evidence
+    launch_blocker_decision: non_blocker
+    dependency_order: 13
+    severity: low
+    citations:
+      - .github/workflows/devflow-contract.yml:27-42
+      - platform/docs/CI_AND_SECURITY.md:127-129
+    evidence_summary: Devflow contract workflow verifies exposed devflow integration behavior.

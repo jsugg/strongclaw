@@ -1,0 +1,98 @@
+version: 1
+generated_at: 2026-04-02
+workflows:
+  - workflow_path: .github/workflows/ci-gate.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Required pull-request verdict lane for all release-bound changes.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:23-40
+      - .github/workflows/ci-gate.yml:15-148
+
+  - workflow_path: .github/workflows/compatibility-matrix.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Core host and toolchain compatibility evidence for supported launch platforms.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:33-38
+      - .github/workflows/compatibility-matrix.yml:29-71
+
+  - workflow_path: .github/workflows/dependency-submission.yml
+    launch_surface_relevance: "conditional"
+    mapping_status: mapped
+    rationale: Supply-chain provenance evidence relevant to launch, but not direct runtime readiness proof.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:95-100
+      - .github/workflows/dependency-submission.yml:28-45
+
+  - workflow_path: .github/workflows/devflow-contract.yml
+    launch_surface_relevance: "conditional"
+    mapping_status: mapped
+    rationale: Relevant because devflow is an exposed surface; it verifies contract conformance rather than runtime launch behavior.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:127-129
+      - .github/workflows/devflow-contract.yml:27-42
+
+  - workflow_path: .github/workflows/fresh-host-acceptance.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Required fresh-host acceptance gate for release confidence.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:42-66
+      - .github/workflows/fresh-host-acceptance.yml:1-101
+
+  - workflow_path: .github/workflows/fresh-host-core.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Reusable workflow implementing host-side bring-up scenarios and diagnostics.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:42-66
+      - .github/workflows/fresh-host-core.yml:50-221
+
+  - workflow_path: .github/workflows/harness.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Policy and security regression verification lane tied to release readiness.
+    citations:
+      - platform/docs/ARCHITECTURE.md:34-40
+      - .github/workflows/harness.yml:13-34
+
+  - workflow_path: .github/workflows/memory-plugin-verification.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Required evidence lane for shipped hypermemory/plugin surfaces.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:67-87
+      - .github/workflows/memory-plugin-verification.yml:28-96
+
+  - workflow_path: .github/workflows/nightly.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Recurring regression detection across readiness-critical surfaces.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:9-16
+      - .github/workflows/nightly.yml:15-68
+
+  - workflow_path: .github/workflows/release.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Release-blocking build, publish, and provenance path.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:115-130
+      - .github/workflows/release.yml:17-96
+
+  - workflow_path: .github/workflows/security.yml
+    launch_surface_relevance: "yes"
+    mapping_status: mapped
+    rationale: Security quality gate including code scanning and supply-chain checks.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:95-115
+      - .github/workflows/security.yml:31-109
+
+  - workflow_path: .github/workflows/upstream-merge-validation.yml
+    launch_surface_relevance: "conditional"
+    mapping_status: mapped
+    rationale: Post-merge regression confidence lane relevant to launch risk, but not direct runtime readiness proof.
+    citations:
+      - platform/docs/CI_AND_SECURITY.md:123-124
+      - .github/workflows/upstream-merge-validation.yml:13-41

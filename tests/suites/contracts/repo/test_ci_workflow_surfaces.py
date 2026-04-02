@@ -123,6 +123,14 @@ def test_ci_gate_workflow_runs_on_pull_requests_and_emits_verdict() -> None:
     assert "docs_parity_required" in text
 
 
+def test_ci_gate_paths_filter_uses_every_predicate_quantifier() -> None:
+    """Paths-filter should enforce include/exclude rules with all-pattern semantics."""
+    text = _workflow_text("ci-gate.yml")
+
+    assert "uses: dorny/paths-filter@" in text
+    assert "predicate-quantifier: every" in text
+
+
 def test_ci_gate_verdict_job_checks_out_repository_before_running_script() -> None:
     """The verdict job must checkout the repository before invoking local scripts."""
     loaded_workflow: object = yaml.safe_load(_workflow_text("ci-gate.yml"))
