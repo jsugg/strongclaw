@@ -608,6 +608,7 @@ def _sidecars_up_report(
             command_steps=command_steps,
             command_exit_code=postgres_exit,
         )
+    postgres_wait_error: CommandError | None = None
     try:
         _wait_for_compose_service(
             execution,
@@ -617,17 +618,43 @@ def _sidecars_up_report(
             timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
         )
     except CommandError as exc:
-        if not suppress_wait_failures:
-            raise
-        return _sidecars_report_payload(
-            execution,
-            profile_flags=profile_flags,
-            targets=targets,
-            command_steps=command_steps,
-            command_exit_code=1,
-            error=str(exc),
-            failed_service=POSTGRES_SERVICE_NAME,
+        postgres_wait_error = exc
+    if postgres_wait_error is not None:
+        recreate_exit = _record_step(
+            "recreate-postgres",
+            _run_compose_command_with_context(
+                execution,
+                arguments=("up", "-d", "--force-recreate", POSTGRES_SERVICE_NAME),
+            ),
         )
+        if recreate_exit != 0:
+            return _sidecars_report_payload(
+                execution,
+                profile_flags=profile_flags,
+                targets=targets,
+                command_steps=command_steps,
+                command_exit_code=recreate_exit,
+            )
+        try:
+            _wait_for_compose_service(
+                execution,
+                service_name=POSTGRES_SERVICE_NAME,
+                state="running",
+                health="healthy",
+                timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
+            )
+        except CommandError as exc:
+            if not suppress_wait_failures:
+                raise
+            return _sidecars_report_payload(
+                execution,
+                profile_flags=profile_flags,
+                targets=targets,
+                command_steps=command_steps,
+                command_exit_code=1,
+                error=str(exc),
+                failed_service=POSTGRES_SERVICE_NAME,
+            )
 
     litellm_status = _compose_service_statuses(execution).get(LITELLM_SERVICE_NAME)
     litellm_ready = _service_matches(litellm_status, state="running", health="healthy")
