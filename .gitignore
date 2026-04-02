@@ -28,3 +28,4 @@ src/clawops/assets/platform/compose/state/**/*
 vendor/lossless-claw/
 .coverage*
 turn.sh
+.omx/
