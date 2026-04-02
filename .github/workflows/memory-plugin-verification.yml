@@ -2,20 +2,6 @@ name: Memory Plugin Integration Checks
 
 on:
   workflow_call:
-  pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.txt"
-      - "**/*.rst"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.jpeg"
-      - "**/*.gif"
-      - "**/*.svg"
-      - "**/*.webp"
-      - "**/*.ico"
-      - "**/*.pdf"
-      - "LICENSE*"
   push:
     branches: [main]
     paths-ignore:

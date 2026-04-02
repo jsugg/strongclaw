@@ -38,6 +38,11 @@ def _workflow_text(workflow_name: str) -> str:
     return workflow_path.read_text(encoding="utf-8")
 
 
+def _ci_gate_filters_text() -> str:
+    """Return the CI gate path-filter definition text."""
+    return (REPO_ROOT / ".github" / "ci" / "ci-gate-filters.yml").read_text(encoding="utf-8")
+
+
 def _as_str_object_dict(value: object) -> dict[str, object] | None:
     """Return a string-keyed dictionary when the runtime value matches."""
     if not isinstance(value, dict):
@@ -102,18 +107,45 @@ def test_fresh_host_acceptance_workflow_routes_to_reusable_core() -> None:
     """The trigger workflow should delegate execution to the reusable core workflow."""
     text = _workflow_text("fresh-host-acceptance.yml")
 
-    assert "pull_request:" in text
-    assert "pull_request:\n    paths:" not in text
+    assert "workflow_call:" in text
+    assert "pull_request:" not in text
     assert "workflow_dispatch:" in text
     assert "push:" not in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
 
 
-def test_fresh_host_acceptance_workflow_runs_for_every_pull_request() -> None:
-    """Fresh-host acceptance should emit required checks for every pull request."""
-    text = _workflow_text("fresh-host-acceptance.yml")
+def test_ci_gate_workflow_runs_on_pull_requests_and_emits_verdict() -> None:
+    """The CI gate should always run on pull requests and expose a stable verdict job."""
+    text = _workflow_text("ci-gate.yml")
 
-    assert "paths:" not in text
+    assert "on:\n  pull_request:" in text
+    assert "name: Verdict" in text
+    assert "docs_parity_required" in text
+
+
+def test_ci_gate_workflow_calls_reusable_heavy_lanes() -> None:
+    """The CI gate should orchestrate heavy lanes through reusable workflow calls."""
+    text = _workflow_text("ci-gate.yml")
+
+    assert "uses: ./.github/workflows/harness.yml" in text
+    assert "uses: ./.github/workflows/compatibility-matrix.yml" in text
+    assert "uses: ./.github/workflows/memory-plugin-verification.yml" in text
+    assert "uses: ./.github/workflows/fresh-host-acceptance.yml" in text
+    assert "uses: ./.github/workflows/security.yml" in text
+
+
+def test_heavy_pr_workflows_are_reusable_only() -> None:
+    """PR-heavy workflows should be callable by the gate and not self-trigger on PRs."""
+    for workflow_name in (
+        "compatibility-matrix.yml",
+        "harness.yml",
+        "memory-plugin-verification.yml",
+        "security.yml",
+        "fresh-host-acceptance.yml",
+    ):
+        text = _workflow_text(workflow_name)
+        assert "workflow_call:" in text, workflow_name
+        assert "pull_request:" not in text, workflow_name
 
 
 def test_fresh_host_core_workflow_uses_semantic_test_scripts() -> None:
@@ -143,9 +175,11 @@ def test_fresh_host_core_workflow_stays_thin() -> None:
 
 
 def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls() -> None:
-    """The trigger workflow should keep dispatch tuning and concurrency guards."""
+    """Fresh-host acceptance should keep explicit tuning inputs and concurrency guards."""
     text = _workflow_text("fresh-host-acceptance.yml")
 
+    assert "workflow_call:" in text
+    assert "workflow_dispatch:" in text
     assert "macos_runtime_provider" in text
     assert "docker_pull_parallelism" in text
     assert "docker_pull_max_attempts" in text
@@ -158,6 +192,10 @@ def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls(
     assert "inputs.docker_pull_max_attempts" in text
     assert "inputs.enable_homebrew_cache" in text
     assert "inputs.enable_runtime_download_cache" in text
+    assert "macos_runtime_provider: ${{ inputs.macos_runtime_provider }}" in text
+    assert "docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}" in text
+    assert "docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}" in text
+    assert "enable_runtime_download_cache: ${{ inputs.enable_runtime_download_cache }}" in text
     assert "cancel-in-progress: true" in text
 
 
@@ -296,11 +334,10 @@ def test_memory_plugin_workflow_supports_reusable_workflow_invocation() -> None:
 
 
 def test_selected_workflows_ignore_docs_and_static_only_changes() -> None:
-    """General CI pull-request and push lanes should skip docs-only and static-only changes."""
+    """Reusable lanes and gate filters should skip docs-only and static-only changes."""
     for workflow_name in (
         "compatibility-matrix.yml",
         "dependency-submission.yml",
-        "harness.yml",
         "memory-plugin-verification.yml",
         "security.yml",
     ):
@@ -308,6 +345,12 @@ def test_selected_workflows_ignore_docs_and_static_only_changes() -> None:
         assert "paths-ignore:" in text, workflow_name
         for marker in _NON_IMPACTFUL_PATH_FILTER_MARKERS:
             assert marker in text, workflow_name
+
+    filters_text = _ci_gate_filters_text()
+    for marker in _NON_IMPACTFUL_PATH_FILTER_MARKERS:
+        marker_body = marker.strip('"')
+        negated_marker = f'"!{marker_body}"'
+        assert marker in filters_text or negated_marker in filters_text
 
 
 def test_devflow_contract_workflow_surfaces_public_devflow_lane() -> None:
