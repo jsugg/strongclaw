@@ -59,6 +59,18 @@ def run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | N
             if context.platform == "linux"
             else macos.exercise_macos_sidecars(context)
         )
+    if phase_name == "exercise-channels-runtime":
+        return (
+            linux.exercise_linux_channels_runtime(context)
+            if context.platform == "linux"
+            else macos.exercise_macos_channels_runtime(context)
+        )
+    if phase_name == "exercise-recovery-smoke":
+        return (
+            linux.exercise_linux_recovery_smoke(context)
+            if context.platform == "linux"
+            else macos.exercise_macos_recovery_smoke(context)
+        )
     if phase_name == "exercise-browser-lab":
         return (
             linux.exercise_linux_browser_lab(context)

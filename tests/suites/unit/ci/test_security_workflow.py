@@ -360,3 +360,131 @@ def test_security_workflow_main_dispatches_run_recovery_smoke(
 
     assert exit_code == 0
     assert seen_calls == [tmp_path.resolve()]
+
+
+def test_enforce_independent_review_rejects_missing_non_author_approval(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Critical PR changes should require at least one non-author approval."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 42,
+                    "user": {"login": "author-user"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
+        assert token == "ghs_test"
+        if "/files?" in url:
+            return [{"filename": "src/clawops/strongclaw_model_auth.py"}]
+        if "/reviews?" in url:
+            return [{"state": "APPROVED", "user": {"login": "author-user"}}]
+        raise AssertionError(url)
+
+    test_context.patch.patch_object(
+        security_helpers,
+        "_github_paginated_get",
+        new=fake_paginated_get,
+    )
+
+    with pytest.raises(CiWorkflowError, match="independent review required"):
+        security_helpers.enforce_independent_review(
+            event_path=event_path,
+            repository="example/repo",
+            github_token="ghs_test",
+        )
+
+
+def test_enforce_independent_review_accepts_independent_approval(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Security-critical PR changes should pass when an independent reviewer approved."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 43,
+                    "user": {"login": "author-user"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
+        assert token == "ghs_test"
+        if "/files?" in url:
+            return [{"filename": ".github/workflows/security.yml"}]
+        if "/reviews?" in url:
+            return [
+                {"state": "COMMENTED", "user": {"login": "author-user"}},
+                {"state": "APPROVED", "user": {"login": "independent-reviewer"}},
+            ]
+        raise AssertionError(url)
+
+    test_context.patch.patch_object(
+        security_helpers,
+        "_github_paginated_get",
+        new=fake_paginated_get,
+    )
+
+    security_helpers.enforce_independent_review(
+        event_path=event_path,
+        repository="example/repo",
+        github_token="ghs_test",
+    )
+
+
+def test_security_workflow_main_dispatches_independent_review_enforcement(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch independent review enforcement."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text("{}", encoding="utf-8")
+    seen_calls: list[tuple[Path, str, str, str]] = []
+
+    def fake_enforce_independent_review(
+        *,
+        event_path: Path,
+        repository: str,
+        github_token: str,
+        github_api_base: str,
+    ) -> None:
+        seen_calls.append((event_path, repository, github_token, github_api_base))
+
+    test_context.patch.patch_object(
+        security_workflow_script,
+        "enforce_independent_review",
+        new=fake_enforce_independent_review,
+    )
+    test_context.env.set("GITHUB_TOKEN", "ghs_test")
+
+    exit_code = security_workflow_script.main(
+        [
+            "enforce-independent-review",
+            "--event-path",
+            str(event_path),
+            "--repository",
+            "example/repo",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [
+        (
+            event_path.resolve(),
+            "example/repo",
+            "ghs_test",
+            "https://api.github.com",
+        )
+    ]

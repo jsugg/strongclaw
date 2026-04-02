@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import json
 import os
+import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, cast
 
 import clawops.strongclaw_recovery as recovery_helpers
 from clawops.platform_verify import verify_channels
@@ -28,6 +30,28 @@ CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_varlock_env.py": 19.0,
     "src/clawops/strongclaw_bootstrap.py": 28.0,
 }
+_GITHUB_API_BASE: Final[str] = "https://api.github.com"
+_CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
+    ".github/workflows/**",
+    ".github/ci/**",
+    "security/**",
+    "src/clawops/strongclaw_model_auth.py",
+    "src/clawops/strongclaw_varlock_env.py",
+    "src/clawops/strongclaw_bootstrap.py",
+    "src/clawops/credential_broker.py",
+    "platform/docs/SECURITY_MODEL.md",
+    "platform/docs/SECRETS_AND_ENV.md",
+    "platform/docs/BROWSER_LAB.md",
+    "platform/compose/docker-compose.browser-lab*.yaml",
+    "platform/compose/docker-compose.browser-lab.*.yaml",
+    "platform/workers/browser-lab/**",
+    "pyproject.toml",
+    "uv.lock",
+    "package.json",
+    "package-lock.json",
+    "platform/plugins/**/package.json",
+    "platform/plugins/**/package-lock.json",
+)
 
 
 def append_coverage_summary(coverage_file: Path, summary_file: Path) -> None:
@@ -141,6 +165,139 @@ def write_empty_sarif(output_path: Path, *, information_uri: str) -> None:
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _next_link(link_header: str | None) -> str | None:
+    """Extract the pagination next-link URL from one GitHub Link header."""
+    if link_header is None:
+        return None
+    for segment in link_header.split(","):
+        parts = [part.strip() for part in segment.split(";")]
+        if not parts:
+            continue
+        if any(part == 'rel="next"' for part in parts[1:]):
+            candidate = parts[0]
+            if candidate.startswith("<") and candidate.endswith(">"):
+                return candidate[1:-1]
+    return None
+
+
+def _github_paginated_get(
+    *,
+    url: str,
+    token: str,
+) -> list[dict[str, object]]:
+    """Fetch one GitHub API endpoint and follow pagination links."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    collected: list[dict[str, object]] = []
+    next_url: str | None = url
+    while next_url is not None:
+        request = urllib.request.Request(next_url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = response.read().decode("utf-8")
+                link_header = response.headers.get("Link")
+        except OSError as exc:
+            raise CiWorkflowError(f"github api request failed for {next_url}: {exc}") from exc
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise CiWorkflowError(f"github api returned invalid json for {next_url}") from exc
+        if not isinstance(payload, list):
+            raise CiWorkflowError(f"github api payload must be a list for {next_url}")
+        for row in cast(list[object], payload):
+            if not isinstance(row, dict):
+                raise CiWorkflowError(f"github api row must be an object for {next_url}")
+            normalized_row: dict[str, object] = {}
+            for key, value in cast(dict[object, object], row).items():
+                if isinstance(key, str):
+                    normalized_row[key] = value
+            collected.append(normalized_row)
+        next_url = _next_link(link_header)
+    return collected
+
+
+def _is_security_critical_path(path: str) -> bool:
+    """Return whether a changed file should require independent review."""
+    return any(fnmatch.fnmatch(path, pattern) for pattern in _CRITICAL_REVIEW_PATH_PATTERNS)
+
+
+def enforce_independent_review(
+    *,
+    event_path: Path,
+    repository: str,
+    github_token: str,
+    github_api_base: str = _GITHUB_API_BASE,
+) -> None:
+    """Require at least one non-author approval when critical files change on a PR."""
+    if not github_token.strip():
+        raise CiWorkflowError("GITHUB_TOKEN is required for independent review enforcement")
+    event_payload = json.loads(event_path.read_text(encoding="utf-8"))
+    if not isinstance(event_payload, dict):
+        raise CiWorkflowError("github event payload must be a JSON object")
+    event_payload_obj = cast(dict[str, object], event_payload)
+    pull_request = event_payload_obj.get("pull_request")
+    if not isinstance(pull_request, dict):
+        return
+    pull_request_obj = cast(dict[str, object], pull_request)
+    number_value = pull_request_obj.get("number")
+    if not isinstance(number_value, int):
+        raise CiWorkflowError("pull_request.number missing from github event payload")
+    user_value = pull_request_obj.get("user")
+    if not isinstance(user_value, dict):
+        raise CiWorkflowError("pull_request.user missing from github event payload")
+    user_obj = cast(dict[str, object], user_value)
+    author_login = user_obj.get("login")
+    if not isinstance(author_login, str) or not author_login.strip():
+        raise CiWorkflowError("pull_request.user.login missing from github event payload")
+
+    api_base = github_api_base.rstrip("/")
+    files = _github_paginated_get(
+        url=f"{api_base}/repos/{repository}/pulls/{number_value}/files?per_page=100",
+        token=github_token,
+    )
+    changed_paths: list[str] = []
+    for row in files:
+        filename = row.get("filename")
+        if isinstance(filename, str):
+            changed_paths.append(filename)
+    critical_paths = sorted({path for path in changed_paths if _is_security_critical_path(path)})
+    if not critical_paths:
+        return
+
+    reviews = _github_paginated_get(
+        url=f"{api_base}/repos/{repository}/pulls/{number_value}/reviews?per_page=100",
+        token=github_token,
+    )
+    latest_review_state: dict[str, str] = {}
+    for row in reviews:
+        user = row.get("user")
+        if not isinstance(user, dict):
+            continue
+        user_obj = cast(dict[str, object], user)
+        reviewer_login = user_obj.get("login")
+        state = row.get("state")
+        if not isinstance(reviewer_login, str) or not isinstance(state, str):
+            continue
+        latest_review_state[reviewer_login] = state.upper()
+
+    independent_approvals = sorted(
+        reviewer
+        for reviewer, state in latest_review_state.items()
+        if reviewer != author_login and state == "APPROVED"
+    )
+    if independent_approvals:
+        return
+
+    changed_summary = ", ".join(critical_paths)
+    raise CiWorkflowError(
+        "independent review required for security-critical changes. "
+        f"author={author_login}; changed={changed_summary}; no non-author APPROVED review found"
+    )
 
 
 def verify_channels_contract(*, repo_root: Path) -> None:

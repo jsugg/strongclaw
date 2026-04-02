@@ -81,6 +81,11 @@ def verify_linux_rendered_units(context: FreshHostContext) -> None:
         verify_file_exists(unit_root / filename)
 
 
+def _venv_python(context: FreshHostContext) -> str:
+    """Return the managed-environment Python executable for one scenario."""
+    return venv_clawops_command(context)[0]
+
+
 def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local sidecars."""
     repo_root, _ = repo_paths(context)
@@ -109,6 +114,62 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     )
     run_command(down_command, cwd=repo_root, env=env)
     return down_command
+
+
+def exercise_linux_channels_runtime(context: FreshHostContext) -> list[str]:
+    """Exercise channels acceptance while sidecars are running repo-locally."""
+    repo_root, _ = repo_paths(context)
+    env = phase_env(context)
+    compose_file = compose_file_for_component(context, "sidecars")
+    wait_for_docker_backend(cwd=repo_root, env=env)
+    up_command = venv_clawops_command(
+        context, "ops", "--asset-root", ".", "sidecars", "up", "--repo-local-state"
+    )
+    channels_verify_command = venv_clawops_command(
+        context, "verify-platform", "channels", "--asset-root", "."
+    )
+    channels_contract_command = [
+        _venv_python(context),
+        "./tests/scripts/security_workflow.py",
+        "verify-channels-contract",
+        "--repo-root",
+        ".",
+    ]
+    down_command = venv_clawops_command(
+        context,
+        "ops",
+        "--asset-root",
+        ".",
+        "sidecars",
+        "down",
+        "--repo-local-state",
+    )
+    run_command(up_command, cwd=repo_root, env=env)
+    verify_sidecar_services_running(
+        compose_file,
+        cwd=repo_root / "platform" / "compose",
+        env=env,
+        repo_root_path=repo_root,
+        repo_local_state=True,
+    )
+    run_command(channels_verify_command, cwd=repo_root, env=env)
+    run_command(channels_contract_command, cwd=repo_root, env=env)
+    run_command(down_command, cwd=repo_root, env=env)
+    return down_command
+
+
+def exercise_linux_recovery_smoke(context: FreshHostContext) -> list[str]:
+    """Exercise backup/verify/restore smoke in the Linux fresh-host lane."""
+    repo_root, _ = repo_paths(context)
+    command = [
+        _venv_python(context),
+        "./tests/scripts/security_workflow.py",
+        "run-recovery-smoke",
+        "--tmp-root",
+        context.tmp_root,
+    ]
+    run_command(command, cwd=repo_root, env=phase_env(context))
+    return command
 
 
 def exercise_linux_browser_lab(context: FreshHostContext) -> list[str]:
