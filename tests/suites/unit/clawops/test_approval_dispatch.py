@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 
 from clawops.approval_dispatch import dispatch_pending_approval
@@ -50,6 +51,9 @@ def test_dispatch_pending_approval_writes_packet_and_updates_journal(
     assert packet["opId"] == pending.op_id
     assert packet["review"]["status"] == "pending"
     assert packet["policy"]["decision"] == "require_approval"
+    if os.name != "nt":
+        assert (outcome.artifact_path.parent.stat().st_mode & 0o777) == 0o700
+        assert (outcome.artifact_path.stat().st_mode & 0o777) == 0o600
     persisted = journal.get(pending.op_id)
     assert persisted.review_artifact_path == outcome.artifact_path.as_posix()
     assert persisted.status == "pending_approval"

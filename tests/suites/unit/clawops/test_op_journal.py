@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import sqlite3
 from typing import Any, Callable, cast
@@ -278,6 +279,19 @@ def test_connect_retries_transient_open_error(
     journal.init()
 
     assert attempts["count"] == 2
+
+
+def test_init_normalizes_owner_only_permissions(tmp_path: pathlib.Path) -> None:
+    db_dir = tmp_path / "journal-state"
+    db_dir.mkdir(mode=0o755)
+    db = db_dir / "journal.sqlite"
+
+    journal = OperationJournal(db)
+    journal.init()
+
+    if os.name != "nt":
+        assert (db_dir.stat().st_mode & 0o777) == 0o700
+        assert (db.stat().st_mode & 0o777) == 0o600
 
 
 def test_session_leases_are_visible_and_releasable(tmp_path: pathlib.Path) -> None:

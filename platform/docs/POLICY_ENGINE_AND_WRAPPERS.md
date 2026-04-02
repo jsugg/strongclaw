@@ -86,6 +86,8 @@ Treat `~/.openclaw/clawops` as service-owned state.
 
 - keep directory mode `0700` on `~/.openclaw/clawops`
 - keep file mode `0600` on `~/.openclaw/clawops/op_journal.sqlite`
+- keep reviewer packet directories mode `0700` and packet files mode `0600`
+- `clawops` normalizes those journal and reviewer-artifact permissions on supported POSIX hosts when it creates or updates them
 - do not grant write access to lower-trust workers or shared workspaces
 
 ## CLI flow

@@ -112,6 +112,9 @@ def test_operator_docs_surface_platform_verification_commands() -> None:
     assert "Continuously validated on Linux `x86_64`" in host_platforms
     assert "platform-native user-management tooling" in macos_runbook
     assert "platform-native user-management tooling" in linux_runbook
+    assert "platform/docs/POLICY_ENGINE_AND_WRAPPERS.md" in readme
+    assert "platform/docs/SECRETS_AND_ENV.md" in readme
+    assert "platform/docs/SECURITY_MODEL.md" in readme
 
 
 def test_operator_docs_surface_repo_local_dev_sidecar_state_commands() -> None:
