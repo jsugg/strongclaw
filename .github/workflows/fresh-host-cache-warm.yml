@@ -8,6 +8,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION: "v2"
   MACOS_COLIMA_VERSION: "v0.10.1"
   MACOS_LIMA_VERSION: "v2.0.3"
   MACOS_COLIMA_DISK_GIB: "20"
@@ -96,8 +97,9 @@ jobs:
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/docker-images
-          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
           restore-keys: |
+            fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-
             fresh-host-macos-images-${{ runner.arch }}-
       - name: Warm macOS fresh-host package cache
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
@@ -138,4 +140,4 @@ jobs:
         uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: .github-cache/docker-images
-          key: fresh-host-macos-images-${{ runner.arch }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
+          key: fresh-host-macos-images-${{ runner.arch }}-${{ env.FRESH_HOST_MACOS_IMAGE_CACHE_FORMAT_VERSION }}-${{ hashFiles('platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml', 'platform/compose/docker-compose.browser-lab.ci-hosted-macos.yaml') }}
