@@ -35,6 +35,9 @@ class RuntimeInstallReport:
     docker_config: str | None
     installed_tools: list[str]
     failure_reason: str | None
+    started_at: str
+    finished_at: str
+    duration_seconds: float
     created_at: str
 
 
@@ -52,4 +55,7 @@ class ImageEnsureReport:
     pull_attempt_count: int
     retried_images: list[str]
     failure_reason: str | None
+    started_at: str
+    finished_at: str
+    duration_seconds: float
     created_at: str

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tarfile
 import tempfile
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -88,6 +89,8 @@ def install_runtime(
     env["DOCKER_CONFIG"] = docker_config
     env["DOCKER_HOST"] = docker_host
     failure_reason: str | None = None
+    started_at = now_iso()
+    started = time.monotonic()
 
     try:
         if arch != "x86_64":
@@ -195,6 +198,8 @@ def install_runtime(
             run_checked(command, cwd=repo_root, env=env, timeout_seconds=120)
     except Exception as exc:  # noqa: BLE001
         failure_reason = str(exc)
+    finished_at = now_iso()
+    duration_seconds = round(time.monotonic() - started, 3)
 
     report = RuntimeInstallReport(
         runtime_provider=runtime_provider,
@@ -207,7 +212,10 @@ def install_runtime(
         docker_config=docker_config,
         installed_tools=["lima", "colima", "docker", "docker-compose"],
         failure_reason=failure_reason,
-        created_at=now_iso(),
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_seconds=duration_seconds,
+        created_at=finished_at,
     )
     write_json(asdict(report), report_path)
     main_report = load_report(Path(context.report_path).resolve())

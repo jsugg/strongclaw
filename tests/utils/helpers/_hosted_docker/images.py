@@ -226,8 +226,11 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
     env = compose_probe_env(
         context=context, repo_root=repo_root, compose_state_dir_name="compose-prepull"
     )
+    started_at = now_iso()
+    started = time.monotonic()
 
     if not context.ensure_images:
+        finished_at = now_iso()
         report = ImageEnsureReport(
             compose_files=[str(path) for path in compose_files],
             images=[],
@@ -239,7 +242,10 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
             pull_attempt_count=0,
             retried_images=[],
             failure_reason=None,
-            created_at=now_iso(),
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=round(time.monotonic() - started, 3),
+            created_at=finished_at,
         )
         if report_path is not None:
             write_json(asdict(report), report_path)
@@ -264,6 +270,7 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
         failure_reason = "docker pull failed"
     elif missing_after_pull:
         failure_reason = "images remain unavailable after pull"
+    finished_at = now_iso()
     report = ImageEnsureReport(
         compose_files=[str(path) for path in compose_files],
         images=images,
@@ -275,7 +282,10 @@ def ensure_images(context_path: Path) -> ImageEnsureReport:
         pull_attempt_count=0 if pull_report is None else pull_report.attempt_count,
         retried_images=[] if pull_report is None else list(pull_report.retried_images),
         failure_reason=failure_reason,
-        created_at=now_iso(),
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_seconds=round(time.monotonic() - started, 3),
+        created_at=finished_at,
     )
     if report_path is not None:
         write_json(asdict(report), report_path)
