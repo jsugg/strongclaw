@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
+import clawops.strongclaw_recovery as recovery_helpers
 from clawops.platform_verify import verify_channels
 from clawops.strongclaw_recovery import create_backup, restore_backup, verify_backup
 from tests.utils.helpers._ci_workflows.common import (
@@ -169,14 +173,37 @@ def run_recovery_smoke(*, tmp_root: Path) -> None:
     marker_path.write_text("recovery smoke marker\n", encoding="utf-8")
     (state_dir / "settings.json").write_text('{"ok":true}\n', encoding="utf-8")
 
-    archive_path = create_backup(home_dir=home_dir)
-    verified_archive = verify_backup(archive_path, home_dir=home_dir)
+    with _force_tar_fallback_for_recovery():
+        archive_path = create_backup(home_dir=home_dir)
+        verified_archive = verify_backup(archive_path, home_dir=home_dir)
 
-    restore_destination = resolved_tmp_root / "recovery-restore"
-    restore_backup(verified_archive, destination=restore_destination, home_dir=home_dir)
+        restore_destination = resolved_tmp_root / "recovery-restore"
+        restore_backup(verified_archive, destination=restore_destination, home_dir=home_dir)
 
     restored_marker = restore_destination / ".openclaw" / "logs" / "smoke.log"
     if not restored_marker.exists():
         raise CiWorkflowError(
             "recovery smoke failed: restored marker missing after backup/verify/restore cycle"
         )
+
+
+@contextlib.contextmanager
+def _force_tar_fallback_for_recovery() -> Iterator[None]:
+    """Temporarily force strongclaw_recovery helpers down the tar fallback path."""
+    original_which = recovery_helpers.shutil.which
+    recovery_shutil: Any = recovery_helpers.shutil
+
+    def _without_openclaw(
+        command: str,
+        mode: int = os.F_OK | os.X_OK,
+        path: str | None = None,
+    ) -> str | None:
+        if command == "openclaw":
+            return None
+        return original_which(command, mode, path)
+
+    recovery_shutil.which = _without_openclaw
+    try:
+        yield
+    finally:
+        recovery_shutil.which = original_which
