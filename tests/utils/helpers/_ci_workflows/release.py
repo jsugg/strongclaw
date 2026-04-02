@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -34,6 +35,9 @@ RUNTIME_READINESS_OPENCLAW_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("doctor",),
     ("security", "audit", "--deep"),
     ("secrets", "audit", "--check"),
+)
+LAUNCH_READINESS_CONTRACT_TEST_PATH = (
+    "tests/suites/contracts/repo/launch_readiness/test_launch_readiness_audit_packet.py"
 )
 
 
@@ -128,6 +132,53 @@ def run_release_runtime_readiness(*, repo_root: Path) -> None:
     openclaw_command = _resolve_openclaw_command()
     for command_suffix in RUNTIME_READINESS_OPENCLAW_COMMANDS:
         run_checked([*openclaw_command, *command_suffix], cwd=resolved_root)
+
+    run_checked(
+        [
+            sys.executable,
+            "./tests/scripts/security_workflow.py",
+            "run-channels-runtime-smoke",
+            "--repo-root",
+            ".",
+        ],
+        cwd=resolved_root,
+        env={
+            **os.environ,
+            "STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN": "release-smoke-token",
+        },
+    )
+    _run_live_launch_readiness_contract(repo_root=resolved_root)
+
+
+def _run_live_launch_readiness_contract(*, repo_root: Path) -> None:
+    """Generate a launch packet and validate it in live contract mode."""
+    with tempfile.TemporaryDirectory(prefix="strongclaw-launch-readiness.") as tmp_dir:
+        artifact_root = Path(tmp_dir) / "packet"
+        run_checked(
+            [
+                sys.executable,
+                "./tests/scripts/launch_readiness.py",
+                "generate-audit-packet",
+                "--output-dir",
+                str(artifact_root),
+            ],
+            cwd=repo_root,
+        )
+        run_checked(
+            [
+                "uv",
+                "run",
+                "pytest",
+                "-q",
+                LAUNCH_READINESS_CONTRACT_TEST_PATH,
+            ],
+            cwd=repo_root,
+            env={
+                **os.environ,
+                "STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE": "live",
+                "STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT": str(artifact_root),
+            },
+        )
 
 
 def publish_github_release(tag: str, dist_dir: Path, sbom_path: Path) -> None:

@@ -90,6 +90,7 @@ def exercise_linux_sidecars(context: FreshHostContext) -> list[str]:
     """Exercise Linux repo-local sidecars."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    env.setdefault("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN", "fresh-host-smoke-token")
     compose_file = compose_file_for_component(context, "sidecars")
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(
@@ -135,6 +136,15 @@ def exercise_linux_channels_runtime(context: FreshHostContext) -> list[str]:
         "--repo-root",
         ".",
     ]
+    channels_runtime_smoke_command = [
+        _venv_python(context),
+        "./tests/scripts/security_workflow.py",
+        "run-channels-runtime-smoke",
+        "--repo-root",
+        ".",
+        "--artifact-path",
+        str(context_path(context.report_dir) / "channels-runtime-smoke.json"),
+    ]
     down_command = venv_clawops_command(
         context,
         "ops",
@@ -154,6 +164,7 @@ def exercise_linux_channels_runtime(context: FreshHostContext) -> list[str]:
     )
     run_command(channels_verify_command, cwd=repo_root, env=env)
     run_command(channels_contract_command, cwd=repo_root, env=env)
+    run_command(channels_runtime_smoke_command, cwd=repo_root, env=env)
     run_command(down_command, cwd=repo_root, env=env)
     return down_command
 

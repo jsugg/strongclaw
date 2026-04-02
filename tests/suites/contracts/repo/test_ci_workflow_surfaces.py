@@ -339,11 +339,16 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     assert "./tests/scripts/security_workflow.py write-coverage-summary" in security
     assert "./tests/scripts/security_workflow.py enforce-independent-review" in security
     assert "./tests/scripts/security_workflow.py verify-channels-contract --repo-root ." in security
+    assert (
+        "./tests/scripts/security_workflow.py run-channels-runtime-smoke --repo-root ." in security
+    )
     assert "./tests/scripts/security_workflow.py run-recovery-smoke --tmp-root" in security
     assert "./tests/scripts/security_workflow.py install-gitleaks" in security
     assert "./tests/scripts/security_workflow.py install-syft" in security
     assert "./tests/scripts/security_workflow.py write-empty-sarif" in security
     assert "./tests/scripts/release_workflow.py clean-artifacts" in release
+    assert "./tests/scripts/release_workflow.py runtime-readiness --repo-root ." in release
+    assert "./tests/scripts/release_workflow.py verify-tag-version --tag" in release
     assert "./tests/scripts/release_workflow.py verify-artifacts" in release
     assert "./tests/scripts/release_workflow.py publish-github-release" in release
 

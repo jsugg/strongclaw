@@ -946,7 +946,7 @@ def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Linux channels runtime phase should verify sidecars and channel contracts before teardown."""
+    """Linux channels runtime phase should verify contracts and run runtime smoke before teardown."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -1012,7 +1012,8 @@ def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
     assert calls[2] == "verify:docker-compose.aux-stack.yaml"
     assert "verify-platform channels --asset-root ." in calls[3]
     assert "security_workflow.py verify-channels-contract --repo-root ." in calls[4]
-    assert calls[5].endswith("sidecars down --repo-local-state")
+    assert "security_workflow.py run-channels-runtime-smoke --repo-root ." in calls[5]
+    assert calls[6].endswith("sidecars down --repo-local-state")
 
 
 def test_exercise_linux_recovery_smoke_runs_security_workflow_command(
@@ -1206,7 +1207,7 @@ def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Hosted macOS channels runtime phase should verify sidecars and channel contracts."""
+    """Hosted macOS channels runtime phase should verify contracts and run runtime smoke."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -1272,7 +1273,8 @@ def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
     assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
     assert "verify-platform channels --asset-root ." in calls[3]
     assert "security_workflow.py verify-channels-contract --repo-root ." in calls[4]
-    assert calls[5].endswith("sidecars down --repo-local-state")
+    assert "security_workflow.py run-channels-runtime-smoke --repo-root ." in calls[5]
+    assert calls[6].endswith("sidecars down --repo-local-state")
 
 
 def test_exercise_macos_recovery_smoke_runs_security_workflow_command(

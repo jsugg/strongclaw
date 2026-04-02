@@ -51,6 +51,10 @@ jobs:
         run: uv run --project . python3 ./tests/scripts/security_workflow.py enforce-independent-review --event-path "${GITHUB_EVENT_PATH}" --repository "${GITHUB_REPOSITORY}"
       - name: Verify channels rollout contract
         run: uv run --project . python3 ./tests/scripts/security_workflow.py verify-channels-contract --repo-root .
+      - name: Run channels runtime smoke
+        env:
+          STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN: "ci-smoke-telegram-token"
+        run: uv run --project . python3 ./tests/scripts/security_workflow.py run-channels-runtime-smoke --repo-root . --artifact-path "${RUNNER_TEMP}/channels-runtime-smoke.json"
       - name: Run recovery backup/restore smoke
         run: uv run --project . python3 ./tests/scripts/security_workflow.py run-recovery-smoke --tmp-root "${RUNNER_TEMP}"
       - name: Run repository quality gate
@@ -102,6 +106,7 @@ jobs:
             coverage.xml
             pytest.xml
             sbom.spdx.json
+            ${{ runner.temp }}/channels-runtime-smoke.json
 
   run-codeql-analysis:
     name: Run CodeQL Analysis
