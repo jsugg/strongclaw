@@ -19,6 +19,7 @@ from clawops.observability import emit_structured_log
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
+    VARLOCK_ENV_MODE_MANAGED,
     CommandError,
     ensure_docker_backend_ready,
     load_env_assignments,
@@ -67,15 +68,14 @@ class _ComposeExecution:
     env: dict[str, str]
 
     def command(self, *arguments: str) -> list[str]:
-        """Return a wrapped compose command for the configured file."""
-        base_command = [
+        """Return a compose command for the configured file."""
+        return [
             "docker",
             "compose",
             "-f",
             str(self.compose_path),
             *[str(argument) for argument in arguments],
         ]
-        return wrap_command_with_varlock(self.repo_root, base_command)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -127,7 +127,13 @@ def _compose_env(
         "OPENCLAW_PROFILE",
         "STRONGCLAW_RUNTIME_ROOT",
     }
-    for key, value in load_env_assignments(varlock_local_env_file(repo_root, environ=env)).items():
+    for key, value in load_env_assignments(
+        varlock_local_env_file(
+            repo_root,
+            environ=env,
+            env_mode=VARLOCK_ENV_MODE_MANAGED,
+        )
+    ).items():
         if layout.uses_isolated_runtime and key in isolated_runtime_keys:
             continue
         if value and not env.get(key, "").strip():

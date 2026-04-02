@@ -66,8 +66,11 @@ def _fixed_compose_env(
 def _identity_varlock_command(
     _repo_root: pathlib.Path,
     command: Sequence[str],
+    *,
+    env_mode: str = "auto",
 ) -> list[str]:
     """Return the raw command for tests that do not need Varlock wrapping."""
+    del env_mode
     return [str(part) for part in command]
 
 
@@ -112,6 +115,20 @@ def test_compose_state_dir_repo_local_override_wins(
     assert _compose_state_dir(tmp_path, repo_local_state=True) == override_dir
 
 
+def test_compose_execution_returns_direct_compose_command() -> None:
+    """Compose execution should emit deterministic docker compose commands."""
+    execution = cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={},
+    )
+
+    command = execution.command("up", "-d", "postgres")
+
+    assert command == ["docker", "compose", "-f", "/tmp/compose.yaml", "up", "-d", "postgres"]
+
+
 def test_compose_env_exports_openclaw_and_compose_state(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
@@ -148,6 +165,39 @@ def test_compose_env_exports_openclaw_and_compose_state(
     assert env["OPENCLAW_STATE_DIR"] == str(openclaw_state_dir)
     assert env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(openclaw_state_dir / "compose")
     assert env["OPENCLAW_CONFIG"] == str(config_path)
+
+
+def test_compose_env_reads_managed_varlock_env_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Compose env must request managed varlock env-mode to avoid legacy fallback drift."""
+    observed: dict[str, str] = {}
+    local_env_file = tmp_path / "managed.env.local"
+    local_env_file.write_text("NEO4J_PASSWORD=managed-secret\n", encoding="utf-8")
+
+    def _varlock_local_env_file(
+        _repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None = None,
+        environ: Mapping[str, str] | None = None,
+        env_mode: str = "auto",
+    ) -> pathlib.Path:
+        del home_dir, environ
+        observed["env_mode"] = env_mode
+        return local_env_file
+
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    monkeypatch.setattr(strongclaw_ops, "varlock_local_env_file", _varlock_local_env_file)
+
+    env = _compose_env(
+        REPO_ROOT,
+        repo_local_state=False,
+        compose_name="docker-compose.aux-stack.yaml",
+    )
+
+    assert env["NEO4J_PASSWORD"] == "managed-secret"
+    assert observed["env_mode"] == strongclaw_ops.VARLOCK_ENV_MODE_MANAGED
 
 
 def test_compose_env_exports_isolated_runtime_contract(
@@ -200,8 +250,9 @@ def test_compose_env_ignores_isolated_runtime_keys_from_local_env(
         *,
         home_dir: pathlib.Path | None = None,
         environ: Mapping[str, str] | None = None,
+        env_mode: str = "auto",
     ) -> pathlib.Path:
-        del home_dir, environ
+        del home_dir, environ, env_mode
         return local_env_file
 
     monkeypatch.setenv("STRONGCLAW_RUNTIME_ROOT", str(runtime_root))
@@ -252,8 +303,9 @@ def test_compose_env_inherits_repo_local_varlock_assignments(
         *,
         home_dir: pathlib.Path | None = None,
         environ: Mapping[str, str] | None = None,
+        env_mode: str = "auto",
     ) -> pathlib.Path:
-        del home_dir, environ
+        del home_dir, environ, env_mode
         return local_env_file
 
     monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
