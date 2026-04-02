@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import pathlib
 import sqlite3
 import time
@@ -196,6 +197,8 @@ _UNSET = object()
 _RETRYABLE_OPEN_ERROR = "unable to open database file"
 _CONNECT_ATTEMPTS = 3
 _CONNECT_RETRY_DELAY_SECONDS = 0.01
+_OWNER_ONLY_DIR_MODE = 0o700
+_OWNER_ONLY_FILE_MODE = 0o600
 
 
 def _is_retryable_open_error(error: sqlite3.OperationalError) -> bool:
@@ -222,6 +225,18 @@ def _merge_review_payload(
     if not payload:
         return None
     return canonical_json(payload)
+
+
+def _normalize_permissions(path: pathlib.Path, mode: int) -> None:
+    """Apply owner-only permissions on supported hosts."""
+    if os.name == "nt":
+        return
+    try:
+        current_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        return
+    if current_mode != mode:
+        path.chmod(mode)
 
 
 @dataclasses.dataclass(slots=True)
@@ -316,6 +331,7 @@ class OperationJournal:
     def connect(self) -> sqlite3.Connection:
         """Open a SQLite connection with row access by name."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        _normalize_permissions(self.db_path.parent, _OWNER_ONLY_DIR_MODE)
         for attempt in range(1, _CONNECT_ATTEMPTS + 1):
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
@@ -327,6 +343,7 @@ class OperationJournal:
                     raise
                 time.sleep(_CONNECT_RETRY_DELAY_SECONDS * attempt)
                 continue
+            _normalize_permissions(self.db_path, _OWNER_ONLY_FILE_MODE)
             return conn
         raise AssertionError("unreachable: connect loop returned no SQLite connection")
 
