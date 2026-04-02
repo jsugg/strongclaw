@@ -13,6 +13,13 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 import clawops.strongclaw_recovery as recovery_helpers
+from clawops.allowlist_sync import (
+    load_source,
+    normalize_telegram,
+    normalize_whatsapp,
+    render_fragment,
+)
+from clawops.common import load_json5
 from clawops.platform_verify import verify_channels
 from clawops.strongclaw_recovery import create_backup, restore_backup, verify_backup
 from tests.utils.helpers._ci_workflows.common import (
@@ -26,9 +33,9 @@ from tests.utils.helpers._ci_workflows.common import (
 GLOBAL_COVERAGE_THRESHOLD = 75.0
 CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_recovery.py": 80.0,
-    "src/clawops/strongclaw_model_auth.py": 50.0,
-    "src/clawops/strongclaw_varlock_env.py": 30.0,
-    "src/clawops/strongclaw_bootstrap.py": 28.0,
+    "src/clawops/strongclaw_model_auth.py": 55.0,
+    "src/clawops/strongclaw_varlock_env.py": 35.0,
+    "src/clawops/strongclaw_bootstrap.py": 35.0,
 }
 _GITHUB_API_BASE: Final[str] = "https://api.github.com"
 _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
@@ -52,6 +59,7 @@ _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
     "platform/plugins/**/package.json",
     "platform/plugins/**/package-lock.json",
 )
+_CHANNELS_RUNTIME_TOKEN_ENV_FALLBACK: Final[str] = "STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN"
 
 
 def append_coverage_summary(coverage_file: Path, summary_file: Path) -> None:
@@ -318,6 +326,288 @@ def verify_channels_contract(*, repo_root: Path) -> None:
         raise CiWorkflowError("channel contract verification failed without explicit checks")
     detail = "; ".join(f"{check.name}: {check.message}" for check in failed_checks)
     raise CiWorkflowError(f"channel contract drift detected: {detail}")
+
+
+def run_channels_runtime_smoke(*, repo_root: Path, artifact_path: Path | None = None) -> None:
+    """Exercise deterministic live-like channel runtime checks."""
+    resolved_root = repo_root.expanduser().resolve()
+    overlay_path = resolved_root / "platform" / "configs" / "openclaw" / "30-channels.json5"
+    allowlist_source_path = (
+        resolved_root / "platform" / "configs" / "source-allowlists.example.yaml"
+    )
+    if not overlay_path.is_file():
+        raise CiWorkflowError(f"channels runtime overlay missing: {overlay_path}")
+    if not allowlist_source_path.is_file():
+        raise CiWorkflowError(f"channels allowlist source missing: {allowlist_source_path}")
+
+    overlay_payload = _as_str_object_dict(
+        load_json5(overlay_path, allow_duplicate_keys=False),
+        path=str(overlay_path),
+    )
+    channels_payload = _as_str_object_dict(
+        overlay_payload.get("channels"),
+        path="channels",
+    )
+    telegram_payload = _as_str_object_dict(
+        channels_payload.get("telegram"),
+        path="channels.telegram",
+    )
+    whatsapp_payload = _as_str_object_dict(
+        channels_payload.get("whatsapp"),
+        path="channels.whatsapp",
+    )
+
+    token_spec = _as_str_object_dict(
+        telegram_payload.get("botToken"),
+        path="channels.telegram.botToken",
+    )
+    token_env_id = _as_required_string(token_spec.get("id"), path="channels.telegram.botToken.id")
+    token_source = _as_required_string(
+        token_spec.get("source"), path="channels.telegram.botToken.source"
+    )
+    if token_source != "env":
+        raise CiWorkflowError(
+            "channels.telegram.botToken.source must be env for runtime smoke validation"
+        )
+    token_value = (
+        os.environ.get(token_env_id, "").strip()
+        or os.environ.get(_CHANNELS_RUNTIME_TOKEN_ENV_FALLBACK, "").strip()
+    )
+    if not token_value:
+        raise CiWorkflowError(
+            "telegram auth material was not loaded: set "
+            f"{token_env_id} or {_CHANNELS_RUNTIME_TOKEN_ENV_FALLBACK}"
+        )
+
+    rendered_payload = _as_str_object_dict(
+        render_fragment(load_source(allowlist_source_path)),
+        path="rendered_fragment",
+    )
+    rendered_channels = _as_str_object_dict(
+        rendered_payload.get("channels"),
+        path="rendered_fragment.channels",
+    )
+    rendered_telegram = _as_str_object_dict(
+        rendered_channels.get("telegram"),
+        path="rendered_fragment.channels.telegram",
+    )
+    rendered_whatsapp = _as_str_object_dict(
+        rendered_channels.get("whatsapp"),
+        path="rendered_fragment.channels.whatsapp",
+    )
+    telegram_allowlist = _as_string_list(
+        rendered_telegram.get("allowFrom"),
+        path="rendered_fragment.channels.telegram.allowFrom",
+    )
+    whatsapp_allowlist = _as_string_list(
+        rendered_whatsapp.get("allowFrom"),
+        path="rendered_fragment.channels.whatsapp.allowFrom",
+    )
+    if not telegram_allowlist:
+        raise CiWorkflowError("telegram allowlist cannot be empty for runtime smoke")
+    if not whatsapp_allowlist:
+        raise CiWorkflowError("whatsapp allowlist cannot be empty for runtime smoke")
+
+    telegram_allow_event = _simulate_dm_event(
+        channel_name="telegram",
+        channel_payload=telegram_payload,
+        sender=telegram_allowlist[0],
+        message="health check",
+    )
+    telegram_pairing_event = _simulate_dm_event(
+        channel_name="telegram",
+        channel_payload=telegram_payload,
+        sender="99999999",
+        message="pair me",
+    )
+    whatsapp_allow_event = _simulate_dm_event(
+        channel_name="whatsapp",
+        channel_payload=whatsapp_payload,
+        sender=whatsapp_allowlist[0],
+        message="status",
+    )
+    whatsapp_group_event = _simulate_group_event(
+        channel_name="whatsapp",
+        channel_payload=whatsapp_payload,
+        sender="+5511888888888",
+        group="+5511777777777",
+        message="group ping",
+    )
+
+    if not telegram_allow_event["accepted"]:
+        raise CiWorkflowError("telegram allowlisted inbound message was not accepted")
+    if telegram_allow_event["outbound"] is None:
+        raise CiWorkflowError("telegram outbound response path was not exercised")
+    if (
+        telegram_pairing_event["accepted"]
+        or telegram_pairing_event["decision"] != "pairing_required"
+    ):
+        raise CiWorkflowError("telegram pairing policy enforcement did not trigger as expected")
+    if not whatsapp_allow_event["accepted"]:
+        raise CiWorkflowError("whatsapp allowlisted inbound message was not accepted")
+    if whatsapp_allow_event["outbound"] is None:
+        raise CiWorkflowError("whatsapp outbound response path was not exercised")
+    if (
+        whatsapp_group_event["accepted"]
+        or whatsapp_group_event["decision"] != "group_allowlist_blocked"
+    ):
+        raise CiWorkflowError("whatsapp group allowlist enforcement did not trigger as expected")
+
+    report_payload: dict[str, object] = {
+        "channels_runtime_smoke": "pass",
+        "auth_material": {
+            "telegram_token_env": token_env_id,
+            "telegram_token_length": len(token_value),
+            "token_loaded_via_fallback_env": not bool(os.environ.get(token_env_id, "").strip()),
+        },
+        "events": {
+            "telegram_allowlisted_dm": telegram_allow_event,
+            "telegram_pairing_dm": telegram_pairing_event,
+            "whatsapp_allowlisted_dm": whatsapp_allow_event,
+            "whatsapp_group_allowlist_block": whatsapp_group_event,
+        },
+    }
+    if artifact_path is None:
+        return
+
+    resolved_artifact_path = artifact_path.expanduser().resolve()
+    resolved_artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_artifact_path.write_text(
+        json.dumps(report_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _simulate_dm_event(
+    *,
+    channel_name: str,
+    channel_payload: Mapping[str, object],
+    sender: str,
+    message: str,
+) -> dict[str, object]:
+    """Simulate one deterministic DM channel event."""
+    normalized_sender = _normalize_sender(channel_name=channel_name, sender=sender)
+    allow_from = _as_string_list(channel_payload.get("allowFrom"), path=f"{channel_name}.allowFrom")
+    dm_policy = _as_required_string(
+        channel_payload.get("dmPolicy"), path=f"{channel_name}.dmPolicy"
+    )
+
+    if normalized_sender in allow_from:
+        return {
+            "channel": channel_name,
+            "accepted": True,
+            "decision": "allowlisted",
+            "inbound": {"sender": normalized_sender, "message": message, "scope": "dm"},
+            "outbound": {
+                "recipient": normalized_sender,
+                "message": f"[{channel_name}] ack: {message}",
+            },
+        }
+    if dm_policy == "pairing":
+        return {
+            "channel": channel_name,
+            "accepted": False,
+            "decision": "pairing_required",
+            "inbound": {"sender": normalized_sender, "message": message, "scope": "dm"},
+            "outbound": None,
+        }
+    return {
+        "channel": channel_name,
+        "accepted": False,
+        "decision": "dm_rejected",
+        "inbound": {"sender": normalized_sender, "message": message, "scope": "dm"},
+        "outbound": None,
+    }
+
+
+def _simulate_group_event(
+    *,
+    channel_name: str,
+    channel_payload: Mapping[str, object],
+    sender: str,
+    group: str,
+    message: str,
+) -> dict[str, object]:
+    """Simulate one deterministic group channel event."""
+    normalized_sender = _normalize_sender(channel_name=channel_name, sender=sender)
+    normalized_group = _normalize_sender(channel_name=channel_name, sender=group)
+    group_policy = _as_required_string(
+        channel_payload.get("groupPolicy"),
+        path=f"{channel_name}.groupPolicy",
+    )
+    group_allow_from = _as_string_list(
+        channel_payload.get("groupAllowFrom", []),
+        path=f"{channel_name}.groupAllowFrom",
+    )
+
+    if group_policy == "allowlist" and normalized_group not in group_allow_from:
+        return {
+            "channel": channel_name,
+            "accepted": False,
+            "decision": "group_allowlist_blocked",
+            "inbound": {
+                "sender": normalized_sender,
+                "group": normalized_group,
+                "message": message,
+                "scope": "group",
+            },
+            "outbound": None,
+        }
+    return {
+        "channel": channel_name,
+        "accepted": True,
+        "decision": "group_allowed",
+        "inbound": {
+            "sender": normalized_sender,
+            "group": normalized_group,
+            "message": message,
+            "scope": "group",
+        },
+        "outbound": {
+            "recipient": normalized_group,
+            "message": f"[{channel_name}] ack: {message}",
+        },
+    }
+
+
+def _normalize_sender(*, channel_name: str, sender: str) -> str:
+    """Normalize one sender identifier for channel-policy checks."""
+    if channel_name == "telegram":
+        return normalize_telegram(sender)
+    if channel_name == "whatsapp":
+        return normalize_whatsapp(sender)
+    raise CiWorkflowError(f"unsupported channel for runtime smoke: {channel_name}")
+
+
+def _as_required_string(value: object, *, path: str) -> str:
+    """Validate one required string payload."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise CiWorkflowError(f"{path} must be a non-empty string")
+
+
+def _as_str_object_dict(value: object, *, path: str) -> dict[str, object]:
+    """Validate a string-keyed dictionary payload."""
+    if not isinstance(value, Mapping):
+        raise CiWorkflowError(f"{path} must be a mapping")
+    validated: dict[str, object] = {}
+    for key, item in cast(Mapping[object, object], value).items():
+        if not isinstance(key, str):
+            raise CiWorkflowError(f"{path} contains a non-string key")
+        validated[key] = item
+    return validated
+
+
+def _as_string_list(value: object, *, path: str) -> list[str]:
+    """Validate a list of non-empty strings."""
+    if not isinstance(value, list):
+        raise CiWorkflowError(f"{path} must be a list")
+    validated: list[str] = []
+    for item in cast(list[object], value):
+        if not isinstance(item, str) or not item.strip():
+            raise CiWorkflowError(f"{path} must contain non-empty strings")
+        validated.append(item.strip())
+    return validated
 
 
 def run_recovery_smoke(*, tmp_root: Path) -> None:

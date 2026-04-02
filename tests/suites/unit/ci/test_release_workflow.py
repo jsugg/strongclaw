@@ -255,6 +255,77 @@ def test_run_release_runtime_readiness_executes_expected_commands(
 
     assert seen_commands[0][:4] == [sys.executable, "-m", "clawops", "doctor"]
     assert any(command[:3] == [sys.executable, "-m", "openclaw"] for command in seen_commands)
+    assert any(
+        command[:5]
+        == [
+            sys.executable,
+            "./tests/scripts/security_workflow.py",
+            "run-channels-runtime-smoke",
+            "--repo-root",
+            ".",
+        ]
+        for command in seen_commands
+    )
+    assert any(
+        command[:4]
+        == [
+            sys.executable,
+            "./tests/scripts/launch_readiness.py",
+            "generate-audit-packet",
+            "--output-dir",
+        ]
+        for command in seen_commands
+    )
+    assert any(
+        command[:4]
+        == [
+            "uv",
+            "run",
+            "pytest",
+            "-q",
+        ]
+        and command[-1]
+        == "tests/suites/contracts/repo/launch_readiness/test_launch_readiness_audit_packet.py"
+        for command in seen_commands
+    )
+
+
+def test_run_release_runtime_readiness_runs_launch_contract_in_live_mode(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Runtime readiness should execute launch-readiness contracts with live artifact env wiring."""
+    seen_calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        capture_output: bool = False,
+    ) -> Any:
+        del cwd, timeout_seconds, capture_output
+        seen_calls.append((command, env))
+        if command[:3] == [sys.executable, "-m", "openclaw"]:
+            return SimpleNamespace(stdout="", stderr="")
+        return None
+
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(release_helpers.shutil, "which", return_value=None)
+
+    ci_workflows.run_release_runtime_readiness(repo_root=tmp_path)
+
+    live_call = next(
+        (call for call in seen_calls if call[0][:4] == ["uv", "run", "pytest", "-q"]),
+        None,
+    )
+    assert live_call is not None
+    command, env = live_call
+    assert command[-1] == release_helpers.LAUNCH_READINESS_CONTRACT_TEST_PATH
+    assert env is not None
+    assert env["STRONGCLAW_LAUNCH_READINESS_ARTIFACT_MODE"] == "live"
+    assert env["STRONGCLAW_LAUNCH_READINESS_ARTIFACT_ROOT"]
 
 
 def test_release_policy_rejects_forbidden_path_in_wheel(tmp_path: Path) -> None:

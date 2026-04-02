@@ -21,6 +21,7 @@ from tests.utils.helpers._ci_workflows.security import (  # noqa: E402
     enforce_independent_review,
     install_gitleaks,
     install_syft,
+    run_channels_runtime_smoke,
     run_recovery_smoke_with_modes,
     verify_channels_contract,
     write_empty_sarif,
@@ -75,6 +76,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repo-root",
         type=Path,
         default=REPO_ROOT,
+    )
+    channels_runtime_parser = subparsers.add_parser(
+        "run-channels-runtime-smoke",
+        help="Exercise deterministic live-like channels runtime acceptance checks.",
+    )
+    channels_runtime_parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=REPO_ROOT,
+    )
+    channels_runtime_parser.add_argument(
+        "--artifact-path",
+        type=Path,
+        default=None,
+        help="Optional JSON evidence output path.",
     )
 
     recovery_parser = subparsers.add_parser(
@@ -161,6 +177,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "verify-channels-contract":
             verify_channels_contract(
                 repo_root=Path(args.repo_root).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "run-channels-runtime-smoke":
+            run_channels_runtime_smoke(
+                repo_root=Path(args.repo_root).expanduser().resolve(),
+                artifact_path=(
+                    Path(args.artifact_path).expanduser().resolve()
+                    if args.artifact_path is not None
+                    else None
+                ),
             )
             return 0
         if args.command == "run-recovery-smoke":

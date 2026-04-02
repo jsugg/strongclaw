@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -131,6 +132,28 @@ def test_enforce_coverage_thresholds_checks_overall_and_critical_modules(tmp_pat
     with pytest.raises(CiWorkflowError, match="strongclaw_recovery.py"):
         ci_workflows.enforce_coverage_thresholds(coverage_file)
 
+    coverage_file.write_text(
+        "\n".join(
+            [
+                '<coverage line-rate="0.80">',
+                "  <packages>",
+                '    <package name="clawops">',
+                "      <classes>",
+                '        <class filename="src/clawops/strongclaw_recovery.py" line-rate="0.81"/>',
+                '        <class filename="src/clawops/strongclaw_model_auth.py" line-rate="0.76"/>',
+                '        <class filename="src/clawops/strongclaw_varlock_env.py" line-rate="0.75"/>',
+                '        <class filename="src/clawops/strongclaw_bootstrap.py" line-rate="0.34"/>',
+                "      </classes>",
+                "    </package>",
+                "  </packages>",
+                "</coverage>",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CiWorkflowError, match="strongclaw_bootstrap.py"):
+        ci_workflows.enforce_coverage_thresholds(coverage_file)
+
 
 def test_write_empty_sarif_writes_expected_payload(tmp_path: Path) -> None:
     """The placeholder SARIF payload should preserve the expected schema and category driver."""
@@ -166,6 +189,104 @@ def test_verify_channels_contract_raises_ci_error_when_report_fails(
 
     with pytest.raises(CiWorkflowError, match="channel-docs-pairing"):
         ci_workflows.verify_channels_contract(repo_root=tmp_path)
+
+
+def test_run_channels_runtime_smoke_succeeds_with_deterministic_runtime_checks(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Runtime smoke should validate auth loading plus deterministic inbound/outbound checks."""
+    overlay_path = tmp_path / "platform" / "configs" / "openclaw" / "30-channels.json5"
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay_path.write_text(
+        "\n".join(
+            [
+                "{",
+                '  "channels": {',
+                '    "defaults": {"groupPolicy": "allowlist"},',
+                '    "telegram": {',
+                '      "allowFrom": ["tg:12345678"],',
+                '      "botToken": {"id": "TELEGRAM_BOT_TOKEN", "source": "env", "provider": "default"},',
+                '      "dmPolicy": "pairing",',
+                '      "groupPolicy": "allowlist"',
+                "    },",
+                '    "whatsapp": {',
+                '      "allowFrom": ["+5511999999999"],',
+                '      "dmPolicy": "pairing",',
+                '      "groupPolicy": "allowlist",',
+                '      "groupAllowFrom": []',
+                "    }",
+                "  }",
+                "}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    allowlists_path = tmp_path / "platform" / "configs" / "source-allowlists.example.yaml"
+    allowlists_path.write_text(
+        "\n".join(
+            [
+                "telegram_allow:",
+                '  - "12345678"',
+                "whatsapp_allow:",
+                '  - "+5511999999999"',
+                "telegram_models:",
+                '  "12345678": "messaging"',
+                "whatsapp_models:",
+                '  "+5511999999999": "messaging"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    artifact_path = tmp_path / "channels-runtime-smoke.json"
+    test_context.env.set("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN", "token-from-smoke-env")
+
+    ci_workflows.run_channels_runtime_smoke(repo_root=tmp_path, artifact_path=artifact_path)
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["channels_runtime_smoke"] == "pass"
+    events = cast(dict[str, object], payload["events"])
+    assert cast(dict[str, object], events["telegram_allowlisted_dm"])["accepted"] is True
+    assert cast(dict[str, object], events["telegram_pairing_dm"])["decision"] == "pairing_required"
+    assert cast(dict[str, object], events["whatsapp_group_allowlist_block"])["decision"] == (
+        "group_allowlist_blocked"
+    )
+
+
+def test_run_channels_runtime_smoke_rejects_missing_auth_material(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Runtime smoke should fail when required Telegram auth material is unavailable."""
+    overlay_path = tmp_path / "platform" / "configs" / "openclaw" / "30-channels.json5"
+    overlay_path.parent.mkdir(parents=True, exist_ok=True)
+    overlay_path.write_text(
+        "\n".join(
+            [
+                "{",
+                '  "channels": {',
+                '    "defaults": {"groupPolicy": "allowlist"},',
+                '    "telegram": {"allowFrom": ["tg:12345678"], "botToken": {"id": "TELEGRAM_BOT_TOKEN", "source": "env"}, "dmPolicy": "pairing", "groupPolicy": "allowlist"},',
+                '    "whatsapp": {"allowFrom": ["+5511999999999"], "dmPolicy": "pairing", "groupPolicy": "allowlist", "groupAllowFrom": []}',
+                "  }",
+                "}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    allowlists_path = tmp_path / "platform" / "configs" / "source-allowlists.example.yaml"
+    allowlists_path.write_text(
+        'telegram_allow:\n  - "12345678"\nwhatsapp_allow:\n  - "+5511999999999"\n',
+        encoding="utf-8",
+    )
+    test_context.env.remove("TELEGRAM_BOT_TOKEN")
+    test_context.env.remove("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN")
+
+    with pytest.raises(CiWorkflowError, match="telegram auth material was not loaded"):
+        ci_workflows.run_channels_runtime_smoke(repo_root=tmp_path)
 
 
 def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_available(
@@ -326,6 +447,37 @@ def test_security_workflow_main_dispatches_verify_channels_contract(
 
     assert exit_code == 0
     assert seen_calls == [tmp_path.resolve()]
+
+
+def test_security_workflow_main_dispatches_run_channels_runtime_smoke(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch channels runtime smoke execution."""
+    seen_calls: list[tuple[Path, Path | None]] = []
+
+    def fake_run_channels_runtime_smoke(*, repo_root: Path, artifact_path: Path | None) -> None:
+        seen_calls.append((repo_root, artifact_path))
+
+    test_context.patch.patch_object(
+        security_workflow_script,
+        "run_channels_runtime_smoke",
+        new=fake_run_channels_runtime_smoke,
+    )
+
+    artifact_path = tmp_path / "channels-runtime-smoke.json"
+    exit_code = security_workflow_script.main(
+        [
+            "run-channels-runtime-smoke",
+            "--repo-root",
+            str(tmp_path),
+            "--artifact-path",
+            str(artifact_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [(tmp_path.resolve(), artifact_path.resolve())]
 
 
 def test_security_workflow_main_dispatches_run_recovery_smoke(
