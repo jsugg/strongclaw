@@ -4,10 +4,33 @@ from __future__ import annotations
 
 import pathlib
 import textwrap
+from collections.abc import Sequence
+from dataclasses import replace
 
 from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
 from clawops.hypermemory.config import matches_glob
-from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
+from tests.utils.helpers.hypermemory import (
+    FakeQdrantBackend,
+    build_workspace,
+    write_hypermemory_config,
+)
+
+
+class _BatchSplitTimeoutEmbeddingProvider:
+    """Fail batched embedding calls so reindex must split batches to recover."""
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def embed_texts(
+        self, texts: Sequence[str], *, timeout_ms: int | None = None
+    ) -> list[list[float]]:
+        del timeout_ms
+        batch_size = len(texts)
+        self.calls.append(batch_size)
+        if batch_size > 1:
+            raise RuntimeError("embedding request timed out")
+        return [[1.0, 0.0, 0.0]]
 
 
 def test_load_shipped_hypermemory_config() -> None:
@@ -53,6 +76,43 @@ def test_hypermemory_reindex_and_search(tmp_path: pathlib.Path) -> None:
     assert hits
     assert hits[0].path == "docs/runbook.md"
     assert "Rotate the gateway token" in hits[0].snippet
+
+
+def test_hypermemory_reindex_splits_embedding_batches_after_timeout(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+
+    config = load_config(config_path)
+    config = replace(
+        config,
+        backend=replace(config.backend, active="qdrant_sparse_dense_hybrid", fallback="sqlite_fts"),
+        embedding=replace(
+            config.embedding,
+            enabled=True,
+            provider="compatible-http",
+            model="dense-test",
+            base_url="http://127.0.0.1:9",
+            batch_size=8,
+        ),
+        qdrant=replace(config.qdrant, enabled=True, collection="hypermemory"),
+    )
+    embedding_provider = _BatchSplitTimeoutEmbeddingProvider()
+    engine = HypermemoryEngine(
+        config,
+        embedding_provider=embedding_provider,
+        vector_backend=FakeQdrantBackend(),
+    )
+
+    summary = engine.reindex()
+    status = engine.status()
+
+    assert summary.chunks >= 3
+    assert any(size > 1 for size in embedding_provider.calls)
+    assert 1 in embedding_provider.calls
+    assert int(status["vectorItems"]) > 0
 
 
 def test_hypermemory_reindex_deduplicates_overlapping_corpus_sources(
