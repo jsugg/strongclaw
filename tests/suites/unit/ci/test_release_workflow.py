@@ -14,6 +14,7 @@ import pytest
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import ci_workflows
 from tests.utils.helpers._ci_workflows import release as release_helpers
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_clean_artifact_directories_removes_paths(tmp_path: Path) -> None:
@@ -354,3 +355,15 @@ def test_release_policy_rejects_forbidden_path_in_sdist(tmp_path: Path) -> None:
 
     with pytest.raises(ci_workflows.CiWorkflowError, match="contains forbidden path"):
         release_helpers.enforce_artifact_content_policy(sdist_path)
+
+
+def test_required_runtime_asset_paths_exist_in_packaged_assets_tree() -> None:
+    """Runtime-asset smoke requirements should only reference shipped packaged files."""
+    packaged_asset_root = REPO_ROOT / "src" / "clawops" / "assets" / "platform"
+    missing_paths = [
+        relative_path
+        for relative_path in release_helpers.REQUIRED_RUNTIME_ASSET_PATHS
+        if not (packaged_asset_root / relative_path).is_file()
+    ]
+
+    assert missing_paths == []
