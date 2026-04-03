@@ -195,7 +195,7 @@ def test_run_channels_runtime_smoke_succeeds_with_deterministic_runtime_checks(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Runtime smoke should validate auth loading plus deterministic inbound/outbound checks."""
+    """Runtime smoke should use rendered allowlists when overlay sender IDs are placeholders."""
     overlay_path = tmp_path / "platform" / "configs" / "openclaw" / "30-channels.json5"
     overlay_path.parent.mkdir(parents=True, exist_ok=True)
     overlay_path.write_text(
@@ -205,13 +205,13 @@ def test_run_channels_runtime_smoke_succeeds_with_deterministic_runtime_checks(
                 '  "channels": {',
                 '    "defaults": {"groupPolicy": "allowlist"},',
                 '    "telegram": {',
-                '      "allowFrom": ["tg:12345678"],',
+                '      "allowFrom": ["tg:__OWNER_TELEGRAM_ID__"],',
                 '      "botToken": {"id": "TELEGRAM_BOT_TOKEN", "source": "env", "provider": "default"},',
                 '      "dmPolicy": "pairing",',
                 '      "groupPolicy": "allowlist"',
                 "    },",
                 '    "whatsapp": {',
-                '      "allowFrom": ["+5511999999999"],',
+                '      "allowFrom": ["+5511888888888"],',
                 '      "dmPolicy": "pairing",',
                 '      "groupPolicy": "allowlist",',
                 '      "groupAllowFrom": []',

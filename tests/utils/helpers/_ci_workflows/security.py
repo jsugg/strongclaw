@@ -407,28 +407,36 @@ def run_channels_runtime_smoke(*, repo_root: Path, artifact_path: Path | None = 
         raise CiWorkflowError("telegram allowlist cannot be empty for runtime smoke")
     if not whatsapp_allowlist:
         raise CiWorkflowError("whatsapp allowlist cannot be empty for runtime smoke")
+    effective_telegram_payload = _with_allowlist(
+        channel_payload=telegram_payload,
+        allow_from=telegram_allowlist,
+    )
+    effective_whatsapp_payload = _with_allowlist(
+        channel_payload=whatsapp_payload,
+        allow_from=whatsapp_allowlist,
+    )
 
     telegram_allow_event = _simulate_dm_event(
         channel_name="telegram",
-        channel_payload=telegram_payload,
+        channel_payload=effective_telegram_payload,
         sender=telegram_allowlist[0],
         message="health check",
     )
     telegram_pairing_event = _simulate_dm_event(
         channel_name="telegram",
-        channel_payload=telegram_payload,
+        channel_payload=effective_telegram_payload,
         sender="99999999",
         message="pair me",
     )
     whatsapp_allow_event = _simulate_dm_event(
         channel_name="whatsapp",
-        channel_payload=whatsapp_payload,
+        channel_payload=effective_whatsapp_payload,
         sender=whatsapp_allowlist[0],
         message="status",
     )
     whatsapp_group_event = _simulate_group_event(
         channel_name="whatsapp",
-        channel_payload=whatsapp_payload,
+        channel_payload=effective_whatsapp_payload,
         sender="+5511888888888",
         group="+5511777777777",
         message="group ping",
@@ -476,6 +484,17 @@ def run_channels_runtime_smoke(*, repo_root: Path, artifact_path: Path | None = 
         json.dumps(report_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _with_allowlist(
+    *,
+    channel_payload: Mapping[str, object],
+    allow_from: list[str],
+) -> dict[str, object]:
+    """Return one channel payload with a deterministic allowFrom list."""
+    merged = dict(channel_payload)
+    merged["allowFrom"] = list(allow_from)
+    return merged
 
 
 def _simulate_dm_event(
