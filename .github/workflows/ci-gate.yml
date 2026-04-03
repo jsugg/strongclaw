@@ -32,10 +32,9 @@ jobs:
         run: python3 ./tests/scripts/ci_gate.py emit-filters --filters-file .github/ci/ci-gate-filters.yml --github-output-file "$GITHUB_OUTPUT"
       - id: filter
         name: Detect changed lanes
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: ${{ steps.export_filters.outputs.filters }}
-          predicate-quantifier: every
           list-files: json
       - id: selection
         name: Summarize lane selection

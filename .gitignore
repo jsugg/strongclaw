@@ -29,3 +29,4 @@ vendor/lossless-claw/
 .coverage*
 turn.sh
 .omx/
+memory.json
