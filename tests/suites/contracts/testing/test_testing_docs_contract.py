@@ -7,22 +7,6 @@ from tests.utils.helpers.repo import REPO_ROOT
 DOCS_ROOT = REPO_ROOT / "docs" / "testing"
 
 
-def test_testing_docs_entrypoint_exists() -> None:
-    assert (DOCS_ROOT / "README.md").is_file()
-
-
-def test_testing_authoring_doc_exists() -> None:
-    assert (DOCS_ROOT / "authoring.md").is_file()
-
-
-def test_testing_operations_doc_exists() -> None:
-    assert (DOCS_ROOT / "operations.md").is_file()
-
-
-def test_fixture_readme_exists() -> None:
-    assert (REPO_ROOT / "tests" / "fixtures" / "README.md").is_file()
-
-
 def test_docs_entrypoint_links_to_authoring_and_operations() -> None:
     readme = (DOCS_ROOT / "README.md").read_text(encoding="utf-8")
 

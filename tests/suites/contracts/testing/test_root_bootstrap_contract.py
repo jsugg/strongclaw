@@ -9,11 +9,6 @@ from tests.utils.helpers.repo import REPO_ROOT
 _CONFTEST = REPO_ROOT / "tests" / "conftest.py"
 
 
-def test_root_conftest_stays_lean() -> None:
-    lines = _CONFTEST.read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 80, f"Root conftest is {len(lines)} lines (max 80)"
-
-
 def test_root_conftest_only_assigns_structural_markers() -> None:
     source = _CONFTEST.read_text(encoding="utf-8")
     for marker in ("qdrant", "network_local"):

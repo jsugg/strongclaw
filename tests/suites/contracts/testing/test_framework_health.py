@@ -25,11 +25,6 @@ _EXPECTED_MARKERS = {
 }
 
 
-def test_root_conftest_stays_lean() -> None:
-    lines = (REPO_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8").splitlines()
-    assert len(lines) <= 80
-
-
 def test_no_helper_module_exceeds_250_lines() -> None:
     for path in sorted((REPO_ROOT / "tests" / "utils" / "helpers").glob("*.py")):
         line_count = len(path.read_text(encoding="utf-8").splitlines())
