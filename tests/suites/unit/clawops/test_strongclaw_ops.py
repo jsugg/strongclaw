@@ -12,6 +12,7 @@ from typing import Any, Protocol, cast
 import pytest
 
 from clawops import strongclaw_ops
+from clawops.strongclaw_runtime import CommandError
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -1046,6 +1047,50 @@ def test_wait_for_compose_service_emits_start_and_ready_events(
     assert observed_events[0][1]["service"] == "postgres"
     assert observed_events[1][0] == "clawops.ops.sidecars.wait.ready"
     assert observed_events[1][1]["service"] == "postgres"
+
+
+def test_wait_for_compose_service_retries_transient_status_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose status probing should tolerate transient command errors while polling."""
+    execution = cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={},
+    )
+    attempts = {"count": 0}
+
+    def _compose_service_statuses_flaky(_execution: object) -> dict[str, object]:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise CommandError("failed to inspect sidecar services: transient compose error")
+        return {
+            "postgres": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="postgres",
+                state="running",
+                health="healthy",
+            )
+        }
+
+    monkeypatch.setattr(
+        strongclaw_ops, "_compose_service_statuses", _compose_service_statuses_flaky
+    )
+
+    def _sleep_noop(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(strongclaw_ops.time, "sleep", _sleep_noop)
+
+    cast(Any, strongclaw_ops)._wait_for_compose_service(
+        execution,
+        service_name="postgres",
+        state="running",
+        health="healthy",
+        timeout_seconds=30,
+    )
+
+    assert attempts["count"] == 2
 
 
 def test_gateway_start_uses_unbounded_subprocess_timeout(

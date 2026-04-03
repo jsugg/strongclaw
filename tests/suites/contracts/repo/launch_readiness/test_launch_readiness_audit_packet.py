@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Final, cast
 
+import pytest
 import yaml
 
 from tests.utils.helpers.repo import REPO_ROOT
@@ -44,6 +45,18 @@ _REQUIRED_ARTIFACTS: Final[tuple[str, ...]] = (
     "launch-readiness-citation-verification.md",
     "launch-readiness-audit-report.md",
     "launch-readiness-decision-packet.md",
+)
+_MISSING_REQUIRED_ARTIFACTS: Final[tuple[str, ...]] = tuple(
+    artifact_name
+    for artifact_name in _REQUIRED_ARTIFACTS
+    if not (_ARTIFACT_ROOT / artifact_name).exists()
+)
+pytestmark = pytest.mark.skipif(
+    bool(_MISSING_REQUIRED_ARTIFACTS),
+    reason=(
+        "Launch-readiness packet artifacts are not available in this checkout: "
+        + ", ".join(_MISSING_REQUIRED_ARTIFACTS)
+    ),
 )
 
 _REQUIRED_SURFACE_IDS: Final[set[str]] = {

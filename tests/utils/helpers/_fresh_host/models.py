@@ -7,6 +7,7 @@ from typing import Final, Literal
 
 ScenarioId = Literal["linux", "macos-sidecars", "macos-browser-lab"]
 PlatformName = Literal["linux", "macos"]
+FreshnessMode = Literal["warm", "cold"]
 PhaseStatus = Literal["success", "failure", "skipped"]
 
 LOG_PREFIX: Final[str] = "[fresh-host]"
@@ -78,6 +79,7 @@ class FreshHostContext:
     diagnostics_dir: str
     profile: str
     runtime_provider: str | None
+    freshness_mode: FreshnessMode
     docker_pull_parallelism: int
     docker_pull_max_attempts: int
     compose_variant: str | None
@@ -100,6 +102,7 @@ class FreshHostReport:
     job_name: str
     platform: str
     runtime_provider: str | None
+    freshness_mode: FreshnessMode
     phases: list[PhaseResult]
     diagnostics_dir: str
     runtime_report_path: str | None

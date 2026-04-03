@@ -9,6 +9,7 @@ import pytest
 from tests.utils.helpers._ci_workflows.change_router import (
     CiGateSelection,
     evaluate_filter_matches,
+    evidence_from_changed_paths,
     evidence_from_output_file_lists,
     load_ci_gate_filters,
     parse_output_file_list,
@@ -59,6 +60,7 @@ def test_core_runtime_change_routes_to_heavy_lanes() -> None:
 
     assert selection.docs_only is False
     assert selection.fresh_host is True
+    assert selection.fresh_host_coldstart is False
     assert selection.compatibility_matrix is True
     assert selection.memory_plugin is True
     assert selection.security is True
@@ -86,7 +88,15 @@ def test_dot_github_workflow_path_is_not_stripped_from_filter_matching() -> None
     selection = _select(".github/workflows/fresh-host-acceptance.yml")
 
     assert selection.fresh_host is True
+    assert selection.fresh_host_coldstart is False
     assert selection.docs_only is False
+
+
+def test_fresh_host_coldstart_paths_route_to_coldstart_lane() -> None:
+    selection = _select("tests/utils/helpers/_hosted_docker/image_cache.py")
+
+    assert selection.fresh_host is True
+    assert selection.fresh_host_coldstart is True
 
 
 def test_ci_gate_filters_file_exists() -> None:
@@ -97,6 +107,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
     selection = CiGateSelection(
         docs_only=True,
         fresh_host=True,
+        fresh_host_coldstart=True,
         security=True,
         harness=True,
         memory_plugin=True,
@@ -105,6 +116,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
     evidence = evidence_from_output_file_lists(
         docs_only_files='["platform/docs/CI_AND_SECURITY.md"]',
         fresh_host_files='["src/clawops/strongclaw_runtime.py"]',
+        fresh_host_coldstart_files='["tests/utils/helpers/_hosted_docker/image_cache.py"]',
         security_files='["security/semgrep/semgrep.yml"]',
         harness_files='["platform/configs/harness/policy_regressions.yaml"]',
         memory_plugin_files='["platform/plugins/memory-lancedb-pro/package.json"]',
@@ -115,6 +127,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
 
     assert "`docs_only` is `True` because matching changes were detected" in summary
     assert "`harness` is `True` because matching changes were detected" in summary
+    assert "`fresh_host_coldstart` is `True` because matching changes were detected" in summary
     assert (
         "`docs_parity_required` is `False` even with `docs_only=True` because heavy lanes are also required"
         in summary
@@ -124,3 +137,19 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
 def test_parse_output_file_list_rejects_invalid_json() -> None:
     with pytest.raises(CiWorkflowError):
         parse_output_file_list("not-json", label="docs_only")
+
+
+def test_evidence_from_changed_paths_uses_repo_filter_logic() -> None:
+    filters = load_ci_gate_filters(_FILTERS_FILE)
+    evidence = evidence_from_changed_paths(
+        filters=filters,
+        changed_paths=(
+            ".github/workflows/fresh-host-core.yml",
+            "tests/utils/helpers/_hosted_docker/image_cache.py",
+            "platform/docs/CI_AND_SECURITY.md",
+        ),
+    )
+
+    assert ".github/workflows/fresh-host-core.yml" in evidence.fresh_host
+    assert "tests/utils/helpers/_hosted_docker/image_cache.py" in evidence.fresh_host_coldstart
+    assert "platform/docs/CI_AND_SECURITY.md" in evidence.docs_only

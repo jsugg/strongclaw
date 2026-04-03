@@ -234,6 +234,32 @@ def _is_security_critical_path(path: str) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in _CRITICAL_REVIEW_PATH_PATTERNS)
 
 
+def _has_independent_collaborator(
+    *,
+    repository: str,
+    author_login: str,
+    github_token: str,
+    github_api_base: str,
+) -> bool:
+    """Return whether the repository has at least one non-author collaborator with write access."""
+    collaborators = _github_paginated_get(
+        url=f"{github_api_base.rstrip('/')}/repos/{repository}/collaborators?affiliation=direct&per_page=100",
+        token=github_token,
+    )
+    for row in collaborators:
+        login = row.get("login")
+        if not isinstance(login, str) or login == author_login:
+            continue
+        permissions = row.get("permissions")
+        if not isinstance(permissions, dict):
+            continue
+        permissions_obj = cast(dict[object, object], permissions)
+        for permission_name in ("admin", "maintain", "push"):
+            if bool(permissions_obj.get(permission_name)):
+                return True
+    return False
+
+
 def enforce_independent_review(
     *,
     event_path: Path,
@@ -275,6 +301,14 @@ def enforce_independent_review(
             changed_paths.append(filename)
     critical_paths = sorted({path for path in changed_paths if _is_security_critical_path(path)})
     if not critical_paths:
+        return
+
+    if not _has_independent_collaborator(
+        repository=repository,
+        author_login=author_login,
+        github_token=github_token,
+        github_api_base=api_base,
+    ):
         return
 
     reviews = _github_paginated_get(

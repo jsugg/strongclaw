@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
@@ -28,6 +29,8 @@ from tests.utils.helpers._fresh_host.storage import (
     repo_root,
     write_report,
 )
+
+KPI_EVIDENCE_SCHEMA_VERSION = "1.0.0"
 
 
 def _diagnostic_commands(context: FreshHostContext) -> dict[Path, list[str]]:
@@ -285,6 +288,78 @@ def _append_timing_kpis(
     )
 
 
+def _kpi_evidence_path(context: FreshHostContext) -> Path:
+    """Resolve where to persist machine-readable KPI evidence."""
+    configured = os.environ.get("FRESH_HOST_KPI_EVIDENCE_FILE", "").strip()
+    if configured:
+        return context_path(configured)
+    evidence_name = f"ci-macos-kpi-{context.scenario_id}.json"
+    return repo_root(context.repo_root) / ".omx" / "evidence" / evidence_name
+
+
+def _write_kpi_evidence(
+    *,
+    context: FreshHostContext,
+    report: FreshHostReport,
+    scenario_phase_seconds: float,
+    runtime_report: dict[str, object] | None,
+    image_report: dict[str, object] | None,
+) -> Path:
+    """Persist machine-readable KPI evidence for downstream comparison tooling."""
+    runtime_install_seconds = _duration_seconds(runtime_report)
+    image_ensure_seconds = _duration_seconds(image_report)
+    tracked_execution_seconds = (
+        scenario_phase_seconds + (runtime_install_seconds or 0.0) + (image_ensure_seconds or 0.0)
+    )
+    report_window_seconds = _report_window_seconds(report)
+    unattributed_seconds = (
+        max(report_window_seconds - tracked_execution_seconds, 0.0)
+        if report_window_seconds is not None
+        else None
+    )
+    cache_state = os.environ.get("FRESH_HOST_IMAGE_CACHE_STATE")
+    cache_restored = os.environ.get("FRESH_HOST_IMAGE_CACHE_RESTORED")
+
+    payload = {
+        "schema_version": KPI_EVIDENCE_SCHEMA_VERSION,
+        "generated_at": now_iso(),
+        "run": {
+            "id": os.environ.get("GITHUB_RUN_ID"),
+            "attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+            "workflow": os.environ.get("GITHUB_WORKFLOW"),
+            "ref": os.environ.get("GITHUB_REF"),
+            "sha": os.environ.get("GITHUB_SHA"),
+        },
+        "scenario": {
+            "id": report.scenario_id,
+            "job_name": report.job_name,
+            "platform": report.platform,
+            "runtime_provider": report.runtime_provider,
+            "freshness_mode": context.freshness_mode,
+        },
+        "cache": {
+            "state": cache_state,
+            "restored": (
+                cache_restored.strip().lower() == "true" if cache_restored is not None else None
+            ),
+        },
+        "timings_seconds": {
+            "scenario_phase_total": round(scenario_phase_seconds, 3),
+            "runtime_install": runtime_install_seconds,
+            "image_ensure": image_ensure_seconds,
+            "tracked_execution_total": round(tracked_execution_seconds, 3),
+            "execution_window": report_window_seconds,
+            "unattributed_execution": unattributed_seconds,
+        },
+        "status": report.status,
+    }
+
+    evidence_path = _kpi_evidence_path(context)
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return evidence_path
+
+
 def _append_child_report_sections(
     lines: list[str],
     *,
@@ -332,6 +407,7 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         f"| Platform | {report.platform} |",
         f"| Status | {report.status} |",
         f"| Runtime provider | {report.runtime_provider or 'n/a'} |",
+        f"| Freshness mode | {context.freshness_mode} |",
         f"| Activate services in setup | {context.activate_services} |",
         f"| Docker pull parallelism | {context.docker_pull_parallelism} |",
         f"| Docker pull max attempts | {context.docker_pull_max_attempts} |",
@@ -343,6 +419,8 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         ("Homebrew cache hit", "FRESH_HOST_HOMEBREW_CACHE_HIT"),
         ("Runtime download cache", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED"),
         ("Runtime download cache hit", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT"),
+        ("Image cache state", "FRESH_HOST_IMAGE_CACHE_STATE"),
+        ("Image cache restored", "FRESH_HOST_IMAGE_CACHE_RESTORED"),
     ):
         raw_value = os.environ.get(env_name)
         if raw_value is not None:
@@ -363,6 +441,15 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         runtime_report=runtime_report,
         image_report=image_report,
     )
+    evidence_path = _write_kpi_evidence(
+        context=context,
+        report=report,
+        scenario_phase_seconds=scenario_phase_seconds,
+        runtime_report=runtime_report,
+        image_report=image_report,
+    )
+    lines.append(f"KPI evidence JSON: `{evidence_path}`")
+    lines.append("")
     lines.append(f"Diagnostics artifact root: `{report.diagnostics_dir}`")
     lines.append("")
     summary_file.parent.mkdir(parents=True, exist_ok=True)

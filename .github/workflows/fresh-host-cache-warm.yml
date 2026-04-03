@@ -104,7 +104,7 @@ jobs:
       - name: Warm macOS fresh-host package cache
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - name: Prepare macOS cache warm context
-        run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-sidecars --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}" --freshness-mode warm
       - name: Preview macOS cache warm context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Warm hosted macOS runtime downloads
@@ -116,6 +116,22 @@ jobs:
       - name: Save hosted macOS Docker image cache archive
         run: ./tests/scripts/hosted_docker.py save-image-cache --context "${FRESH_HOST_CONTEXT}"
       - name: Clean up macOS cache warm context
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
+      - name: Prepare macOS browser-lab cache warm context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario macos-browser-lab --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}" --freshness-mode warm
+      - name: Preview macOS browser-lab cache warm context
+        run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
+      - name: Warm hosted macOS runtime downloads for browser-lab
+        run: ./tests/scripts/hosted_docker.py install-runtime --context "${FRESH_HOST_CONTEXT}" --github-env-file "${GITHUB_ENV}"
+      - name: Restore hosted macOS browser-lab Docker images from cache
+        run: ./tests/scripts/hosted_docker.py restore-image-cache --context "${FRESH_HOST_CONTEXT}"
+      - name: Ensure hosted macOS browser-lab Docker images
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Save hosted macOS browser-lab Docker image cache archive
+        run: ./tests/scripts/hosted_docker.py save-image-cache --context "${FRESH_HOST_CONTEXT}"
+      - name: Clean up macOS browser-lab cache warm context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"

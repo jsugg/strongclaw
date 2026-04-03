@@ -89,6 +89,7 @@ def test_ensure_required_defaults_generates_neo4j_credentials(
     values = load_env_assignments(local_env_file)
     assert values["NEO4J_USERNAME"] == "neo4j"
     assert values["NEO4J_PASSWORD"] == "neo4j-password-secret"
+    assert values["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
 
 
 def test_configure_varlock_env_replaces_short_local_secrets(
@@ -212,7 +213,7 @@ def test_configure_varlock_env_non_interactive_autofills_local_ollama_model_chai
     assert values["OPENCLAW_OLLAMA_MODEL"] == "deepseek-r1:latest"
     assert values["OPENCLAW_DEFAULT_MODEL"] == "ollama/deepseek-r1:latest"
     assert values["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
-    assert values["HYPERMEMORY_EMBEDDING_API_BASE"] == "http://host.docker.internal:11434"
+    assert values["HYPERMEMORY_EMBEDDING_BASE_URL"] == "http://127.0.0.1:4000/v1"
 
 
 def test_varlock_env_main_honors_env_mode_wrapper(

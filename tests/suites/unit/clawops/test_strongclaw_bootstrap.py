@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -294,3 +294,378 @@ def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(
     assert wrapper_path.read_text(encoding="utf-8").endswith(
         f'exec nodejs "{qmd_dist_entry}" "$@"\n'
     )
+
+
+def test_bootstrap_host_darwin_happy_path(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Darwin bootstrap should run dependency setup, npm globals, and completion markers."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    recorded_commands: list[list[str]] = []
+    recorded_completion: dict[str, str] = {}
+
+    def _platform_system() -> str:
+        return "Darwin"
+
+    def _command_exists(command: str) -> bool:
+        return command == "brew"
+
+    def _ensure_command_or_brew(_command_name: str, _formula_name: str) -> None:
+        return None
+
+    def _ensure_python_runtime_darwin() -> None:
+        return None
+
+    def _ensure_node_runtime_darwin() -> None:
+        return None
+
+    def _ensure_docker_compatible_runtime(_host_os: str) -> bool:
+        return False
+
+    def _ensure_varlock_installed(_version: str) -> pathlib.Path:
+        return tmp_path / "varlock"
+
+    def _uv_sync_managed_environment(
+        _repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None = None,
+    ) -> pathlib.Path:
+        del home_dir
+        return tmp_path / "uv"
+
+    def _install_profile_assets(
+        _repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path | None = None,
+    ) -> list[str]:
+        del profile, home_dir
+        return []
+
+    def _stream_checked(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 1800,
+    ) -> None:
+        del cwd, env, timeout_seconds
+        recorded_commands.append(list(command))
+
+    def _ensure_common_state_roots(*, home_dir: pathlib.Path | None = None) -> None:
+        del home_dir
+        return None
+
+    def _render_post_bootstrap_config(
+        _repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path,
+    ) -> None:
+        del profile, home_dir
+        return None
+
+    def _run_post_bootstrap_doctor(_repo_root: pathlib.Path) -> None:
+        return None
+
+    def _resolve_runtime_user(_repo_root: pathlib.Path) -> str:
+        return "solo-dev"
+
+    def _mark_bootstrap_complete(*, profile: str, host_os: str, runtime_user: str) -> None:
+        recorded_completion.update(
+            {
+                "profile": profile,
+                "host_os": host_os,
+                "runtime_user": runtime_user,
+            }
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap.platform,
+        "system",
+        new=_platform_system,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "command_exists",
+        new=_command_exists,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_ensure_command_or_brew",
+        new=_ensure_command_or_brew,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_ensure_python_runtime_darwin",
+        new=_ensure_python_runtime_darwin,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_ensure_node_runtime_darwin",
+        new=_ensure_node_runtime_darwin,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_docker_compatible_runtime",
+        new=_ensure_docker_compatible_runtime,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_varlock_installed",
+        new=_ensure_varlock_installed,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "uv_sync_managed_environment",
+        new=_uv_sync_managed_environment,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "install_profile_assets",
+        new=_install_profile_assets,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=_stream_checked,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_common_state_roots",
+        new=_ensure_common_state_roots,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_render_post_bootstrap_config",
+        new=_render_post_bootstrap_config,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_run_post_bootstrap_doctor",
+        new=_run_post_bootstrap_doctor,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "resolve_runtime_user",
+        new=_resolve_runtime_user,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "mark_bootstrap_complete",
+        new=_mark_bootstrap_complete,
+    )
+
+    payload = strongclaw_bootstrap.bootstrap_host(
+        repo_root, profile="hypermemory", home_dir=home_dir
+    )
+
+    assert payload == {
+        "ok": True,
+        "profile": "hypermemory",
+        "hostOs": "Darwin",
+        "runtimeUser": "solo-dev",
+        "dockerInstalledByBootstrap": False,
+    }
+    assert recorded_commands == [
+        [
+            "npm",
+            "install",
+            "-g",
+            f"openclaw@{strongclaw_bootstrap.DEFAULT_OPENCLAW_VERSION}",
+            f"acpx@{strongclaw_bootstrap.DEFAULT_ACPX_VERSION}",
+        ]
+    ]
+    assert recorded_completion == {
+        "profile": "hypermemory",
+        "host_os": "Darwin",
+        "runtime_user": "solo-dev",
+    }
+
+
+def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Linux bootstrap should install prerequisites and repair runtime docker access when needed."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    recorded_commands: list[list[str]] = []
+    repair_calls: list[str] = []
+
+    def _platform_system() -> str:
+        return "Linux"
+
+    def _command_exists(command: str) -> bool:
+        return command in {"sudo", "apt-get", "curl"}
+
+    def _stream_checked(
+        command: Sequence[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 1800,
+    ) -> None:
+        del cwd, env, timeout_seconds
+        recorded_commands.append(list(command))
+
+    def _ensure_node_runtime_linux() -> None:
+        return None
+
+    def _ensure_docker_compatible_runtime(_host_os: str) -> bool:
+        return True
+
+    def _ensure_varlock_installed(_version: str) -> pathlib.Path:
+        return tmp_path / "varlock"
+
+    def _uv_sync_managed_environment(
+        _repo_root: pathlib.Path,
+        *,
+        home_dir: pathlib.Path | None = None,
+    ) -> pathlib.Path:
+        del home_dir
+        return tmp_path / "uv"
+
+    def _install_profile_assets(
+        _repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path | None = None,
+    ) -> list[str]:
+        del profile, home_dir
+        return []
+
+    def _ensure_common_state_roots(*, home_dir: pathlib.Path | None = None) -> None:
+        del home_dir
+        return None
+
+    def _render_post_bootstrap_config(
+        _repo_root: pathlib.Path,
+        *,
+        profile: str,
+        home_dir: pathlib.Path,
+    ) -> None:
+        del profile, home_dir
+        return None
+
+    def _run_post_bootstrap_doctor(_repo_root: pathlib.Path) -> None:
+        return None
+
+    def _resolve_runtime_user(_repo_root: pathlib.Path) -> str:
+        return "solo-dev"
+
+    def _repair_linux_runtime_user_docker_access(runtime_user: str) -> None:
+        repair_calls.append(runtime_user)
+
+    def _mark_bootstrap_complete(*, profile: str, host_os: str, runtime_user: str) -> None:
+        del profile, host_os, runtime_user
+        return None
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap.platform,
+        "system",
+        new=_platform_system,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "command_exists",
+        new=_command_exists,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=_stream_checked,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_ensure_node_runtime_linux",
+        new=_ensure_node_runtime_linux,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_docker_compatible_runtime",
+        new=_ensure_docker_compatible_runtime,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_varlock_installed",
+        new=_ensure_varlock_installed,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "uv_sync_managed_environment",
+        new=_uv_sync_managed_environment,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "install_profile_assets",
+        new=_install_profile_assets,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_common_state_roots",
+        new=_ensure_common_state_roots,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_render_post_bootstrap_config",
+        new=_render_post_bootstrap_config,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_run_post_bootstrap_doctor",
+        new=_run_post_bootstrap_doctor,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "resolve_runtime_user",
+        new=_resolve_runtime_user,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "repair_linux_runtime_user_docker_access",
+        new=_repair_linux_runtime_user_docker_access,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "mark_bootstrap_complete",
+        new=_mark_bootstrap_complete,
+    )
+
+    payload = strongclaw_bootstrap.bootstrap_host(
+        repo_root, profile="openclaw-default", home_dir=home_dir
+    )
+
+    assert payload["hostOs"] == "Linux"
+    assert payload["dockerInstalledByBootstrap"] is True
+    assert repair_calls == ["solo-dev"]
+    assert recorded_commands[:2] == [
+        ["sudo", "apt-get", "update"],
+        [
+            "sudo",
+            "apt-get",
+            "install",
+            "-y",
+            "python3",
+            "python3-pip",
+            "sqlite3",
+            "curl",
+            "unzip",
+            "ca-certificates",
+            "gnupg",
+        ],
+    ]
+    assert recorded_commands[-1] == [
+        "sudo",
+        "npm",
+        "install",
+        "-g",
+        f"openclaw@{strongclaw_bootstrap.DEFAULT_OPENCLAW_VERSION}",
+        f"acpx@{strongclaw_bootstrap.DEFAULT_ACPX_VERSION}",
+    ]

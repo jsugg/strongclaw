@@ -345,8 +345,17 @@ def _wait_for_compose_service(
     )
     deadline = time.monotonic() + timeout_seconds
     last_status: _ComposeServiceStatus | None = None
+    last_error: CommandError | None = None
     while True:
-        last_status = _compose_service_statuses(execution).get(service_name)
+        try:
+            last_status = _compose_service_statuses(execution).get(service_name)
+            last_error = None
+        except CommandError as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(COMPOSE_POLL_INTERVAL_SECONDS)
+            continue
         if _service_matches(last_status, state=state, health=health):
             emit_structured_log(
                 "clawops.ops.sidecars.wait.ready",
@@ -367,6 +376,9 @@ def _wait_for_compose_service(
         if last_status is None
         else f"state={last_status.state!r}, health={last_status.health or 'n/a'!r}"
     )
+    error_detail = ""
+    if last_error is not None:
+        error_detail = f"; last status inspection error: {last_error}"
     emit_structured_log(
         "clawops.ops.sidecars.wait.timeout",
         {
@@ -374,11 +386,12 @@ def _wait_for_compose_service(
             "target": target,
             "observed": observed,
             "timeout_seconds": timeout_seconds,
+            "statusInspectionError": None if last_error is None else str(last_error),
         },
     )
     raise CommandError(
         f"timed out waiting for compose service '{service_name}' to reach {target}; "
-        f"last observed {observed}."
+        f"last observed {observed}{error_detail}."
     )
 
 

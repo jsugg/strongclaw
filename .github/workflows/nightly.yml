@@ -56,7 +56,7 @@ jobs:
     uses: ./.github/workflows/fresh-host-cache-warm.yml
 
   run-nightly-fresh-host-acceptance:
-    name: Nightly Fresh Host Acceptance
+    name: Nightly Fresh Host Cold Start
     needs: warm-fresh-host-caches
     uses: ./.github/workflows/fresh-host-core.yml
     with:
@@ -66,3 +66,4 @@ jobs:
       enable_package_cache: true
       enable_homebrew_cache: true
       enable_runtime_download_cache: true
+      freshness_mode: cold

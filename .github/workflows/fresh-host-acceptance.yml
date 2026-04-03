@@ -33,6 +33,16 @@ on:
         required: false
         type: boolean
         default: true
+      freshness_mode:
+        description: Fresh-host execution mode (`warm` prefers promoted assets; `cold` validates cold start).
+        required: false
+        type: string
+        default: warm
+      promotion_manifest_required:
+        description: Require a compatible promotion manifest before consuming warmed image archives.
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       macos_runtime_provider:
@@ -65,24 +75,31 @@ on:
         required: true
         type: boolean
         default: true
+      freshness_mode:
+        description: Fresh-host execution mode (`warm` prefers promoted assets; `cold` validates cold start).
+        required: true
+        type: string
+        default: warm
+      promotion_manifest_required:
+        description: Require a compatible promotion manifest before consuming warmed image archives.
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
   group: >-
-    fresh-host-acceptance-${{ github.workflow }}-${{
-      github.event_name == 'workflow_dispatch'
-      && format(
-        '{0}-{1}-{2}-{3}-{4}-{5}-{6}',
-        github.ref,
-        inputs.macos_runtime_provider,
-        inputs.docker_pull_parallelism,
-        inputs.docker_pull_max_attempts,
-        inputs.enable_package_cache,
-        inputs.enable_homebrew_cache,
-        inputs.enable_runtime_download_cache
-      )
-      || github.event.pull_request.number
-      || github.ref
-    }}
+    fresh-host-acceptance-${{ github.workflow }}-${{ format(
+      '{0}-{1}-{2}-{3}-{4}-{5}-{6}-{7}-{8}',
+      github.ref,
+      inputs.macos_runtime_provider,
+      inputs.docker_pull_parallelism,
+      inputs.docker_pull_max_attempts,
+      inputs.enable_package_cache,
+      inputs.enable_homebrew_cache,
+      inputs.enable_runtime_download_cache,
+      inputs.freshness_mode,
+      inputs.promotion_manifest_required
+    ) }}
   cancel-in-progress: true
 
 permissions:
@@ -99,3 +116,5 @@ jobs:
       enable_package_cache: ${{ inputs.enable_package_cache }}
       enable_homebrew_cache: ${{ inputs.enable_homebrew_cache }}
       enable_runtime_download_cache: ${{ inputs.enable_runtime_download_cache }}
+      freshness_mode: ${{ inputs.freshness_mode }}
+      promotion_manifest_required: ${{ inputs.promotion_manifest_required }}
