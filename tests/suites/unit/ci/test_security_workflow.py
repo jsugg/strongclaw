@@ -533,6 +533,11 @@ def test_enforce_independent_review_rejects_missing_non_author_approval(
             return [{"filename": "src/clawops/strongclaw_model_auth.py"}]
         if "/reviews?" in url:
             return [{"state": "APPROVED", "user": {"login": "author-user"}}]
+        if "/collaborators?" in url:
+            return [
+                {"login": "author-user", "permissions": {"admin": True}},
+                {"login": "reviewer-one", "permissions": {"push": True}},
+            ]
         raise AssertionError(url)
 
     test_context.patch.patch_object(
@@ -576,6 +581,47 @@ def test_enforce_independent_review_accepts_independent_approval(
                 {"state": "COMMENTED", "user": {"login": "author-user"}},
                 {"state": "APPROVED", "user": {"login": "independent-reviewer"}},
             ]
+        raise AssertionError(url)
+
+    test_context.patch.patch_object(
+        security_helpers,
+        "_github_paginated_get",
+        new=fake_paginated_get,
+    )
+
+    security_helpers.enforce_independent_review(
+        event_path=event_path,
+        repository="example/repo",
+        github_token="ghs_test",
+    )
+
+
+def test_enforce_independent_review_allows_single_maintainer_repo(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Critical changes should not deadlock when no independent reviewer exists."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 44,
+                    "user": {"login": "author-user"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
+        assert token == "ghs_test"
+        if "/files?" in url:
+            return [{"filename": ".github/workflows/ci-gate.yml"}]
+        if "/reviews?" in url:
+            return [{"state": "APPROVED", "user": {"login": "author-user"}}]
+        if "/collaborators?" in url:
+            return [{"login": "author-user", "permissions": {"admin": True}}]
         raise AssertionError(url)
 
     test_context.patch.patch_object(
