@@ -121,6 +121,7 @@ def exercise_linux_channels_runtime(context: FreshHostContext) -> list[str]:
     """Exercise channels acceptance while sidecars are running repo-locally."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
+    env.setdefault("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN", "fresh-host-smoke-token")
     compose_file = compose_file_for_component(context, "sidecars")
     wait_for_docker_backend(cwd=repo_root, env=env)
     up_command = venv_clawops_command(

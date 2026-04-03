@@ -63,6 +63,35 @@ def test_prepare_context_writes_context_and_env_file(
     assert context.runtime_provider == "docker"
 
 
+def test_phase_env_sets_hypermemory_embedding_model_default_for_hypermemory_profile(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Hypermemory fresh-host phases should provide an embedding-model fallback."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_push")
+    test_context.env.remove("HYPERMEMORY_EMBEDDING_MODEL")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        profile="hypermemory",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    resolved_env = fresh_host_shell.phase_env(context)
+    assert resolved_env["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
+
+    test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    overridden_env = fresh_host_shell.phase_env(context)
+    assert overridden_env["HYPERMEMORY_EMBEDDING_MODEL"] == "openai/text-embedding-3-small"
+
+
 def test_scenario_phase_names_match_macos_browser_lab(
     tmp_path: Path,
     test_context: TestContext,
@@ -961,6 +990,7 @@ def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
         github_env_file=github_env,
     )
     calls: list[str] = []
+    captured_envs: list[dict[str, str]] = []
 
     def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
         del env
@@ -974,7 +1004,8 @@ def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
         timeout_seconds: int = 3600,
         check: bool = True,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, timeout_seconds, check
+        captured_envs.append(dict(env))
         calls.append("run:" + " ".join(command))
 
     def _fake_verify_sidecars(
@@ -1014,6 +1045,11 @@ def test_exercise_linux_channels_runtime_runs_runtime_checks_and_teardown(
     assert "security_workflow.py verify-channels-contract --repo-root ." in calls[4]
     assert "security_workflow.py run-channels-runtime-smoke --repo-root ." in calls[5]
     assert calls[6].endswith("sidecars down --repo-local-state")
+    assert captured_envs
+    assert all(
+        env.get("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN") == "fresh-host-smoke-token"
+        for env in captured_envs
+    )
 
 
 def test_exercise_linux_recovery_smoke_runs_security_workflow_command(
