@@ -80,20 +80,23 @@ def verify_backup(
         if str(target) == "latest"
         else pathlib.Path(target).expanduser().resolve()
     )
+    openclaw_verify_result = None
     if shutil.which("openclaw") is not None:
-        result = run_command(
+        openclaw_verify_result = run_command(
             ["openclaw", "backup", "verify", str(archive_path)], timeout_seconds=600
         )
-        if not result.ok:
-            detail = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or "OpenClaw backup verification failed"
-            )
-            raise CommandError(detail)
-        return archive_path
+        if openclaw_verify_result.ok:
+            return archive_path
     with tarfile.open(archive_path, "r:gz") as archive:
         archive.getmembers()
+    if openclaw_verify_result is not None and not openclaw_verify_result.ok:
+        detail = (
+            openclaw_verify_result.stderr.strip()
+            or openclaw_verify_result.stdout.strip()
+            or "OpenClaw backup verification failed"
+        )
+        if "backup manifest entry" not in detail.lower():
+            raise CommandError(detail)
     return archive_path
 
 

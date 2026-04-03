@@ -12,7 +12,7 @@ from typing import cast
 import pytest
 
 from clawops import strongclaw_recovery
-from clawops.strongclaw_runtime import CommandError
+from clawops.strongclaw_runtime import CommandError, ExecResult
 from tests.plugins.infrastructure.context import TestContext
 
 
@@ -36,6 +36,13 @@ def _write_payload_member(archive_path: Path, member_name: str) -> None:
 
 def _missing_tool(_command: str, _path: str | None = None) -> str | None:
     """Return a typed `shutil.which` stub that forces fallback paths."""
+    return None
+
+
+def _openclaw_only(command: str, _path: str | None = None) -> str | None:
+    """Return a typed `shutil.which` stub that only resolves openclaw."""
+    if command == "openclaw":
+        return "/usr/bin/openclaw"
     return None
 
 
@@ -152,3 +159,42 @@ def test_prune_retention_deletes_only_expired_strongclaw_owned_files(tmp_path: P
     assert recent_backup.exists()
     assert recent_log.exists()
     assert external_file.exists()
+
+
+def test_verify_backup_falls_back_when_openclaw_manifest_is_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Fallback tar archives should still verify when openclaw manifest checks fail."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+
+    test_context.patch.patch_object(
+        strongclaw_recovery.shutil,
+        "which",
+        new=_missing_tool,
+    )
+    archive_path = strongclaw_recovery.create_backup(home_dir=home_dir)
+
+    def _run_command(command: list[str], **_kwargs: object) -> ExecResult:
+        assert command[:3] == ["openclaw", "backup", "verify"]
+        return ExecResult(
+            argv=tuple(command),
+            returncode=1,
+            stdout="",
+            stderr="Error: Expected exactly one backup manifest entry, found 0.",
+            duration_ms=1,
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_recovery.shutil,
+        "which",
+        new=_openclaw_only,
+    )
+    test_context.patch.patch_object(
+        strongclaw_recovery,
+        "run_command",
+        new=_run_command,
+    )
+
+    assert strongclaw_recovery.verify_backup(archive_path, home_dir=home_dir) == archive_path
