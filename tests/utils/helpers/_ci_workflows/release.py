@@ -22,7 +22,7 @@ REQUIRED_RUNTIME_ASSET_PATHS: tuple[str, ...] = (
     "docs/SECURITY_MODEL.md",
     "docs/CI_AND_SECURITY.md",
     "configs/openclaw/30-channels.json5",
-    "configs/openclaw/00-defaults.json5",
+    "configs/openclaw/00-baseline.json5",
 )
 RUNTIME_READINESS_CLAWOPS_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("clawops", "doctor", "--asset-root", "."),
