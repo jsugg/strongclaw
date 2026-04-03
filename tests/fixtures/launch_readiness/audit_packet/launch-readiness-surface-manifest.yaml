@@ -46,7 +46,7 @@ surfaces:
     declared_sources:
       - README.md:11-13
       - platform/docs/CHANNELS.md:1-21
-      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:17-17
+      - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:25-25
     surface_type: optional_exposed
     owner_lane: optional_surfaces
     launch_blocker_default: "yes"

@@ -163,6 +163,8 @@ def _validate_citation(citation: str) -> None:
     assert cited_file.exists(), citation
     lines = cited_file.read_text(encoding="utf-8").splitlines()
     assert end_line <= len(lines), citation
+    cited_lines = lines[start_line - 1 : end_line]
+    assert any(line.strip() for line in cited_lines), citation
 
 
 def test_required_launch_readiness_artifacts_exist() -> None:
