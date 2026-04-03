@@ -142,7 +142,7 @@ def test_enforce_coverage_thresholds_checks_overall_and_critical_modules(tmp_pat
                 '        <class filename="src/clawops/strongclaw_recovery.py" line-rate="0.81"/>',
                 '        <class filename="src/clawops/strongclaw_model_auth.py" line-rate="0.76"/>',
                 '        <class filename="src/clawops/strongclaw_varlock_env.py" line-rate="0.75"/>',
-                '        <class filename="src/clawops/strongclaw_bootstrap.py" line-rate="0.34"/>',
+                '        <class filename="src/clawops/strongclaw_bootstrap.py" line-rate="0.27"/>',
                 "      </classes>",
                 "    </package>",
                 "  </packages>",

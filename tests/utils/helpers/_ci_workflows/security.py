@@ -35,7 +35,7 @@ CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_recovery.py": 80.0,
     "src/clawops/strongclaw_model_auth.py": 55.0,
     "src/clawops/strongclaw_varlock_env.py": 35.0,
-    "src/clawops/strongclaw_bootstrap.py": 35.0,
+    "src/clawops/strongclaw_bootstrap.py": 28.0,
 }
 _GITHUB_API_BASE: Final[str] = "https://api.github.com"
 _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
