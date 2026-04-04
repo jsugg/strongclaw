@@ -87,10 +87,12 @@ def verify_backup(
         openclaw_verify_result = run_command(
             ["openclaw", "backup", "verify", str(archive_path)], timeout_seconds=600
         )
-        if result.ok:
+        if openclaw_verify_result.ok:
             return archive_path
         detail = (
-            result.stderr.strip() or result.stdout.strip() or "OpenClaw backup verification failed"
+            openclaw_verify_result.stderr.strip()
+            or openclaw_verify_result.stdout.strip()
+            or "OpenClaw backup verification failed"
         )
         if _OPENCLAW_VERIFY_MANIFEST_MISMATCH in detail:
             try:
@@ -104,15 +106,8 @@ def verify_backup(
 def _verify_tar_archive(archive_path: pathlib.Path) -> pathlib.Path:
     """Verify one fallback tar archive by ensuring members can be enumerated."""
     with tarfile.open(archive_path, "r:gz") as archive:
+        # Simply ensure the archive can be opened and its members enumerated.
         archive.getmembers()
-    if openclaw_verify_result is not None and not openclaw_verify_result.ok:
-        detail = (
-            openclaw_verify_result.stderr.strip()
-            or openclaw_verify_result.stdout.strip()
-            or "OpenClaw backup verification failed"
-        )
-        if "backup manifest entry" not in detail.lower():
-            raise CommandError(detail)
     return archive_path
 
 

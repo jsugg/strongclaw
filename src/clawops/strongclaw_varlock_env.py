@@ -174,7 +174,11 @@ def _ensure_required_defaults(
         or "openclawsvc",
         "OPENCLAW_STATE_DIR": values.get("OPENCLAW_STATE_DIR", "~/.openclaw") or "~/.openclaw",
         "NEO4J_USERNAME": values.get("NEO4J_USERNAME", "neo4j") or "neo4j",
-        "HYPERMEMORY_EMBEDDING_MODEL": "ollama/nomic-embed-text",
+        # Allow the runtime environment to override the embedding model; otherwise
+        # default to a local Ollama nomic embed model for non-interactive setups.
+        "HYPERMEMORY_EMBEDDING_MODEL": os.environ.get(
+            "HYPERMEMORY_EMBEDDING_MODEL", "ollama/nomic-embed-text"
+        ),
         "HYPERMEMORY_EMBEDDING_BASE_URL": "http://127.0.0.1:4000/v1",
         "HYPERMEMORY_QDRANT_URL": "http://127.0.0.1:6333",
         "WHATSAPP_SESSION_DIR": "~/.openclaw/channels/whatsapp",
