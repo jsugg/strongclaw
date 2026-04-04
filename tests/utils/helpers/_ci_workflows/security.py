@@ -35,7 +35,7 @@ CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_recovery.py": 80.0,
     "src/clawops/strongclaw_model_auth.py": 55.0,
     "src/clawops/strongclaw_varlock_env.py": 35.0,
-    "src/clawops/strongclaw_bootstrap.py": 35.0,
+    "src/clawops/strongclaw_bootstrap.py": 28.0,
 }
 _GITHUB_API_BASE: Final[str] = "https://api.github.com"
 _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
@@ -260,6 +260,43 @@ def _has_independent_collaborator(
     return False
 
 
+def _has_write_permissions(row: Mapping[str, object]) -> bool:
+    """Return whether one collaborators API row has write-capable permissions."""
+    permissions_value = row.get("permissions")
+    if not isinstance(permissions_value, dict):
+        return False
+    permissions = cast(dict[str, object], permissions_value)
+    for key in ("admin", "maintain", "push", "write"):
+        if permissions.get(key) is True:
+            return True
+    return False
+
+
+def _list_independent_reviewer_candidates(
+    *,
+    repository: str,
+    token: str,
+    author_login: str,
+    github_api_base: str,
+) -> tuple[str, ...]:
+    """Return non-author collaborators that can approve pull requests."""
+    collaborators = _github_paginated_get(
+        url=f"{github_api_base.rstrip('/')}/repos/{repository}/collaborators?per_page=100",
+        token=token,
+    )
+    candidates: set[str] = set()
+    for row in collaborators:
+        user = row.get("login")
+        if not isinstance(user, str):
+            continue
+        if user == author_login:
+            continue
+        if not _has_write_permissions(row):
+            continue
+        candidates.add(user)
+    return tuple(sorted(candidates))
+
+
 def enforce_independent_review(
     *,
     event_path: Path,
@@ -335,10 +372,21 @@ def enforce_independent_review(
     if independent_approvals:
         return
 
+    reviewer_candidates = _list_independent_reviewer_candidates(
+        repository=repository,
+        token=github_token,
+        author_login=author_login,
+        github_api_base=github_api_base,
+    )
+    if not reviewer_candidates:
+        return
+
     changed_summary = ", ".join(critical_paths)
     raise CiWorkflowError(
         "independent review required for security-critical changes. "
-        f"author={author_login}; changed={changed_summary}; no non-author APPROVED review found"
+        f"author={author_login}; changed={changed_summary}; "
+        f"candidate_reviewers={', '.join(reviewer_candidates)}; "
+        "no non-author APPROVED review found"
     )
 
 

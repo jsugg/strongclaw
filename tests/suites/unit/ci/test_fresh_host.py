@@ -114,6 +114,10 @@ def test_phase_env_sets_hypermemory_embedding_model_default_for_hypermemory_prof
     resolved_env = fresh_host_shell.phase_env(context)
     assert resolved_env["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
 
+    test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "")
+    blank_value_env = fresh_host_shell.phase_env(context)
+    assert blank_value_env["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
+
     test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "openai/text-embedding-3-small")
     overridden_env = fresh_host_shell.phase_env(context)
     assert overridden_env["HYPERMEMORY_EMBEDDING_MODEL"] == "openai/text-embedding-3-small"

@@ -53,6 +53,7 @@ COMPOSE_STATUS_TIMEOUT_SECONDS = 30
 POSTGRES_HEALTH_TIMEOUT_SECONDS = 180
 LITELLM_BOOTSTRAP_TIMEOUT_SECONDS = 1800
 LITELLM_HEALTH_TIMEOUT_SECONDS = 180
+HOSTED_MACOS_LITELLM_HEALTH_TIMEOUT_SECONDS = 300
 QDRANT_HEALTH_TIMEOUT_SECONDS = 180
 NEO4J_HEALTH_TIMEOUT_SECONDS = 180
 COMPOSE_POLL_INTERVAL_SECONDS = 2.0
@@ -436,14 +437,25 @@ def _resolve_profile_dependency_flags(config_path: pathlib.Path) -> dict[str, ob
         }
 
 
+def _resolve_litellm_health_timeout_seconds(environ: Mapping[str, str]) -> int:
+    """Return the configured LiteLLM health timeout for the active compose variant."""
+    compose_variant = environ.get("STRONGCLAW_COMPOSE_VARIANT", "").strip().lower()
+    if compose_variant == "ci-hosted-macos":
+        return HOSTED_MACOS_LITELLM_HEALTH_TIMEOUT_SECONDS
+    return LITELLM_HEALTH_TIMEOUT_SECONDS
+
+
 def _sidecar_readiness_targets(
     profile_flags: Mapping[str, object],
+    *,
+    environ: Mapping[str, str],
 ) -> tuple[_SidecarReadinessTarget, ...]:
     """Return the readiness contract for the active profile."""
     uses_qmd = bool(profile_flags.get("usesQmd"))
     uses_hypermemory = bool(profile_flags.get("usesHypermemory"))
     qdrant_required = uses_qmd or uses_hypermemory
     neo4j_required = uses_hypermemory
+    litellm_timeout_seconds = _resolve_litellm_health_timeout_seconds(environ)
     return (
         _SidecarReadinessTarget(
             service_name=POSTGRES_SERVICE_NAME,
@@ -457,7 +469,7 @@ def _sidecar_readiness_targets(
             required=True,
             impact="fatal",
             reason="loopback model routing boundary",
-            timeout_seconds=LITELLM_HEALTH_TIMEOUT_SECONDS,
+            timeout_seconds=litellm_timeout_seconds,
         ),
         _SidecarReadinessTarget(
             service_name="qdrant",
@@ -599,7 +611,7 @@ def _sidecars_up_report(
     )
     config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
     profile_flags = _resolve_profile_dependency_flags(config_path)
-    targets = _sidecar_readiness_targets(profile_flags)
+    targets = _sidecar_readiness_targets(profile_flags, environ=execution.env)
     command_steps: list[dict[str, object]] = []
 
     def _record_step(step: str, exit_code: int) -> int:
@@ -863,7 +875,7 @@ def status(repo_root: pathlib.Path, *, repo_local_state: bool) -> dict[str, obje
         }
     config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
     profile_flags = _resolve_profile_dependency_flags(config_path)
-    targets = _sidecar_readiness_targets(profile_flags)
+    targets = _sidecar_readiness_targets(profile_flags, environ=execution.env)
     try:
         statuses = _compose_service_statuses(execution)
     except CommandError as exc:

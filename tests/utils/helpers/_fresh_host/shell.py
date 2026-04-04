@@ -49,6 +49,7 @@ def phase_env(context: FreshHostContext) -> dict[str, str]:
             "XDG_CONFIG_HOME": f"{context.app_home}/.config",
         }
     )
+
     if context.profile == "hypermemory":
         if not env.get("HYPERMEMORY_EMBEDDING_MODEL", "").strip():
             env["HYPERMEMORY_EMBEDDING_MODEL"] = "ollama/nomic-embed-text"

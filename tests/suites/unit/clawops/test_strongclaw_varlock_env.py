@@ -216,6 +216,66 @@ def test_configure_varlock_env_non_interactive_autofills_local_ollama_model_chai
     assert values["HYPERMEMORY_EMBEDDING_BASE_URL"] == "http://127.0.0.1:4000/v1"
 
 
+def test_configure_varlock_env_non_interactive_uses_runtime_embedding_model(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    local_env_file = tmp_path / ".env.local"
+    test_context.env.set("VARLOCK_LOCAL_ENV_FILE", str(local_env_file))
+    test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    test_context.patch.patch(
+        "clawops.strongclaw_varlock_env._validate_secret_backend_configuration",
+        new=_no_op_secret_backend_validation,
+    )
+    test_context.patch.patch(
+        "clawops.strongclaw_varlock_env._validate_with_varlock",
+        new=_varlock_validation_success,
+    )
+    test_context.patch.patch(
+        "clawops.strongclaw_varlock_env.resolve_profile",
+        new=lambda: "hypermemory",
+    )
+
+    def _run_command(command: Sequence[str], **_kwargs: object) -> ExecResult:
+        argv = tuple(command)
+        if tuple(command[:2]) == ("ollama", "list"):
+            return ExecResult(
+                argv=argv,
+                returncode=0,
+                stdout=(
+                    "NAME ID SIZE MODIFIED\n"
+                    "deepseek-r1:latest abc 4.7 GB 14 months ago\n"
+                    "nomic-embed-text:latest def 274 MB 20 months ago\n"
+                ),
+                stderr="",
+                duration_ms=1,
+            )
+        if tuple(command[:2]) == ("ollama", "show"):
+            return ExecResult(
+                argv=argv,
+                returncode=0,
+                stdout="Model\n  context length 32768\n",
+                stderr="",
+                duration_ms=1,
+            )
+        raise AssertionError(f"unexpected command: {command!r}")
+
+    test_context.patch.patch(
+        "clawops.strongclaw_varlock_env.run_command",
+        new=_run_command,
+    )
+
+    template_path = varlock_env_template_file(tmp_path)
+    template_path.parent.mkdir(parents=True, exist_ok=True)
+    template_path.write_text("APP_ENV=local\n", encoding="utf-8")
+
+    result = configure_varlock_env(tmp_path, check_only=False, non_interactive=True)
+
+    assert result["ok"] is True
+    values = load_env_assignments(local_env_file)
+    assert values["HYPERMEMORY_EMBEDDING_MODEL"] == "openai/text-embedding-3-small"
+
+
 def test_varlock_env_main_honors_env_mode_wrapper(
     test_context: TestContext,
     tmp_path: pathlib.Path,

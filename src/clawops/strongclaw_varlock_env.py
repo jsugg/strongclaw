@@ -549,6 +549,10 @@ def _ensure_hypermemory_embedding_model(
     values = load_env_assignments(env_file)
     if value_is_effective(values.get("HYPERMEMORY_EMBEDDING_MODEL")):
         return
+    runtime_embedding_model = os.environ.get("HYPERMEMORY_EMBEDDING_MODEL", "").strip()
+    if value_is_effective(runtime_embedding_model):
+        set_env_assignment(env_file, "HYPERMEMORY_EMBEDDING_MODEL", runtime_embedding_model)
+        return
     if not check_only and non_interactive:
         ollama_result = run_command(["ollama", "list"], timeout_seconds=15)
         if ollama_result.ok and "nomic-embed-text" in ollama_result.stdout:

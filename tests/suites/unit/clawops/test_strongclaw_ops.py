@@ -388,6 +388,34 @@ def test_compose_path_uses_variant_file_when_configured(
     assert _compose_path(tmp_path, "docker-compose.aux-stack.yaml") == variant_path
 
 
+def test_sidecar_readiness_targets_extend_litellm_timeout_for_hosted_macos() -> None:
+    """Hosted macOS variant should give LiteLLM extra time to pass health checks."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={"STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos"},
+    )
+
+    litellm_target = next(target for target in targets if target.service_name == "litellm")
+    assert (
+        litellm_target.timeout_seconds == strongclaw_ops.HOSTED_MACOS_LITELLM_HEALTH_TIMEOUT_SECONDS
+    )
+
+
+def test_sidecar_readiness_targets_keep_default_litellm_timeout_without_hosted_variant() -> None:
+    """Non-hosted variants should keep the default LiteLLM readiness timeout."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={},
+    )
+
+    litellm_target = next(target for target in targets if target.service_name == "litellm")
+    assert litellm_target.timeout_seconds == strongclaw_ops.LITELLM_HEALTH_TIMEOUT_SECONDS
+
+
 def test_sidecars_up_bootstraps_litellm_before_starting_runtime_services(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
