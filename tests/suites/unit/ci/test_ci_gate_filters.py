@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from tests.scripts.ci_gate import main as ci_gate_main
 from tests.utils.helpers._ci_workflows.change_router import (
     CiGateSelection,
     evaluate_filter_matches,
@@ -153,3 +155,45 @@ def test_evidence_from_changed_paths_uses_repo_filter_logic() -> None:
     assert ".github/workflows/fresh-host-core.yml" in evidence.fresh_host
     assert "tests/utils/helpers/_hosted_docker/image_cache.py" in evidence.fresh_host_coldstart
     assert "platform/docs/CI_AND_SECURITY.md" in evidence.docs_only
+
+
+def test_summarize_selection_prefers_warm_lane_when_both_filters_match(
+    tmp_path: Path,
+) -> None:
+    """When cold-start and fresh_host both fire, the warm/cached lane is preferred."""
+    output_file = tmp_path / "github_output"
+    output_file.write_text("", encoding="utf-8")
+
+    # A path that matches both fresh_host and fresh_host_coldstart filters
+    all_changed = json.dumps(["tests/utils/helpers/_hosted_docker/image_cache.py"])
+
+    exit_code = ci_gate_main(
+        [
+            "summarize-selection",
+            "--docs-only",
+            "false",
+            "--fresh-host",
+            "true",
+            "--fresh-host-coldstart",
+            "true",
+            "--security",
+            "false",
+            "--harness",
+            "false",
+            "--memory-plugin",
+            "false",
+            "--compatibility-matrix",
+            "false",
+            "--filters-file",
+            str(_FILTERS_FILE),
+            "--all-changed-paths-files",
+            all_changed,
+            "--github-output-file",
+            str(output_file),
+        ]
+    )
+
+    assert exit_code == 0
+    output_text = output_file.read_text(encoding="utf-8")
+    assert "fresh_host=true\n" in output_text
+    assert "fresh_host_coldstart=false\n" in output_text
