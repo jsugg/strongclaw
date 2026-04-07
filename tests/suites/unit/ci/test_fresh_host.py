@@ -60,7 +60,34 @@ def test_prepare_context_writes_context_and_env_file(
     exports = github_env.read_text(encoding="utf-8")
     assert f"FRESH_HOST_CONTEXT={context.context_path}" in exports
     assert f"STRONGCLAW_APP_HOME={context.app_home}" in exports
+    assert "FRESH_HOST_FRESHNESS_MODE=cold" in exports
     assert context.runtime_provider == "docker"
+    assert context.freshness_mode == "cold"
+
+
+def test_prepare_context_supports_explicit_freshness_mode(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Context preparation should persist the explicit warm/cold freshness mode."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+        freshness_mode="warm",
+    )
+
+    exports = github_env.read_text(encoding="utf-8")
+    assert context.freshness_mode == "warm"
+    assert "FRESH_HOST_FRESHNESS_MODE=warm" in exports
 
 
 def test_phase_env_sets_hypermemory_embedding_model_default_for_hypermemory_profile(
@@ -94,6 +121,10 @@ def test_phase_env_sets_hypermemory_embedding_model_default_for_hypermemory_prof
     test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "openai/text-embedding-3-small")
     overridden_env = fresh_host_shell.phase_env(context)
     assert overridden_env["HYPERMEMORY_EMBEDDING_MODEL"] == "openai/text-embedding-3-small"
+
+    test_context.env.set("HYPERMEMORY_EMBEDDING_MODEL", "")
+    empty_value_env = fresh_host_shell.phase_env(context)
+    assert empty_value_env["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
 
 
 def test_scenario_phase_names_match_macos_browser_lab(
@@ -194,6 +225,8 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
             "macos-sidecars",
             "--runner-temp",
             "/tmp/runner",
+            "--freshness-mode",
+            "warm",
         ]
     )
     browser_lab = _parse_args(
@@ -207,6 +240,7 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
     )
 
     assert sidecars.scenario == "macos-sidecars"
+    assert sidecars.freshness_mode == "warm"
     assert browser_lab.scenario == "macos-browser-lab"
 
 
@@ -259,6 +293,7 @@ def test_preview_context_writes_preview_json_and_summary(
     assert preview["context_path"] == context.context_path
     assert preview["report_path"] == context.report_path
     assert preview["diagnostics_dir"] == context.diagnostics_dir
+    assert preview["freshness_mode"] == "cold"
     assert preview["phase_names"] == context.phase_names
     assert preview["ensure_images"] is True
     assert preview["activate_services"] is False
@@ -1716,6 +1751,11 @@ def test_write_summary_includes_child_reports(
     assert "| Unattributed execution |" in summary_text
     assert "Known phase total" not in summary_text
     assert "| Images requested | 1 |" in summary_text
+    evidence_path = workspace / ".omx" / "evidence" / "ci-macos-kpi-macos-sidecars.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["schema_version"] == "1.0.0"
+    assert evidence["scenario"]["id"] == "macos-sidecars"
+    assert evidence["scenario"]["freshness_mode"] == "cold"
 
 
 def test_write_summary_marks_missing_child_durations_as_na(

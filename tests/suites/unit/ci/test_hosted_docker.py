@@ -12,6 +12,7 @@ import pytest
 from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import hosted_docker as hosted_docker_script
+from tests.scripts import hosted_docker_cache_state as hosted_docker_cache_state_script
 from tests.utils.helpers import fresh_host, hosted_docker
 from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
@@ -750,11 +751,23 @@ def test_save_image_cache_exports_hosted_macos_compose_images(
 
     sidecars_archive = cache_root.resolve() / "hosted-macos-images-macos-sidecars.tar"
     browser_lab_archive = cache_root.resolve() / "hosted-macos-images-macos-browser-lab.tar"
+    sidecars_manifest = cache_root.resolve() / "hosted-macos-images-macos-sidecars.manifest.json"
+    browser_lab_manifest = (
+        cache_root.resolve() / "hosted-macos-images-macos-browser-lab.manifest.json"
+    )
     assert archive_path == sidecars_archive
     assert save_commands == [
         ["docker", "image", "save", "-o", str(sidecars_archive), *sidecars_image_set],
         ["docker", "image", "save", "-o", str(browser_lab_archive), *browser_lab_image_set],
     ]
+    sidecars_payload = json.loads(sidecars_manifest.read_text(encoding="utf-8"))
+    browser_lab_payload = json.loads(browser_lab_manifest.read_text(encoding="utf-8"))
+    assert sidecars_payload["schema_version"] == "1.0.0"
+    assert sidecars_payload["scenario_id"] == "macos-sidecars"
+    assert sidecars_payload["image_digests"] == sidecars_image_set
+    assert browser_lab_payload["schema_version"] == "1.0.0"
+    assert browser_lab_payload["scenario_id"] == "macos-browser-lab"
+    assert browser_lab_payload["image_digests"] == browser_lab_image_set
     assert sorted(path.name for path in resolved_compose_files) == sorted(
         [
             "docker-compose.aux-stack.ci-hosted-macos.yaml",
@@ -880,6 +893,69 @@ def test_save_image_cache_allows_partial_export_when_some_images_are_missing(
     ]
 
 
+def test_restore_image_cache_skips_incompatible_manifest_when_required(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Manifest-required restores should skip incompatible scenario archives."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    cache_root.mkdir()
+    archive_path = (
+        cache_root
+        / hosted_docker_image_cache.DOCKER_IMAGE_CACHE_ARCHIVE_TEMPLATE.format(
+            scenario_id="macos-sidecars"
+        )
+    )
+    manifest_path = (
+        cache_root
+        / hosted_docker_image_cache.DOCKER_IMAGE_CACHE_MANIFEST_TEMPLATE.format(
+            scenario_id="macos-sidecars"
+        )
+    )
+    archive_path.write_text("fake-image-cache", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "scenario_id": "macos-sidecars",
+                "compose_hash": "mismatch",
+                "runtime_versions": {"MACOS_COLIMA_VERSION": "v0.10.1"},
+                "image_digests": ["postgres:16@sha256:abc"],
+                "created_at": "2026-04-02T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+    test_context.env.set("FRESH_HOST_PROMOTION_MANIFEST_REQUIRED", "true")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_run_checked(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("run_checked should not execute with incompatible required manifest")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    restored = hosted_docker.restore_image_cache(Path(context.context_path))
+
+    assert restored is False
+
+
 def test_hosted_docker_cli_dispatches_image_cache_commands(
     tmp_path: Path,
     test_context: TestContext,
@@ -918,4 +994,87 @@ def test_hosted_docker_cli_dispatches_image_cache_commands(
     assert calls == [
         ("restore", context_file.resolve()),
         ("save", context_file.resolve()),
+    ]
+
+
+def test_hosted_docker_restore_cli_writes_restore_state_to_github_env(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """restore-image-cache should export a machine-readable restore flag."""
+    context_file = tmp_path / "context.json"
+    github_env_file = tmp_path / "github.env"
+    context_file.write_text("{}", encoding="utf-8")
+
+    def fake_restore_image_cache(_: Path) -> bool:
+        return False
+
+    test_context.patch.patch_object(
+        hosted_docker_script,
+        "restore_image_cache",
+        new=fake_restore_image_cache,
+    )
+
+    exit_code = hosted_docker_script.main(
+        [
+            "restore-image-cache",
+            "--context",
+            str(context_file),
+            "--github-env-file",
+            str(github_env_file),
+        ]
+    )
+
+    assert exit_code == 0
+    assert "FRESH_HOST_IMAGE_CACHE_RESTORED=false" in github_env_file.read_text(encoding="utf-8")
+
+
+def test_hosted_docker_cache_state_cli_classifies_cache_outputs(
+    tmp_path: Path,
+) -> None:
+    """Cache-state helper should map action outputs to hit/partial/miss labels."""
+    github_env_file = tmp_path / "github.env"
+
+    hit_exit = hosted_docker_cache_state_script.main(
+        [
+            "classify",
+            "--cache-hit",
+            "true",
+            "--cache-matched-key",
+            "fresh-host-key",
+            "--github-env-file",
+            str(github_env_file),
+        ]
+    )
+    partial_exit = hosted_docker_cache_state_script.main(
+        [
+            "classify",
+            "--cache-hit",
+            "false",
+            "--cache-matched-key",
+            "fresh-host-key",
+            "--github-env-file",
+            str(github_env_file),
+        ]
+    )
+    miss_exit = hosted_docker_cache_state_script.main(
+        [
+            "classify",
+            "--cache-hit",
+            "false",
+            "--cache-matched-key",
+            "",
+            "--github-env-file",
+            str(github_env_file),
+        ]
+    )
+
+    assert hit_exit == 0
+    assert partial_exit == 0
+    assert miss_exit == 0
+    lines = github_env_file.read_text(encoding="utf-8").splitlines()
+    assert lines == [
+        "FRESH_HOST_IMAGE_CACHE_STATE=hit",
+        "FRESH_HOST_IMAGE_CACHE_STATE=partial",
+        "FRESH_HOST_IMAGE_CACHE_STATE=miss",
     ]

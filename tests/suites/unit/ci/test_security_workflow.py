@@ -531,6 +531,11 @@ def test_enforce_independent_review_rejects_missing_non_author_approval(
         assert token == "ghs_test"
         if "/files?" in url:
             return [{"filename": "src/clawops/strongclaw_model_auth.py"}]
+        if "/collaborators?" in url:
+            return [
+                {"login": "author-user", "permissions": {"admin": True}},
+                {"login": "independent-reviewer", "permissions": {"push": True}},
+            ]
         if "/reviews?" in url:
             return [{"state": "APPROVED", "user": {"login": "author-user"}}]
         if "/collaborators?" in url:
@@ -576,6 +581,11 @@ def test_enforce_independent_review_accepts_independent_approval(
         assert token == "ghs_test"
         if "/files?" in url:
             return [{"filename": ".github/workflows/security.yml"}]
+        if "/collaborators?" in url:
+            return [
+                {"login": "author-user", "permissions": {"admin": True}},
+                {"login": "independent-reviewer", "permissions": {"push": True}},
+            ]
         if "/reviews?" in url:
             return [
                 {"state": "COMMENTED", "user": {"login": "author-user"}},
@@ -596,11 +606,11 @@ def test_enforce_independent_review_accepts_independent_approval(
     )
 
 
-def test_enforce_independent_review_allows_single_maintainer_repo(
+def test_enforce_independent_review_skips_for_single_developer_repo(
     test_context: TestContext,
     tmp_path: Path,
 ) -> None:
-    """Critical changes should not deadlock when no independent reviewer exists."""
+    """Security-critical PR changes should not block repos with no non-author collaborators."""
     event_path = tmp_path / "event.json"
     event_path.write_text(
         json.dumps(
@@ -617,11 +627,11 @@ def test_enforce_independent_review_allows_single_maintainer_repo(
     def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
         assert token == "ghs_test"
         if "/files?" in url:
-            return [{"filename": ".github/workflows/ci-gate.yml"}]
-        if "/reviews?" in url:
-            return [{"state": "APPROVED", "user": {"login": "author-user"}}]
+            return [{"filename": "security/semgrep/semgrep.yml"}]
         if "/collaborators?" in url:
             return [{"login": "author-user", "permissions": {"admin": True}}]
+        if "/reviews?" in url:
+            raise AssertionError("review endpoint should not be queried for single-developer repos")
         raise AssertionError(url)
 
     test_context.patch.patch_object(

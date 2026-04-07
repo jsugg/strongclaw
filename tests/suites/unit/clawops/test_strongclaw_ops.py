@@ -12,6 +12,7 @@ from typing import Any, Protocol, cast
 import pytest
 
 from clawops import strongclaw_ops
+from clawops.strongclaw_runtime import CommandError
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -413,6 +414,32 @@ def test_sidecar_readiness_targets_keep_default_litellm_timeout_without_hosted_v
 
     litellm_target = next(target for target in targets if target.service_name == "litellm")
     assert litellm_target.timeout_seconds == strongclaw_ops.LITELLM_HEALTH_TIMEOUT_SECONDS
+
+
+def test_sidecar_readiness_targets_extend_neo4j_timeout_for_hosted_macos() -> None:
+    """Hosted macOS variant should give Neo4j extra time to pass health checks."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={"STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos"},
+    )
+
+    neo4j_target = next(target for target in targets if target.service_name == "neo4j")
+    assert neo4j_target.timeout_seconds == strongclaw_ops.HOSTED_MACOS_NEO4J_HEALTH_TIMEOUT_SECONDS
+
+
+def test_sidecar_readiness_targets_keep_default_neo4j_timeout_without_hosted_variant() -> None:
+    """Non-hosted variants should keep the default Neo4j readiness timeout."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={},
+    )
+
+    neo4j_target = next(target for target in targets if target.service_name == "neo4j")
+    assert neo4j_target.timeout_seconds == strongclaw_ops.NEO4J_HEALTH_TIMEOUT_SECONDS
 
 
 def test_sidecars_up_bootstraps_litellm_before_starting_runtime_services(
@@ -1074,6 +1101,50 @@ def test_wait_for_compose_service_emits_start_and_ready_events(
     assert observed_events[0][1]["service"] == "postgres"
     assert observed_events[1][0] == "clawops.ops.sidecars.wait.ready"
     assert observed_events[1][1]["service"] == "postgres"
+
+
+def test_wait_for_compose_service_retries_transient_status_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compose status probing should tolerate transient command errors while polling."""
+    execution = cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={},
+    )
+    attempts = {"count": 0}
+
+    def _compose_service_statuses_flaky(_execution: object) -> dict[str, object]:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise CommandError("failed to inspect sidecar services: transient compose error")
+        return {
+            "postgres": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="postgres",
+                state="running",
+                health="healthy",
+            )
+        }
+
+    monkeypatch.setattr(
+        strongclaw_ops, "_compose_service_statuses", _compose_service_statuses_flaky
+    )
+
+    def _sleep_noop(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(strongclaw_ops.time, "sleep", _sleep_noop)
+
+    cast(Any, strongclaw_ops)._wait_for_compose_service(
+        execution,
+        service_name="postgres",
+        state="running",
+        health="healthy",
+        timeout_seconds=30,
+    )
+
+    assert attempts["count"] == 2
 
 
 def test_gateway_start_uses_unbounded_subprocess_timeout(

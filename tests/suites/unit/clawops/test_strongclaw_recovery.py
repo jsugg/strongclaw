@@ -125,6 +125,46 @@ def test_restore_backup_rejects_link_members(
         )
 
 
+def test_verify_backup_falls_back_when_openclaw_verify_rejects_tar_archive(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Verify should fall back to tar validation on OpenClaw manifest-compat failures."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+    test_context.patch.patch_object(
+        strongclaw_recovery.shutil,
+        "which",
+        new=_missing_tool,
+    )
+    archive_path = strongclaw_recovery.create_backup(home_dir=home_dir)
+
+    def _with_openclaw(_command: str, _path: str | None = None) -> str | None:
+        return "/usr/bin/openclaw"
+
+    def _failed_openclaw_verify(*_args: object, **_kwargs: object) -> ExecResult:
+        return ExecResult(
+            argv=("openclaw", "backup", "verify", str(archive_path)),
+            returncode=1,
+            stdout="",
+            stderr="Error: Expected exactly one backup manifest entry, found 0.",
+            duration_ms=1,
+        )
+
+    test_context.patch.patch_object(
+        strongclaw_recovery.shutil,
+        "which",
+        new=_with_openclaw,
+    )
+    test_context.patch.patch_object(
+        strongclaw_recovery,
+        "run_command",
+        new=_failed_openclaw_verify,
+    )
+
+    assert strongclaw_recovery.verify_backup(archive_path, home_dir=home_dir) == archive_path
+
+
 def test_prune_retention_deletes_only_expired_strongclaw_owned_files(tmp_path: Path) -> None:
     """Retention pruning should stay scoped to StrongClaw-owned backup and log roots."""
     home_dir = tmp_path / "home"

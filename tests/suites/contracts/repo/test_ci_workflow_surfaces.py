@@ -121,6 +121,7 @@ def test_ci_gate_workflow_runs_on_pull_requests_and_emits_verdict() -> None:
     assert "on:\n  pull_request:" in text
     assert "name: Verdict" in text
     assert "docs_parity_required" in text
+    assert "predicate-quantifier:" not in text
 
 
 def test_ci_gate_paths_filter_uses_default_quantifier() -> None:
@@ -128,6 +129,7 @@ def test_ci_gate_paths_filter_uses_default_quantifier() -> None:
     text = _workflow_text("ci-gate.yml")
 
     assert "uses: dorny/paths-filter@" in text
+    assert "list-files: json" in text
     assert "predicate-quantifier:" not in text
 
 
@@ -166,6 +168,10 @@ def test_ci_gate_workflow_calls_reusable_heavy_lanes() -> None:
     assert "uses: ./.github/workflows/compatibility-matrix.yml" in text
     assert "uses: ./.github/workflows/memory-plugin-verification.yml" in text
     assert "uses: ./.github/workflows/fresh-host-acceptance.yml" in text
+    assert "name: Fresh Host PR Fast" in text
+    assert "name: Fresh Host PR Cold Start" in text
+    assert "fresh_host_coldstart" in text
+    assert "always() &&" in text
     assert "uses: ./.github/workflows/security.yml" in text
 
 
@@ -221,16 +227,21 @@ def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls(
     assert "enable_package_cache" in text
     assert "enable_homebrew_cache" in text
     assert "enable_runtime_download_cache" in text
-    assert "github.event_name == 'workflow_dispatch'" in text
+    assert "freshness_mode" in text
+    assert "promotion_manifest_required" in text
+    assert "fresh-host-acceptance-${{ github.workflow }}-${{ format(" in text
+    assert "'{0}-{1}-{2}-{3}-{4}-{5}-{6}-{7}-{8}'" in text
     assert "inputs.macos_runtime_provider" in text
     assert "inputs.docker_pull_parallelism" in text
     assert "inputs.docker_pull_max_attempts" in text
     assert "inputs.enable_homebrew_cache" in text
     assert "inputs.enable_runtime_download_cache" in text
+    assert "inputs.freshness_mode" in text
     assert "macos_runtime_provider: ${{ inputs.macos_runtime_provider }}" in text
     assert "docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}" in text
     assert "docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}" in text
     assert "enable_runtime_download_cache: ${{ inputs.enable_runtime_download_cache }}" in text
+    assert "freshness_mode: ${{ inputs.freshness_mode }}" in text
     assert "cancel-in-progress: true" in text
 
 
@@ -257,7 +268,13 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert "Restore hosted macOS Homebrew download cache" in text
     assert "Restore hosted macOS runtime download cache" in text
     assert "Restore hosted macOS Docker image cache" in text
-    assert "Re-check hosted macOS Docker image cache after runtime install" in text
+    assert "Classify hosted macOS Docker image cache state" in text
+    assert "FRESH_HOST_PROMOTION_MANIFEST_REQUIRED" in text
+    assert "--freshness-mode" in text
+    assert "inputs.freshness_mode == 'warm'" in text
+    assert "FRESH_HOST_IMAGE_CACHE_STATE == 'hit'" in text
+    assert "FRESH_HOST_ENABLE_IMAGE_CACHE_RESTORE == 'true'" in text
+    assert '--github-env-file "${GITHUB_ENV}"' in text
     assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
     assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text
@@ -316,6 +333,7 @@ def test_nightly_workflow_warms_caches_before_running_fresh_host_core() -> None:
     assert "uses: ./.github/workflows/fresh-host-cache-warm.yml" in text
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
     assert "needs: warm-fresh-host-caches" in text
+    assert "freshness_mode: cold" in text
 
 
 def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:

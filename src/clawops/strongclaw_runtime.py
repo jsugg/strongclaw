@@ -1014,11 +1014,40 @@ def docker_cli_installed() -> bool:
     return command_exists("docker")
 
 
+def _system_account_home() -> pathlib.Path | None:
+    """Return the account home directory independent of HOME overrides."""
+    candidate = pathlib.Path(f"~{getpass.getuser()}").expanduser()
+    if not candidate.exists():
+        return None
+    return candidate.resolve()
+
+
 def docker_compose_available() -> bool:
     """Return whether `docker compose` is available."""
     if not docker_cli_installed():
         return False
-    return run_command(["docker", "compose", "version"], timeout_seconds=10).ok
+    if run_command(["docker", "compose", "version"], timeout_seconds=10).ok:
+        return True
+
+    fallback_home = _system_account_home()
+    if fallback_home is None:
+        return False
+    configured_home_raw = os.environ.get("HOME", "").strip()
+    if not configured_home_raw:
+        return False
+    configured_home = pathlib.Path(configured_home_raw).expanduser()
+    try:
+        if configured_home.resolve() == fallback_home:
+            return False
+    except OSError:
+        return False
+    fallback_env = dict(os.environ)
+    fallback_env["HOME"] = str(fallback_home)
+    return run_command(
+        ["docker", "compose", "version"],
+        env=fallback_env,
+        timeout_seconds=10,
+    ).ok
 
 
 def _docker_context_name() -> str | None:

@@ -22,6 +22,7 @@ from tests.utils.helpers._fresh_host.models import (
     FreshHostContext,
     FreshHostError,
     FreshHostReport,
+    FreshnessMode,
     PhaseResult,
     PhaseStatus,
     PlatformName,
@@ -105,6 +106,18 @@ def _platform_name(value: object, *, path: str) -> PlatformName:
     return cast(PlatformName, platform)
 
 
+def _freshness_mode(
+    value: object,
+    *,
+    path: str,
+    default: FreshnessMode = "cold",
+) -> FreshnessMode:
+    mode = as_string(value, path=path) if value is not None else default
+    if mode not in {"warm", "cold"}:
+        raise FreshHostError(f"{path} must be 'warm' or 'cold'")
+    return cast(FreshnessMode, mode)
+
+
 def _phase_status(value: object, *, path: str) -> PhaseStatus:
     status = as_string(value, path=path)
     if status not in {"success", "failure", "skipped"}:
@@ -151,6 +164,11 @@ def load_context(path: Path) -> FreshHostContext:
         runtime_provider=as_optional_string(
             payload.get("runtime_provider"),
             path="context.runtime_provider",
+        ),
+        freshness_mode=_freshness_mode(
+            payload.get("freshness_mode"),
+            path="context.freshness_mode",
+            default="cold",
         ),
         docker_pull_parallelism=as_int(
             payload.get("docker_pull_parallelism"),
@@ -242,6 +260,11 @@ def load_report(path: Path) -> FreshHostReport:
         runtime_provider=as_optional_string(
             payload.get("runtime_provider"),
             path="report.runtime_provider",
+        ),
+        freshness_mode=_freshness_mode(
+            payload.get("freshness_mode"),
+            path="report.freshness_mode",
+            default="cold",
         ),
         phases=phases,
         diagnostics_dir=as_string(payload.get("diagnostics_dir"), path="report.diagnostics_dir"),

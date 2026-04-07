@@ -17,6 +17,8 @@ from clawops.strongclaw_runtime import (
     run_command,
 )
 
+_OPENCLAW_VERIFY_MANIFEST_MISMATCH = "Expected exactly one backup manifest entry"
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class BackupCreateResult:
@@ -87,16 +89,25 @@ def verify_backup(
         )
         if openclaw_verify_result.ok:
             return archive_path
-    with tarfile.open(archive_path, "r:gz") as archive:
-        archive.getmembers()
-    if openclaw_verify_result is not None and not openclaw_verify_result.ok:
         detail = (
             openclaw_verify_result.stderr.strip()
             or openclaw_verify_result.stdout.strip()
             or "OpenClaw backup verification failed"
         )
-        if "backup manifest entry" not in detail.lower():
-            raise CommandError(detail)
+        if _OPENCLAW_VERIFY_MANIFEST_MISMATCH in detail:
+            try:
+                return _verify_tar_archive(archive_path)
+            except (OSError, tarfile.TarError):
+                pass
+        raise CommandError(detail)
+    return _verify_tar_archive(archive_path)
+
+
+def _verify_tar_archive(archive_path: pathlib.Path) -> pathlib.Path:
+    """Verify one fallback tar archive by ensuring members can be enumerated."""
+    with tarfile.open(archive_path, "r:gz") as archive:
+        # Simply ensure the archive can be opened and its members enumerated.
+        archive.getmembers()
     return archive_path
 
 

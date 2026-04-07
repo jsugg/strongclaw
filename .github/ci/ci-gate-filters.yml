@@ -18,6 +18,9 @@ docs_only:
   - "!pyproject.toml"
   - "!uv.lock"
 
+all_changed_paths:
+  - "**"
+
 fresh_host:
   - ".github/workflows/fresh-host-acceptance.yml"
   - ".github/workflows/fresh-host-core.yml"
@@ -47,6 +50,13 @@ fresh_host:
   - "!**/*.ico"
   - "!**/*.pdf"
   - "!LICENSE*"
+
+fresh_host_coldstart:
+  - "platform/compose/**"
+  - "tests/scripts/fresh_host.py"
+  - "tests/scripts/hosted_docker.py"
+  - "tests/utils/helpers/_fresh_host/**"
+  - "tests/utils/helpers/_hosted_docker/**"
 
 security:
   - ".github/workflows/security.yml"

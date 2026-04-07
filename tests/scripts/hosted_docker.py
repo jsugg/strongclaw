@@ -42,6 +42,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Restore Docker images from the workflow cache archive.",
     )
     restore_parser.add_argument("--context", type=Path, required=True)
+    restore_parser.add_argument("--github-env-file", type=Path)
 
     save_parser = subparsers.add_parser(
         "save-image-cache",
@@ -56,6 +57,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     diagnostics_parser.add_argument("--context", type=Path, required=True)
 
     return parser.parse_args(argv)
+
+
+def _append_github_env(github_env_file: Path | None, *, key: str, value: str) -> None:
+    """Append one environment export to the GitHub env file when configured."""
+    if github_env_file is None:
+        return
+    github_env_file.parent.mkdir(parents=True, exist_ok=True)
+    with github_env_file.open("a", encoding="utf-8") as handle:
+        handle.write(f"{key}={value}\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,7 +86,16 @@ def main(argv: list[str] | None = None) -> int:
             ensure_images(Path(args.context).expanduser().resolve())
             return 0
         if args.command == "restore-image-cache":
-            restore_image_cache(Path(args.context).expanduser().resolve())
+            restored = restore_image_cache(Path(args.context).expanduser().resolve())
+            _append_github_env(
+                (
+                    Path(args.github_env_file).expanduser().resolve()
+                    if args.github_env_file is not None
+                    else None
+                ),
+                key="FRESH_HOST_IMAGE_CACHE_RESTORED",
+                value=str(restored).lower(),
+            )
             return 0
         if args.command == "save-image-cache":
             save_image_cache(Path(args.context).expanduser().resolve())

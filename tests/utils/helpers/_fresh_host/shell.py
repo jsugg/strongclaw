@@ -49,8 +49,10 @@ def phase_env(context: FreshHostContext) -> dict[str, str]:
             "XDG_CONFIG_HOME": f"{context.app_home}/.config",
         }
     )
-    if context.profile == "hypermemory" and not env.get("HYPERMEMORY_EMBEDDING_MODEL", "").strip():
-        env["HYPERMEMORY_EMBEDDING_MODEL"] = "ollama/nomic-embed-text"
+
+    if context.profile == "hypermemory":
+        if not env.get("HYPERMEMORY_EMBEDDING_MODEL", "").strip():
+            env["HYPERMEMORY_EMBEDDING_MODEL"] = "ollama/nomic-embed-text"
     if context.platform == "linux":
         if context.xdg_runtime_dir is None:
             raise FreshHostError("Linux scenarios require xdg_runtime_dir in context.")

@@ -141,6 +141,68 @@ def test_docker_backend_diagnostics_capture_runtime_context(
     assert "Cannot connect to the Docker daemon" in diagnostics.info_stderr
 
 
+def test_docker_compose_available_retries_with_system_home_when_home_is_isolated(
+    test_context: TestContext,
+) -> None:
+    calls: list[dict[str, str] | None] = []
+
+    def _fake_run_command(
+        argv: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 10,
+    ) -> ExecResult:
+        del timeout_seconds
+        assert argv == ["docker", "compose", "version"]
+        calls.append(None if env is None else dict(env))
+        if len(calls) == 1:
+            return ExecResult(tuple(argv), 1, "", "compose unavailable", 5)
+        return ExecResult(tuple(argv), 0, "Docker Compose version v2", "", 5)
+
+    test_context.patch.patch_object(runtime, "docker_cli_installed", new=lambda: True)
+    test_context.patch.patch_object(runtime, "run_command", new=_fake_run_command)
+    test_context.patch.patch_object(
+        runtime,
+        "_system_account_home",
+        new=lambda: pathlib.Path("/Users/runner"),
+    )
+    test_context.env.set("HOME", "/tmp/isolated-home")
+
+    assert runtime.docker_compose_available() is True
+    assert len(calls) == 2
+    assert calls[1] is not None
+    assert calls[1]["HOME"] == "/Users/runner"
+
+
+def test_docker_compose_available_does_not_retry_when_home_matches_system_home(
+    test_context: TestContext,
+) -> None:
+    calls: list[dict[str, str] | None] = []
+
+    def _fake_run_command(
+        argv: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 10,
+    ) -> ExecResult:
+        del timeout_seconds
+        assert argv == ["docker", "compose", "version"]
+        calls.append(None if env is None else dict(env))
+        return ExecResult(tuple(argv), 1, "", "compose unavailable", 5)
+
+    test_context.patch.patch_object(runtime, "docker_cli_installed", new=lambda: True)
+    test_context.patch.patch_object(runtime, "run_command", new=_fake_run_command)
+    test_context.patch.patch_object(
+        runtime,
+        "_system_account_home",
+        new=lambda: pathlib.Path("/Users/runner"),
+    )
+    test_context.env.set("HOME", "/Users/runner")
+
+    assert runtime.docker_compose_available() is False
+    assert calls == [None]
+
+
 def test_ensure_docker_backend_ready_surfaces_runtime_details(
     test_context: TestContext,
 ) -> None:
