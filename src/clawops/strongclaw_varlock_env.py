@@ -176,8 +176,15 @@ def _ensure_required_defaults(
         "NEO4J_USERNAME": values.get("NEO4J_USERNAME", "neo4j") or "neo4j",
         # Allow the runtime environment to override the embedding model; otherwise
         # default to a local Ollama nomic embed model for non-interactive setups.
+        # HYPERMEMORY_EMBEDDING_API_BASE is the upstream URL that LiteLLM uses to
+        # reach the embedding provider (e.g. Ollama via the Docker host bridge).
+        # It must always be paired with HYPERMEMORY_EMBEDDING_MODEL so the LiteLLM
+        # config.yaml never receives a blank api_base at container start time.
         "HYPERMEMORY_EMBEDDING_MODEL": os.environ.get(
             "HYPERMEMORY_EMBEDDING_MODEL", "ollama/nomic-embed-text"
+        ),
+        "HYPERMEMORY_EMBEDDING_API_BASE": os.environ.get(
+            "HYPERMEMORY_EMBEDDING_API_BASE", "http://host.docker.internal:11434"
         ),
         "HYPERMEMORY_EMBEDDING_BASE_URL": "http://127.0.0.1:4000/v1",
         "HYPERMEMORY_QDRANT_URL": "http://127.0.0.1:6333",

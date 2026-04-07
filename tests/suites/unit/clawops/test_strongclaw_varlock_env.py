@@ -90,6 +90,7 @@ def test_ensure_required_defaults_generates_neo4j_credentials(
     assert values["NEO4J_USERNAME"] == "neo4j"
     assert values["NEO4J_PASSWORD"] == "neo4j-password-secret"
     assert values["HYPERMEMORY_EMBEDDING_MODEL"] == "ollama/nomic-embed-text"
+    assert values["HYPERMEMORY_EMBEDDING_API_BASE"] == "http://host.docker.internal:11434"
 
 
 def test_configure_varlock_env_replaces_short_local_secrets(

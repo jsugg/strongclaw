@@ -416,6 +416,32 @@ def test_sidecar_readiness_targets_keep_default_litellm_timeout_without_hosted_v
     assert litellm_target.timeout_seconds == strongclaw_ops.LITELLM_HEALTH_TIMEOUT_SECONDS
 
 
+def test_sidecar_readiness_targets_extend_neo4j_timeout_for_hosted_macos() -> None:
+    """Hosted macOS variant should give Neo4j extra time to pass health checks."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={"STRONGCLAW_COMPOSE_VARIANT": "ci-hosted-macos"},
+    )
+
+    neo4j_target = next(target for target in targets if target.service_name == "neo4j")
+    assert neo4j_target.timeout_seconds == strongclaw_ops.HOSTED_MACOS_NEO4J_HEALTH_TIMEOUT_SECONDS
+
+
+def test_sidecar_readiness_targets_keep_default_neo4j_timeout_without_hosted_variant() -> None:
+    """Non-hosted variants should keep the default Neo4j readiness timeout."""
+    profile_flags = {"usesQmd": True, "usesHypermemory": True}
+
+    targets = cast(Any, strongclaw_ops)._sidecar_readiness_targets(
+        profile_flags,
+        environ={},
+    )
+
+    neo4j_target = next(target for target in targets if target.service_name == "neo4j")
+    assert neo4j_target.timeout_seconds == strongclaw_ops.NEO4J_HEALTH_TIMEOUT_SECONDS
+
+
 def test_sidecars_up_bootstraps_litellm_before_starting_runtime_services(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:

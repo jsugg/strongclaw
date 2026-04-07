@@ -56,6 +56,7 @@ LITELLM_HEALTH_TIMEOUT_SECONDS = 180
 HOSTED_MACOS_LITELLM_HEALTH_TIMEOUT_SECONDS = 300
 QDRANT_HEALTH_TIMEOUT_SECONDS = 180
 NEO4J_HEALTH_TIMEOUT_SECONDS = 180
+HOSTED_MACOS_NEO4J_HEALTH_TIMEOUT_SECONDS = 360
 COMPOSE_POLL_INTERVAL_SECONDS = 2.0
 
 
@@ -445,6 +446,14 @@ def _resolve_litellm_health_timeout_seconds(environ: Mapping[str, str]) -> int:
     return LITELLM_HEALTH_TIMEOUT_SECONDS
 
 
+def _resolve_neo4j_health_timeout_seconds(environ: Mapping[str, str]) -> int:
+    """Return the configured Neo4j health timeout for the active compose variant."""
+    compose_variant = environ.get("STRONGCLAW_COMPOSE_VARIANT", "").strip().lower()
+    if compose_variant == "ci-hosted-macos":
+        return HOSTED_MACOS_NEO4J_HEALTH_TIMEOUT_SECONDS
+    return NEO4J_HEALTH_TIMEOUT_SECONDS
+
+
 def _sidecar_readiness_targets(
     profile_flags: Mapping[str, object],
     *,
@@ -456,6 +465,7 @@ def _sidecar_readiness_targets(
     qdrant_required = uses_qmd or uses_hypermemory
     neo4j_required = uses_hypermemory
     litellm_timeout_seconds = _resolve_litellm_health_timeout_seconds(environ)
+    neo4j_timeout_seconds = _resolve_neo4j_health_timeout_seconds(environ)
     return (
         _SidecarReadinessTarget(
             service_name=POSTGRES_SERVICE_NAME,
@@ -483,7 +493,7 @@ def _sidecar_readiness_targets(
             required=neo4j_required,
             impact="degraded",
             reason="graph-backed context expansion for the hypermemory profile",
-            timeout_seconds=NEO4J_HEALTH_TIMEOUT_SECONDS,
+            timeout_seconds=neo4j_timeout_seconds,
         ),
         _SidecarReadinessTarget(
             service_name="otel-collector",
