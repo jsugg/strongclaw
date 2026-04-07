@@ -67,3 +67,4 @@ jobs:
       enable_homebrew_cache: true
       enable_runtime_download_cache: true
       freshness_mode: cold
+    secrets: inherit
