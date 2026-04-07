@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -144,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
                     memory_plugin_files=str(args.memory_plugin_files),
                     compatibility_matrix_files=str(args.compatibility_matrix_files),
                 )
+            if selection.fresh_host_coldstart and selection.fresh_host:
+                selection = dataclasses.replace(selection, fresh_host_coldstart=False)
             write_github_output(
                 {
                     "docs_only": str(selection.docs_only).lower(),
