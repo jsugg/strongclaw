@@ -16,6 +16,7 @@ from tests.utils.helpers._hosted_docker.models import RuntimeInstallReport
 from tests.utils.helpers._hosted_docker.shell import (
     macos_env,
     run_checked,
+    run_command,
     sysctl_int,
     wait_for_docker_ready,
 )
@@ -366,6 +367,38 @@ def install_runtime_tools(context_path: Path, *, github_env_file: Path | None = 
     )
 
 
+def _log_colima_startup_diagnostics(repo_root: Path, env: dict[str, str]) -> None:
+    """Emit best-effort Colima/Docker diagnostics to stdout for CI log visibility."""
+    log("=== Colima startup diagnostics ===")
+    colima_log = Path("/tmp/colima-start.log")
+    if colima_log.exists():
+        log(f"--- /tmp/colima-start.log ({colima_log.stat().st_size} bytes) ---")
+        try:
+            log(colima_log.read_text(encoding="utf-8", errors="replace")[-4000:])
+        except OSError as exc:
+            log(f"(could not read colima-start.log: {exc})")
+    else:
+        log("/tmp/colima-start.log not found — nohup may not have created it.")
+    for label, command in [
+        ("colima status", ["colima", "status"]),
+        ("colima list", ["colima", "list"]),
+        ("ps colima", ["ps", "aux"]),
+    ]:
+        try:
+            completed = run_command(
+                command, cwd=repo_root, env=env, timeout_seconds=30, capture_output=True
+            )
+            stdout: str = completed.stdout or ""
+            stderr: str = completed.stderr or ""
+            output: str = stdout + stderr
+            if label == "ps colima":
+                output = "\n".join(line for line in output.splitlines() if "colima" in line.lower())
+            log(f"--- {label} ---\n{output.strip()[:2000]}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"--- {label} failed: {exc} ---")
+    log("=== end Colima diagnostics ===")
+
+
 def wait_runtime_ready(context_path: Path) -> RuntimeInstallReport:
     """Wait for the Colima Docker runtime to become ready and write the install report.
 
@@ -408,6 +441,13 @@ def wait_runtime_ready(context_path: Path) -> RuntimeInstallReport:
     started_at = now_iso()
     started = time.monotonic()
 
+    log(f"wait_runtime_ready: DOCKER_HOST={docker_host} DOCKER_CONFIG={docker_config}")
+    socket_path = docker_host.removeprefix("unix://")
+    log(
+        f"wait_runtime_ready: socket {socket_path}: "
+        f"{'EXISTS' if os.path.exists(socket_path) else 'NOT FOUND'}"
+    )
+
     try:
         wait_for_docker_ready(cwd=repo_root, env=env)
         for command in (
@@ -418,6 +458,7 @@ def wait_runtime_ready(context_path: Path) -> RuntimeInstallReport:
             run_checked(command, cwd=repo_root, env=env, timeout_seconds=120)
     except Exception as exc:  # noqa: BLE001
         failure_reason = str(exc)
+        _log_colima_startup_diagnostics(repo_root, env)
 
     finished_at = now_iso()
     duration_seconds = round(time.monotonic() - started, 3)
