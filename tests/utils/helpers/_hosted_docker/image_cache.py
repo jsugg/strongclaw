@@ -263,12 +263,16 @@ def restore_image_cache(context_path: Path) -> bool:
         expected_path = _cache_archive_path(cache_root, scenario_id=context.scenario_id)
         log(f"Docker image cache archive was not found at {expected_path}; skipping restore.")
         return False
-    run_checked(
-        ["docker", "image", "load", "-i", str(archive_path)],
-        cwd=repo_root,
-        env=dict(os.environ),
-        timeout_seconds=_docker_image_load_timeout_seconds(),
-    )
+    try:
+        run_checked(
+            ["docker", "image", "load", "-i", str(archive_path)],
+            cwd=repo_root,
+            env=dict(os.environ),
+            timeout_seconds=_docker_image_load_timeout_seconds(),
+        )
+    except FreshHostError as exc:
+        log(f"Docker image cache load failed (will pull fresh images instead): {exc}")
+        return False
     log(f"Loaded Docker image cache from {archive_path}.")
     return True
 

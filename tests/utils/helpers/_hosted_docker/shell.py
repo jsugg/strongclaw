@@ -50,7 +50,9 @@ def run_checked(
         capture_output=capture_output,
     )
     if completed.returncode != 0:
-        output = completed.stderr.strip() or completed.stdout.strip() or "command failed"
+        output = (
+            (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
+        )
         raise FreshHostError(f"{' '.join(command)} failed: {output}")
     return completed
 
