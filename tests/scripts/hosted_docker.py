@@ -18,8 +18,10 @@ from tests.utils.helpers.hosted_docker import (  # noqa: E402
     collect_runtime_diagnostics,
     ensure_images,
     install_runtime,
+    install_runtime_tools,
     restore_image_cache,
     save_image_cache,
+    wait_runtime_ready,
 )
 
 
@@ -31,6 +33,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     install_parser = subparsers.add_parser("install-runtime", help="Install the hosted runtime.")
     install_parser.add_argument("--context", type=Path, required=True)
     install_parser.add_argument("--github-env-file", type=Path)
+
+    install_tools_parser = subparsers.add_parser(
+        "install-runtime-tools",
+        help=(
+            "Download and install Lima, Colima, and Docker tooling without starting the VM."
+            " Start Colima in a background shell step after this, then call wait-runtime-ready."
+        ),
+    )
+    install_tools_parser.add_argument("--context", type=Path, required=True)
+    install_tools_parser.add_argument("--github-env-file", type=Path)
+
+    wait_parser = subparsers.add_parser(
+        "wait-runtime-ready",
+        help="Poll until the Colima Docker runtime responds and write the install report.",
+    )
+    wait_parser.add_argument("--context", type=Path, required=True)
 
     ensure_parser = subparsers.add_parser(
         "ensure-images", help="Ensure compose images exist locally."
@@ -81,6 +99,19 @@ def main(argv: list[str] | None = None) -> int:
                     else None
                 ),
             )
+            return 0
+        if args.command == "install-runtime-tools":
+            install_runtime_tools(
+                Path(args.context).expanduser().resolve(),
+                github_env_file=(
+                    Path(args.github_env_file).expanduser().resolve()
+                    if args.github_env_file is not None
+                    else None
+                ),
+            )
+            return 0
+        if args.command == "wait-runtime-ready":
+            wait_runtime_ready(Path(args.context).expanduser().resolve())
             return 0
         if args.command == "ensure-images":
             ensure_images(Path(args.context).expanduser().resolve())

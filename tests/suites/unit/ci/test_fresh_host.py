@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import subprocess
 from collections.abc import Callable, Mapping
@@ -1208,11 +1209,11 @@ def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
     assert calls[3].endswith("browser-lab down --repo-local-state")
 
 
-def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
+def test_macos_sidecars_exercise_leaves_stack_running_when_channels_runtime_follows(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Hosted macOS sidecar exercises should verify runtime before teardown."""
+    """Sidecars exercise should leave services up when exercise-channels-runtime follows."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
@@ -1226,6 +1227,8 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
         workspace=workspace,
         github_env_file=github_env,
     )
+    # macos-sidecars includes both exercise-sidecars and exercise-channels-runtime
+    assert "exercise-channels-runtime" in context.phase_names
     calls: list[str] = []
     verify_kwargs: dict[str, object] = {}
 
@@ -1267,10 +1270,11 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
 
     fresh_host_macos.exercise_macos_sidecars(context)
 
+    # Stack is left running — no down command — so channels runtime can reuse it
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
     assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
-    assert calls[3].endswith("sidecars down --repo-local-state")
+    assert len(calls) == 3, f"Expected no teardown command; got extra call(s): {calls[3:]}"
     assert (
         verify_kwargs["timeout_seconds"]
         == fresh_host_macos.HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS
@@ -1278,24 +1282,30 @@ def test_macos_repo_local_sidecars_verifies_runtime_before_teardown(
     assert verify_kwargs["repo_local_state"] is True
 
 
-def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
+def test_macos_sidecars_exercise_brings_stack_down_when_no_channels_runtime_follows(
     tmp_path: Path,
     test_context: TestContext,
 ) -> None:
-    """Hosted macOS channels runtime phase should verify contracts and run runtime smoke."""
+    """Sidecars exercise should tear services down when exercise-channels-runtime is absent."""
     github_env = tmp_path / "github.env"
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     test_context.apply_profiles("fresh_host_macos_colima")
 
-    context = fresh_host.prepare_context(
+    base_context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
         repo_root=workspace,
         runner_temp=runner_temp,
         workspace=workspace,
         github_env_file=github_env,
     )
+    # Simulate a scenario where channels runtime is not scheduled
+    context = dataclasses.replace(
+        base_context,
+        phase_names=[p for p in base_context.phase_names if p != "exercise-channels-runtime"],
+    )
+    assert "exercise-channels-runtime" not in context.phase_names
     calls: list[str] = []
 
     def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
@@ -1313,12 +1323,18 @@ def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
         del cwd, env, timeout_seconds, check
         calls.append("run:" + " ".join(command))
 
-    def _fake_verify_sidecars(
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        new=_fake_wait_for_docker_backend,
+    )
+
+    def _fake_verify_down(
         compose_file: Path,
         *,
         cwd: Path,
         env: dict[str, str],
-        timeout_seconds: int = 120,
+        timeout_seconds: int = 90,
         repo_root_path: Path | None = None,
         repo_local_state: bool = False,
     ) -> None:
@@ -1327,9 +1343,78 @@ def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
 
     test_context.patch.patch_object(
         fresh_host_macos,
+        "run_command",
+        new=_fake_run_command,
+    )
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        new=_fake_verify_down,
+    )
+
+    fresh_host_macos.exercise_macos_sidecars(context)
+
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
+    assert calls[3].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_macos_channels_runtime_skips_sidecars_startup_when_already_up(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Channels runtime should skip sidecars up/verify when exercise-sidecars preceded it."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    # macos-sidecars includes exercise-sidecars, so sidecars are already up
+    assert "exercise-sidecars" in context.phase_names
+    calls: list[str] = []
+
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
         "wait_for_docker_backend",
         new=_fake_wait_for_docker_backend,
     )
+
+    def _fake_verify_skips(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 90,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, timeout_seconds, repo_root_path, repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
     test_context.patch.patch_object(
         fresh_host_macos,
         "run_command",
@@ -1338,11 +1423,92 @@ def test_exercise_macos_channels_runtime_runs_runtime_checks_and_teardown(
     test_context.patch.patch_object(
         fresh_host_macos,
         "verify_sidecar_services_running",
-        new=_fake_verify_sidecars,
+        new=_fake_verify_skips,
     )
 
     fresh_host_macos.exercise_macos_channels_runtime(context)
 
+    # No sidecars up/verify — stack was already started by exercise-sidecars
+    assert calls[0].startswith("wait:")
+    assert "verify-platform channels --asset-root ." in calls[1]
+    assert "security_workflow.py verify-channels-contract --repo-root ." in calls[2]
+    assert "security_workflow.py run-channels-runtime-smoke --repo-root ." in calls[3]
+    assert calls[4].endswith("sidecars down --repo-local-state")
+
+
+def test_exercise_macos_channels_runtime_starts_sidecars_when_no_sidecar_phase_preceded(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Channels runtime should bring sidecars up and verify when exercise-sidecars did not run."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_colima")
+
+    base_context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    # Simulate a scenario where exercise-sidecars is not scheduled
+    context = dataclasses.replace(
+        base_context,
+        phase_names=[p for p in base_context.phase_names if p != "exercise-sidecars"],
+    )
+    assert "exercise-sidecars" not in context.phase_names
+    calls: list[str] = []
+
+    def _fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        new=_fake_wait_for_docker_backend,
+    )
+
+    def _fake_verify_starts(
+        compose_file: Path,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 90,
+        repo_root_path: Path | None = None,
+        repo_local_state: bool = False,
+    ) -> None:
+        del cwd, env, timeout_seconds, repo_root_path, repo_local_state
+        calls.append(f"verify:{compose_file.name}")
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "run_command",
+        new=_fake_run_command,
+    )
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        new=_fake_verify_starts,
+    )
+
+    fresh_host_macos.exercise_macos_channels_runtime(context)
+
+    # Sidecars must be started and verified before channels exercises
     assert calls[0].startswith("wait:")
     assert calls[1].endswith("sidecars up --repo-local-state")
     assert calls[2] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"

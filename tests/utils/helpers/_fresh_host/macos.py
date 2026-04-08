@@ -249,8 +249,15 @@ def verify_macos_launchd(context: FreshHostContext) -> None:
             raise FreshHostError(f"launchd state check failed for {target}")
 
 
-def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str]:
-    """Run one repo-local up/down cycle for a component."""
+def _run_repo_local_cycle(
+    context: FreshHostContext, component: str, *, bring_down: bool = True
+) -> list[str]:
+    """Run one repo-local up/down cycle for a component.
+
+    When *bring_down* is False the services are left running after verification
+    so that a subsequent phase can reuse the already-healthy stack without paying
+    another startup and health-check round.
+    """
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
     compose_file = compose_file_for_component(
@@ -289,8 +296,10 @@ def _run_repo_local_cycle(context: FreshHostContext, component: str) -> list[str
             repo_root_path=repo_root,
             repo_local_state=True,
         )
-    run_command(down_command, cwd=repo_root, env=env)
-    return down_command
+    if bring_down:
+        run_command(down_command, cwd=repo_root, env=env)
+        return down_command
+    return up_command
 
 
 def _venv_python(context: FreshHostContext) -> str:
@@ -299,8 +308,14 @@ def _venv_python(context: FreshHostContext) -> str:
 
 
 def exercise_macos_sidecars(context: FreshHostContext) -> list[str]:
-    """Exercise macOS repo-local sidecars."""
-    return _run_repo_local_cycle(context, "sidecars")
+    """Exercise macOS repo-local sidecars.
+
+    When *exercise-channels-runtime* is also scheduled the sidecars stack is left
+    running after verification so the next phase can reuse it without a redundant
+    up/down cycle.
+    """
+    bring_down = "exercise-channels-runtime" not in context.phase_names
+    return _run_repo_local_cycle(context, "sidecars", bring_down=bring_down)
 
 
 def exercise_macos_browser_lab(context: FreshHostContext) -> list[str]:
@@ -309,15 +324,33 @@ def exercise_macos_browser_lab(context: FreshHostContext) -> list[str]:
 
 
 def exercise_macos_channels_runtime(context: FreshHostContext) -> list[str]:
-    """Exercise channels acceptance while sidecars are running repo-locally."""
+    """Exercise channels acceptance while sidecars are running repo-locally.
+
+    When *exercise-sidecars* is also scheduled the sidecars stack is already running
+    from that phase, so this function skips the redundant up/verify cycle and proceeds
+    directly to channels exercises before tearing the stack down.
+    """
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
     env.setdefault("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN", "fresh-host-smoke-token")
-    compose_file = compose_file_for_component(context, "sidecars")
     wait_for_docker_backend(cwd=repo_root, env=env)
-    up_command = venv_clawops_command(
-        context, "ops", "--asset-root", ".", "sidecars", "up", "--repo-local-state"
-    )
+
+    sidecars_already_up = "exercise-sidecars" in context.phase_names
+    if not sidecars_already_up:
+        compose_file = compose_file_for_component(context, "sidecars")
+        up_command = venv_clawops_command(
+            context, "ops", "--asset-root", ".", "sidecars", "up", "--repo-local-state"
+        )
+        run_command(up_command, cwd=repo_root, env=env)
+        verify_sidecar_services_running(
+            compose_file,
+            cwd=repo_root / "platform" / "compose",
+            env=env,
+            timeout_seconds=HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS,
+            repo_root_path=repo_root,
+            repo_local_state=True,
+        )
+
     channels_verify_command = venv_clawops_command(
         context, "verify-platform", "channels", "--asset-root", "."
     )
@@ -345,15 +378,6 @@ def exercise_macos_channels_runtime(context: FreshHostContext) -> list[str]:
         "sidecars",
         "down",
         "--repo-local-state",
-    )
-    run_command(up_command, cwd=repo_root, env=env)
-    verify_sidecar_services_running(
-        compose_file,
-        cwd=repo_root / "platform" / "compose",
-        env=env,
-        timeout_seconds=HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS,
-        repo_root_path=repo_root,
-        repo_local_state=True,
     )
     run_command(channels_verify_command, cwd=repo_root, env=env)
     run_command(channels_contract_command, cwd=repo_root, env=env)
