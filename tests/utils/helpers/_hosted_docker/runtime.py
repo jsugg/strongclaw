@@ -449,7 +449,11 @@ def wait_runtime_ready(context_path: Path) -> RuntimeInstallReport:
     )
 
     try:
-        wait_for_docker_ready(cwd=repo_root, env=env)
+        # Colima was started in the background — allow up to 10 min for the VM to boot
+        # and for the Docker daemon inside the VM to stabilize.  The synchronous
+        # install_runtime path calls wait_for_docker_ready after colima has already
+        # returned, so it needs no override there.
+        wait_for_docker_ready(cwd=repo_root, env=env, max_attempts=300)
         for command in (
             ["docker", "version"],
             ["docker", "compose", "version"],
