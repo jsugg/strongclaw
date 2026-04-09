@@ -209,7 +209,7 @@ surfaces:
   - surface_id: workflow_fresh_host_acceptance
     declared_sources:
       - platform/docs/CI_AND_SECURITY.md:42-66
-      - .github/workflows/fresh-host-acceptance.yml:1-84
+      - .github/workflows/fresh-host-acceptance.yml:1-59
     surface_type: workflow_evidence
     owner_lane: workflow_evidence
     launch_blocker_default: "yes"
@@ -219,7 +219,7 @@ surfaces:
   - surface_id: workflow_fresh_host_core
     declared_sources:
       - platform/docs/CI_AND_SECURITY.md:42-66
-      - .github/workflows/fresh-host-core.yml:1-201
+      - .github/workflows/fresh-host-core.yml:1-189
     surface_type: workflow_evidence
     owner_lane: workflow_evidence
     launch_blocker_default: "yes"

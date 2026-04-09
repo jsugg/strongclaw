@@ -18,16 +18,6 @@ on:
         required: false
         type: boolean
         default: true
-      freshness_mode:
-        description: Fresh-host execution mode (`warm` prefers promoted assets; `cold` validates cold start).
-        required: false
-        type: string
-        default: warm
-      promotion_manifest_required:
-        description: Require a compatible promotion manifest before consuming warmed image archives.
-        required: false
-        type: boolean
-        default: true
   workflow_dispatch:
     inputs:
       docker_pull_parallelism:
@@ -45,27 +35,14 @@ on:
         required: true
         type: boolean
         default: true
-      freshness_mode:
-        description: Fresh-host execution mode (`warm` prefers promoted assets; `cold` validates cold start).
-        required: true
-        type: string
-        default: warm
-      promotion_manifest_required:
-        description: Require a compatible promotion manifest before consuming warmed image archives.
-        required: true
-        type: boolean
-        default: true
 
 concurrency:
   group: >-
     fresh-host-acceptance-${{ github.workflow }}-${{ format(
-      '{0}-{1}-{2}-{3}-{4}-{5}',
+      '{0}-{1}-{2}',
       github.ref,
       inputs.docker_pull_parallelism,
-      inputs.docker_pull_max_attempts,
-      inputs.enable_package_cache,
-      inputs.freshness_mode,
-      inputs.promotion_manifest_required
+      inputs.docker_pull_max_attempts
     ) }}
   cancel-in-progress: true
 
@@ -80,5 +57,3 @@ jobs:
       docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}
       docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}
       enable_package_cache: ${{ inputs.enable_package_cache }}
-      freshness_mode: ${{ inputs.freshness_mode }}
-      promotion_manifest_required: ${{ inputs.promotion_manifest_required }}

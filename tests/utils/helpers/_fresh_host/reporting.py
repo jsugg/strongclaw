@@ -72,9 +72,6 @@ def _diagnostic_commands(context: FreshHostContext) -> dict[Path, list[str]]:
             "logs",
             "--no-color",
         ]
-    if shutil.which("colima") is not None:
-        commands[diagnostics_dir / "colima-status.txt"] = ["colima", "status"]
-        commands[diagnostics_dir / "colima-list.txt"] = ["colima", "list"]
     return commands
 
 
@@ -332,7 +329,6 @@ def _write_kpi_evidence(
             "job_name": report.job_name,
             "platform": report.platform,
             "runtime_provider": report.runtime_provider,
-            "freshness_mode": context.freshness_mode,
         },
         "timings_seconds": {
             "scenario_phase_total": round(scenario_phase_seconds, 3),
@@ -377,10 +373,6 @@ def _append_child_report_sections(
             lines.append(
                 f"Host resources: {runtime_report['host_cpu_count']} CPU / {runtime_report['host_memory_gib']} GiB"
             )
-        if runtime_report.get("colima_cpu_count") and runtime_report.get("colima_memory_gib"):
-            lines.append(
-                f"Colima resources: {runtime_report['colima_cpu_count']} CPU / {runtime_report['colima_memory_gib']} GiB"
-            )
         if lines[-1] != "":
             lines.append("")
 
@@ -398,7 +390,6 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         f"| Platform | {report.platform} |",
         f"| Status | {report.status} |",
         f"| Runtime provider | {report.runtime_provider or 'n/a'} |",
-        f"| Freshness mode | {context.freshness_mode} |",
         f"| Activate services in setup | {context.activate_services} |",
         f"| Docker pull parallelism | {context.docker_pull_parallelism} |",
         f"| Docker pull max attempts | {context.docker_pull_max_attempts} |",

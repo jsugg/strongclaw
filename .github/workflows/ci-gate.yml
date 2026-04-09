@@ -19,12 +19,10 @@ jobs:
     outputs:
       docs_only: ${{ steps.selection.outputs.docs_only }}
       fresh_host: ${{ steps.selection.outputs.fresh_host }}
-      fresh_host_coldstart: ${{ steps.selection.outputs.fresh_host_coldstart }}
       security: ${{ steps.selection.outputs.security }}
       harness: ${{ steps.selection.outputs.harness }}
       memory_plugin: ${{ steps.selection.outputs.memory_plugin }}
       compatibility_matrix: ${{ steps.selection.outputs.compatibility_matrix }}
-      any_heavy: ${{ steps.selection.outputs.any_heavy }}
       docs_parity_required: ${{ steps.selection.outputs.docs_parity_required }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -43,7 +41,6 @@ jobs:
           ALL_CHANGED_PATHS_FILES: ${{ steps.filter.outputs.all_changed_paths_files }}
           DOCS_ONLY_FILES: ${{ steps.filter.outputs.docs_only_files }}
           FRESH_HOST_FILES: ${{ steps.filter.outputs.fresh_host_files }}
-          FRESH_HOST_COLDSTART_FILES: ${{ steps.filter.outputs.fresh_host_coldstart_files || '[]' }}
           SECURITY_FILES: ${{ steps.filter.outputs.security_files }}
           HARNESS_FILES: ${{ steps.filter.outputs.harness_files }}
           MEMORY_PLUGIN_FILES: ${{ steps.filter.outputs.memory_plugin_files }}
@@ -52,14 +49,12 @@ jobs:
           python3 ./tests/scripts/ci_gate.py summarize-selection
           --docs-only "${{ steps.filter.outputs.docs_only }}"
           --fresh-host "${{ steps.filter.outputs.fresh_host }}"
-          --fresh-host-coldstart "${{ steps.filter.outputs.fresh_host_coldstart || 'false' }}"
           --security "${{ steps.filter.outputs.security }}"
           --harness "${{ steps.filter.outputs.harness }}"
           --memory-plugin "${{ steps.filter.outputs.memory_plugin }}"
           --compatibility-matrix "${{ steps.filter.outputs.compatibility_matrix }}"
           --docs-only-files "$DOCS_ONLY_FILES"
           --fresh-host-files "$FRESH_HOST_FILES"
-          --fresh-host-coldstart-files "$FRESH_HOST_COLDSTART_FILES"
           --security-files "$SECURITY_FILES"
           --harness-files "$HARNESS_FILES"
           --memory-plugin-files "$MEMORY_PLUGIN_FILES"
@@ -120,31 +115,6 @@ jobs:
       needs.memory_plugin.result != 'failure' &&
       needs.memory_plugin.result != 'cancelled'
     uses: ./.github/workflows/fresh-host-acceptance.yml
-    with:
-      freshness_mode: warm
-      promotion_manifest_required: true
-    secrets: inherit
-
-  fresh_host_coldstart:
-    name: Fresh Host PR Cold Start
-    needs:
-      - classify
-      - harness
-      - compatibility_matrix
-      - memory_plugin
-    if: >-
-      always() &&
-      needs.classify.outputs.fresh_host_coldstart == 'true' &&
-      needs.harness.result != 'failure' &&
-      needs.harness.result != 'cancelled' &&
-      needs.compatibility_matrix.result != 'failure' &&
-      needs.compatibility_matrix.result != 'cancelled' &&
-      needs.memory_plugin.result != 'failure' &&
-      needs.memory_plugin.result != 'cancelled'
-    uses: ./.github/workflows/fresh-host-acceptance.yml
-    with:
-      freshness_mode: cold
-      promotion_manifest_required: false
     secrets: inherit
 
   security:
@@ -174,11 +144,10 @@ jobs:
       - compatibility_matrix
       - memory_plugin
       - fresh_host_pr_fast
-      - fresh_host_coldstart
       - security
     if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Evaluate final verdict
-        run: python3 ./tests/scripts/ci_gate.py verdict --docs-only "${{ needs.classify.outputs.docs_only }}" --fresh-host "${{ needs.classify.outputs.fresh_host }}" --fresh-host-coldstart "${{ needs.classify.outputs.fresh_host_coldstart }}" --security "${{ needs.classify.outputs.security }}" --harness "${{ needs.classify.outputs.harness }}" --memory-plugin "${{ needs.classify.outputs.memory_plugin }}" --compatibility-matrix "${{ needs.classify.outputs.compatibility_matrix }}" --classify-result "${{ needs.classify.result }}" --docs-parity-result "${{ needs.docs_parity.result }}" --harness-result "${{ needs.harness.result }}" --compatibility-matrix-result "${{ needs.compatibility_matrix.result }}" --memory-plugin-result "${{ needs.memory_plugin.result }}" --fresh-host-pr-fast-result "${{ needs.fresh_host_pr_fast.result }}" --fresh-host-coldstart-result "${{ needs.fresh_host_coldstart.result }}" --security-result "${{ needs.security.result }}" --github-summary-file "$GITHUB_STEP_SUMMARY"
+        run: python3 ./tests/scripts/ci_gate.py verdict --docs-only "${{ needs.classify.outputs.docs_only }}" --fresh-host "${{ needs.classify.outputs.fresh_host }}" --security "${{ needs.classify.outputs.security }}" --harness "${{ needs.classify.outputs.harness }}" --memory-plugin "${{ needs.classify.outputs.memory_plugin }}" --compatibility-matrix "${{ needs.classify.outputs.compatibility_matrix }}" --classify-result "${{ needs.classify.result }}" --docs-parity-result "${{ needs.docs_parity.result }}" --harness-result "${{ needs.harness.result }}" --compatibility-matrix-result "${{ needs.compatibility_matrix.result }}" --memory-plugin-result "${{ needs.memory_plugin.result }}" --fresh-host-pr-fast-result "${{ needs.fresh_host_pr_fast.result }}" --security-result "${{ needs.security.result }}" --github-summary-file "$GITHUB_STEP_SUMMARY"

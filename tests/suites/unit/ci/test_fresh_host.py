@@ -61,34 +61,7 @@ def test_prepare_context_writes_context_and_env_file(
     exports = github_env.read_text(encoding="utf-8")
     assert f"FRESH_HOST_CONTEXT={context.context_path}" in exports
     assert f"STRONGCLAW_APP_HOME={context.app_home}" in exports
-    assert "FRESH_HOST_FRESHNESS_MODE=cold" in exports
     assert context.runtime_provider == "docker"
-    assert context.freshness_mode == "cold"
-
-
-def test_prepare_context_supports_explicit_freshness_mode(
-    tmp_path: Path,
-    test_context: TestContext,
-) -> None:
-    """Context preparation should persist the explicit warm/cold freshness mode."""
-    github_env = tmp_path / "github.env"
-    runner_temp = tmp_path / "runner-temp"
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
-
-    context = fresh_host.prepare_context(
-        scenario_id="macos-sidecars",
-        repo_root=workspace,
-        runner_temp=runner_temp,
-        workspace=workspace,
-        github_env_file=github_env,
-        freshness_mode="warm",
-    )
-
-    exports = github_env.read_text(encoding="utf-8")
-    assert context.freshness_mode == "warm"
-    assert "FRESH_HOST_FRESHNESS_MODE=warm" in exports
 
 
 def test_phase_env_sets_hypermemory_embedding_model_default_for_hypermemory_profile(
@@ -137,7 +110,7 @@ def test_scenario_phase_names_match_macos_browser_lab(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-browser-lab",
@@ -165,7 +138,7 @@ def test_scenario_phase_names_deactivate_host_services_before_repo_local_sidecar
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -196,7 +169,7 @@ def test_prepare_context_sets_macos_variant_and_primary_compose_file(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -226,8 +199,6 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
             "macos-sidecars",
             "--runner-temp",
             "/tmp/runner",
-            "--freshness-mode",
-            "warm",
         ]
     )
     browser_lab = _parse_args(
@@ -241,7 +212,6 @@ def test_fresh_host_cli_accepts_current_macos_scenarios() -> None:
     )
 
     assert sidecars.scenario == "macos-sidecars"
-    assert sidecars.freshness_mode == "warm"
     assert browser_lab.scenario == "macos-browser-lab"
 
 
@@ -294,7 +264,6 @@ def test_preview_context_writes_preview_json_and_summary(
     assert preview["context_path"] == context.context_path
     assert preview["report_path"] == context.report_path
     assert preview["diagnostics_dir"] == context.diagnostics_dir
-    assert preview["freshness_mode"] == "cold"
     assert preview["phase_names"] == context.phase_names
     assert preview["ensure_images"] is True
     assert preview["activate_services"] is False
@@ -356,7 +325,7 @@ def test_run_named_phase_supports_macos_service_deactivation(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1218,7 +1187,7 @@ def test_macos_sidecars_exercise_leaves_stack_running_when_channels_runtime_foll
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1291,7 +1260,7 @@ def test_macos_sidecars_exercise_brings_stack_down_when_no_channels_runtime_foll
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     base_context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1369,7 +1338,7 @@ def test_exercise_macos_channels_runtime_skips_sidecars_startup_when_already_up(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1445,7 +1414,7 @@ def test_exercise_macos_channels_runtime_starts_sidecars_when_no_sidecar_phase_p
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     base_context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1527,7 +1496,7 @@ def test_exercise_macos_recovery_smoke_runs_security_workflow_command(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1570,7 +1539,7 @@ def test_deactivate_macos_host_services_limits_teardown_to_active_sidecars_servi
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1634,7 +1603,7 @@ def test_deactivate_macos_host_services_raises_for_active_bootout_failure(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1698,7 +1667,7 @@ def test_cleanup_macos_skips_clawops_teardown_when_venv_is_missing(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1754,7 +1723,7 @@ def test_cleanup_cli_returns_nonzero_and_records_failure_when_cleanup_raises(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1793,7 +1762,7 @@ def test_collect_diagnostics_uses_compose_probe_env_for_macos_compose_commands(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
     local_env_file = workspace / "platform" / "configs" / "varlock" / ".env.local"
     local_env_file.parent.mkdir(parents=True, exist_ok=True)
     local_env_file.write_text("NEO4J_PASSWORD=diag-secret\n", encoding="utf-8")
@@ -1841,7 +1810,7 @@ def test_write_summary_includes_child_reports(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
     test_context.env.update(
         {
             "FRESH_HOST_PACKAGE_CACHE_ENABLED": "true",
@@ -1873,7 +1842,7 @@ def test_write_summary_includes_child_reports(
     Path(context.runtime_report_path or "").write_text(
         json.dumps(
             {
-                "runtime_provider": "colima",
+                "runtime_provider": "orbstack",
                 "host_cpu_count": 4,
                 "host_memory_gib": 8,
                 "docker_host": "unix:///tmp/docker.sock",
@@ -1908,7 +1877,7 @@ def test_write_summary_includes_child_reports(
     summary_text = summary_path.read_text(encoding="utf-8")
     assert "## macOS Fresh Host Sidecars" in summary_text
     assert "| Package cache | true |" in summary_text
-    assert "| Runtime provider | colima |" in summary_text
+    assert "| Runtime provider | orbstack |" in summary_text
     assert "Scenario phase total (fresh-host phases only): 0m 12s" in summary_text
     assert "| Hosted runtime install | 1m 5s |" in summary_text
     assert "| Hosted image ensure | 0m 19s |" in summary_text
@@ -1921,7 +1890,6 @@ def test_write_summary_includes_child_reports(
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert evidence["schema_version"] == "1.0.0"
     assert evidence["scenario"]["id"] == "macos-sidecars"
-    assert evidence["scenario"]["freshness_mode"] == "cold"
 
 
 def test_write_summary_marks_missing_child_durations_as_na(
@@ -1933,7 +1901,7 @@ def test_write_summary_marks_missing_child_durations_as_na(
     runner_temp = tmp_path / "runner-temp"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    test_context.apply_profiles("fresh_host_macos_colima")
+    test_context.apply_profiles("fresh_host_macos_orbstack")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -1957,7 +1925,7 @@ def test_write_summary_marks_missing_child_durations_as_na(
     )
     fresh_host.write_report(report, report_path)
     Path(context.runtime_report_path or "").write_text(
-        json.dumps({"runtime_provider": "colima", "host_cpu_count": 4, "host_memory_gib": 8}),
+        json.dumps({"runtime_provider": "orbstack", "host_cpu_count": 4, "host_memory_gib": 8}),
         encoding="utf-8",
     )
     Path(context.image_report_path or "").write_text(

@@ -106,7 +106,7 @@ def wait_for_docker_ready(
                 )
         if attempt < max_attempts:
             time.sleep(poll_seconds)
-    raise FreshHostError("docker did not become ready after starting colima")
+    raise FreshHostError("docker did not become ready")
 
 
 def sysctl_int(name: str) -> int | None:

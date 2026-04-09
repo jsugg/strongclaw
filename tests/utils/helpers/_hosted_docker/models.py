@@ -29,8 +29,6 @@ class RuntimeInstallReport:
     arch: str
     host_cpu_count: int | None
     host_memory_gib: int | None
-    colima_cpu_count: int | None
-    colima_memory_gib: int | None
     docker_host: str | None
     docker_config: str | None
     installed_tools: list[str]

@@ -75,8 +75,6 @@ def wait_runtime_ready(
         arch=arch,
         host_cpu_count=host_cpu_count,
         host_memory_gib=host_memory_gib,
-        colima_cpu_count=None,
-        colima_memory_gib=None,
         docker_host=docker_host or None,
         docker_config=docker_config,
         installed_tools=["orbstack", "docker", "docker-compose"],

@@ -11,7 +11,7 @@ type IsolationMode = Literal["isolated", "shared"]
 type ProfileValue = str | PathLike[str]
 type ProfileOverrideValue = ProfileValue | None
 type TestProfileName = Literal[
-    "fresh_host_macos_colima",
+    "fresh_host_macos_orbstack",
     "fresh_host_push",
     "model_setup_skip",
     "retry_off",

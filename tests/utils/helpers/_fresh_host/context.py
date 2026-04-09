@@ -5,15 +5,12 @@ from __future__ import annotations
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import cast
 
 from tests.utils.helpers._fresh_host.models import (
     DEFAULT_DOCKER_PULL_MAX_ATTEMPTS,
     DEFAULT_DOCKER_PULL_PARALLELISM,
     FreshHostContext,
-    FreshHostError,
     FreshHostReport,
-    FreshnessMode,
 )
 from tests.utils.helpers._fresh_host.storage import (
     load_context,
@@ -61,26 +58,12 @@ def _selected_pull_max_attempts() -> int:
     )
 
 
-def _selected_freshness_mode(explicit_mode: str | None = None) -> FreshnessMode:
-    """Resolve the selected freshness mode for the workflow run."""
-    raw_mode = (
-        (explicit_mode or "").strip().lower()
-        or os.environ.get("FRESH_HOST_SELECTED_FRESHNESS_MODE", "").strip().lower()
-        or os.environ.get("FRESH_HOST_FRESHNESS_MODE", "").strip().lower()
-        or "cold"
-    )
-    if raw_mode not in {"warm", "cold"}:
-        raise FreshHostError("freshness_mode must be either 'warm' or 'cold'")
-    return cast(FreshnessMode, raw_mode)
-
-
 def _ensure_cache_dirs() -> None:
     """Create configured workflow cache roots when present."""
     for env_name in (
         "FRESH_HOST_CACHE_ROOT",
         "UV_CACHE_DIR",
         "npm_config_cache",
-        "HOMEBREW_CACHE",
     ):
         raw_path = os.environ.get(env_name, "").strip()
         if raw_path:
@@ -95,7 +78,6 @@ def prepare_context(
     runner_temp: Path,
     workspace: Path,
     github_env_file: Path | None,
-    freshness_mode: str | None = None,
 ) -> FreshHostContext:
     """Create and persist one fresh-host execution context."""
     spec = require_scenario(scenario_id)
@@ -131,7 +113,6 @@ def prepare_context(
         diagnostics_dir=str(diagnostics_dir.resolve()),
         profile=profile,
         runtime_provider="docker" if spec.platform == "linux" else _selected_runtime_provider(),
-        freshness_mode=_selected_freshness_mode(freshness_mode),
         docker_pull_parallelism=_selected_pull_parallelism(),
         docker_pull_max_attempts=_selected_pull_max_attempts(),
         compose_variant=spec.compose_variant,
@@ -152,7 +133,6 @@ def prepare_context(
         job_name=context.job_name,
         platform=context.platform,
         runtime_provider=context.runtime_provider,
-        freshness_mode=context.freshness_mode,
         phases=[],
         diagnostics_dir=context.diagnostics_dir,
         runtime_report_path=context.runtime_report_path,
@@ -176,7 +156,6 @@ def prepare_context(
         "FRESH_HOST_PROFILE": context.profile,
         "FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM": str(context.docker_pull_parallelism),
         "FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS": str(context.docker_pull_max_attempts),
-        "FRESH_HOST_FRESHNESS_MODE": context.freshness_mode,
     }
     if context.xdg_runtime_dir is not None:
         exports["STRONGCLAW_XDG_RUNTIME_DIR"] = context.xdg_runtime_dir
@@ -225,7 +204,6 @@ def preview_context(
         "job_name": context.job_name,
         "runtime_provider": context.runtime_provider,
         "profile": context.profile,
-        "freshness_mode": context.freshness_mode,
         "docker_pull_parallelism": context.docker_pull_parallelism,
         "docker_pull_max_attempts": context.docker_pull_max_attempts,
         "activate_services": context.activate_services,
@@ -252,7 +230,6 @@ def preview_context(
             f"| Job | {context.job_name} |",
             f"| Runtime provider | {context.runtime_provider or 'n/a'} |",
             f"| Profile | {context.profile} |",
-            f"| Freshness mode | {context.freshness_mode} |",
             f"| Ensure images | {context.ensure_images} |",
             f"| Activate services in setup | {context.activate_services} |",
             f"| Docker pull parallelism | {context.docker_pull_parallelism} |",

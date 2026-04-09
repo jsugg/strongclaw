@@ -66,12 +66,12 @@ _PROFILES: dict[TestProfileName, TestProfile] = {
         description="Model a GitHub Actions push event for fresh-host tests.",
         env={"GITHUB_EVENT_NAME": "push"},
     ),
-    "fresh_host_macos_colima": TestProfile(
-        name="fresh_host_macos_colima",
-        description="Model the hosted macOS fresh-host runtime using Colima.",
+    "fresh_host_macos_orbstack": TestProfile(
+        name="fresh_host_macos_orbstack",
+        description="Model the hosted macOS fresh-host runtime using OrbStack.",
         env={
             "GITHUB_EVENT_NAME": "push",
-            "DEFAULT_MACOS_RUNTIME_PROVIDER": "colima",
+            "DEFAULT_MACOS_RUNTIME_PROVIDER": "orbstack",
         },
     ),
     "retry_safe": TestProfile(
