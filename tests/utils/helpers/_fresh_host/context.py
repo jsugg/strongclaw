@@ -81,7 +81,6 @@ def _ensure_cache_dirs() -> None:
         "UV_CACHE_DIR",
         "npm_config_cache",
         "HOMEBREW_CACHE",
-        "FRESH_HOST_DOCKER_IMAGE_CACHE_DIR",
     ):
         raw_path = os.environ.get(env_name, "").strip()
         if raw_path:

@@ -245,7 +245,7 @@ def selection_from_filter_matches(matches: dict[str, bool]) -> CiGateSelection:
     return CiGateSelection(
         docs_only=_required_match(matches, "docs_only"),
         fresh_host=_required_match(matches, "fresh_host"),
-        fresh_host_coldstart=_required_match(matches, "fresh_host_coldstart"),
+        fresh_host_coldstart=matches.get("fresh_host_coldstart", False),
         security=_required_match(matches, "security"),
         harness=_required_match(matches, "harness"),
         memory_plugin=_required_match(matches, "memory_plugin"),

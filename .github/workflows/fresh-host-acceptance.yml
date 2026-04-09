@@ -3,11 +3,6 @@ name: Acceptance Tests
 on:
   workflow_call:
     inputs:
-      macos_runtime_provider:
-        description: Hosted macOS container runtime provider.
-        required: false
-        type: string
-        default: colima
       docker_pull_parallelism:
         description: Parallelism for hosted macOS Docker image pulling.
         required: false
@@ -20,16 +15,6 @@ on:
         default: "3"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
-        required: false
-        type: boolean
-        default: true
-      enable_homebrew_cache:
-        description: Restore the hosted macOS Homebrew download cache.
-        required: false
-        type: boolean
-        default: true
-      enable_runtime_download_cache:
-        description: Restore cached hosted macOS runtime binaries for Colima/Lima.
         required: false
         type: boolean
         default: true
@@ -45,11 +30,6 @@ on:
         default: true
   workflow_dispatch:
     inputs:
-      macos_runtime_provider:
-        description: Hosted macOS container runtime provider.
-        required: true
-        type: string
-        default: colima
       docker_pull_parallelism:
         description: Parallelism for hosted macOS Docker image pulling.
         required: true
@@ -62,16 +42,6 @@ on:
         default: "3"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
-        required: true
-        type: boolean
-        default: true
-      enable_homebrew_cache:
-        description: Restore the hosted macOS Homebrew download cache.
-        required: true
-        type: boolean
-        default: true
-      enable_runtime_download_cache:
-        description: Restore cached hosted macOS runtime binaries for Colima/Lima.
         required: true
         type: boolean
         default: true
@@ -89,14 +59,11 @@ on:
 concurrency:
   group: >-
     fresh-host-acceptance-${{ github.workflow }}-${{ format(
-      '{0}-{1}-{2}-{3}-{4}-{5}-{6}-{7}-{8}',
+      '{0}-{1}-{2}-{3}-{4}-{5}',
       github.ref,
-      inputs.macos_runtime_provider,
       inputs.docker_pull_parallelism,
       inputs.docker_pull_max_attempts,
       inputs.enable_package_cache,
-      inputs.enable_homebrew_cache,
-      inputs.enable_runtime_download_cache,
       inputs.freshness_mode,
       inputs.promotion_manifest_required
     ) }}
@@ -110,11 +77,8 @@ jobs:
     name: Fresh Host
     uses: ./.github/workflows/fresh-host-core.yml
     with:
-      macos_runtime_provider: ${{ inputs.macos_runtime_provider }}
       docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}
       docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}
       enable_package_cache: ${{ inputs.enable_package_cache }}
-      enable_homebrew_cache: ${{ inputs.enable_homebrew_cache }}
-      enable_runtime_download_cache: ${{ inputs.enable_runtime_download_cache }}
       freshness_mode: ${{ inputs.freshness_mode }}
       promotion_manifest_required: ${{ inputs.promotion_manifest_required }}

@@ -51,13 +51,6 @@ fresh_host:
   - "!**/*.pdf"
   - "!LICENSE*"
 
-fresh_host_coldstart:
-  - "platform/compose/**"
-  - "tests/scripts/fresh_host.py"
-  - "tests/scripts/hosted_docker.py"
-  - "tests/utils/helpers/_fresh_host/**"
-  - "tests/utils/helpers/_hosted_docker/**"
-
 security:
   - ".github/workflows/security.yml"
   - ".github/workflows/upstream-merge-validation.yml"

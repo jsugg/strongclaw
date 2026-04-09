@@ -94,13 +94,6 @@ def test_dot_github_workflow_path_is_not_stripped_from_filter_matching() -> None
     assert selection.docs_only is False
 
 
-def test_fresh_host_coldstart_paths_route_to_coldstart_lane() -> None:
-    selection = _select("tests/utils/helpers/_hosted_docker/image_cache.py")
-
-    assert selection.fresh_host is True
-    assert selection.fresh_host_coldstart is True
-
-
 def test_ci_gate_filters_file_exists() -> None:
     assert Path(_FILTERS_FILE).is_file()
 
@@ -118,7 +111,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
     evidence = evidence_from_output_file_lists(
         docs_only_files='["platform/docs/CI_AND_SECURITY.md"]',
         fresh_host_files='["src/clawops/strongclaw_runtime.py"]',
-        fresh_host_coldstart_files='["tests/utils/helpers/_hosted_docker/image_cache.py"]',
+        fresh_host_coldstart_files="[]",
         security_files='["security/semgrep/semgrep.yml"]',
         harness_files='["platform/configs/harness/policy_regressions.yaml"]',
         memory_plugin_files='["platform/plugins/memory-lancedb-pro/package.json"]',
@@ -147,13 +140,11 @@ def test_evidence_from_changed_paths_uses_repo_filter_logic() -> None:
         filters=filters,
         changed_paths=(
             ".github/workflows/fresh-host-core.yml",
-            "tests/utils/helpers/_hosted_docker/image_cache.py",
             "platform/docs/CI_AND_SECURITY.md",
         ),
     )
 
     assert ".github/workflows/fresh-host-core.yml" in evidence.fresh_host
-    assert "tests/utils/helpers/_hosted_docker/image_cache.py" in evidence.fresh_host_coldstart
     assert "platform/docs/CI_AND_SECURITY.md" in evidence.docs_only
 
 

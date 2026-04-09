@@ -263,7 +263,7 @@ findings:
     dependency_order: 10
     severity: medium
     citations:
-      - .github/workflows/fresh-host-acceptance.yml:1-101
+      - .github/workflows/fresh-host-acceptance.yml:1-84
       - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:105-113
       - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:204-225
     evidence_summary: Fresh-host acceptance workflow remains reusable and parameterized for launch bring-up checks.
@@ -276,7 +276,7 @@ findings:
     dependency_order: 11
     severity: medium
     citations:
-      - .github/workflows/fresh-host-core.yml:50-221
+      - .github/workflows/fresh-host-core.yml:50-201
       - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:180-203
       - tests/suites/contracts/repo/test_ci_workflow_surfaces.py:228-257
     evidence_summary: Fresh-host core workflow encapsulates runtime setup, scenario execution, diagnostics, and cleanup.
@@ -301,7 +301,7 @@ findings:
     dependency_order: 12
     severity: low
     citations:
-      - .github/workflows/nightly.yml:15-68
+      - .github/workflows/nightly.yml:15-66
       - platform/docs/CI_AND_SECURITY.md:9-16
     evidence_summary: Nightly workflow provides recurring regression evidence across key readiness areas.
 

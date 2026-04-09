@@ -317,9 +317,6 @@ def _write_kpi_evidence(
         if report_window_seconds is not None
         else None
     )
-    cache_state = os.environ.get("FRESH_HOST_IMAGE_CACHE_STATE")
-    cache_restored = os.environ.get("FRESH_HOST_IMAGE_CACHE_RESTORED")
-
     payload = {
         "schema_version": KPI_EVIDENCE_SCHEMA_VERSION,
         "generated_at": now_iso(),
@@ -336,12 +333,6 @@ def _write_kpi_evidence(
             "platform": report.platform,
             "runtime_provider": report.runtime_provider,
             "freshness_mode": context.freshness_mode,
-        },
-        "cache": {
-            "state": cache_state,
-            "restored": (
-                cache_restored.strip().lower() == "true" if cache_restored is not None else None
-            ),
         },
         "timings_seconds": {
             "scenario_phase_total": round(scenario_phase_seconds, 3),
@@ -415,12 +406,6 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
     for label, env_name in (
         ("Package cache", "FRESH_HOST_PACKAGE_CACHE_ENABLED"),
         ("Package cache hit", "FRESH_HOST_PACKAGE_CACHE_HIT"),
-        ("Homebrew cache", "FRESH_HOST_HOMEBREW_CACHE_ENABLED"),
-        ("Homebrew cache hit", "FRESH_HOST_HOMEBREW_CACHE_HIT"),
-        ("Runtime download cache", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED"),
-        ("Runtime download cache hit", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT"),
-        ("Image cache state", "FRESH_HOST_IMAGE_CACHE_STATE"),
-        ("Image cache restored", "FRESH_HOST_IMAGE_CACHE_RESTORED"),
     ):
         raw_value = os.environ.get(env_name)
         if raw_value is not None:
