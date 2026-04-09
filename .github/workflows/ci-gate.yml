@@ -43,7 +43,7 @@ jobs:
           ALL_CHANGED_PATHS_FILES: ${{ steps.filter.outputs.all_changed_paths_files }}
           DOCS_ONLY_FILES: ${{ steps.filter.outputs.docs_only_files }}
           FRESH_HOST_FILES: ${{ steps.filter.outputs.fresh_host_files }}
-          FRESH_HOST_COLDSTART_FILES: ${{ steps.filter.outputs.fresh_host_coldstart_files }}
+          FRESH_HOST_COLDSTART_FILES: ${{ steps.filter.outputs.fresh_host_coldstart_files || '[]' }}
           SECURITY_FILES: ${{ steps.filter.outputs.security_files }}
           HARNESS_FILES: ${{ steps.filter.outputs.harness_files }}
           MEMORY_PLUGIN_FILES: ${{ steps.filter.outputs.memory_plugin_files }}
@@ -52,7 +52,7 @@ jobs:
           python3 ./tests/scripts/ci_gate.py summarize-selection
           --docs-only "${{ steps.filter.outputs.docs_only }}"
           --fresh-host "${{ steps.filter.outputs.fresh_host }}"
-          --fresh-host-coldstart "${{ steps.filter.outputs.fresh_host_coldstart }}"
+          --fresh-host-coldstart "${{ steps.filter.outputs.fresh_host_coldstart || 'false' }}"
           --security "${{ steps.filter.outputs.security }}"
           --harness "${{ steps.filter.outputs.harness }}"
           --memory-plugin "${{ steps.filter.outputs.memory_plugin }}"
