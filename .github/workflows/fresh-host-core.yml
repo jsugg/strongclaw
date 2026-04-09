@@ -140,7 +140,12 @@ jobs:
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Set up Docker via OrbStack
-        run: brew install --cask orbstack && orb start
+        # OrbStack v1.5.1: last version supporting pre-Skylake Intel CPUs used in GHA macos-15-intel runners.
+        # v1.6.0+ added a fatal Skylake check that panics on these runners. Install from pinned cask commit.
+        run: >-
+          brew install --cask
+          https://raw.githubusercontent.com/Homebrew/homebrew-cask/65da904d/Casks/o/orbstack.rb
+          && orb start
       - name: Prepare macOS fresh-host context
         run: >-
           ./tests/scripts/fresh_host.py prepare-context

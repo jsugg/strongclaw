@@ -47,7 +47,7 @@ workflows:
     rationale: Reusable workflow implementing host-side bring-up scenarios and diagnostics.
     citations:
       - platform/docs/CI_AND_SECURITY.md:42-66
-      - .github/workflows/fresh-host-core.yml:50-189
+      - .github/workflows/fresh-host-core.yml:50-194
 
   - workflow_path: .github/workflows/harness.yml
     launch_surface_relevance: "yes"
