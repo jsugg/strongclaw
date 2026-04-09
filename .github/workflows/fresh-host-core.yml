@@ -146,9 +146,9 @@ jobs:
           curl -fsSL
           "https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.11.3_19358_amd64.dmg"
           -o /tmp/orbstack.dmg &&
-          hdiutil attach -quiet -nobrowse /tmp/orbstack.dmg &&
-          cp -R "/Volumes/OrbStack/OrbStack.app" /Applications/ &&
-          hdiutil detach -quiet "/Volumes/OrbStack" &&
+          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt /tmp/orbstack.dmg &&
+          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
+          hdiutil detach -quiet /tmp/orbstack_mnt &&
           sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
           orb start
       - name: Prepare macOS fresh-host context
