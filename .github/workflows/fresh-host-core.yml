@@ -141,6 +141,7 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Set up Docker via OrbStack
         # v1.6.0+ panics on GHA macos-15-intel runners (Skylake CPU check); v1.5.1 is safe.
+        # v1.5.1 does not bundle Docker CLI in the app bundle; install via Homebrew first.
         # Start in background; wait-runtime-ready below handles Docker readiness polling.
         run: >-
           curl -fsSL
@@ -150,8 +151,10 @@ jobs:
           cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
           hdiutil detach -quiet /tmp/orbstack_mnt &&
           sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
-          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/docker /usr/local/bin/docker &&
-          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/docker-compose /usr/local/bin/docker-compose &&
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+          brew install --quiet docker docker-compose &&
+          mkdir -p ~/.docker/cli-plugins &&
+          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
           nohup orb start > /tmp/orb-start.log 2>&1 &
       - name: Prepare macOS fresh-host context
         run: >-
