@@ -22,7 +22,11 @@ from tests.utils.helpers._hosted_docker.models import (
     PullReport,
     RuntimeInstallReport,
 )
-from tests.utils.helpers._hosted_docker.runtime import install_runtime
+from tests.utils.helpers._hosted_docker.runtime import (
+    install_runtime,
+    install_runtime_tools,
+    wait_runtime_ready,
+)
 from tests.utils.helpers._hosted_docker.shell import run_checked as _run_checked
 from tests.utils.helpers._hosted_docker.shell import run_command as _run_command
 from tests.utils.helpers._hosted_docker.shell import wait_for_docker_ready as _wait_for_docker_ready
@@ -41,7 +45,9 @@ __all__ = [
     "DOCKER_IMAGE_CACHE_ARCHIVE_NAME",
     "ensure_images",
     "install_runtime",
+    "install_runtime_tools",
     "list_local_images",
+    "wait_runtime_ready",
     "pull_images",
     "restore_image_cache",
     "resolve_compose_images",

@@ -18,6 +18,7 @@ from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
 from tests.utils.helpers._hosted_docker import image_cache as hosted_docker_image_cache
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
+from tests.utils.helpers._hosted_docker import runtime as hosted_docker_runtime
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
 
 
@@ -1078,3 +1079,128 @@ def test_hosted_docker_cache_state_cli_classifies_cache_outputs(
         "FRESH_HOST_IMAGE_CACHE_STATE=partial",
         "FRESH_HOST_IMAGE_CACHE_STATE=miss",
     ]
+
+
+def test_install_runtime_tools_rejects_non_macos_context(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """install_runtime_tools should reject Linux scenarios with FreshHostError."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    with pytest.raises(fresh_host.FreshHostError):
+        hosted_docker_runtime.install_runtime_tools(Path(context.context_path))
+
+
+def test_wait_runtime_ready_rejects_non_macos_context(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """wait_runtime_ready should reject Linux scenarios with FreshHostError."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+
+    context = fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    with pytest.raises(fresh_host.FreshHostError):
+        hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
+
+
+def test_restore_image_cache_returns_false_when_docker_load_fails(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """restore_image_cache must return False — not raise — when docker image load fails."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cache_root = tmp_path / "docker-images"
+    cache_root.mkdir()
+    archive_path = (
+        cache_root
+        / hosted_docker_image_cache.DOCKER_IMAGE_CACHE_ARCHIVE_TEMPLATE.format(
+            scenario_id="macos-sidecars"
+        )
+    )
+    archive_path.write_text("fake-image-cache", encoding="utf-8")
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("FRESH_HOST_DOCKER_IMAGE_CACHE_DIR", str(cache_root))
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del command, cwd, env, timeout_seconds, capture_output
+        raise fresh_host.FreshHostError("docker image load: connection reset by peer")
+
+    test_context.patch.patch_object(
+        hosted_docker_image_cache,
+        "run_checked",
+        new=fake_run_checked,
+    )
+
+    restored = hosted_docker.restore_image_cache(Path(context.context_path))
+
+    assert restored is False
+
+
+def test_run_checked_handles_none_outputs_when_capture_output_is_false(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """run_checked must not crash with AttributeError when capture_output=False.
+
+    subprocess.run with capture_output=False leaves stdout and stderr as None on the
+    returned CompletedProcess.  The error-path in run_checked must guard against this
+    via ``(x or "").strip()`` rather than ``x.strip()``.
+    """
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        return subprocess.CompletedProcess(command, returncode=1, stdout=None, stderr=None)
+
+    test_context.patch.patch_object(hosted_docker_shell, "run_command", new=fake_run_command)
+
+    with pytest.raises(fresh_host.FreshHostError, match="command failed"):
+        hosted_docker_shell.run_checked(["false"], cwd=tmp_path, env={}, capture_output=False)

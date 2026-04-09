@@ -103,6 +103,9 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
             + "\n",
             encoding="utf-8",
         )
+    colima_start_log = Path("/tmp/colima-start.log")
+    if colima_start_log.exists():
+        shutil.copyfile(colima_start_log, diagnostics_dir / "colima-start.log")
     colima_logs_dir = Path.home() / ".colima" / "_lima" / "colima"
     if colima_logs_dir.is_dir():
         target_dir = diagnostics_dir / "colima-logs"

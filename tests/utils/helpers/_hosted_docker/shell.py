@@ -50,7 +50,9 @@ def run_checked(
         capture_output=capture_output,
     )
     if completed.returncode != 0:
-        output = completed.stderr.strip() or completed.stdout.strip() or "command failed"
+        output = (
+            (completed.stderr or "").strip() or (completed.stdout or "").strip() or "command failed"
+        )
         raise FreshHostError(f"{' '.join(command)} failed: {output}")
     return completed
 
@@ -64,7 +66,21 @@ def wait_for_docker_ready(
     probe_timeout_seconds: int = 30,
 ) -> None:
     """Wait until the Docker daemon answers successfully."""
+    docker_host = env.get("DOCKER_HOST") or os.environ.get("DOCKER_HOST") or "(not set)"
+    log(
+        f"Waiting for Docker — DOCKER_HOST={docker_host} (max {max_attempts} attempts, "
+        f"{poll_seconds}s between probes, {probe_timeout_seconds}s probe timeout)."
+    )
     for attempt in range(1, max_attempts + 1):
+        if attempt == 1 or attempt % 10 == 0:
+            socket_path = docker_host.removeprefix("unix://")
+            socket_exists = (
+                Path(socket_path).exists() if docker_host.startswith("unix://") else None
+            )
+            log(
+                f"[attempt {attempt}/{max_attempts}] socket {socket_path}: "
+                f"{'EXISTS' if socket_exists else 'NOT FOUND'}."
+            )
         try:
             ready = run_command(
                 ["docker", "info"],
@@ -75,12 +91,19 @@ def wait_for_docker_ready(
             )
         except subprocess.TimeoutExpired:
             log(
-                "Docker readiness probe timed out after "
+                f"Docker readiness probe timed out after "
                 f"{probe_timeout_seconds}s (attempt {attempt}/{max_attempts})."
             )
         else:
             if ready.returncode == 0:
+                log(f"Docker ready after {attempt} attempt(s).")
                 return
+            if attempt == 1 or attempt % 10 == 0:
+                stderr_snippet = (ready.stderr or "").strip()[:400]
+                log(
+                    f"[attempt {attempt}/{max_attempts}] docker info rc={ready.returncode}: "
+                    f"{stderr_snippet or '(no output)'}"
+                )
         if attempt < max_attempts:
             time.sleep(poll_seconds)
     raise FreshHostError("docker did not become ready after starting colima")
