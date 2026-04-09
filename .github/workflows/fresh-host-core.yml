@@ -140,8 +140,8 @@ jobs:
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Set up Docker via OrbStack
-        # v1.6.0+ added a Skylake CPU check that panics on GHA macos-15-intel runners.
-        # Install v1.5.1 (last safe version, build 16857) directly from CDN DMG.
+        # v1.6.0+ panics on GHA macos-15-intel runners (Skylake CPU check); v1.5.1 is safe.
+        # Start in background; wait-runtime-ready below handles Docker readiness polling.
         run: >-
           curl -fsSL
           "https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg"
@@ -150,7 +150,7 @@ jobs:
           cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
           hdiutil detach -quiet /tmp/orbstack_mnt &&
           sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
-          orb start
+          nohup orb start > /tmp/orb-start.log 2>&1 &
       - name: Prepare macOS fresh-host context
         run: >-
           ./tests/scripts/fresh_host.py prepare-context
