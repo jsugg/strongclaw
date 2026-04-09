@@ -433,6 +433,43 @@ def test_wait_for_docker_ready_retries_after_probe_timeout(
     assert attempts["count"] == 3
 
 
+def test_wait_for_docker_ready_retries_after_binary_not_found(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Docker readiness probes should tolerate transient FileNotFoundError."""
+    attempts = {"count": 0}
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker", "info"]
+        assert cwd == tmp_path
+        assert env == {"DOCKER_HOST": "unix:///tmp/docker.sock"}
+        assert timeout_seconds == 30
+        assert capture_output is True
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise FileNotFoundError(2, "No such file or directory", "docker")
+        return subprocess.CompletedProcess(command, 0, stdout="ready", stderr="")
+
+    test_context.patch.patch_object(hosted_docker_shell, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(hosted_docker_shell.time, "sleep", new=_sleep)
+
+    _wait_for_docker_ready(
+        cwd=tmp_path,
+        env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        max_attempts=4,
+    )
+
+    assert attempts["count"] == 3
+
+
 def test_collect_runtime_diagnostics_uses_compose_probe_env(
     tmp_path: Path,
     test_context: TestContext,

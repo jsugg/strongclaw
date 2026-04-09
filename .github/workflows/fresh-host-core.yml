@@ -140,7 +140,7 @@ jobs:
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Set up Docker via OrbStack
-        run: brew install --cask orbstack && open /Applications/OrbStack.app
+        run: brew install --cask orbstack && orb start
       - name: Prepare macOS fresh-host context
         run: >-
           ./tests/scripts/fresh_host.py prepare-context
