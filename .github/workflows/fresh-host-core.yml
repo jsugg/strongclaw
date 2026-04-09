@@ -150,6 +150,8 @@ jobs:
           cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
           hdiutil detach -quiet /tmp/orbstack_mnt &&
           sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
+          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/docker /usr/local/bin/docker &&
+          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/docker-compose /usr/local/bin/docker-compose &&
           nohup orb start > /tmp/orb-start.log 2>&1 &
       - name: Prepare macOS fresh-host context
         run: >-
