@@ -53,11 +53,18 @@ def wait_runtime_ready(
     started_at = now_iso()
     started = time.monotonic()
 
+    # When OrbStack is started in the background its socket appears asynchronously.
+    # Fall back to OrbStack's canonical socket path if DOCKER_HOST is not yet set.
+    if not docker_host and runtime_provider == "orbstack":
+        orbstack_socket = Path.home() / ".orbstack" / "run" / "docker.sock"
+        docker_host = f"unix://{orbstack_socket}"
+        env["DOCKER_HOST"] = docker_host
+
     log(f"wait_runtime_ready: DOCKER_HOST={docker_host!r} DOCKER_CONFIG={docker_config!r}")
 
     try:
-        # OrbStack is ready immediately — short poll to confirm socket is live
-        wait_for_docker_ready(cwd=repo_root, env=env, max_attempts=20)
+        # OrbStack starts in the background on GHA; poll for up to 10 minutes.
+        wait_for_docker_ready(cwd=repo_root, env=env, max_attempts=300)
         for command in (
             ["docker", "version"],
             ["docker", "compose", "version"],

@@ -557,6 +557,61 @@ def test_wait_runtime_ready_rejects_non_macos_context(
         hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
 
 
+def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """wait_runtime_ready must fall back to OrbStack's socket path when DOCKER_HOST is unset."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.remove("DOCKER_HOST", raising=False)
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    captured: list[dict[str, str]] = []
+
+    def fake_wait_for_docker_ready(
+        *, cwd: Path, env: dict[str, str], max_attempts: int = 60
+    ) -> None:
+        captured.append({"DOCKER_HOST": env.get("DOCKER_HOST", ""), "max_attempts": str(max_attempts)})  # type: ignore[dict-item]
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output  # noqa: ARG001
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    def fake_sysctl_int(name: str) -> int | None:
+        return 4 if name == "hw.ncpu" else 8 * 1073741824
+
+    test_context.patch.patch_object(
+        hosted_docker_runtime, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+    test_context.patch.patch_object(hosted_docker_runtime, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(hosted_docker_runtime, "sysctl_int", new=fake_sysctl_int)
+
+    hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
+
+    assert len(captured) == 1
+    expected_socket = Path.home() / ".orbstack" / "run" / "docker.sock"
+    assert captured[0]["DOCKER_HOST"] == f"unix://{expected_socket}"
+    assert captured[0]["max_attempts"] == "300"
+
+
 def test_run_checked_handles_none_outputs_when_capture_output_is_false(
     tmp_path: Path,
     test_context: TestContext,
