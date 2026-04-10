@@ -98,13 +98,16 @@ def wait_runtime_ready(
         main_report.failure_reason = failure_reason
         main_report.status = "failure"
     write_report(main_report, Path(context.report_path).resolve())
-    write_github_env(
-        {
-            "FRESH_HOST_HOST_CPU_COUNT": str(host_cpu_count or ""),
-            "FRESH_HOST_HOST_MEMORY_GIB": str(host_memory_gib or ""),
-        },
-        github_env_file,
-    )
+    github_env_vars: dict[str, str] = {
+        "FRESH_HOST_HOST_CPU_COUNT": str(host_cpu_count or ""),
+        "FRESH_HOST_HOST_MEMORY_GIB": str(host_memory_gib or ""),
+    }
+    # Export DOCKER_HOST so all subsequent workflow steps reach the same socket.
+    # Without this, clawops (run-scenario) falls back to the default Docker context
+    # (/var/run/docker.sock), which is absent when only OrbStack is installed.
+    if docker_host:
+        github_env_vars["DOCKER_HOST"] = docker_host
+    write_github_env(github_env_vars, github_env_file)
     if failure_reason is not None:
         raise FreshHostError(failure_reason)
     return report

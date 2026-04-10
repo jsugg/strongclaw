@@ -604,12 +604,25 @@ def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
     test_context.patch.patch_object(hosted_docker_runtime, "run_checked", new=fake_run_checked)
     test_context.patch.patch_object(hosted_docker_runtime, "sysctl_int", new=fake_sysctl_int)
 
-    hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
+    wait_github_env = tmp_path / "wait-github.env"
+    hosted_docker_runtime.wait_runtime_ready(
+        Path(context.context_path), github_env_file=wait_github_env
+    )
 
     assert len(captured) == 1
     expected_socket = Path.home() / ".orbstack" / "run" / "docker.sock"
-    assert captured[0]["DOCKER_HOST"] == f"unix://{expected_socket}"
+    expected_docker_host = f"unix://{expected_socket}"
+    assert captured[0]["DOCKER_HOST"] == expected_docker_host
     assert captured[0]["max_attempts"] == "300"
+    # DOCKER_HOST must be exported to GITHUB_ENV so subsequent workflow steps
+    # (run-scenario, cleanup) reach OrbStack's socket instead of the absent
+    # default /var/run/docker.sock.
+    written_env = dict(
+        line.split("=", 1)
+        for line in wait_github_env.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    assert written_env.get("DOCKER_HOST") == expected_docker_host
 
 
 def test_run_checked_handles_none_outputs_when_capture_output_is_false(
