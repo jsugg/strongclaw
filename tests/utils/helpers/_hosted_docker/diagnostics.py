@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -22,8 +21,6 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
     repo_root = Path(context.repo_root).resolve()
     env = phase_env(context)
     commands = {
-        diagnostics_dir / "runtime-status.txt": ["colima", "status"],
-        diagnostics_dir / "runtime-list.txt": ["colima", "list"],
         diagnostics_dir / "docker-info.txt": ["docker", "info"],
         diagnostics_dir / "docker-system-df.txt": ["docker", "system", "df"],
         diagnostics_dir / "docker-images.jsonl": ["docker", "images", "--format", "{{json .}}"],
@@ -78,16 +75,12 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
         diagnostics_dir / "host-memory-bytes.txt": str(sysctl_int("hw.memsize") or ""),
     }.items():
         output_path.write_text(f"{content}\n", encoding="utf-8")
-    for output_path, raw_target_path in {
-        diagnostics_dir / "colima-disk-usage.txt": str(Path.home() / ".colima"),
-        diagnostics_dir / "homebrew-cache-usage.txt": os.environ.get("HOMEBREW_CACHE", ""),
-        diagnostics_dir / "workflow-cache-usage.txt": os.environ.get("FRESH_HOST_CACHE_ROOT", ""),
-    }.items():
-        if not raw_target_path:
-            continue
+    cache_root = os.environ.get("FRESH_HOST_CACHE_ROOT", "")
+    if cache_root:
+        output_path = diagnostics_dir / "workflow-cache-usage.txt"
         try:
             completed = run_command(
-                ["du", "-sh", raw_target_path],
+                ["du", "-sh", cache_root],
                 cwd=repo_root,
                 env=env,
                 timeout_seconds=120,
@@ -95,20 +88,11 @@ def collect_runtime_diagnostics(context_path: Path) -> None:
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             output_path.write_text(f"{exc}\n", encoding="utf-8")
-            continue
-        output_path.write_text(
-            "\n".join(
-                chunk for chunk in (completed.stdout.strip(), completed.stderr.strip()) if chunk
+        else:
+            output_path.write_text(
+                "\n".join(
+                    chunk for chunk in (completed.stdout.strip(), completed.stderr.strip()) if chunk
+                )
+                + "\n",
+                encoding="utf-8",
             )
-            + "\n",
-            encoding="utf-8",
-        )
-    colima_start_log = Path("/tmp/colima-start.log")
-    if colima_start_log.exists():
-        shutil.copyfile(colima_start_log, diagnostics_dir / "colima-start.log")
-    colima_logs_dir = Path.home() / ".colima" / "_lima" / "colima"
-    if colima_logs_dir.is_dir():
-        target_dir = diagnostics_dir / "colima-logs"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for log_path in colima_logs_dir.glob("*.log"):
-            shutil.copyfile(log_path, target_dir / log_path.name)

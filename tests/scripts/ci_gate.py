@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import sys
 from pathlib import Path
 
@@ -67,7 +66,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verdict.add_argument("--compatibility-matrix-result", required=True)
     verdict.add_argument("--memory-plugin-result", required=True)
     verdict.add_argument("--fresh-host-pr-fast-result", required=True)
-    verdict.add_argument("--fresh-host-coldstart-result", required=True)
     verdict.add_argument("--security-result", required=True)
     verdict.add_argument("--github-summary-file", type=Path)
 
@@ -83,7 +81,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _add_lane_flag_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docs-only", required=True)
     parser.add_argument("--fresh-host", required=True)
-    parser.add_argument("--fresh-host-coldstart", required=True)
     parser.add_argument("--security", required=True)
     parser.add_argument("--harness", required=True)
     parser.add_argument("--memory-plugin", required=True)
@@ -93,7 +90,6 @@ def _add_lane_flag_args(parser: argparse.ArgumentParser) -> None:
 def _add_lane_file_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docs-only-files", default="[]")
     parser.add_argument("--fresh-host-files", default="[]")
-    parser.add_argument("--fresh-host-coldstart-files", default="[]")
     parser.add_argument("--security-files", default="[]")
     parser.add_argument("--harness-files", default="[]")
     parser.add_argument("--memory-plugin-files", default="[]")
@@ -118,7 +114,6 @@ def main(argv: list[str] | None = None) -> int:
         selection = selection_from_output_flags(
             docs_only=str(args.docs_only),
             fresh_host=str(args.fresh_host),
-            fresh_host_coldstart=str(args.fresh_host_coldstart),
             security=str(args.security),
             harness=str(args.harness),
             memory_plugin=str(args.memory_plugin),
@@ -139,19 +134,15 @@ def main(argv: list[str] | None = None) -> int:
                 evidence = evidence_from_output_file_lists(
                     docs_only_files=str(args.docs_only_files),
                     fresh_host_files=str(args.fresh_host_files),
-                    fresh_host_coldstart_files=str(args.fresh_host_coldstart_files),
                     security_files=str(args.security_files),
                     harness_files=str(args.harness_files),
                     memory_plugin_files=str(args.memory_plugin_files),
                     compatibility_matrix_files=str(args.compatibility_matrix_files),
                 )
-            if selection.fresh_host_coldstart and selection.fresh_host:
-                selection = dataclasses.replace(selection, fresh_host_coldstart=False)
             write_github_output(
                 {
                     "docs_only": str(selection.docs_only).lower(),
                     "fresh_host": str(selection.fresh_host).lower(),
-                    "fresh_host_coldstart": str(selection.fresh_host_coldstart).lower(),
                     "security": str(selection.security).lower(),
                     "harness": str(selection.harness).lower(),
                     "memory_plugin": str(selection.memory_plugin).lower(),
@@ -183,7 +174,6 @@ def main(argv: list[str] | None = None) -> int:
                 compatibility_matrix=str(args.compatibility_matrix_result),
                 memory_plugin=str(args.memory_plugin_result),
                 fresh_host_pr_fast=str(args.fresh_host_pr_fast_result),
-                fresh_host_coldstart=str(args.fresh_host_coldstart_result),
                 security=str(args.security_result),
             )
             success, failures = evaluate_verdict(selection=selection, results=results)

@@ -94,6 +94,8 @@ def wait_for_docker_ready(
                 f"Docker readiness probe timed out after "
                 f"{probe_timeout_seconds}s (attempt {attempt}/{max_attempts})."
             )
+        except FileNotFoundError:
+            pass  # docker binary not yet in PATH; keep retrying
         else:
             if ready.returncode == 0:
                 log(f"Docker ready after {attempt} attempt(s).")
@@ -106,7 +108,7 @@ def wait_for_docker_ready(
                 )
         if attempt < max_attempts:
             time.sleep(poll_seconds)
-    raise FreshHostError("docker did not become ready after starting colima")
+    raise FreshHostError("docker did not become ready")
 
 
 def sysctl_int(name: str) -> int | None:

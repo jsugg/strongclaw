@@ -21,7 +21,6 @@ class CiGateSelection:
 
     docs_only: bool
     fresh_host: bool
-    fresh_host_coldstart: bool
     security: bool
     harness: bool
     memory_plugin: bool
@@ -33,7 +32,6 @@ class CiGateSelection:
         return any(
             (
                 self.fresh_host,
-                self.fresh_host_coldstart,
                 self.security,
                 self.harness,
                 self.memory_plugin,
@@ -57,7 +55,6 @@ class CiGateResults:
     compatibility_matrix: str
     memory_plugin: str
     fresh_host_pr_fast: str
-    fresh_host_coldstart: str
     security: str
 
 
@@ -67,7 +64,6 @@ class CiGateEvidence:
 
     docs_only: tuple[str, ...]
     fresh_host: tuple[str, ...]
-    fresh_host_coldstart: tuple[str, ...]
     security: tuple[str, ...]
     harness: tuple[str, ...]
     memory_plugin: tuple[str, ...]
@@ -88,7 +84,6 @@ def selection_from_output_flags(
     *,
     docs_only: str,
     fresh_host: str,
-    fresh_host_coldstart: str,
     security: str,
     harness: str,
     memory_plugin: str,
@@ -98,10 +93,6 @@ def selection_from_output_flags(
     return CiGateSelection(
         docs_only=parse_github_boolean(docs_only, label="docs_only"),
         fresh_host=parse_github_boolean(fresh_host, label="fresh_host"),
-        fresh_host_coldstart=parse_github_boolean(
-            fresh_host_coldstart,
-            label="fresh_host_coldstart",
-        ),
         security=parse_github_boolean(security, label="security"),
         harness=parse_github_boolean(harness, label="harness"),
         memory_plugin=parse_github_boolean(memory_plugin, label="memory_plugin"),
@@ -136,7 +127,6 @@ def evidence_from_output_file_lists(
     *,
     docs_only_files: str,
     fresh_host_files: str,
-    fresh_host_coldstart_files: str,
     security_files: str,
     harness_files: str,
     memory_plugin_files: str,
@@ -146,10 +136,6 @@ def evidence_from_output_file_lists(
     return CiGateEvidence(
         docs_only=parse_output_file_list(docs_only_files, label="docs_only"),
         fresh_host=parse_output_file_list(fresh_host_files, label="fresh_host"),
-        fresh_host_coldstart=parse_output_file_list(
-            fresh_host_coldstart_files,
-            label="fresh_host_coldstart",
-        ),
         security=parse_output_file_list(security_files, label="security"),
         harness=parse_output_file_list(harness_files, label="harness"),
         memory_plugin=parse_output_file_list(memory_plugin_files, label="memory_plugin"),
@@ -169,7 +155,6 @@ def evidence_from_changed_paths(
     lane_names = (
         "docs_only",
         "fresh_host",
-        "fresh_host_coldstart",
         "security",
         "harness",
         "memory_plugin",
@@ -192,7 +177,6 @@ def evidence_from_changed_paths(
     return CiGateEvidence(
         docs_only=tuple(matched_by_lane["docs_only"]),
         fresh_host=tuple(matched_by_lane["fresh_host"]),
-        fresh_host_coldstart=tuple(matched_by_lane["fresh_host_coldstart"]),
         security=tuple(matched_by_lane["security"]),
         harness=tuple(matched_by_lane["harness"]),
         memory_plugin=tuple(matched_by_lane["memory_plugin"]),
@@ -245,7 +229,6 @@ def selection_from_filter_matches(matches: dict[str, bool]) -> CiGateSelection:
     return CiGateSelection(
         docs_only=_required_match(matches, "docs_only"),
         fresh_host=_required_match(matches, "fresh_host"),
-        fresh_host_coldstart=_required_match(matches, "fresh_host_coldstart"),
         security=_required_match(matches, "security"),
         harness=_required_match(matches, "harness"),
         memory_plugin=_required_match(matches, "memory_plugin"),
@@ -261,7 +244,6 @@ def build_results(
     compatibility_matrix: str,
     memory_plugin: str,
     fresh_host_pr_fast: str,
-    fresh_host_coldstart: str,
     security: str,
 ) -> CiGateResults:
     """Build validated per-job result values for verdict evaluation."""
@@ -274,9 +256,6 @@ def build_results(
         ),
         memory_plugin=_validate_job_result(memory_plugin, label="memory_plugin"),
         fresh_host_pr_fast=_validate_job_result(fresh_host_pr_fast, label="fresh_host_pr_fast"),
-        fresh_host_coldstart=_validate_job_result(
-            fresh_host_coldstart, label="fresh_host_coldstart"
-        ),
         security=_validate_job_result(security, label="security"),
     )
 
@@ -295,10 +274,6 @@ def evaluate_verdict(
         "compatibility_matrix": (selection.compatibility_matrix, results.compatibility_matrix),
         "memory_plugin": (selection.memory_plugin, results.memory_plugin),
         "fresh_host_pr_fast": (selection.fresh_host, results.fresh_host_pr_fast),
-        "fresh_host_coldstart": (
-            selection.fresh_host_coldstart,
-            results.fresh_host_coldstart,
-        ),
         "security": (selection.security, results.security),
     }
     for lane_name, (required, result) in required_lanes.items():
@@ -326,7 +301,6 @@ def render_selection_summary(
         f"| compatibility_matrix | {selection.compatibility_matrix} |",
         f"| memory_plugin | {selection.memory_plugin} |",
         f"| fresh_host | {selection.fresh_host} |",
-        f"| fresh_host_coldstart | {selection.fresh_host_coldstart} |",
         f"| security | {selection.security} |",
         f"| any_heavy | {selection.any_heavy} |",
         f"| docs_parity_required | {selection.docs_parity_required} |",
@@ -342,11 +316,6 @@ def render_selection_summary(
         ),
         ("memory_plugin", selection.memory_plugin, evidence.memory_plugin if evidence else ()),
         ("fresh_host", selection.fresh_host, evidence.fresh_host if evidence else ()),
-        (
-            "fresh_host_coldstart",
-            selection.fresh_host_coldstart,
-            evidence.fresh_host_coldstart if evidence else (),
-        ),
         ("security", selection.security, evidence.security if evidence else ()),
     )
 
@@ -392,11 +361,6 @@ def render_verdict_summary(
         ("compatibility_matrix", selection.compatibility_matrix, results.compatibility_matrix),
         ("memory_plugin", selection.memory_plugin, results.memory_plugin),
         ("fresh_host_pr_fast", selection.fresh_host, results.fresh_host_pr_fast),
-        (
-            "fresh_host_coldstart",
-            selection.fresh_host_coldstart,
-            results.fresh_host_coldstart,
-        ),
         ("security", selection.security, results.security),
     ]
     lines = [

@@ -72,9 +72,6 @@ def _diagnostic_commands(context: FreshHostContext) -> dict[Path, list[str]]:
             "logs",
             "--no-color",
         ]
-    if shutil.which("colima") is not None:
-        commands[diagnostics_dir / "colima-status.txt"] = ["colima", "status"]
-        commands[diagnostics_dir / "colima-list.txt"] = ["colima", "list"]
     return commands
 
 
@@ -317,9 +314,6 @@ def _write_kpi_evidence(
         if report_window_seconds is not None
         else None
     )
-    cache_state = os.environ.get("FRESH_HOST_IMAGE_CACHE_STATE")
-    cache_restored = os.environ.get("FRESH_HOST_IMAGE_CACHE_RESTORED")
-
     payload = {
         "schema_version": KPI_EVIDENCE_SCHEMA_VERSION,
         "generated_at": now_iso(),
@@ -335,13 +329,6 @@ def _write_kpi_evidence(
             "job_name": report.job_name,
             "platform": report.platform,
             "runtime_provider": report.runtime_provider,
-            "freshness_mode": context.freshness_mode,
-        },
-        "cache": {
-            "state": cache_state,
-            "restored": (
-                cache_restored.strip().lower() == "true" if cache_restored is not None else None
-            ),
         },
         "timings_seconds": {
             "scenario_phase_total": round(scenario_phase_seconds, 3),
@@ -386,10 +373,6 @@ def _append_child_report_sections(
             lines.append(
                 f"Host resources: {runtime_report['host_cpu_count']} CPU / {runtime_report['host_memory_gib']} GiB"
             )
-        if runtime_report.get("colima_cpu_count") and runtime_report.get("colima_memory_gib"):
-            lines.append(
-                f"Colima resources: {runtime_report['colima_cpu_count']} CPU / {runtime_report['colima_memory_gib']} GiB"
-            )
         if lines[-1] != "":
             lines.append("")
 
@@ -407,7 +390,6 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
         f"| Platform | {report.platform} |",
         f"| Status | {report.status} |",
         f"| Runtime provider | {report.runtime_provider or 'n/a'} |",
-        f"| Freshness mode | {context.freshness_mode} |",
         f"| Activate services in setup | {context.activate_services} |",
         f"| Docker pull parallelism | {context.docker_pull_parallelism} |",
         f"| Docker pull max attempts | {context.docker_pull_max_attempts} |",
@@ -415,12 +397,6 @@ def write_summary(context_file: Path, summary_file: Path) -> None:
     for label, env_name in (
         ("Package cache", "FRESH_HOST_PACKAGE_CACHE_ENABLED"),
         ("Package cache hit", "FRESH_HOST_PACKAGE_CACHE_HIT"),
-        ("Homebrew cache", "FRESH_HOST_HOMEBREW_CACHE_ENABLED"),
-        ("Homebrew cache hit", "FRESH_HOST_HOMEBREW_CACHE_HIT"),
-        ("Runtime download cache", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_ENABLED"),
-        ("Runtime download cache hit", "FRESH_HOST_RUNTIME_DOWNLOAD_CACHE_HIT"),
-        ("Image cache state", "FRESH_HOST_IMAGE_CACHE_STATE"),
-        ("Image cache restored", "FRESH_HOST_IMAGE_CACHE_RESTORED"),
     ):
         raw_value = os.environ.get(env_name)
         if raw_value is not None:

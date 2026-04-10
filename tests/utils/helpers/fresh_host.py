@@ -10,7 +10,6 @@ from tests.utils.helpers._fresh_host.models import (
     FreshHostContext,
     FreshHostError,
     FreshHostReport,
-    FreshnessMode,
     PhaseResult,
     PhaseStatus,
     PlatformName,
@@ -26,7 +25,6 @@ from tests.utils.helpers._fresh_host.storage import load_context, load_report, w
 __all__ = [
     "DEFAULT_DOCKER_PULL_MAX_ATTEMPTS",
     "DEFAULT_DOCKER_PULL_PARALLELISM",
-    "FreshnessMode",
     "FreshHostContext",
     "FreshHostError",
     "FreshHostReport",

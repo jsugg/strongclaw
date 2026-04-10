@@ -44,7 +44,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prepare_parser.add_argument("--runner-temp", type=Path, required=True)
     prepare_parser.add_argument("--workspace", type=Path, default=REPO_ROOT)
     prepare_parser.add_argument("--github-env-file", type=Path)
-    prepare_parser.add_argument("--freshness-mode", choices=("warm", "cold"))
 
     preview_parser = subparsers.add_parser(
         "preview-context",
@@ -87,9 +86,6 @@ def main(argv: list[str] | None = None) -> int:
                     Path(args.github_env_file).expanduser().resolve()
                     if args.github_env_file is not None
                     else None
-                ),
-                freshness_mode=(
-                    str(args.freshness_mode) if args.freshness_mode is not None else None
                 ),
             )
             return 0
