@@ -1,5 +1,12 @@
 # Strongclaw / ClawOps
 
+[![CI](https://github.com/jsugg/strongclaw/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/ci-gate.yml)
+[![Nightly](https://github.com/jsugg/strongclaw/actions/workflows/nightly.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/nightly.yml)
+[![Security](https://github.com/jsugg/strongclaw/actions/workflows/security.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/security.yml)
+[![Linux/MacOS Fresh Install Tests](https://github.com/jsugg/strongclaw/actions/workflows/fresh-host-acceptance.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/fresh-host-acceptance.yml)
+[![Compatibility Matrix](https://github.com/jsugg/strongclaw/actions/workflows/compatibility-matrix.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/compatibility-matrix.yml)
+[![HyperMemory Verification](https://github.com/jsugg/strongclaw/actions/workflows/memory-plugin-verification.yml/badge.svg)](https://github.com/jsugg/strongclaw/actions/workflows/memory-plugin-verification.yml)
+
 This repository is the **Strongclaw** bootstrap for a hardened, production-oriented OpenClaw deployment and ships the **ClawOps** companion tooling. It is intentionally broader than a simple install pack. It includes:
 
 - a hardened OpenClaw control plane baseline
