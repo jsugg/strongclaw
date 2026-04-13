@@ -90,7 +90,7 @@ jobs:
 
   macos-fresh-host:
     name: ${{ matrix.job_name }}
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -121,6 +121,19 @@ jobs:
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: ${{ inputs.docker_pull_max_attempts }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Docker via OrbStack
+        # macos-15 is Apple Silicon (arm64); any OrbStack version works — no Skylake check.
+        # Installed via Homebrew Cask (latest stable). Docker CLI installed separately.
+        # Placed before setup-python/node so OrbStack starts in background while toolchain
+        # setup runs — overlapping ~90s of startup with ~90s of Python/Node/cache steps.
+        run: >-
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+          brew install --quiet --cask orbstack &&
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+          brew install --quiet docker docker-compose &&
+          mkdir -p ~/.docker/cli-plugins &&
+          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
+          nohup orb start > /tmp/orb-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
@@ -139,23 +152,6 @@ jobs:
           key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
-      - name: Set up Docker via OrbStack
-        # v1.6.0+ panics on GHA macos-15-intel runners (Skylake CPU check); v1.5.1 is safe.
-        # v1.5.1 does not bundle Docker CLI in the app bundle; install via Homebrew first.
-        # Start in background; wait-runtime-ready below handles Docker readiness polling.
-        run: >-
-          curl -fsSL
-          "https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg"
-          -o /tmp/orbstack.dmg &&
-          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt /tmp/orbstack.dmg &&
-          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
-          hdiutil detach -quiet /tmp/orbstack_mnt &&
-          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew install --quiet docker docker-compose &&
-          mkdir -p ~/.docker/cli-plugins &&
-          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
-          nohup orb start > /tmp/orb-start.log 2>&1 &
       - name: Prepare macOS fresh-host context
         run: >-
           ./tests/scripts/fresh_host.py prepare-context
