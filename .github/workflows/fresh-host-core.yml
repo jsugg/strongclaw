@@ -121,14 +121,28 @@ jobs:
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: ${{ inputs.docker_pull_max_attempts }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Restore OrbStack DMG cache
+        id: orbstack_dmg_cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: /tmp/orbstack.dmg
+          key: orbstack-v2.0.5-19905-arm64
       - name: Set up Docker via OrbStack
-        # macos-15 is Apple Silicon (arm64); any OrbStack version works — no Skylake check.
-        # Installed via Homebrew Cask (latest stable). Docker CLI installed separately.
+        # macos-15 is Apple Silicon (arm64); OrbStack v2.0.5 — no Skylake check on arm64.
+        # Direct DMG install (same pattern as Intel) to ensure orb CLI is available headlessly.
+        # brew install --cask orbstack does not expose orb in PATH on GHA headless runners.
         # Placed before setup-python/node so OrbStack starts in background while toolchain
         # setup runs — overlapping ~90s of startup with ~90s of Python/Node/cache steps.
+        # DMG is cached by key orbstack-v2.0.5-19905-arm64; curl is skipped on cache hit.
         run: >-
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew install --quiet --cask orbstack &&
+          test -f /tmp/orbstack.dmg ||
+          curl -fsSL
+          "https://cdn-updates.orbstack.dev/arm64/OrbStack_v2.0.5_19905_arm64.dmg"
+          -o /tmp/orbstack.dmg &&
+          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt /tmp/orbstack.dmg &&
+          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
+          hdiutil detach -quiet /tmp/orbstack_mnt &&
+          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
           HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
           brew install --quiet docker docker-compose &&
           mkdir -p ~/.docker/cli-plugins &&
@@ -152,6 +166,12 @@ jobs:
           key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
           restore-keys: |
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+      - name: Save OrbStack DMG cache
+        if: steps.orbstack_dmg_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: /tmp/orbstack.dmg
+          key: orbstack-v2.0.5-19905-arm64
       - name: Prepare macOS fresh-host context
         run: >-
           ./tests/scripts/fresh_host.py prepare-context
