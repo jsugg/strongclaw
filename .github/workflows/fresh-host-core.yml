@@ -124,10 +124,9 @@ jobs:
       - name: Set up Docker via Colima
         # macos-15 is Apple Silicon (arm64). OrbStack does not start on GHA headless
         # arm64 runners (daemon fails to initialize without a GUI session).
-        # Colima provides an equivalent Docker daemon via Apple Virtualization.framework
-        # (--vz flag), available on M1 GHA runners and starts in ~60-90s.
-        # --vz-rosetta enables Rosetta 2 so amd64-pinned image digests run transparently;
-        # required because compose files pin to amd64-specific SHA256 digests.
+        # Colima 0.10.1 uses --vm-type vz (Apple Virtualization.framework, the default on
+        # arm64). --vz-rosetta enables Rosetta 2 so amd64-pinned image digests run
+        # transparently; required because compose files pin amd64-specific SHA256 digests.
         # Placed before setup-python/node to overlap startup with toolchain setup steps.
         # NOTE: commands use newline-separated `|` form to ensure the echo to GITHUB_ENV
         # runs in the foreground before the step exits. A trailing `&` on a `>-` one-liner
@@ -141,9 +140,9 @@ jobs:
           mkdir -p ~/.docker/cli-plugins
           ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+          # --vz renamed to --vm-type vz in Colima 0.10.1; vz is also the default on arm64.
           # --network-address omitted: requires com.apple.vmnet entitlement absent on GHA runners.
-          # Containers reach external hosts via NAT (Lima default), which is sufficient here.
-          nohup colima start --vz --vz-rosetta --cpu 3 --memory 6 \
+          nohup colima start --vm-type vz --vz-rosetta --cpu 3 --memory 6 \
             > /tmp/colima-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
