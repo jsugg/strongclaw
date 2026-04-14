@@ -128,11 +128,8 @@ jobs:
           path: /tmp/orbstack.dmg
           key: orbstack-v1.5.1-16857-amd64
       - name: Set up Docker via OrbStack
-        # v1.6.0+ panics on GHA macos-15-intel runners (Skylake CPU check); v1.5.1 is safe.
-        # v1.5.1 does not bundle Docker CLI in the app bundle; install via Homebrew first.
-        # Placed before setup-python/node so OrbStack starts in background while toolchain
-        # setup runs — overlapping ~90s of startup with ~90s of Python/Node/cache steps.
-        # DMG is cached by key orbstack-v1.5.1-16857-amd64; curl is skipped on cache hit.
+        # v1.6.0+ panics on GHA macos-15-intel (Skylake CPU check); v1.5.1 is safe.
+        # Placed first to overlap OrbStack startup with toolchain setup (~90s saved).
         run: >-
           test -f /tmp/orbstack.dmg ||
           curl -fsSL
