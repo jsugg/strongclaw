@@ -129,14 +129,18 @@ jobs:
         # --vz-rosetta enables Rosetta 2 so amd64-pinned image digests run transparently;
         # required because compose files pin to amd64-specific SHA256 digests.
         # Placed before setup-python/node to overlap startup with toolchain setup steps.
-        # DOCKER_HOST is written to GITHUB_ENV so all subsequent steps reach the socket.
-        run: >-
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew install --quiet colima docker docker-compose &&
-          mkdir -p ~/.docker/cli-plugins &&
-          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
-          echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}" &&
-          nohup colima start --network-address --vz --vz-rosetta --cpu 3 --memory 6 > /tmp/colima-start.log 2>&1 &
+        # NOTE: commands use newline-separated `|` form to ensure the echo to GITHUB_ENV
+        # runs in the foreground before the step exits. A trailing `&` on a `>-` one-liner
+        # causes bash to background the *entire* &&-chain, making the GITHUB_ENV write
+        # race against GHA reading the file for the next step.
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 \
+            brew install --quiet colima docker docker-compose
+          mkdir -p ~/.docker/cli-plugins
+          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
+          echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
+          nohup colima start --network-address --vz --vz-rosetta --cpu 3 --memory 6 \
+            > /tmp/colima-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
