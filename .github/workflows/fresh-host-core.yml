@@ -185,6 +185,7 @@ jobs:
           --github-env-file "${GITHUB_ENV}"
       - name: Load Docker image cache
         if: ${{ inputs.enable_image_cache && steps.docker_image_cache.outputs.cache-hit == 'true' }}
+        continue-on-error: true
         run: >-
           ./tests/scripts/hosted_docker.py restore-image-cache
           --context "${FRESH_HOST_CONTEXT}"
