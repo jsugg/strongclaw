@@ -122,28 +122,17 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Set up Docker via Colima
-        # macos-15 is Apple Silicon (arm64). OrbStack does not start on GHA headless
-        # arm64 runners (daemon fails to initialize without a GUI session).
-        # Colima 0.10.1 with --vm-type vz (Apple Virtualization.framework, the arm64 default)
-        # is used here. --vz-rosetta is NOT used: it requires the Rosetta Linux binary
-        # (/Library/Apple/usr/libexec/oah/RosettaLinux/rosetta) which is NOT installed by
-        # `softwareupdate --install-rosetta` and is absent on GHA arm64 runners; the Lima
-        # hostagent fatally exits when it cannot set up the Rosetta VirtioFS share.
-        # Instead, --binfmt (on by default) provides QEMU user-mode amd64 emulation, which
-        # is sufficient for running amd64-pinned compose images at the cost of some CPU overhead.
-        # --network-address omitted: requires com.apple.vmnet entitlement absent on GHA runners.
-        # Placed before setup-python/node to overlap VM boot with toolchain setup steps.
-        # NOTE: commands use newline-separated `|` form to ensure the echo to GITHUB_ENV
-        # runs in the foreground before the step exits. A trailing `&` on a `>-` one-liner
-        # causes bash to background the *entire* &&-chain, making the GITHUB_ENV write
-        # race against GHA reading the file for the next step.
+        # macos-15 is Apple Silicon (arm64). OrbStack fails on headless GHA runners.
+        # Apple VZ (the arm64 default) also fails on GHA arm64 runners (entitlement issue).
+        # QEMU mode works and supports amd64 containers via binfmt user-mode emulation.
+        # Placed before setup-python/node to overlap VM startup with toolchain steps.
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 \
-            brew install --quiet colima docker docker-compose
+            brew install --quiet colima docker docker-compose qemu
           mkdir -p ~/.docker/cli-plugins
           ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
-          nohup colima start --vm-type vz --cpu 3 --memory 6 \
+          nohup colima start --vm-type qemu --cpu 3 --memory 6 \
             > /tmp/colima-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
@@ -206,6 +195,7 @@ jobs:
             ${{ runner.temp }}/fresh-host-reports/${{ matrix.report_dir_name }}
             ${{ github.workspace }}/.omx/evidence
             /tmp/colima-start.log
+            /Users/runner/.colima/_lima/colima/ha.stderr.log
           include-hidden-files: true
       - name: Clean up macOS fresh-host context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
