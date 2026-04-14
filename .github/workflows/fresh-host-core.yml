@@ -141,7 +141,9 @@ jobs:
           mkdir -p ~/.docker/cli-plugins
           ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}"
-          nohup colima start --network-address --vz --vz-rosetta --cpu 3 --memory 6 \
+          # --network-address omitted: requires com.apple.vmnet entitlement absent on GHA runners.
+          # Containers reach external hosts via NAT (Lima default), which is sufficient here.
+          nohup colima start --vz --vz-rosetta --cpu 3 --memory 6 \
             > /tmp/colima-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
@@ -203,6 +205,7 @@ jobs:
             ${{ runner.temp }}/strongclaw-macos-host/home/Library/LaunchAgents
             ${{ runner.temp }}/fresh-host-reports/${{ matrix.report_dir_name }}
             ${{ github.workspace }}/.omx/evidence
+            /tmp/colima-start.log
           include-hidden-files: true
       - name: Clean up macOS fresh-host context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
