@@ -125,7 +125,9 @@ jobs:
         # macos-15 is Apple Silicon (arm64). OrbStack does not start on GHA headless
         # arm64 runners (daemon fails to initialize without a GUI session).
         # Colima provides an equivalent Docker daemon via Apple Virtualization.framework
-        # (--vz flag), which is available on M1 GHA runners and starts in ~60-90s.
+        # (--vz flag), available on M1 GHA runners and starts in ~60-90s.
+        # --vz-rosetta enables Rosetta 2 so amd64-pinned image digests run transparently;
+        # required because compose files pin to amd64-specific SHA256 digests.
         # Placed before setup-python/node to overlap startup with toolchain setup steps.
         # DOCKER_HOST is written to GITHUB_ENV so all subsequent steps reach the socket.
         run: >-
@@ -134,7 +136,7 @@ jobs:
           mkdir -p ~/.docker/cli-plugins &&
           ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
           echo "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock" >> "${GITHUB_ENV}" &&
-          nohup colima start --network-address --vz --cpu 3 --memory 6 > /tmp/colima-start.log 2>&1 &
+          nohup colima start --network-address --vz --vz-rosetta --cpu 3 --memory 6 > /tmp/colima-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
