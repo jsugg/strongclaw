@@ -134,6 +134,8 @@ jobs:
         # causes bash to background the *entire* &&-chain, making the GITHUB_ENV write
         # race against GHA reading the file for the next step.
         run: |
+          # Install Rosetta 2 — required by --vz-rosetta; not pre-installed on GHA arm64 runners.
+          /usr/sbin/softwareupdate --install-rosetta --agree-to-license || true
           HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 \
             brew install --quiet colima docker docker-compose
           mkdir -p ~/.docker/cli-plugins
