@@ -63,4 +63,5 @@ jobs:
       docker_pull_parallelism: "2"
       docker_pull_max_attempts: "3"
       enable_package_cache: true
+      enable_image_cache: true
     secrets: inherit

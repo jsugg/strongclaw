@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable_image_cache:
+        description: Restore and save Docker image cache to skip image pulls.
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       docker_pull_parallelism:
@@ -32,6 +37,11 @@ on:
         default: "3"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
+        required: true
+        type: boolean
+        default: true
+      enable_image_cache:
+        description: Restore and save Docker image cache to skip image pulls.
         required: true
         type: boolean
         default: true
@@ -57,3 +67,4 @@ jobs:
       docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}
       docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}
       enable_package_cache: ${{ inputs.enable_package_cache }}
+      enable_image_cache: ${{ inputs.enable_image_cache }}

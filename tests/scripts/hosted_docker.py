@@ -17,6 +17,8 @@ from tests.utils.helpers.fresh_host import FreshHostError  # noqa: E402
 from tests.utils.helpers.hosted_docker import (  # noqa: E402
     collect_runtime_diagnostics,
     ensure_images,
+    restore_image_cache,
+    save_image_cache,
     wait_runtime_ready,
 )
 
@@ -44,6 +46,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     diagnostics_parser.add_argument("--context", type=Path, required=True)
 
+    save_cache_parser = subparsers.add_parser(
+        "save-image-cache",
+        help="Save scenario Docker images to a tar archive for caching.",
+    )
+    save_cache_parser.add_argument("--context", type=Path, required=True)
+    save_cache_parser.add_argument("--output", type=Path, required=True)
+
+    restore_cache_parser = subparsers.add_parser(
+        "restore-image-cache",
+        help="Load a Docker image tar archive into the local daemon.",
+    )
+    restore_cache_parser.add_argument("--context", type=Path, required=True)
+    restore_cache_parser.add_argument("--archive", type=Path, required=True)
+
     return parser.parse_args(argv)
 
 
@@ -66,6 +82,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "collect-diagnostics":
             collect_runtime_diagnostics(Path(args.context).expanduser().resolve())
+            return 0
+        if args.command == "save-image-cache":
+            save_image_cache(
+                Path(args.context).expanduser().resolve(),
+                Path(args.output).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "restore-image-cache":
+            restore_image_cache(
+                Path(args.context).expanduser().resolve(),
+                Path(args.archive).expanduser().resolve(),
+            )
             return 0
     except FreshHostError as exc:
         print(f"hosted-docker error: {exc}", file=sys.stderr)
