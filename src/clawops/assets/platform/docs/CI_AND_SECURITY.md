@@ -44,7 +44,7 @@ any required lane does not complete successfully.
 `.github/workflows/fresh-host-acceptance.yml` exercises the real bootstrap, setup, service activation, and repo-local sidecar/browser-lab flows on hosted Linux and macOS runners. It delegates the reusable execution lane to `.github/workflows/fresh-host-core.yml`.
 
 - Each run writes a GitHub job summary with the runner label, runtime provider,
-cache toggles, phase timings, and the effective hosted macOS Colima sizing.
+cache toggles, and phase timings.
 - Each run now renders an explicit context preview immediately after
 `prepare-context`, so operators can inspect planned phases, compose targets,
 runtime settings, and scenario paths before runtime install or scenario
@@ -52,15 +52,18 @@ execution begins.
 - Each run uploads a `fresh-host-reports` artifact subtree with runtime
 diagnostics (`docker info`, image inventory, launchd state, and runtime status output), context preview JSON, and rendered host artifacts.
 - Hosted macOS acceptance is pinned to `macos-15-intel`. GitHub's standard
-`macos-15` arm64 runners are available on public repositories, but GitHub documents that nested virtualization is not supported on arm64 macOS hosted runners, so Colima/OrbStack cannot provide a Docker backend there.
-- The hosted macOS job installs Lima and Colima directly, then sizes Colima for
-the runner instead of using the old fixed `2 CPU / 4 GiB` VM.
+`macos-15` arm64 runners do not expose hardware virtualization (neither HVF nor
+Apple Virtualization.framework), so no Docker runtime can provide a backend there.
+- The hosted macOS job installs OrbStack v1.5.1 via a cached DMG
+(`orbstack-v1.5.1-16857-amd64`) and starts it in the background before toolchain
+setup so the ~90s OrbStack startup overlaps Python/Node/cache-restore steps.
+v1.6.0+ panics on `macos-15-intel` (Skylake CPU check); v1.5.1 is pinned.
 - Hosted macOS acceptance uses the `ci-hosted-macos` compose variant so
-sidecars and browser-lab mutable data live in Docker-managed volumes instead of FUSE-backed host bind mounts. That avoids the hosted-Colima filesystem regressions seen with Qdrant and Postgres while preserving the real `clawops` setup, launchd activation, and repo-local stack flows.
+sidecars and browser-lab mutable data live in Docker-managed volumes instead of FUSE-backed host bind mounts. That avoids the filesystem regressions seen with Qdrant and Postgres while preserving the real `clawops` setup, launchd activation, and repo-local stack flows.
 - `workflow_dispatch` can benchmark cache toggles for the supported hosted
 macOS path without changing the required PR gate.
 - The workflow stays declarative by delegating runtime setup, image warming,
-diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Hosted macOS image warming restores a cached Docker image archive when available, then verifies compose image availability with bounded retries and heartbeat logging as a fallback.
+diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Compose image availability is verified with bounded retries and heartbeat logging.
 - `.github/workflows/nightly.yml` warms the fresh-host caches before it calls the reusable fresh-host core lane for the scheduled validation sweep.
 - Repository workflow contract tests verify that shell steps invoking
 `tests/scripts/*.py` either call an explicit Python interpreter or target an executable script, so nightly cache warming cannot silently regress on file mode drift.
