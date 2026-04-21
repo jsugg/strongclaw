@@ -204,8 +204,8 @@ findings:
     severity: medium
     citations:
       - platform/docs/PRODUCTION_READINESS_CHECKLIST.md:1-24
-      - tests/suites/contracts/repo/test_docs_parity.py:234-249
-    evidence_summary: Launch checklist is present and represented in contracts as a governed launch artifact.
+      - tests/suites/contracts/repo/test_docs_parity.py:34-45
+    evidence_summary: Launch checklist remains present and is covered by markdown link integrity contracts.
 
   - finding_id: LR-017
     surface_id: workflow_ci_gate

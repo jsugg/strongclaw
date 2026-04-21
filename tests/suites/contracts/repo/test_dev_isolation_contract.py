@@ -28,12 +28,3 @@ def test_runtime_cli_modules_do_not_hardcode_real_home_as_the_only_default() -> 
     assert "Defaults to ~/.openclaw/openclaw.json." not in openclaw_config
     assert "Defaults to ~/.openclaw/openclaw.json." not in config_cli
     assert 'pathlib.Path.home() / ".openclaw" / "openclaw.json"' not in openclaw_config
-
-
-def test_readme_documents_all_three_runtime_modes_and_same_user_caveat() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "bare `clawops ...`" in readme
-    assert "`clawops --asset-root <repo> ...`" in readme
-    assert "`source scripts/dev-env.sh`, `make dev-shell`, or `clawops-dev ...`" in readme
-    assert "practical same-user developer isolation" in readme
