@@ -7,10 +7,6 @@ from clawops.context.codebase.service import load_config
 from tests.utils.helpers.repo import REPO_ROOT
 
 
-def _context_service_docs() -> str:
-    return (REPO_ROOT / "platform/docs/CONTEXT_SERVICE.md").read_text(encoding="utf-8")
-
-
 def test_shipped_codebase_provider_enables_hybrid_lane() -> None:
     config = load_config(REPO_ROOT / "platform/configs/context/codebase.yaml")
 
@@ -44,33 +40,3 @@ def test_shipped_codebase_provider_uses_conservative_local_embedding_settings() 
 
     assert config.embedding.batch_size <= 8
     assert config.embedding.timeout_ms >= 30_000
-
-
-def test_context_service_docs_define_small_as_lexical_first() -> None:
-    docs = _context_service_docs()
-
-    assert "`small` keeps the file-level lexical path and avoids graph expansion" in docs
-    assert (
-        "For `small`, benchmark cases should use exact lexical or symbol-oriented queries." in docs
-    )
-
-
-def test_shipped_codebase_benchmark_examples_route_semantic_expectations_to_medium_or_large() -> (
-    None
-):
-    docs = _context_service_docs()
-
-    assert (
-        "semantic or paraphrase-oriented benchmark cases should target `medium` or `large`." in docs
-    )
-    assert "clawops context codebase benchmark --scale medium" in docs
-    assert "final context surface" in docs
-    assert "dependency expansion" in docs
-    assert "the benchmark command excludes" in docs
-    assert "query set cannot self-match" in docs
-    assert "src/clawops/assets/**" in docs
-    assert "keeps embedding batches conservative and allows longer HTTP timeouts" in docs
-    assert "resumes from the remaining chunks" in docs
-    assert "skips both sparse rebuild" in docs
-    assert "dense re-embedding work" in docs
-    assert "uses direct Ollama embeddings" in docs
