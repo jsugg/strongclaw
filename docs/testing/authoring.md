@@ -9,9 +9,9 @@ Strongclaw uses four primary default pytest lanes:
 - `contracts`: repository policies, and CI/test-governance rules
 - `e2e`: black-box CLI and workflow-shaped orchestration coverage
 
-The repository also maintains an explicit `framework` lane for pytest-framework self-checks. Framework tests live under `tests/suites/contracts/testing/framework/` and are excluded from default runs. Use that lane only for pytest bootstrap and plugin-registration behavior.
+The repository also maintains an explicit `framework` lane for pytest-framework self-checks. Framework tests live under `tests/suites/contracts/taf/framework/` and are excluded from default runs. Use that lane only for pytest bootstrap and plugin-registration behavior.
 
-Monkeypatch governance is a default contract, not a framework-only self-check. The direct-monkeypatch contract lives under `tests/suites/contracts/testing/` so ordinary pytest runs fail when new unmanaged `monkeypatch` usage appears in suite code. Treat `TestContext` as the standard path and reserve raw `monkeypatch` for edge cases where `TestContext` patch/env APIs are not a practical fit.
+Monkeypatch governance is a default contract, not a framework-only self-check. The direct-monkeypatch contract lives under `tests/suites/contracts/taf/` so ordinary pytest runs fail when new unmanaged `monkeypatch` usage appears in suite code. Treat `TestContext` as the standard path and reserve raw `monkeypatch` for edge cases where `TestContext` patch/env APIs are not a practical fit.
 
 Capability markers are additive and remain module-local:
 
@@ -28,7 +28,7 @@ Add a new test in the suite that matches its behavior:
 - `tests/suites/unit/...` for isolated behavior
 - `tests/suites/integration/...` for cross-module or service-backed behavior
 - `tests/suites/contracts/...` for repository and governance rules
-- `tests/suites/contracts/testing/framework/...` for explicit pytest-framework
+- `tests/suites/contracts/taf/framework/...` for explicit pytest-framework
 self-checks
 - `tests/suites/e2e/...` for black-box CLI and workflow-shaped coverage
 
@@ -70,6 +70,6 @@ Current service support:
 
 ## Governance
 
-Framework policy lives under `tests/suites/contracts/testing/`. Add a contract test when a rule must stay true even if the implementation changes.
+Framework policy lives under `tests/suites/contracts/taf/`. Add a contract test when a rule must stay true even if the implementation changes.
 
-Pytest-framework registration and bootstrap topology lives under `tests/suites/contracts/testing/framework/`.
+Pytest-framework registration and bootstrap topology lives under `tests/suites/contracts/taf/framework/`.

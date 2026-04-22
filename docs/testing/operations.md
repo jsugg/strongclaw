@@ -8,7 +8,7 @@
 - E2E lane: `uv run pytest -q -m e2e`
 - Contract lane: `uv run pytest -q -m contract`
 - Framework lane only:
-`uv run pytest -q -m framework tests/suites/contracts/testing/framework`
+`uv run pytest -q -m framework tests/suites/contracts/taf/framework`
 - E2E lane: `uv run pytest -q -m e2e`
 - Hypermemory lane: `uv run pytest -q -m hypermemory`
 - Qdrant lane: `uv run pytest -q -m "hypermemory and qdrant"`
@@ -26,7 +26,7 @@
 
 ## Governance Checks
 
-- Testing contracts: `uv run pytest -q tests/suites/contracts/testing`
+- Testing contracts: `uv run pytest -q tests/suites/contracts/taf`
 - Fixture analysis:
 `uv run python -m tests.utils.scripts.analyze_fixtures --json`
 - Safe timeout wrapper:

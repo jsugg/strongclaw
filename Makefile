@@ -84,7 +84,7 @@ test-contracts: ## Run the contract pytest lane.
 	$(PYTEST) -q -m contract
 
 test-framework: ## Run the explicit pytest framework lane.
-	$(PYTEST) -q -m framework tests/suites/contracts/testing/framework
+	$(PYTEST) -q -m framework tests/suites/contracts/taf/framework
 
 test-e2e: ## Run the end-to-end pytest lane.
 	$(PYTEST) -q -m e2e
@@ -99,7 +99,7 @@ test-all: ## Run the full pytest suite.
 	$(PYTEST) -q
 
 test-governance: ## Run testing-governance contracts and fixture analysis.
-	$(PYTEST) -q tests/suites/contracts/testing
+	$(PYTEST) -q tests/suites/contracts/taf
 	$(RUN) python -m tests.utils.scripts.analyze_fixtures --json
 
 compile: ## Compile source and tests in the managed dev environment.
