@@ -15,6 +15,7 @@ _ALLOWED_DIRECT_MONKEYPATCH_FILES = {
     "tests/suites/unit/clawops/test_memory_tools.py",
     "tests/suites/unit/clawops/test_op_journal.py",
     "tests/suites/unit/clawops/test_setup_cli.py",
+    "tests/suites/unit/clawops/test_strongclaw_compose.py",
     "tests/suites/unit/clawops/test_strongclaw_ops.py",
     "tests/suites/unit/clawops/test_supply_chain.py",
     "tests/suites/unit/taf/test_identity.py",
