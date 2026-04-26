@@ -30,6 +30,8 @@ DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "cannot connect to the docker daemon",
     "/run/containerd/containerd.sock",
     "error while dialing",
+    "error during connect",
+    "unexpected eof",
 )
 
 
@@ -121,7 +123,9 @@ def pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, s
 def _is_daemon_connectivity_failure(output: str) -> bool:
     """Return whether a pull failure output indicates daemon connectivity problems."""
     lowered = output.lower()
-    return any(marker in lowered for marker in DOCKER_DAEMON_FAILURE_MARKERS)
+    if any(marker in lowered for marker in DOCKER_DAEMON_FAILURE_MARKERS):
+        return True
+    return "docker.sock" in lowered and "eof" in lowered
 
 
 def pull_images(
@@ -188,8 +192,11 @@ def pull_images(
             if image not in seen_retries:
                 seen_retries.add(image)
                 retried_images.append(image)
-        if daemon_connectivity_failure and recovery_cwd is not None and recovery_env is not None:
-            log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
+        if recovery_cwd is not None and recovery_env is not None:
+            if daemon_connectivity_failure:
+                log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
+            else:
+                log("Retrying image pull after failure; probing Docker runtime before retry.")
             try:
                 wait_for_docker_ready(cwd=recovery_cwd, env=recovery_env, max_attempts=90)
             except FreshHostError as exc:

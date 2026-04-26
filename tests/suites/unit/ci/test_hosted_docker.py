@@ -122,6 +122,117 @@ def test_pull_images_waits_for_daemon_recovery_on_connectivity_failure(
     assert recovery_probes == [(tmp_path, {"DOCKER_HOST": "unix:///tmp/docker.sock"}, 90)]
 
 
+def test_pull_images_probes_runtime_before_retry_for_non_connectivity_failure(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Image pull retries should probe Docker runtime before retrying regardless of error signature."""
+    attempts: dict[str, int] = {"ubuntu/squid": 0}
+    recovery_probes: list[tuple[Path, dict[str, str], int]] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        assert timeout_seconds == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
+        attempts[image] += 1
+        if attempts[image] == 1:
+            return (
+                image,
+                1,
+                0.1,
+                (
+                    'Get "https://registry-1.docker.io/v2/ubuntu/squid/manifests/sha256:deadbeef": '
+                    "tls: failed to verify certificate: x509: certificate signed by unknown authority"
+                ),
+            )
+        return image, 0, 0.1, ""
+
+    def fake_wait_for_docker_ready(
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        max_attempts: int = 60,
+    ) -> None:
+        recovery_probes.append((cwd, dict(env), max_attempts))
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images,
+        "wait_for_docker_ready",
+        new=fake_wait_for_docker_ready,
+    )
+    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
+
+    report = hosted_docker.pull_images(
+        ["ubuntu/squid"],
+        parallelism=2,
+        max_attempts=3,
+        recovery_cwd=tmp_path,
+        recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+    )
+
+    assert report.exit_code == 0
+    assert report.attempt_count == 2
+    assert recovery_probes == [(tmp_path, {"DOCKER_HOST": "unix:///tmp/docker.sock"}, 90)]
+
+
+def test_pull_images_classifies_docker_socket_eof_as_connectivity_failure(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Docker socket EOF failures should be classified as daemon connectivity issues."""
+    attempts: dict[str, int] = {"ubuntu/squid": 0}
+    logs: list[str] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        assert timeout_seconds == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
+        attempts[image] += 1
+        if attempts[image] == 1:
+            return (
+                image,
+                1,
+                0.1,
+                (
+                    'error during connect: Post "http://%2FUsers%2Frunner%2F.orbstack%2Frun%2Fdocker.sock'
+                    '/v1.54/images/create?fromImage=docker.io%2Fubuntu%2Fsquid": EOF'
+                ),
+            )
+        return image, 0, 0.1, ""
+
+    def fake_wait_for_docker_ready(
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        max_attempts: int = 60,
+    ) -> None:
+        del cwd, env, max_attempts
+
+    def fake_log(message: str) -> None:
+        logs.append(message)
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images,
+        "wait_for_docker_ready",
+        new=fake_wait_for_docker_ready,
+    )
+    test_context.patch.patch_object(hosted_docker_images, "log", new=fake_log)
+    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
+
+    report = hosted_docker.pull_images(
+        ["ubuntu/squid"],
+        parallelism=2,
+        max_attempts=3,
+        recovery_cwd=tmp_path,
+        recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+    )
+
+    assert report.exit_code == 0
+    assert report.attempt_count == 2
+    assert any(
+        "Detected Docker daemon connectivity failure; waiting for runtime recovery." in entry
+        for entry in logs
+    )
+
+
 def test_pull_images_requires_recovery_cwd_and_env_together() -> None:
     """Pull recovery wiring should reject partial recovery configuration."""
     with pytest.raises(fresh_host.FreshHostError, match="recovery_cwd and recovery_env"):
