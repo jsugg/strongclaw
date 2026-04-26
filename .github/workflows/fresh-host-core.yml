@@ -185,7 +185,12 @@ jobs:
           --context "${FRESH_HOST_CONTEXT}"
           --github-env-file "${GITHUB_ENV}"
       - name: Ensure hosted macOS Docker images
-        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+        run: >-
+          ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}" ||
+          (echo "[fresh-host] ensure-images failed on first attempt; retrying once after runtime probe." &&
+          sleep 10 &&
+          ./tests/scripts/hosted_docker.py wait-runtime-ready --context "${FRESH_HOST_CONTEXT}" &&
+          ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}")
       - name: Run macOS fresh-host scenario
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect hosted macOS Docker diagnostics
