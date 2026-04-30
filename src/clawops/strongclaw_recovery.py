@@ -10,6 +10,7 @@ import shutil
 import tarfile
 import time
 
+from clawops.app_paths import strongclaw_state_dir
 from clawops.cli_roots import add_ignored_repo_root_alias, warn_ignored_repo_root_argument
 from clawops.strongclaw_runtime import (
     CommandError,
@@ -29,13 +30,19 @@ class BackupCreateResult:
 
 
 def backups_dir(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
-    """Return the backup archive directory."""
-    return resolve_home_dir(home_dir) / ".openclaw" / "backups"
+    """Return the StrongClaw-managed backup archive directory."""
+    resolved_home = resolve_home_dir(home_dir)
+    return strongclaw_state_dir(home_dir=resolved_home) / "backups"
 
 
 def openclaw_state_dir(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
     """Return the OpenClaw home directory."""
     return resolve_home_dir(home_dir) / ".openclaw"
+
+
+def legacy_backups_dir(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
+    """Return the legacy OpenClaw-local backup archive directory."""
+    return openclaw_state_dir(home_dir=home_dir) / "backups"
 
 
 def latest_backup_path(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
@@ -46,25 +53,78 @@ def latest_backup_path(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
     return max(archive_candidates, key=lambda candidate: candidate.stat().st_mtime)
 
 
+def _is_path_within(path: pathlib.Path, root: pathlib.Path) -> bool:
+    """Return whether *path* is contained by *root* after resolution."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _safe_unlink(path: pathlib.Path) -> None:
+    """Remove one file when present."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _write_tar_archive(
+    archive_path: pathlib.Path,
+    *,
+    state_dir: pathlib.Path,
+    include_root: pathlib.Path,
+    exclude_roots: tuple[pathlib.Path, ...],
+) -> None:
+    """Write a fallback tar archive with explicit path exclusions."""
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for path in state_dir.rglob("*"):
+            if path.is_symlink():
+                continue
+            if not (path.is_file() or path.is_dir()):
+                continue
+            resolved_path = path.resolve()
+            if any(_is_path_within(resolved_path, root) for root in exclude_roots):
+                continue
+            archive.add(path, arcname=path.relative_to(include_root), recursive=False)
+
+
 def _create_backup_result(*, home_dir: pathlib.Path | None = None) -> BackupCreateResult:
     """Create one backup archive and record which backup path was used."""
+    resolved_home_dir = resolve_home_dir(home_dir)
     archive_root = backups_dir(home_dir=home_dir)
     archive_root.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     archive_path = archive_root / f"openclaw-{stamp}.tar.gz"
+    archive_tmp_path = archive_root / f".{archive_path.name}.tmp"
+    exclude_roots: tuple[pathlib.Path, ...] = (
+        archive_root.resolve(),
+        legacy_backups_dir(home_dir=home_dir).resolve(),
+    )
     if shutil.which("openclaw") is not None:
+        _safe_unlink(archive_tmp_path)
         result = run_command(
-            ["openclaw", "backup", "create", str(archive_path)], timeout_seconds=600
+            ["openclaw", "backup", "create", str(archive_tmp_path)], timeout_seconds=600
         )
         if result.ok:
+            archive_tmp_path.replace(archive_path)
             return BackupCreateResult(archive_path=archive_path, mode="openclaw-cli")
+        _safe_unlink(archive_tmp_path)
     state_dir = openclaw_state_dir(home_dir=home_dir)
-    archive_name = archive_path.name
-    with tarfile.open(archive_path, "w:gz") as archive:
-        for path in state_dir.rglob("*"):
-            if archive_name in path.as_posix():
-                continue
-            archive.add(path, arcname=path.relative_to(resolve_home_dir(home_dir)))
+    _safe_unlink(archive_tmp_path)
+    try:
+        _write_tar_archive(
+            archive_tmp_path,
+            state_dir=state_dir,
+            include_root=resolved_home_dir,
+            exclude_roots=exclude_roots,
+        )
+        archive_tmp_path.replace(archive_path)
+    except (OSError, tarfile.TarError) as exc:
+        _safe_unlink(archive_tmp_path)
+        _safe_unlink(archive_path)
+        raise CommandError(f"backup creation failed: {exc}") from exc
     return BackupCreateResult(archive_path=archive_path, mode="tar-fallback")
 
 

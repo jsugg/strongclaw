@@ -27,10 +27,14 @@ from clawops.strongclaw_runtime import (
 LAUNCHD_ACTIVATE_LABELS: Final[tuple[str, ...]] = (
     "ai.openclaw.sidecars",
     "ai.openclaw.gateway",
+    "ai.openclaw.backup-create",
+    "ai.openclaw.backup-verify",
     "ai.openclaw.maintenance",
 )
 LAUNCHD_GATEWAY_LABEL: Final[str] = "ai.openclaw.gateway"
 LAUNCHD_SIDECARS_LABEL: Final[str] = "ai.openclaw.sidecars"
+LAUNCHD_BACKUP_CREATE_LABEL: Final[str] = "ai.openclaw.backup-create"
+LAUNCHD_BACKUP_VERIFY_LABEL: Final[str] = "ai.openclaw.backup-verify"
 LAUNCHD_MAINTENANCE_LABEL: Final[str] = "ai.openclaw.maintenance"
 LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_GATEWAY_TIMEOUT_SECONDS"
 LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_LAUNCHD_SIDECARS_TIMEOUT_SECONDS"
@@ -47,6 +51,8 @@ LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
     "openclaw-sidecars.service",
     "openclaw-gateway.service",
+    "openclaw-backup-create.timer",
+    "openclaw-backup-verify.timer",
     "openclaw-maintenance.timer",
 )
 
@@ -294,6 +300,8 @@ def activate_services(
         )
         gateway_plist = output_dir / f"{LAUNCHD_GATEWAY_LABEL}.plist"
         sidecars_plist = output_dir / f"{LAUNCHD_SIDECARS_LABEL}.plist"
+        backup_create_plist = output_dir / f"{LAUNCHD_BACKUP_CREATE_LABEL}.plist"
+        backup_verify_plist = output_dir / f"{LAUNCHD_BACKUP_VERIFY_LABEL}.plist"
         maintenance_plist = output_dir / f"{LAUNCHD_MAINTENANCE_LABEL}.plist"
         emit_structured_log(
             "clawops.services.activate",
@@ -322,6 +330,32 @@ def activate_services(
             LAUNCHD_GATEWAY_LABEL,
             persistent=True,
             timeout_seconds=gateway_timeout_seconds,
+        )
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "launchd",
+                "step": "backup_create_bootstrap",
+                "label": LAUNCHD_BACKUP_CREATE_LABEL,
+            },
+        )
+        _activate_launchd_service(
+            domain,
+            LAUNCHD_BACKUP_CREATE_LABEL,
+            backup_create_plist,
+        )
+        emit_structured_log(
+            "clawops.services.activate",
+            {
+                "service_manager": "launchd",
+                "step": "backup_verify_bootstrap",
+                "label": LAUNCHD_BACKUP_VERIFY_LABEL,
+            },
+        )
+        _activate_launchd_service(
+            domain,
+            LAUNCHD_BACKUP_VERIFY_LABEL,
+            backup_verify_plist,
         )
         emit_structured_log(
             "clawops.services.activate",

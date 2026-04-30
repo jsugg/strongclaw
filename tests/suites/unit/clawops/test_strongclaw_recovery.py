@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 
 from clawops import strongclaw_recovery
+from clawops.app_paths import strongclaw_state_dir
 from clawops.strongclaw_runtime import CommandError, ExecResult
 from tests.plugins.infrastructure.context import TestContext
 
@@ -77,6 +78,63 @@ def test_backup_create_cli_reports_tar_fallback_and_round_trips(
     assert (restored / ".openclaw" / "logs" / "gateway.log").read_text(
         encoding="utf-8"
     ) == "ready\n"
+
+
+def test_backup_root_defaults_to_strongclaw_state_dir(tmp_path: Path) -> None:
+    """Backups should default to the StrongClaw-owned state tree."""
+    home_dir = tmp_path / "home"
+    expected_root = strongclaw_state_dir(home_dir=home_dir) / "backups"
+    backup_root = strongclaw_recovery.backups_dir(home_dir=home_dir)
+
+    assert backup_root == expected_root
+    assert not backup_root.is_relative_to(strongclaw_recovery.openclaw_state_dir(home_dir=home_dir))
+
+
+def test_backup_create_fallback_excludes_legacy_openclaw_backup_root(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Fallback tar backups should never include legacy `~/.openclaw/backups` entries."""
+    home_dir = tmp_path / "home"
+    state_dir = _init_openclaw_home(home_dir)
+    legacy_archive = state_dir / "backups" / "old.tar.gz"
+    legacy_archive.parent.mkdir(parents=True, exist_ok=True)
+    legacy_archive.write_text("legacy\n", encoding="utf-8")
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+
+    archive_path = strongclaw_recovery.create_backup(home_dir=home_dir)
+    with tarfile.open(archive_path, "r:gz") as archive:
+        member_names = [member.name for member in archive.getmembers()]
+
+    assert all(not name.startswith(".openclaw/backups") for name in member_names)
+
+
+def test_backup_create_failure_cleans_partial_archive(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Backup creation failures should remove temporary and partial archive files."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+
+    def _failing_write_tar_archive(*args: object, **kwargs: object) -> None:
+        archive_path = cast(Path, args[0])
+        archive_path.write_bytes(b"partial")
+        raise OSError("no space left on device")
+
+    test_context.patch.patch_object(
+        strongclaw_recovery,
+        "_write_tar_archive",
+        new=_failing_write_tar_archive,
+    )
+
+    with pytest.raises(CommandError, match="backup creation failed"):
+        strongclaw_recovery.create_backup(home_dir=home_dir)
+
+    backup_root = strongclaw_recovery.backups_dir(home_dir=home_dir)
+    remaining_files = list(backup_root.iterdir()) if backup_root.exists() else []
+    assert remaining_files == []
 
 
 def test_restore_backup_rejects_traversal_members(

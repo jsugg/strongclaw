@@ -3,12 +3,12 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>ai.openclaw.maintenance</string>
+    <string>ai.openclaw.backup-verify</string>
     <key>ProgramArguments</key>
     <array>
       <string>/bin/sh</string>
       <string>-lc</string>
-      <string>set -euo pipefail; "__PYTHON_EXECUTABLE__" -m clawops recovery --home-dir "__HOME_DIR__" prune-retention</string>
+      <string>set -euo pipefail; "__PYTHON_EXECUTABLE__" -m clawops recovery --home-dir "__HOME_DIR__" backup-verify latest</string>
     </array>
     <key>WorkingDirectory</key>
     <string>__REPO_ROOT__</string>
@@ -37,14 +37,14 @@ __LAUNCHD_EXTRA_ENV__
     <key>StartCalendarInterval</key>
     <dict>
       <key>Hour</key>
-      <integer>4</integer>
+      <integer>3</integer>
       <key>Minute</key>
-      <integer>0</integer>
+      <integer>30</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>__STATE_DIR__/logs/launchd-maintenance.out.log</string>
+    <string>__STATE_DIR__/logs/launchd-backup-verify.out.log</string>
     <key>StandardErrorPath</key>
-    <string>__STATE_DIR__/logs/launchd-maintenance.err.log</string>
+    <string>__STATE_DIR__/logs/launchd-backup-verify.err.log</string>
     <key>KeepAlive</key>
     <false/>
   </dict>

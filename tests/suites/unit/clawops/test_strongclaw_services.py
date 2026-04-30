@@ -377,6 +377,8 @@ def test_activate_services_retries_launchd_sidecars_after_failed_exit(
         ("wait", "ai.openclaw.sidecars:False"),
         ("activate", "gui/501:ai.openclaw.gateway"),
         ("wait", "ai.openclaw.gateway:True"),
+        ("activate", "gui/501:ai.openclaw.backup-create"),
+        ("activate", "gui/501:ai.openclaw.backup-verify"),
         ("activate", "gui/501:ai.openclaw.maintenance"),
     ]
 
@@ -519,6 +521,8 @@ def test_activate_services_enables_systemd_units_in_declared_order(
         ("systemctl", "--user", "daemon-reload"),
         ("systemctl", "--user", "enable", "--now", "openclaw-sidecars.service"),
         ("systemctl", "--user", "enable", "--now", "openclaw-gateway.service"),
+        ("systemctl", "--user", "enable", "--now", "openclaw-backup-create.timer"),
+        ("systemctl", "--user", "enable", "--now", "openclaw-backup-verify.timer"),
         ("systemctl", "--user", "enable", "--now", "openclaw-maintenance.timer"),
     ]
     assert observed_events[0] == (
@@ -528,6 +532,8 @@ def test_activate_services_enables_systemd_units_in_declared_order(
     assert [event[1].get("unit") for event in observed_events[1:]] == [
         "openclaw-sidecars.service",
         "openclaw-gateway.service",
+        "openclaw-backup-create.timer",
+        "openclaw-backup-verify.timer",
         "openclaw-maintenance.timer",
     ]
 
