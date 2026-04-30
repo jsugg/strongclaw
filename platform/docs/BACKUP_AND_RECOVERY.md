@@ -7,6 +7,11 @@
 - harness results you want to keep
 - compose state for Postgres / LiteLLM / Qdrant if you need continuity
 
+`clawops recovery backup-create` now writes archives under the StrongClaw state
+root (for example `~/.local/state/strongclaw/backups` on Linux) instead of
+`~/.openclaw/backups`, which prevents backup self-inclusion during fallback
+archive traversal.
+
 ## Included commands
 
 - `clawops recovery backup-create`
@@ -21,16 +26,31 @@ OpenClaw CLI path (`openclaw-cli`) or the local tar fallback path
 
 ## Scheduled maintenance
 
-StrongClaw host service activation now installs a daily maintenance schedule at `04:00` local time:
+StrongClaw host service activation now installs independent daily jobs:
 
-- systemd: `openclaw-maintenance.timer` -> `openclaw-maintenance.service`
-- launchd: `ai.openclaw.maintenance`
+- backup create at `03:00` local time
+- backup verify at `03:30` local time
+- prune retention at `04:00` local time
 
-The scheduled command is:
+systemd units/timers:
 
+- `openclaw-backup-create.timer` -> `openclaw-backup-create.service`
+- `openclaw-backup-verify.timer` -> `openclaw-backup-verify.service`
+- `openclaw-maintenance.timer` -> `openclaw-maintenance.service`
+
+launchd agents:
+
+- `ai.openclaw.backup-create`
+- `ai.openclaw.backup-verify`
+- `ai.openclaw.maintenance`
+
+Commands:
+
+- `clawops recovery --home-dir <home> backup-create`
+- `clawops recovery --home-dir <home> backup-verify latest`
 - `clawops recovery --home-dir <home> prune-retention`
 
-This maintenance path is idempotent and retention-only. It prunes expired
+The prune path is idempotent and retention-only. It prunes expired
 StrongClaw-owned backup and log artifacts and does not mutate upstream
 OpenClaw internals or shared `/tmp/openclaw` state by default.
 

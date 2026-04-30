@@ -55,7 +55,19 @@ def test_service_templates_call_repo_venv_python() -> None:
     maintenance_service = (REPO_ROOT / "platform/systemd/openclaw-maintenance.service").read_text(
         encoding="utf-8"
     )
+    backup_create_service = (
+        REPO_ROOT / "platform/systemd/openclaw-backup-create.service"
+    ).read_text(encoding="utf-8")
+    backup_verify_service = (
+        REPO_ROOT / "platform/systemd/openclaw-backup-verify.service"
+    ).read_text(encoding="utf-8")
     maintenance_timer = (REPO_ROOT / "platform/systemd/openclaw-maintenance.timer").read_text(
+        encoding="utf-8"
+    )
+    backup_create_timer = (REPO_ROOT / "platform/systemd/openclaw-backup-create.timer").read_text(
+        encoding="utf-8"
+    )
+    backup_verify_timer = (REPO_ROOT / "platform/systemd/openclaw-backup-verify.timer").read_text(
         encoding="utf-8"
     )
     sidecars = (REPO_ROOT / "platform/systemd/openclaw-sidecars.service").read_text(
@@ -73,20 +85,34 @@ def test_service_templates_call_repo_venv_python() -> None:
     launchd_maintenance = (
         REPO_ROOT / "platform/launchd/ai.openclaw.maintenance.plist.template"
     ).read_text(encoding="utf-8")
+    launchd_backup_create = (
+        REPO_ROOT / "platform/launchd/ai.openclaw.backup-create.plist.template"
+    ).read_text(encoding="utf-8")
+    launchd_backup_verify = (
+        REPO_ROOT / "platform/launchd/ai.openclaw.backup-verify.plist.template"
+    ).read_text(encoding="utf-8")
 
     assert "scripts/ops/" not in gateway
     assert "scripts/ops/" not in sidecars
     assert "__PYTHON_EXECUTABLE__ -m clawops" in gateway
     assert "__PYTHON_EXECUTABLE__ -m clawops" in browserlab
     assert "__PYTHON_EXECUTABLE__ -m clawops" in maintenance_service
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in backup_create_service
+    assert "__PYTHON_EXECUTABLE__ -m clawops" in backup_verify_service
     assert "__PYTHON_EXECUTABLE__ -m clawops" in sidecars
     assert "openclaw-sidecars.service" in gateway
     assert "Unit=openclaw-maintenance.service" in maintenance_timer
+    assert "Unit=openclaw-backup-create.service" in backup_create_timer
+    assert "Unit=openclaw-backup-verify.service" in backup_verify_timer
     assert "__PYTHON_EXECUTABLE__" in launchd_gateway
     assert "__PYTHON_EXECUTABLE__" in launchd_maintenance
-    assert "backup-create" in launchd_maintenance
-    assert "backup-verify latest" in launchd_maintenance
+    assert "__PYTHON_EXECUTABLE__" in launchd_backup_create
+    assert "__PYTHON_EXECUTABLE__" in launchd_backup_verify
+    assert "backup-create" not in launchd_maintenance
+    assert "backup-verify latest" not in launchd_maintenance
     assert "prune-retention" in launchd_maintenance
+    assert "backup-create" in launchd_backup_create
+    assert "backup-verify latest" in launchd_backup_verify
     assert (
         "Environment=PATH=%h/.config/varlock/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         in gateway

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run StrongClaw backup verification daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=openclaw-backup-verify.service
+
+[Install]
+WantedBy=timers.target
