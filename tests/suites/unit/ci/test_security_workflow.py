@@ -295,6 +295,7 @@ def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_availa
 ) -> None:
     """Recovery smoke should execute backup, verify, and restore in both modes."""
     seen_openclaw_resolution: list[str | None] = []
+    seen_allow_fallback_flags: list[bool] = []
     archive_path = tmp_path / "archive.tar.gz"
 
     def fake_which(command: str, *_args: object, **_kwargs: object) -> str | None:
@@ -302,8 +303,9 @@ def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_availa
             return "/usr/local/bin/openclaw"
         return None
 
-    def fake_create_backup(*, home_dir: Path) -> Path:
+    def fake_create_backup(*, home_dir: Path, allow_fallback: bool = False) -> Path:
         del home_dir
+        seen_allow_fallback_flags.append(allow_fallback)
         seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
         archive_path.write_text("archive", encoding="utf-8")
         return archive_path
@@ -340,6 +342,7 @@ def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_availa
         None,
         None,
     ]
+    assert seen_allow_fallback_flags == [True, True]
 
 
 def test_run_recovery_smoke_requires_openclaw_cli_when_requested(

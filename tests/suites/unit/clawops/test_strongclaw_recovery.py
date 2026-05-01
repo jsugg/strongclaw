@@ -80,6 +80,42 @@ def test_backup_create_cli_reports_tar_fallback_and_round_trips(
     ) == "ready\n"
 
 
+def test_backup_create_cli_dry_run_outputs_plan_without_writing_archive(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
+) -> None:
+    """Dry-run backup creation should emit the manifest without writing archives."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+
+    exit_code = strongclaw_recovery.main(
+        [
+            "--home-dir",
+            str(home_dir),
+            "backup-create",
+            "--profile",
+            "control-plane",
+            "--dry-run",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert payload["profile"] == "control-plane"
+    assert payload["backend_candidates"] == ["openclaw-cli", "tar-fallback"]
+    assert payload["include_roots"] == [str(home_dir / ".openclaw")]
+    assert payload["exclude_roots"] == [
+        str(strongclaw_recovery.backups_dir(home_dir=home_dir)),
+        str(strongclaw_recovery.legacy_backups_dir(home_dir=home_dir)),
+    ]
+    backup_root = strongclaw_recovery.backups_dir(home_dir=home_dir)
+    assert not backup_root.exists()
+
+
 def test_backup_root_defaults_to_strongclaw_state_dir(tmp_path: Path) -> None:
     """Backups should default to the StrongClaw-owned state tree."""
     home_dir = tmp_path / "home"
@@ -135,6 +171,56 @@ def test_backup_create_failure_cleans_partial_archive(
     backup_root = strongclaw_recovery.backups_dir(home_dir=home_dir)
     remaining_files = list(backup_root.iterdir()) if backup_root.exists() else []
     assert remaining_files == []
+
+
+def test_backup_create_fails_closed_without_allow_fallback_when_openclaw_create_fails(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Create should fail closed when the OpenClaw backend fails and fallback is not allowed."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+
+    def _run_command(_command: list[str], **_kwargs: object) -> ExecResult:
+        return ExecResult(
+            argv=("openclaw", "backup", "create", "target"),
+            returncode=1,
+            stdout="",
+            stderr="openclaw backend failed",
+            duration_ms=1,
+        )
+
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_openclaw_only)
+    test_context.patch.patch_object(strongclaw_recovery, "run_command", new=_run_command)
+
+    with pytest.raises(CommandError, match="openclaw backend failed"):
+        strongclaw_recovery.create_backup(home_dir=home_dir, allow_fallback=False)
+
+
+def test_backup_create_allows_explicit_fallback_when_openclaw_create_fails(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Create should use tar fallback only when the operator opts into fallback mode."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+
+    def _run_command(_command: list[str], **_kwargs: object) -> ExecResult:
+        return ExecResult(
+            argv=("openclaw", "backup", "create", "target"),
+            returncode=1,
+            stdout="",
+            stderr="openclaw backend failed",
+            duration_ms=1,
+        )
+
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_openclaw_only)
+    test_context.patch.patch_object(strongclaw_recovery, "run_command", new=_run_command)
+
+    archive_path = strongclaw_recovery.create_backup(home_dir=home_dir, allow_fallback=True)
+    assert archive_path.is_file()
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+    assert strongclaw_recovery.verify_backup(archive_path, home_dir=home_dir) == archive_path
 
 
 def test_restore_backup_rejects_traversal_members(

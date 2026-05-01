@@ -24,6 +24,16 @@ archive traversal.
 OpenClaw CLI path (`openclaw-cli`) or the local tar fallback path
 (`tar-fallback`) so automation can tell which recovery mode actually ran.
 
+Backup creation accepts a policy profile and an explicit fallback gate:
+
+- `--profile` (default `control-plane`; supported: `control-plane`, `devflow-checkpoint`, `hypermemory-fast`, `full-data-plane`)
+- `--dry-run` (render deterministic include/exclude/retention plan, do not write archives)
+- `--allow-fallback` (permit tar fallback if OpenClaw backup create fails)
+
+Default mode is fail-closed for OpenClaw backup create failures: if OpenClaw is
+available but `openclaw backup create` fails, the command fails unless
+`--allow-fallback` is set.
+
 ## Scheduled maintenance
 
 StrongClaw host service activation now installs independent daily jobs:
@@ -47,6 +57,8 @@ launchd agents:
 Commands:
 
 - `clawops recovery --home-dir <home> backup-create`
+- `clawops recovery --home-dir <home> backup-create --profile control-plane --dry-run`
+- `clawops recovery --home-dir <home> backup-create --allow-fallback`
 - `clawops recovery --home-dir <home> backup-verify latest`
 - `clawops recovery --home-dir <home> prune-retention`
 

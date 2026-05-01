@@ -760,7 +760,7 @@ def _run_recovery_cycle(
         _force_tar_fallback_for_recovery() if force_tar_fallback else contextlib.nullcontext()
     )
     with recovery_context:
-        archive_path = create_backup(home_dir=home_dir)
+        archive_path = create_backup(home_dir=home_dir, allow_fallback=True)
         verified_archive = verify_backup(archive_path, home_dir=home_dir)
         restore_destination = resolved_tmp_root / f"recovery-restore-{mode_label}"
         restore_backup(verified_archive, destination=restore_destination, home_dir=home_dir)
