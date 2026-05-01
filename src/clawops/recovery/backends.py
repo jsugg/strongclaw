@@ -37,7 +37,7 @@ class OpenClawBackupBackend:
 
     def is_available(self) -> bool:
         """Return whether the OpenClaw executable is available."""
-        return self._which("openclaw", None) is not None
+        return self._which("openclaw") is not None
 
     def create(self, archive_tmp_path: pathlib.Path) -> tuple[bool, str | None]:
         """Create one archive through OpenClaw."""
