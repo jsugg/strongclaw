@@ -12,7 +12,7 @@ type WhichFunc = Callable[..., str | bytes | None]
 type RunCommandFunc = Callable[..., ExecResult]
 type TarWriter = Callable[
     [pathlib.Path],
-    None,
+    dict[str, object],
 ]
 
 
@@ -21,7 +21,9 @@ class BackupBackend(Protocol):
 
     name: str
 
-    def create(self, archive_tmp_path: pathlib.Path) -> tuple[bool, str | None]:
+    def create(
+        self, archive_tmp_path: pathlib.Path
+    ) -> tuple[bool, str | None, dict[str, object] | None]:
         """Create one archive and return status + optional failure reason."""
         ...
 
@@ -39,16 +41,18 @@ class OpenClawBackupBackend:
         """Return whether the OpenClaw executable is available."""
         return self._which("openclaw") is not None
 
-    def create(self, archive_tmp_path: pathlib.Path) -> tuple[bool, str | None]:
+    def create(
+        self, archive_tmp_path: pathlib.Path
+    ) -> tuple[bool, str | None, dict[str, object] | None]:
         """Create one archive through OpenClaw."""
         result = self._run_command(
             ["openclaw", "backup", "create", str(archive_tmp_path)],
             timeout_seconds=600,
         )
         if result.ok:
-            return True, None
+            return True, None, None
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw backup create failed"
-        return False, detail
+        return False, detail, None
 
 
 class TarBackupBackend:
@@ -59,7 +63,9 @@ class TarBackupBackend:
     def __init__(self, *, writer: TarWriter) -> None:
         self._writer = writer
 
-    def create(self, archive_tmp_path: pathlib.Path) -> tuple[bool, str | None]:
+    def create(
+        self, archive_tmp_path: pathlib.Path
+    ) -> tuple[bool, str | None, dict[str, object] | None]:
         """Create one archive through the fallback tar writer."""
-        self._writer(archive_tmp_path)
-        return True, None
+        manifest = self._writer(archive_tmp_path)
+        return True, None, manifest
