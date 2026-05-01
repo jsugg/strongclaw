@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import pathlib
 import shutil
@@ -12,6 +11,13 @@ import time
 
 from clawops.app_paths import strongclaw_state_dir
 from clawops.cli_roots import add_ignored_repo_root_alias, warn_ignored_repo_root_argument
+from clawops.recovery.models import BackupCreateExecution
+from clawops.recovery.orchestrator import create_backup_execution
+from clawops.recovery.policy import (
+    DEFAULT_RECOVERY_PROFILE,
+    RECOVERY_PROFILES,
+    ensure_recovery_profile,
+)
 from clawops.strongclaw_runtime import (
     CommandError,
     resolve_home_dir,
@@ -19,14 +25,6 @@ from clawops.strongclaw_runtime import (
 )
 
 _OPENCLAW_VERIFY_MANIFEST_MISMATCH = "Expected exactly one backup manifest entry"
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class BackupCreateResult:
-    """Archive path plus the mechanism that created it."""
-
-    archive_path: pathlib.Path
-    mode: str
 
 
 def backups_dir(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
@@ -90,47 +88,58 @@ def _write_tar_archive(
             archive.add(path, arcname=path.relative_to(include_root), recursive=False)
 
 
-def _create_backup_result(*, home_dir: pathlib.Path | None = None) -> BackupCreateResult:
+def _create_backup_result(
+    *,
+    home_dir: pathlib.Path | None = None,
+    profile: str = DEFAULT_RECOVERY_PROFILE,
+    allow_fallback: bool = False,
+    dry_run: bool = False,
+) -> BackupCreateExecution:
     """Create one backup archive and record which backup path was used."""
     resolved_home_dir = resolve_home_dir(home_dir)
     archive_root = backups_dir(home_dir=home_dir)
-    archive_root.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-    archive_path = archive_root / f"openclaw-{stamp}.tar.gz"
-    archive_tmp_path = archive_root / f".{archive_path.name}.tmp"
+    selected_profile = ensure_recovery_profile(profile)
     exclude_roots: tuple[pathlib.Path, ...] = (
         archive_root.resolve(),
         legacy_backups_dir(home_dir=home_dir).resolve(),
     )
-    if shutil.which("openclaw") is not None:
-        _safe_unlink(archive_tmp_path)
-        result = run_command(
-            ["openclaw", "backup", "create", str(archive_tmp_path)], timeout_seconds=600
-        )
-        if result.ok:
-            archive_tmp_path.replace(archive_path)
-            return BackupCreateResult(archive_path=archive_path, mode="openclaw-cli")
-        _safe_unlink(archive_tmp_path)
     state_dir = openclaw_state_dir(home_dir=home_dir)
-    _safe_unlink(archive_tmp_path)
-    try:
-        _write_tar_archive(
+    return create_backup_execution(
+        home_dir=resolved_home_dir,
+        openclaw_state_root=state_dir,
+        backup_root=archive_root,
+        legacy_backup_root=legacy_backups_dir(home_dir=home_dir),
+        profile=selected_profile,
+        allow_fallback=allow_fallback,
+        dry_run=dry_run,
+        tar_writer=lambda archive_tmp_path: _write_tar_archive(
             archive_tmp_path,
             state_dir=state_dir,
             include_root=resolved_home_dir,
             exclude_roots=exclude_roots,
-        )
-        archive_tmp_path.replace(archive_path)
-    except (OSError, tarfile.TarError) as exc:
-        _safe_unlink(archive_tmp_path)
-        _safe_unlink(archive_path)
-        raise CommandError(f"backup creation failed: {exc}") from exc
-    return BackupCreateResult(archive_path=archive_path, mode="tar-fallback")
+        ),
+        safe_unlink=_safe_unlink,
+        which=shutil.which,
+        run_command=run_command,
+    )
 
 
-def create_backup(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
+def create_backup(
+    *,
+    home_dir: pathlib.Path | None = None,
+    profile: str = DEFAULT_RECOVERY_PROFILE,
+    allow_fallback: bool = False,
+) -> pathlib.Path:
     """Create one backup archive, preferring the OpenClaw CLI when available."""
-    return _create_backup_result(home_dir=home_dir).archive_path
+    result = _create_backup_result(
+        home_dir=home_dir,
+        profile=profile,
+        allow_fallback=allow_fallback,
+        dry_run=False,
+    )
+    if result.archive_path is None:
+        raise CommandError("backup creation produced no archive path")
+    return result.archive_path
 
 
 def verify_backup(
@@ -260,7 +269,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_ignored_repo_root_alias(parser)
     parser.add_argument("--home-dir", type=pathlib.Path, default=pathlib.Path.home())
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("backup-create")
+    backup_create_parser = subparsers.add_parser("backup-create")
+    backup_create_parser.add_argument("--profile", choices=RECOVERY_PROFILES, default=None)
+    backup_create_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the deterministic backup plan without writing archives.",
+    )
+    backup_create_parser.add_argument(
+        "--allow-fallback",
+        action="store_true",
+        help="Allow fallback tar creation when OpenClaw CLI backup creation fails.",
+    )
     verify_parser = subparsers.add_parser("backup-verify")
     verify_parser.add_argument("target", nargs="?", default="latest")
     restore_parser = subparsers.add_parser("restore")
@@ -286,8 +306,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     home_dir = resolve_home_dir(args.home_dir)
     if args.command == "backup-create":
-        result = _create_backup_result(home_dir=home_dir)
-        payload = {"ok": True, "archive": str(result.archive_path), "mode": result.mode}
+        execution = _create_backup_result(
+            home_dir=home_dir,
+            profile=args.profile or DEFAULT_RECOVERY_PROFILE,
+            allow_fallback=bool(args.allow_fallback),
+            dry_run=bool(args.dry_run),
+        )
+        payload: dict[str, object] = {
+            "ok": True,
+            **execution.plan.to_payload(),
+            "dry_run": execution.dry_run,
+        }
+        if execution.archive_path is not None and execution.mode is not None:
+            payload["archive"] = str(execution.archive_path)
+            payload["mode"] = execution.mode
+            payload["fallback_used"] = execution.fallback_used
+            if execution.fallback_reason is not None:
+                payload["fallback_reason"] = execution.fallback_reason
     elif args.command == "backup-verify":
         payload = {"ok": True, "archive": str(verify_backup(args.target, home_dir=home_dir))}
     elif args.command == "restore":
