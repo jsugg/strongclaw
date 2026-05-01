@@ -13,7 +13,7 @@ from clawops.recovery.planner import build_backup_plan
 from clawops.strongclaw_runtime import CommandError, ExecResult
 
 type RunCommandFunc = Callable[..., ExecResult]
-type TarWriter = Callable[[pathlib.Path], None]
+type TarWriter = Callable[[pathlib.Path], dict[str, object]]
 type SafeUnlink = Callable[[pathlib.Path], None]
 
 
@@ -49,7 +49,7 @@ def create_backup_execution(
     fallback_reason: str | None = None
     if openclaw_backend.is_available():
         safe_unlink(archive_tmp_path)
-        backend_ok, backend_error = openclaw_backend.create(archive_tmp_path)
+        backend_ok, backend_error, _ = openclaw_backend.create(archive_tmp_path)
         if backend_ok:
             archive_tmp_path.replace(archive_path)
             return BackupCreateExecution(
@@ -65,8 +65,9 @@ def create_backup_execution(
 
     safe_unlink(archive_tmp_path)
     fallback_backend = TarBackupBackend(writer=tar_writer)
+    fallback_manifest: dict[str, object] | None = None
     try:
-        fallback_backend.create(archive_tmp_path)
+        _, _, fallback_manifest = fallback_backend.create(archive_tmp_path)
         archive_tmp_path.replace(archive_path)
     except (OSError, tarfile.TarError) as exc:
         safe_unlink(archive_tmp_path)
@@ -79,4 +80,5 @@ def create_backup_execution(
         mode="tar-fallback",
         fallback_used=fallback_reason is not None,
         fallback_reason=fallback_reason,
+        manifest=fallback_manifest,
     )
