@@ -180,6 +180,35 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(
     assert seen_sleeps == [5, 10]
 
 
+def test_install_global_node_tools_retries_after_cache_clean(test_context: TestContext) -> None:
+    """Global npm tool install should recover once from transient registry/cache errors."""
+    install_command = ["sudo", "npm", "install", "-g", "openclaw@2026.3.13", "acpx@0.3.0"]
+    seen_commands: list[list[str]] = []
+    seen_sleeps: list[int] = []
+
+    def fake_stream_checked(command: list[str], **kwargs: object) -> None:
+        seen_commands.append(command)
+        assert kwargs["timeout_seconds"] in {300, 3600}
+        if command == install_command and seen_commands.count(install_command) == 1:
+            raise strongclaw_bootstrap.CommandError("temporary registry miss")
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=fake_stream_checked,
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap.time, "sleep", new=seen_sleeps.append)
+
+    strongclaw_bootstrap.install_global_node_tools(install_command)
+
+    assert seen_commands == [
+        install_command,
+        ["sudo", "npm", "cache", "clean", "--force"],
+        install_command,
+    ]
+    assert seen_sleeps == [15]
+
+
 def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) -> None:
     """Prefer `nodejs` when `node` is unavailable."""
 

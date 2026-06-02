@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -34,6 +35,10 @@ _pull_one_image = cast(
 _wait_for_docker_ready = cast(
     _WaitForDockerReady,
     cast(Any, hosted_docker)._wait_for_docker_ready,
+)
+_ORBSTACK_ONLY = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="OrbStack is only available on macOS.",
 )
 
 
@@ -581,6 +586,7 @@ def test_wait_for_docker_ready_retries_after_binary_not_found(
     assert attempts["count"] == 3
 
 
+@_ORBSTACK_ONLY
 def test_collect_runtime_diagnostics_uses_compose_probe_env(
     tmp_path: Path,
     test_context: TestContext,
@@ -591,6 +597,7 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("DOCKER_HOST", "unix:///tmp/orbstack-test.sock")
 
     context = fresh_host.prepare_context(
         scenario_id="macos-sidecars",
@@ -637,12 +644,21 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
 
     hosted_docker.collect_runtime_diagnostics(Path(context.context_path))
 
+    command_names = {" ".join(command) for command, _env in commands}
+    assert "docker context ls" in command_names
+    assert "orb status" in command_names
+    assert "orb logs" in command_names
     compose_commands = [
         env for command, env in commands if command[:3] == ["docker", "compose", "-f"]
     ]
     assert compose_commands
     assert all(env["NEO4J_PASSWORD"] == "runtime-secret" for env in compose_commands)
     assert all("COMPOSE_PROJECT_NAME" in env for env in compose_commands)
+    socket_state = (Path(context.diagnostics_dir) / "docker-socket-state.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "DOCKER_HOST=unix:///tmp/orbstack-test.sock" in socket_state
+    assert "path=/tmp/orbstack-test.sock" in socket_state
 
 
 def test_wait_runtime_ready_rejects_non_macos_context(
@@ -668,6 +684,26 @@ def test_wait_runtime_ready_rejects_non_macos_context(
         hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
 
 
+def test_setup_orbstack_rejects_checksum_mismatch(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """setup_orbstack should reject and remove a cached DMG with the wrong digest."""
+    dmg_path = tmp_path / "orbstack.dmg"
+    dmg_path.write_bytes(b"not the expected dmg")
+    test_context.patch.patch_object(hosted_docker_runtime.sys, "platform", new="darwin")
+
+    with pytest.raises(fresh_host.FreshHostError, match="checksum mismatch"):
+        hosted_docker_runtime.setup_orbstack(
+            dmg_path=dmg_path,
+            dmg_url="https://example.invalid/orbstack.dmg",
+            expected_sha256="0" * 64,
+        )
+
+    assert not dmg_path.exists()
+
+
+@_ORBSTACK_ONLY
 def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
     tmp_path: Path,
     test_context: TestContext,
@@ -693,7 +729,9 @@ def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
     def fake_wait_for_docker_ready(
         *, cwd: Path, env: dict[str, str], max_attempts: int = 60
     ) -> None:
-        captured.append({"DOCKER_HOST": env.get("DOCKER_HOST", ""), "max_attempts": str(max_attempts)})  # type: ignore[dict-item]
+        captured.append(
+            {"DOCKER_HOST": env.get("DOCKER_HOST", ""), "max_attempts": str(max_attempts)}
+        )
 
     def fake_run_checked(
         command: list[str],
@@ -734,6 +772,178 @@ def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
         if "=" in line
     )
     assert written_env.get("DOCKER_HOST") == expected_docker_host
+
+
+@_ORBSTACK_ONLY
+def test_wait_runtime_ready_recovers_orbstack_with_stop_start_fallback(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """wait_runtime_ready should recover OrbStack when Docker reports socket EOF."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("DOCKER_HOST", "unix:///tmp/orbstack-test.sock")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    wait_calls = 0
+    recovery_commands: list[list[str]] = []
+
+    def fake_wait_for_docker_ready(
+        *, cwd: Path, env: dict[str, str], max_attempts: int = 60
+    ) -> None:
+        nonlocal wait_calls
+        del cwd, env
+        wait_calls += 1
+        if wait_calls == 1:
+            raise fresh_host.FreshHostError("error during connect: EOF")
+        assert max_attempts == 90
+
+    def fake_runtime_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        recovery_commands.append(command)
+        if command == ["orb", "restart", "docker"]:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="restart failed")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    def fake_diagnostics_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    def fake_sysctl_int(name: str) -> int | None:
+        return 4 if name == "hw.ncpu" else 8 * 1073741824
+
+    test_context.patch.patch_object(
+        hosted_docker_runtime, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+    test_context.patch.patch_object(
+        hosted_docker_runtime, "run_command", new=fake_runtime_run_command
+    )
+    test_context.patch.patch_object(hosted_docker_runtime, "run_checked", new=fake_run_checked)
+    test_context.patch.patch_object(hosted_docker_runtime.time, "sleep", new=_sleep)
+    test_context.patch.patch_object(hosted_docker_runtime, "sysctl_int", new=fake_sysctl_int)
+    test_context.patch.patch_object(
+        hosted_docker_diagnostics, "run_command", new=fake_diagnostics_run_command
+    )
+    test_context.patch.patch_object(hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int)
+
+    report = hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
+
+    assert report.failure_reason is None
+    assert report.failure_phase is None
+    assert report.recovery_attempt_count == 1
+    assert report.recovery_attempts[0].status == "success"
+    assert report.recovery_attempts[0].trigger_reason == "docker_socket_eof"
+    assert recovery_commands == [
+        ["orb", "restart", "docker"],
+        ["orb", "stop"],
+        ["orb", "start"],
+    ]
+    assert (Path(context.diagnostics_dir) / "runtime-recovery/attempt-01/before").is_dir()
+    assert (Path(context.diagnostics_dir) / "runtime-recovery/attempt-01/after").is_dir()
+    payload = json.loads(Path(context.runtime_report_path or "").read_text(encoding="utf-8"))
+    assert payload["recovery_attempt_count"] == 1
+    assert payload["recovery_attempts"][0]["recovery_exit_code"] == 0
+
+
+@_ORBSTACK_ONLY
+def test_wait_runtime_ready_reports_exhausted_orbstack_recovery(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """wait_runtime_ready should fail with structured recovery metadata."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    test_context.env.set("DOCKER_HOST", "unix:///tmp/orbstack-test.sock")
+
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+
+    def fake_wait_for_docker_ready(
+        *, cwd: Path, env: dict[str, str], max_attempts: int = 60
+    ) -> None:
+        del cwd, env, max_attempts
+        raise fresh_host.FreshHostError("error during connect: EOF")
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd, env, timeout_seconds, capture_output
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    def fake_sysctl_int(name: str) -> int | None:
+        return 4 if name == "hw.ncpu" else 8 * 1073741824
+
+    test_context.patch.patch_object(
+        hosted_docker_runtime, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+    test_context.patch.patch_object(hosted_docker_runtime, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(hosted_docker_runtime.time, "sleep", new=_sleep)
+    test_context.patch.patch_object(hosted_docker_runtime, "sysctl_int", new=fake_sysctl_int)
+    test_context.patch.patch_object(hosted_docker_diagnostics, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int)
+
+    with pytest.raises(
+        fresh_host.FreshHostError,
+        match="orbstack_recovery_failed: docker_socket_eof",
+    ):
+        hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
+
+    payload = json.loads(Path(context.runtime_report_path or "").read_text(encoding="utf-8"))
+    assert payload["failure_reason"] == "orbstack_recovery_failed"
+    assert payload["failure_phase"] == "post_recovery_probe"
+    assert payload["recovery_attempt_count"] == 2
+    assert [attempt["status"] for attempt in payload["recovery_attempts"]] == [
+        "failure",
+        "failure",
+    ]
+    assert payload["recovery_attempts"][-1]["readiness_reason"] == "docker_socket_eof"
 
 
 def test_run_checked_handles_none_outputs_when_capture_output_is_false(

@@ -16,8 +16,10 @@ from tests.utils.helpers._hosted_docker.models import (
     ImageEnsureReport,
     PullReport,
     RuntimeInstallReport,
+    RuntimeRecoveryAttemptReport,
 )
 from tests.utils.helpers._hosted_docker.runtime import (
+    setup_orbstack,
     wait_runtime_ready,
 )
 from tests.utils.helpers._hosted_docker.shell import run_checked as _run_checked
@@ -29,6 +31,7 @@ __all__ = [
     "ImageEnsureReport",
     "PULL_HEARTBEAT_SECONDS",
     "PullReport",
+    "RuntimeRecoveryAttemptReport",
     "RuntimeInstallReport",
     "_pull_one_image",
     "_run_checked",
@@ -37,7 +40,8 @@ __all__ = [
     "collect_runtime_diagnostics",
     "ensure_images",
     "list_local_images",
-    "wait_runtime_ready",
     "pull_images",
+    "setup_orbstack",
+    "wait_runtime_ready",
     "resolve_compose_images",
 ]

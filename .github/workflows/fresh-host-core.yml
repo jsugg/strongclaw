@@ -130,20 +130,15 @@ jobs:
       - name: Set up Docker via OrbStack
         # v1.6.0+ panics on GHA macos-15-intel (Skylake CPU check); v1.5.1 is safe.
         # Placed first to overlap OrbStack startup with toolchain setup (~90s saved).
+        env:
+          ORBSTACK_DMG_PATH: /tmp/orbstack.dmg
+          ORBSTACK_DMG_SHA256: fb95108ded54a27603b68184a13f7e666e0e758167652c0b65cd4dc5eff94617
+          ORBSTACK_DMG_URL: https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg
         run: >-
-          test -f /tmp/orbstack.dmg ||
-          curl -fsSL
-          "https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg"
-          -o /tmp/orbstack.dmg &&
-          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt /tmp/orbstack.dmg &&
-          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
-          hdiutil detach -quiet /tmp/orbstack_mnt &&
-          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew install --quiet docker docker-compose &&
-          mkdir -p ~/.docker/cli-plugins &&
-          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
-          nohup orb start > /tmp/orb-start.log 2>&1 &
+          ./tests/scripts/hosted_docker.py setup-orbstack
+          --dmg-path "${ORBSTACK_DMG_PATH}"
+          --url "${ORBSTACK_DMG_URL}"
+          --sha256 "${ORBSTACK_DMG_SHA256}"
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
