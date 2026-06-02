@@ -684,6 +684,25 @@ def test_wait_runtime_ready_rejects_non_macos_context(
         hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
 
 
+def test_setup_orbstack_rejects_checksum_mismatch(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """setup_orbstack should reject and remove a cached DMG with the wrong digest."""
+    dmg_path = tmp_path / "orbstack.dmg"
+    dmg_path.write_bytes(b"not the expected dmg")
+    test_context.patch.patch_object(hosted_docker_runtime.sys, "platform", new="darwin")
+
+    with pytest.raises(fresh_host.FreshHostError, match="checksum mismatch"):
+        hosted_docker_runtime.setup_orbstack(
+            dmg_path=dmg_path,
+            dmg_url="https://example.invalid/orbstack.dmg",
+            expected_sha256="0" * 64,
+        )
+
+    assert not dmg_path.exists()
+
+
 @_ORBSTACK_ONLY
 def test_wait_runtime_ready_sets_orbstack_socket_when_docker_host_unset(
     tmp_path: Path,

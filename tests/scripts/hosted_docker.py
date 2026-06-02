@@ -17,6 +17,7 @@ from tests.utils.helpers.fresh_host import FreshHostError  # noqa: E402
 from tests.utils.helpers.hosted_docker import (  # noqa: E402
     collect_runtime_diagnostics,
     ensure_images,
+    setup_orbstack,
     wait_runtime_ready,
 )
 
@@ -25,6 +26,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    setup_parser = subparsers.add_parser(
+        "setup-orbstack",
+        help="Install OrbStack and Docker tooling for hosted macOS runtime checks.",
+    )
+    setup_parser.add_argument("--dmg-path", type=Path, required=True)
+    setup_parser.add_argument("--url", required=True)
+    setup_parser.add_argument("--sha256", required=True)
 
     wait_parser = subparsers.add_parser(
         "wait-runtime-ready",
@@ -51,6 +60,13 @@ def main(argv: list[str] | None = None) -> int:
     """Run the requested hosted-docker subcommand."""
     args = _parse_args(argv)
     try:
+        if args.command == "setup-orbstack":
+            setup_orbstack(
+                dmg_path=Path(args.dmg_path).expanduser().resolve(),
+                dmg_url=str(args.url),
+                expected_sha256=str(args.sha256),
+            )
+            return 0
         if args.command == "wait-runtime-ready":
             wait_runtime_ready(
                 Path(args.context).expanduser().resolve(),

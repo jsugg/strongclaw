@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -40,6 +42,122 @@ _RUNTIME_VALIDATION_COMMANDS = (
     ["docker", "compose", "version"],
     ["docker", "info"],
 )
+_ORBSTACK_MOUNTPOINT = Path("/tmp/orbstack_mnt")
+_ORB_START_LOG = Path("/tmp/orb-start.log")
+
+
+def _sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest for one file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def setup_orbstack(*, dmg_path: Path, dmg_url: str, expected_sha256: str) -> None:
+    """Install OrbStack and Docker tooling for hosted macOS runtime checks."""
+    if sys.platform != "darwin":
+        raise FreshHostError("OrbStack setup is only supported on macOS")
+
+    cwd = Path.cwd()
+    env = macos_env()
+    resolved_dmg_path = dmg_path.resolve()
+    if not resolved_dmg_path.is_file():
+        run_checked(
+            ["curl", "-fsSL", dmg_url, "-o", str(resolved_dmg_path)],
+            cwd=cwd,
+            env=env,
+            timeout_seconds=600,
+        )
+
+    actual_sha256 = _sha256(resolved_dmg_path)
+    if actual_sha256 != expected_sha256:
+        resolved_dmg_path.unlink(missing_ok=True)
+        raise FreshHostError(
+            "OrbStack DMG checksum mismatch: "
+            f"expected {expected_sha256}, got {actual_sha256}"
+        )
+
+    attached = False
+    try:
+        run_checked(
+            [
+                "hdiutil",
+                "attach",
+                "-quiet",
+                "-nobrowse",
+                "-mountpoint",
+                str(_ORBSTACK_MOUNTPOINT),
+                str(resolved_dmg_path),
+            ],
+            cwd=cwd,
+            env=env,
+            timeout_seconds=300,
+        )
+        attached = True
+        run_checked(
+            ["cp", "-R", str(_ORBSTACK_MOUNTPOINT / "OrbStack.app"), "/Applications/"],
+            cwd=cwd,
+            env=env,
+            timeout_seconds=300,
+        )
+    finally:
+        if attached:
+            run_checked(
+                ["hdiutil", "detach", "-quiet", str(_ORBSTACK_MOUNTPOINT)],
+                cwd=cwd,
+                env=env,
+                timeout_seconds=120,
+            )
+
+    run_checked(
+        [
+            "sudo",
+            "ln",
+            "-sf",
+            "/Applications/OrbStack.app/Contents/MacOS/bin/orb",
+            "/usr/local/bin/orb",
+        ],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=120,
+    )
+    run_checked(
+        ["brew", "install", "--quiet", "docker", "docker-compose"],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=600,
+    )
+    brew_prefix = run_checked(
+        ["brew", "--prefix"],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=120,
+        capture_output=True,
+    ).stdout.strip()
+    cli_plugins_dir = Path.home() / ".docker" / "cli-plugins"
+    cli_plugins_dir.mkdir(parents=True, exist_ok=True)
+    run_checked(
+        [
+            "ln",
+            "-sfn",
+            str(Path(brew_prefix) / "bin" / "docker-compose"),
+            str(cli_plugins_dir / "docker-compose"),
+        ],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=120,
+    )
+    with _ORB_START_LOG.open("wb") as orb_start_log:
+        subprocess.Popen(
+            ["orb", "start"],
+            cwd=cwd,
+            env=env,
+            stdout=orb_start_log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
 
 def _docker_socket_path(docker_host: str) -> Path | None:
