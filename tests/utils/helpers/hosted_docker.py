@@ -15,8 +15,8 @@ from tests.utils.helpers._hosted_docker.models import (
     PULL_HEARTBEAT_SECONDS,
     ImageEnsureReport,
     PullReport,
-    RuntimeRecoveryAttemptReport,
     RuntimeInstallReport,
+    RuntimeRecoveryAttemptReport,
 )
 from tests.utils.helpers._hosted_docker.runtime import (
     setup_orbstack,
@@ -40,8 +40,8 @@ __all__ = [
     "collect_runtime_diagnostics",
     "ensure_images",
     "list_local_images",
+    "pull_images",
     "setup_orbstack",
     "wait_runtime_ready",
-    "pull_images",
     "resolve_compose_images",
 ]
