@@ -87,8 +87,7 @@ def install_global_node_tools(command: list[str]) -> None:
             if attempt == _NPM_GLOBAL_INSTALL_MAX_ATTEMPTS:
                 raise
             print(
-                "npm global tool install failed; cleaning npm cache before retry: "
-                f"{err}",
+                f"npm global tool install failed; cleaning npm cache before retry: {err}",
                 file=sys.stderr,
             )
             cache_clean_command = ["npm", "cache", "clean", "--force"]

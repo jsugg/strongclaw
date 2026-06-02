@@ -69,7 +69,8 @@ def collect_runtime_diagnostics_for_context(
         resolved_diagnostics_dir / "docker-context-ls.txt": ["docker", "context", "ls"],
         resolved_diagnostics_dir / "docker-system-df.txt": ["docker", "system", "df"],
         resolved_diagnostics_dir / "docker-ps-all.txt": ["docker", "ps", "-a"],
-        resolved_diagnostics_dir / "docker-images.jsonl": [
+        resolved_diagnostics_dir
+        / "docker-images.jsonl": [
             "docker",
             "images",
             "--format",
@@ -121,9 +122,7 @@ def collect_runtime_diagnostics_for_context(
         )
     for output_path, content in {
         resolved_diagnostics_dir / "host-cpu-count.txt": str(sysctl_int("hw.ncpu") or ""),
-        resolved_diagnostics_dir / "host-memory-bytes.txt": str(
-            sysctl_int("hw.memsize") or ""
-        ),
+        resolved_diagnostics_dir / "host-memory-bytes.txt": str(sysctl_int("hw.memsize") or ""),
     }.items():
         output_path.write_text(f"{content}\n", encoding="utf-8")
     (resolved_diagnostics_dir / "docker-socket-state.txt").write_text(

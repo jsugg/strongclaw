@@ -654,9 +654,9 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
     assert compose_commands
     assert all(env["NEO4J_PASSWORD"] == "runtime-secret" for env in compose_commands)
     assert all("COMPOSE_PROJECT_NAME" in env for env in compose_commands)
-    socket_state = (
-        Path(context.diagnostics_dir) / "docker-socket-state.txt"
-    ).read_text(encoding="utf-8")
+    socket_state = (Path(context.diagnostics_dir) / "docker-socket-state.txt").read_text(
+        encoding="utf-8"
+    )
     assert "DOCKER_HOST=unix:///tmp/orbstack-test.sock" in socket_state
     assert "path=/tmp/orbstack-test.sock" in socket_state
 
@@ -858,9 +858,7 @@ def test_wait_runtime_ready_recovers_orbstack_with_stop_start_fallback(
     test_context.patch.patch_object(
         hosted_docker_diagnostics, "run_command", new=fake_diagnostics_run_command
     )
-    test_context.patch.patch_object(
-        hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int
-    )
+    test_context.patch.patch_object(hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int)
 
     report = hosted_docker_runtime.wait_runtime_ready(Path(context.context_path))
 
@@ -928,12 +926,8 @@ def test_wait_runtime_ready_reports_exhausted_orbstack_recovery(
     test_context.patch.patch_object(hosted_docker_runtime, "run_command", new=fake_run_command)
     test_context.patch.patch_object(hosted_docker_runtime.time, "sleep", new=_sleep)
     test_context.patch.patch_object(hosted_docker_runtime, "sysctl_int", new=fake_sysctl_int)
-    test_context.patch.patch_object(
-        hosted_docker_diagnostics, "run_command", new=fake_run_command
-    )
-    test_context.patch.patch_object(
-        hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int
-    )
+    test_context.patch.patch_object(hosted_docker_diagnostics, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(hosted_docker_diagnostics, "sysctl_int", new=fake_sysctl_int)
 
     with pytest.raises(
         fresh_host.FreshHostError,

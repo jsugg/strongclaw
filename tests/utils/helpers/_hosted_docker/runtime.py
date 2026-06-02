@@ -75,8 +75,7 @@ def setup_orbstack(*, dmg_path: Path, dmg_url: str, expected_sha256: str) -> Non
     if actual_sha256 != expected_sha256:
         resolved_dmg_path.unlink(missing_ok=True)
         raise FreshHostError(
-            "OrbStack DMG checksum mismatch: "
-            f"expected {expected_sha256}, got {actual_sha256}"
+            f"OrbStack DMG checksum mismatch: expected {expected_sha256}, got {actual_sha256}"
         )
 
     attached = False
@@ -489,8 +488,6 @@ def wait_runtime_ready(
     write_github_env(github_env_vars, github_env_file)
     if failure_reason is not None:
         if recovery_attempts and recovery_attempts[-1].readiness_reason:
-            raise FreshHostError(
-                f"{failure_reason}: {recovery_attempts[-1].readiness_reason}"
-            )
+            raise FreshHostError(f"{failure_reason}: {recovery_attempts[-1].readiness_reason}")
         raise FreshHostError(failure_reason)
     return report
