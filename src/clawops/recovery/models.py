@@ -49,3 +49,4 @@ class BackupCreateExecution:
     mode: str | None = None
     fallback_used: bool = False
     fallback_reason: str | None = None
+    manifest: dict[str, object] | None = None

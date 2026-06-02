@@ -16,6 +16,8 @@ from clawops.app_paths import strongclaw_state_dir
 from clawops.strongclaw_runtime import CommandError, ExecResult
 from tests.plugins.infrastructure.context import TestContext
 
+FALLBACK_MANIFEST_PATH = ".strongclaw/backup-manifest.json"
+
 
 def _init_openclaw_home(home_dir: Path) -> Path:
     """Create a minimal OpenClaw home tree for recovery tests."""
@@ -29,10 +31,28 @@ def _init_openclaw_home(home_dir: Path) -> Path:
 def _write_payload_member(archive_path: Path, member_name: str) -> None:
     """Write one tar archive containing a single regular-file member."""
     payload = b"unsafe\n"
+    manifest_payload = json.dumps(
+        {
+            "profile": "control-plane",
+            "include_roots": ["/tmp/home"],
+            "exclude_roots": [
+                "/tmp/home/.local/state/strongclaw/backups",
+                "/tmp/home/.openclaw/backups",
+            ],
+            "file_count": 1,
+            "bytes": len(payload),
+            "content_sha256": "dummy",
+            "backend": "tar-fallback",
+        },
+        sort_keys=True,
+    ).encode("utf-8")
     member = tarfile.TarInfo(member_name)
     member.size = len(payload)
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.addfile(member, io.BytesIO(payload))
+        manifest_member = tarfile.TarInfo(FALLBACK_MANIFEST_PATH)
+        manifest_member.size = len(manifest_payload)
+        archive.addfile(manifest_member, io.BytesIO(manifest_payload))
 
 
 def _missing_tool(_command: str, _path: str | None = None) -> str | None:
@@ -68,6 +88,11 @@ def test_backup_create_cli_reports_tar_fallback_and_round_trips(
 
     assert exit_code == 0
     assert payload["mode"] == "tar-fallback"
+    assert payload["manifest"]["backend"] == "tar-fallback"
+    assert payload["manifest"]["profile"] == "control-plane"
+    assert payload["manifest"]["file_count"] >= 1
+    assert payload["manifest"]["bytes"] >= 1
+    assert payload["manifest"]["content_sha256"]
     assert archive_path.is_file()
     assert strongclaw_recovery.verify_backup("latest", home_dir=home_dir) == archive_path
 
@@ -255,6 +280,24 @@ def test_restore_backup_rejects_link_members(
     link_member.linkname = "target"
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.addfile(link_member)
+        manifest_payload = json.dumps(
+            {
+                "profile": "control-plane",
+                "include_roots": ["/tmp/home"],
+                "exclude_roots": [
+                    "/tmp/home/.local/state/strongclaw/backups",
+                    "/tmp/home/.openclaw/backups",
+                ],
+                "file_count": 0,
+                "bytes": 0,
+                "content_sha256": "dummy",
+                "backend": "tar-fallback",
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+        manifest_member = tarfile.TarInfo(FALLBACK_MANIFEST_PATH)
+        manifest_member.size = len(manifest_payload)
+        archive.addfile(manifest_member, io.BytesIO(manifest_payload))
     test_context.patch.patch_object(
         strongclaw_recovery.shutil,
         "which",
@@ -382,3 +425,66 @@ def test_verify_backup_falls_back_when_openclaw_manifest_is_missing(
     )
 
     assert strongclaw_recovery.verify_backup(archive_path, home_dir=home_dir) == archive_path
+
+
+def test_verify_backup_fails_when_fallback_manifest_is_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Fallback archive verification should fail when the embedded manifest is absent."""
+    archive_path = tmp_path / "missing-manifest.tar.gz"
+    payload = b"data\n"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        member = tarfile.TarInfo(name=".openclaw/config.json")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+    with pytest.raises(CommandError, match="invalid fallback backup manifest count"):
+        strongclaw_recovery.verify_backup(archive_path, home_dir=tmp_path / "home")
+
+
+def test_recovery_emits_structured_events_for_backup_and_prune(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    test_context: TestContext,
+) -> None:
+    """Recovery CLI should emit structured events with required fields when enabled."""
+    home_dir = tmp_path / "home"
+    _init_openclaw_home(home_dir)
+    test_context.patch.patch_object(strongclaw_recovery.shutil, "which", new=_missing_tool)
+    previous_structured_logs = os.environ.get("CLAWOPS_STRUCTURED_LOGS")
+    try:
+        os.environ["CLAWOPS_STRUCTURED_LOGS"] = "1"
+        strongclaw_recovery.main(["--home-dir", str(home_dir), "backup-create"])
+        strongclaw_recovery.main(["--home-dir", str(home_dir), "backup-verify", "latest"])
+        strongclaw_recovery.main(["--home-dir", str(home_dir), "prune-retention"])
+    finally:
+        if previous_structured_logs is None:
+            os.environ.pop("CLAWOPS_STRUCTURED_LOGS", None)
+        else:
+            os.environ["CLAWOPS_STRUCTURED_LOGS"] = previous_structured_logs
+
+    stderr_lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    events = [json.loads(line) for line in stderr_lines]
+    by_event: dict[str, dict[str, object]] = {}
+    for event in events:
+        event_name = event.get("event")
+        if isinstance(event_name, str):
+            by_event[event_name] = event
+
+    plan_event = by_event["clawops.recovery.backup_plan_built"]
+    create_event = by_event["clawops.recovery.backup_create_completed"]
+    verify_event = by_event["clawops.recovery.backup_verify_completed"]
+    prune_event = by_event["clawops.recovery.backup_prune_completed"]
+
+    assert plan_event["profile"] == "control-plane"
+    assert plan_event["excluded_paths_count"] == 2
+    assert create_event["backend"] == "tar-fallback"
+    assert create_event["result"] == "ok"
+    assert isinstance(create_event["file_count"], int)
+    assert create_event["file_count"] >= 1
+    assert isinstance(create_event["bytes"], int)
+    assert create_event["bytes"] >= 1
+    assert verify_event["result"] == "ok"
+    assert prune_event["result"] == "ok"

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import pathlib
 import shutil
 import tarfile
 import time
+from typing import cast
 
 from clawops.app_paths import strongclaw_state_dir
 from clawops.cli_roots import add_ignored_repo_root_alias, warn_ignored_repo_root_argument
+from clawops.observability import emit_structured_log
 from clawops.recovery.models import BackupCreateExecution
 from clawops.recovery.orchestrator import create_backup_execution
 from clawops.recovery.policy import (
@@ -18,6 +22,7 @@ from clawops.recovery.policy import (
     RECOVERY_PROFILES,
     ensure_recovery_profile,
 )
+from clawops.recovery.telemetry import event_payload
 from clawops.strongclaw_runtime import (
     CommandError,
     resolve_home_dir,
@@ -25,6 +30,16 @@ from clawops.strongclaw_runtime import (
 )
 
 _OPENCLAW_VERIFY_MANIFEST_MISMATCH = "Expected exactly one backup manifest entry"
+_FALLBACK_MANIFEST_PATH = ".strongclaw/backup-manifest.json"
+_FALLBACK_MANIFEST_REQUIRED_FIELDS: tuple[str, ...] = (
+    "profile",
+    "include_roots",
+    "exclude_roots",
+    "file_count",
+    "bytes",
+    "content_sha256",
+    "backend",
+)
 
 
 def backups_dir(*, home_dir: pathlib.Path | None = None) -> pathlib.Path:
@@ -74,8 +89,14 @@ def _write_tar_archive(
     state_dir: pathlib.Path,
     include_root: pathlib.Path,
     exclude_roots: tuple[pathlib.Path, ...],
-) -> None:
+    profile: str,
+) -> dict[str, object]:
     """Write a fallback tar archive with explicit path exclusions."""
+    file_count = 0
+    total_bytes = 0
+    hash_summary = hashlib.sha256()
+    include_root_resolved = include_root.resolve()
+    exclude_root_strings = [root.as_posix() for root in exclude_roots]
     with tarfile.open(archive_path, "w:gz") as archive:
         for path in state_dir.rglob("*"):
             if path.is_symlink():
@@ -85,7 +106,39 @@ def _write_tar_archive(
             resolved_path = path.resolve()
             if any(_is_path_within(resolved_path, root) for root in exclude_roots):
                 continue
-            archive.add(path, arcname=path.relative_to(include_root), recursive=False)
+            arcname = path.relative_to(include_root_resolved).as_posix()
+            archive.add(path, arcname=arcname, recursive=False)
+            if not path.is_file():
+                continue
+            file_count += 1
+            size = path.stat().st_size
+            total_bytes += size
+            hash_summary.update(arcname.encode("utf-8"))
+            hash_summary.update(b"\0")
+            hash_summary.update(str(size).encode("utf-8"))
+            hash_summary.update(b"\0")
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(65536)
+                    if not chunk:
+                        break
+                    hash_summary.update(chunk)
+        manifest: dict[str, object] = {
+            "profile": profile,
+            "include_roots": [include_root_resolved.as_posix()],
+            "exclude_roots": exclude_root_strings,
+            "file_count": file_count,
+            "bytes": total_bytes,
+            "content_sha256": hash_summary.hexdigest(),
+            "backend": "tar-fallback",
+        }
+        encoded_manifest = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        manifest_info = tarfile.TarInfo(name=_FALLBACK_MANIFEST_PATH)
+        manifest_info.size = len(encoded_manifest)
+        archive.addfile(manifest_info, io.BytesIO(encoded_manifest))
+    return manifest
 
 
 def _create_backup_result(
@@ -117,6 +170,7 @@ def _create_backup_result(
             state_dir=state_dir,
             include_root=resolved_home_dir,
             exclude_roots=exclude_roots,
+            profile=selected_profile,
         ),
         safe_unlink=_safe_unlink,
         which=shutil.which,
@@ -173,10 +227,32 @@ def verify_backup(
 
 
 def _verify_tar_archive(archive_path: pathlib.Path) -> pathlib.Path:
-    """Verify one fallback tar archive by ensuring members can be enumerated."""
+    """Verify one fallback tar archive by validating its embedded manifest."""
     with tarfile.open(archive_path, "r:gz") as archive:
-        # Simply ensure the archive can be opened and its members enumerated.
-        archive.getmembers()
+        members = archive.getmembers()
+        manifest_members = [member for member in members if member.name == _FALLBACK_MANIFEST_PATH]
+        if len(manifest_members) != 1:
+            raise CommandError(
+                f"invalid fallback backup manifest count in {archive_path}: expected 1, got {len(manifest_members)}"
+            )
+        manifest_handle = archive.extractfile(manifest_members[0])
+        if manifest_handle is None:
+            raise CommandError(f"fallback backup manifest is unreadable in {archive_path}")
+        try:
+            manifest_payload = json.loads(manifest_handle.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CommandError(
+                f"fallback backup manifest is invalid JSON in {archive_path}"
+            ) from exc
+        if not isinstance(manifest_payload, dict):
+            raise CommandError(f"fallback backup manifest payload is invalid in {archive_path}")
+        missing_fields = [
+            field for field in _FALLBACK_MANIFEST_REQUIRED_FIELDS if field not in manifest_payload
+        ]
+        if missing_fields:
+            raise CommandError(
+                f"fallback backup manifest missing required fields in {archive_path}: {', '.join(missing_fields)}"
+            )
     return archive_path
 
 
@@ -306,45 +382,145 @@ def main(argv: list[str] | None = None) -> int:
     )
     home_dir = resolve_home_dir(args.home_dir)
     if args.command == "backup-create":
+        create_started_ms = int(time.time() * 1000)
+        emit_structured_log(
+            "clawops.recovery.backup_create_started",
+            event_payload(
+                "clawops.recovery.backup_create_started",
+                {
+                    "profile": args.profile or DEFAULT_RECOVERY_PROFILE,
+                    "mode": "automation",
+                    "fallback_used": False,
+                },
+            ),
+        )
         execution = _create_backup_result(
             home_dir=home_dir,
             profile=args.profile or DEFAULT_RECOVERY_PROFILE,
             allow_fallback=bool(args.allow_fallback),
             dry_run=bool(args.dry_run),
         )
+        duration_ms = int(time.time() * 1000) - create_started_ms
+        plan_payload = execution.plan.to_payload()
         payload: dict[str, object] = {
             "ok": True,
-            **execution.plan.to_payload(),
+            **plan_payload,
             "dry_run": execution.dry_run,
         }
+        emit_structured_log(
+            "clawops.recovery.backup_plan_built",
+            event_payload(
+                "clawops.recovery.backup_plan_built",
+                {
+                    "profile": execution.plan.profile,
+                    "backend": ",".join(execution.plan.backend_candidates),
+                    "file_count": execution.plan.estimated_file_count,
+                    "bytes": execution.plan.estimated_bytes,
+                    "excluded_paths_count": len(execution.plan.exclude_roots),
+                    "result": "ok",
+                },
+            ),
+        )
         if execution.archive_path is not None and execution.mode is not None:
             payload["archive"] = str(execution.archive_path)
             payload["mode"] = execution.mode
             payload["fallback_used"] = execution.fallback_used
             if execution.fallback_reason is not None:
                 payload["fallback_reason"] = execution.fallback_reason
+            reported_file_count = execution.plan.estimated_file_count
+            reported_bytes = execution.plan.estimated_bytes
+            if execution.manifest is not None:
+                payload["manifest"] = execution.manifest
+                manifest_file_count = execution.manifest.get("file_count")
+                manifest_bytes = execution.manifest.get("bytes")
+                if isinstance(manifest_file_count, int):
+                    reported_file_count = manifest_file_count
+                    payload["file_count"] = reported_file_count
+                if isinstance(manifest_bytes, int):
+                    reported_bytes = manifest_bytes
+                    payload["bytes"] = reported_bytes
+            emit_structured_log(
+                "clawops.recovery.backup_create_completed",
+                event_payload(
+                    "clawops.recovery.backup_create_completed",
+                    {
+                        "backup_id": execution.archive_path.name,
+                        "profile": execution.plan.profile,
+                        "backend": execution.mode,
+                        "mode": "operator" if args.allow_fallback else "automation",
+                        "file_count": reported_file_count,
+                        "bytes": reported_bytes,
+                        "duration_ms": duration_ms,
+                        "result": "ok",
+                        "fallback_used": execution.fallback_used,
+                        "excluded_paths_count": len(execution.plan.exclude_roots),
+                    },
+                ),
+            )
     elif args.command == "backup-verify":
-        payload = {"ok": True, "archive": str(verify_backup(args.target, home_dir=home_dir))}
+        verify_started_ms = int(time.time() * 1000)
+        verified_archive = verify_backup(args.target, home_dir=home_dir)
+        payload = {"ok": True, "archive": str(verified_archive)}
+        emit_structured_log(
+            "clawops.recovery.backup_verify_completed",
+            event_payload(
+                "clawops.recovery.backup_verify_completed",
+                {
+                    "backup_id": verified_archive.name,
+                    "duration_ms": int(time.time() * 1000) - verify_started_ms,
+                    "result": "ok",
+                },
+            ),
+        )
     elif args.command == "restore":
+        restore_started_ms = int(time.time() * 1000)
         destination = (
             pathlib.Path(args.destination).expanduser().resolve()
             if args.destination is not None
             else home_dir.parent / ".openclaw-restore"
         )
+        archive_path = pathlib.Path(args.archive).expanduser().resolve()
         payload = {
             "ok": True,
             "destination": str(
                 restore_backup(
-                    pathlib.Path(args.archive).expanduser().resolve(),
+                    archive_path,
                     destination=destination,
                     home_dir=home_dir,
                 )
             ),
         }
+        emit_structured_log(
+            "clawops.recovery.restore_completed",
+            event_payload(
+                "clawops.recovery.restore_completed",
+                {
+                    "backup_id": archive_path.name,
+                    "duration_ms": int(time.time() * 1000) - restore_started_ms,
+                    "result": "ok",
+                },
+            ),
+        )
     elif args.command == "prune-retention":
+        prune_started_ms = int(time.time() * 1000)
         payload = prune_retention(
             home_dir=home_dir,
             include_shared_tmp=bool(args.include_shared_tmp),
+        )
+        deleted_paths = payload.get("deleted")
+        deleted_count = (
+            len(cast(list[object], deleted_paths)) if isinstance(deleted_paths, list) else 0
+        )
+        emit_structured_log(
+            "clawops.recovery.backup_prune_completed",
+            event_payload(
+                "clawops.recovery.backup_prune_completed",
+                {
+                    "duration_ms": int(time.time() * 1000) - prune_started_ms,
+                    "result": "ok",
+                    "file_count": deleted_count,
+                },
+            ),
         )
     else:
         payload = rotation_guidance()
