@@ -130,19 +130,28 @@ jobs:
       - name: Set up Docker via OrbStack
         # v1.6.0+ panics on GHA macos-15-intel (Skylake CPU check); v1.5.1 is safe.
         # Placed first to overlap OrbStack startup with toolchain setup (~90s saved).
-        run: >-
-          test -f /tmp/orbstack.dmg ||
-          curl -fsSL
-          "https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg"
-          -o /tmp/orbstack.dmg &&
-          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt /tmp/orbstack.dmg &&
-          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/ &&
-          hdiutil detach -quiet /tmp/orbstack_mnt &&
-          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb &&
-          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew install --quiet docker docker-compose &&
-          mkdir -p ~/.docker/cli-plugins &&
-          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose &&
+        env:
+          ORBSTACK_DMG_PATH: /tmp/orbstack.dmg
+          ORBSTACK_DMG_SHA256: fb95108ded54a27603b68184a13f7e666e0e758167652c0b65cd4dc5eff94617
+          ORBSTACK_DMG_URL: https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${ORBSTACK_DMG_PATH}" ]]; then
+            curl -fsSL "${ORBSTACK_DMG_URL}" -o "${ORBSTACK_DMG_PATH}"
+          fi
+          actual_sha="$(shasum -a 256 "${ORBSTACK_DMG_PATH}" | awk '{print $1}')"
+          if [[ "${actual_sha}" != "${ORBSTACK_DMG_SHA256}" ]]; then
+            echo "OrbStack DMG checksum mismatch: expected ${ORBSTACK_DMG_SHA256}, got ${actual_sha}" >&2
+            rm -f "${ORBSTACK_DMG_PATH}"
+            exit 1
+          fi
+          hdiutil attach -quiet -nobrowse -mountpoint /tmp/orbstack_mnt "${ORBSTACK_DMG_PATH}"
+          cp -R /tmp/orbstack_mnt/OrbStack.app /Applications/
+          hdiutil detach -quiet /tmp/orbstack_mnt
+          sudo ln -sf /Applications/OrbStack.app/Contents/MacOS/bin/orb /usr/local/bin/orb
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install --quiet docker docker-compose
+          mkdir -p ~/.docker/cli-plugins
+          ln -sfn "$(brew --prefix)/bin/docker-compose" ~/.docker/cli-plugins/docker-compose
           nohup orb start > /tmp/orb-start.log 2>&1 &
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:

@@ -15,6 +15,7 @@ from tests.utils.helpers._hosted_docker.models import (
     PULL_HEARTBEAT_SECONDS,
     ImageEnsureReport,
     PullReport,
+    RuntimeRecoveryAttemptReport,
     RuntimeInstallReport,
 )
 from tests.utils.helpers._hosted_docker.runtime import (
@@ -29,6 +30,7 @@ __all__ = [
     "ImageEnsureReport",
     "PULL_HEARTBEAT_SECONDS",
     "PullReport",
+    "RuntimeRecoveryAttemptReport",
     "RuntimeInstallReport",
     "_pull_one_image",
     "_run_checked",
