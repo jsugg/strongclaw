@@ -8,6 +8,14 @@ from typing import Final
 LOG_PREFIX: Final[str] = "[hosted-docker]"
 DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS: Final[int] = 1800
 PULL_HEARTBEAT_SECONDS: Final[int] = 30
+# Backoff cap for generic pull failures (daemon hiccups, transient tooling errors).
+PULL_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 10
+# Transient Docker registry connectivity failures (e.g. Docker Hub "context deadline
+# exceeded" while reaching registry-1.docker.io) need a longer, exponential backoff so a
+# brief registry outage is ridden out across the bounded retry budget instead of burning
+# every attempt within a few seconds.
+REGISTRY_RETRY_BACKOFF_BASE_SECONDS: Final[int] = 10
+REGISTRY_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 45
 
 
 @dataclass(slots=True)
