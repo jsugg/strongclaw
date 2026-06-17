@@ -22,7 +22,8 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   FRESH_HOST_DOCKER_PULL_PARALLELISM: "4"
-  FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS: "3"
+  # 5 retries let registry backoff survive transient Docker Hub issues
+  FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS: "5"
   FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm

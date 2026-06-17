@@ -238,6 +238,73 @@ def test_pull_images_classifies_docker_socket_eof_as_connectivity_failure(
     )
 
 
+def test_pull_images_uses_extended_backoff_for_transient_registry_failure(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Transient registry timeouts should retry with a longer, capped exponential backoff."""
+    attempts: dict[str, int] = {"qdrant/qdrant:v1": 0}
+    sleeps: list[float] = []
+    logs: list[str] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        assert timeout_seconds == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
+        attempts[image] += 1
+        if attempts[image] <= 4:
+            return (
+                image,
+                1,
+                15.0,
+                (
+                    'Error response from daemon: Get "https://registry-1.docker.io/v2/": '
+                    "context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+                ),
+            )
+        return image, 0, 0.1, ""
+
+    def fake_wait_for_docker_ready(
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        max_attempts: int = 60,
+    ) -> None:
+        del cwd, env, max_attempts
+
+    def capture_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    def fake_log(message: str) -> None:
+        logs.append(message)
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images,
+        "wait_for_docker_ready",
+        new=fake_wait_for_docker_ready,
+    )
+    test_context.patch.patch_object(hosted_docker_images, "log", new=fake_log)
+    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=capture_sleep)
+
+    report = hosted_docker.pull_images(
+        ["qdrant/qdrant:v1"],
+        parallelism=2,
+        max_attempts=5,
+        recovery_cwd=tmp_path,
+        recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+    )
+
+    assert report.exit_code == 0
+    assert report.attempt_count == 5
+    assert report.retried_images == ["qdrant/qdrant:v1"]
+    # Exponential growth from the 10s base, capped at 45s — far longer than the 2s/4s
+    # generic backoff so a brief Docker Hub outage is ridden out across the retry budget.
+    assert sleeps == [10, 20, 40, 45]
+    assert any(
+        "Detected transient registry connectivity failure; backing off before retry." in entry
+        for entry in logs
+    )
+
+
 def test_pull_images_requires_recovery_cwd_and_env_together() -> None:
     """Pull recovery wiring should reject partial recovery configuration."""
     with pytest.raises(fresh_host.FreshHostError, match="recovery_cwd and recovery_env"):

@@ -18,6 +18,9 @@ from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
 from tests.utils.helpers._hosted_docker.models import (
     DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
     PULL_HEARTBEAT_SECONDS,
+    PULL_RETRY_BACKOFF_CAP_SECONDS,
+    REGISTRY_RETRY_BACKOFF_BASE_SECONDS,
+    REGISTRY_RETRY_BACKOFF_CAP_SECONDS,
     ImageEnsureReport,
     PullReport,
 )
@@ -32,6 +35,17 @@ DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "error while dialing",
     "error during connect",
     "unexpected eof",
+)
+# Transient registry network errors (not daemon failures); retry with longer backoff
+REGISTRY_TRANSIENT_FAILURE_MARKERS: Final[tuple[str, ...]] = (
+    "context deadline exceeded",
+    "request canceled while waiting for connection",
+    "client.timeout exceeded while awaiting headers",
+    "timeout exceeded while awaiting headers",
+    "i/o timeout",
+    "tls handshake timeout",
+    "temporary failure in name resolution",
+    "no such host",
 )
 
 
@@ -128,6 +142,24 @@ def _is_daemon_connectivity_failure(output: str) -> bool:
     return "docker.sock" in lowered and "eof" in lowered
 
 
+def _is_transient_registry_failure(output: str) -> bool:
+    """Return whether a pull failure output indicates a transient registry network blip."""
+    lowered = output.lower()
+    return any(marker in lowered for marker in REGISTRY_TRANSIENT_FAILURE_MARKERS)
+
+
+def _retry_backoff_seconds(*, attempt_count: int, registry_failure: bool) -> int:
+    """Return the backoff before the next pull attempt.
+
+    Transient registry connectivity failures use a longer exponential backoff so a brief
+    upstream outage is ridden out instead of exhausting the retry budget in seconds.
+    """
+    if registry_failure:
+        growth = REGISTRY_RETRY_BACKOFF_BASE_SECONDS << max(0, attempt_count - 1)
+        return min(REGISTRY_RETRY_BACKOFF_CAP_SECONDS, growth)
+    return min(PULL_RETRY_BACKOFF_CAP_SECONDS, 2 * attempt_count)
+
+
 def pull_images(
     images: Sequence[str],
     *,
@@ -156,6 +188,7 @@ def pull_images(
         )
         failures: list[str] = []
         daemon_connectivity_failure = False
+        transient_registry_failure = False
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=min(attempt_parallelism, len(outstanding))
         ) as executor:
@@ -184,6 +217,8 @@ def pull_images(
                         print(output, flush=True)
                         if _is_daemon_connectivity_failure(output):
                             daemon_connectivity_failure = True
+                        elif _is_transient_registry_failure(output):
+                            transient_registry_failure = True
                     failures.append(image)
         outstanding = failures
         if not outstanding or attempt_count >= max_attempts:
@@ -195,6 +230,8 @@ def pull_images(
         if recovery_cwd is not None and recovery_env is not None:
             if daemon_connectivity_failure:
                 log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
+            elif transient_registry_failure:
+                log("Detected transient registry connectivity failure; backing off before retry.")
             else:
                 log("Retrying image pull after failure; probing Docker runtime before retry.")
             try:
@@ -212,7 +249,10 @@ def pull_images(
         if next_parallelism != attempt_parallelism:
             log(f"Reducing retry parallelism {attempt_parallelism}->{next_parallelism}.")
         attempt_parallelism = next_parallelism
-        backoff_seconds = min(10, 2 * attempt_count)
+        backoff_seconds = _retry_backoff_seconds(
+            attempt_count=attempt_count,
+            registry_failure=transient_registry_failure and not daemon_connectivity_failure,
+        )
         log(f"Retrying {len(outstanding)} image(s) after {backoff_seconds}s.")
         time.sleep(backoff_seconds)
     return PullReport(
