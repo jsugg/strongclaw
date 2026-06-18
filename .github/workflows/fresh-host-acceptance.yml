@@ -4,15 +4,15 @@ on:
   workflow_call:
     inputs:
       docker_pull_parallelism:
-        description: Parallelism for hosted macOS Docker image pulling.
+        description: Parallelism for hosted Docker image pulling.
         required: false
         type: string
         default: "2"
       docker_pull_max_attempts:
-        description: Retry attempts for hosted macOS Docker image pulling.
+        description: Retry attempts for hosted Docker image pulling.
         required: false
         type: string
-        default: "3"
+        default: "5"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
         required: false
@@ -21,15 +21,15 @@ on:
   workflow_dispatch:
     inputs:
       docker_pull_parallelism:
-        description: Parallelism for hosted macOS Docker image pulling.
+        description: Parallelism for hosted Docker image pulling.
         required: true
         type: string
         default: "2"
       docker_pull_max_attempts:
-        description: Retry attempts for hosted macOS Docker image pulling.
+        description: Retry attempts for hosted Docker image pulling.
         required: true
         type: string
-        default: "3"
+        default: "5"
       enable_package_cache:
         description: Restore uv and npm download caches for bootstrap.
         required: true
