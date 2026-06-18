@@ -10,8 +10,7 @@ on:
       docker_pull_max_attempts:
         required: false
         type: string
-        # 5 attempts give the helper's exponential registry backoff room to ride out a
-        # transient Docker Hub blip before the prepull gives up.
+        # Give the registry backoff room for transient Docker Hub blips.
         default: "5"
       enable_package_cache:
         required: false
