@@ -212,6 +212,38 @@ def test_fresh_host_core_workflow_stays_thin() -> None:
     assert ".github/scripts/fresh_host_images.py" not in text
 
 
+def test_fresh_host_core_linux_job_honors_pull_tuning_inputs() -> None:
+    """The Linux fresh-host job must honor per-caller docker_pull_* inputs, like macOS."""
+    loaded_workflow: object = yaml.safe_load(_workflow_text("fresh-host-core.yml"))
+    assert isinstance(loaded_workflow, dict)
+    workflow = cast(dict[object, object], loaded_workflow)
+
+    jobs = _as_str_object_dict(workflow.get("jobs"))
+    assert jobs is not None
+
+    # Both platform jobs must map the selected pull tuning env to the per-caller inputs.
+    for job_name in ("linux-fresh-host", "macos-fresh-host"):
+        job = _as_str_object_dict(jobs.get(job_name))
+        assert job is not None, job_name
+        job_env = _as_str_object_dict(job.get("env"))
+        assert job_env is not None, job_name
+        assert (
+            job_env.get("FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM")
+            == "${{ inputs.docker_pull_parallelism }}"
+        ), job_name
+        assert (
+            job_env.get("FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS")
+            == "${{ inputs.docker_pull_max_attempts }}"
+        ), job_name
+
+    # The hard-coded top-level fallbacks must stay gone; if they return, the Linux prepull
+    # would silently override the per-caller inputs again.
+    workflow_env = _as_str_object_dict(workflow.get("env"))
+    assert workflow_env is not None
+    assert "FRESH_HOST_DOCKER_PULL_PARALLELISM" not in workflow_env
+    assert "FRESH_HOST_DOCKER_PULL_MAX_ATTEMPTS" not in workflow_env
+
+
 def test_fresh_host_workflow_preserves_dispatch_inputs_and_concurrency_controls() -> None:
     """Fresh-host acceptance should keep explicit tuning inputs and concurrency guards."""
     text = _workflow_text("fresh-host-acceptance.yml")
