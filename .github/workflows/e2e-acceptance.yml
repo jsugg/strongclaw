@@ -1,0 +1,126 @@
+name: End-to-End Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: >-
+          standard = deep quality gate + policy harness + memory plugin +
+          security scans (Linux). full = also run the compatibility matrix and
+          fresh-host install acceptance (adds hosted macOS + multi-arch, slow).
+        required: true
+        type: choice
+        default: standard
+        options:
+          - standard
+          - full
+      docker_pull_parallelism:
+        description: Parallelism for hosted Docker image pulling (full scope).
+        required: true
+        type: string
+        default: "2"
+      docker_pull_max_attempts:
+        description: Retry attempts for hosted Docker image pulling (full scope).
+        required: true
+        type: string
+        default: "5"
+      enable_package_cache:
+        description: Restore uv and npm download caches for fresh-host bootstrap.
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: e2e-acceptance-${{ github.ref }}-${{ inputs.scope }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+  security-events: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  deep-quality-gate:
+    name: Deep Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+      - run: uv sync --locked
+      - name: Run repository quality gate
+        run: uv run python -m clawops supply-chain --repo-root . quality-gate
+
+  policy-harness:
+    name: Policy Harness
+    uses: ./.github/workflows/harness.yml
+    secrets: inherit
+
+  memory-plugin:
+    name: Memory Plugin Verification
+    uses: ./.github/workflows/memory-plugin-verification.yml
+    secrets: inherit
+
+  security-scans:
+    name: Security Scans
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+
+  compatibility-matrix:
+    name: Compatibility Matrix
+    if: ${{ inputs.scope == 'full' }}
+    uses: ./.github/workflows/compatibility-matrix.yml
+    secrets: inherit
+
+  fresh-host:
+    name: Fresh Host Acceptance
+    if: ${{ inputs.scope == 'full' }}
+    uses: ./.github/workflows/fresh-host-core.yml
+    with:
+      docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}
+      docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}
+      enable_package_cache: ${{ inputs.enable_package_cache }}
+    secrets: inherit
+
+  verdict:
+    name: Acceptance Verdict
+    needs:
+      - deep-quality-gate
+      - policy-harness
+      - memory-plugin
+      - security-scans
+      - compatibility-matrix
+      - fresh-host
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      RESULT_DEEP_QUALITY_GATE: ${{ needs.deep-quality-gate.result }}
+      RESULT_POLICY_HARNESS: ${{ needs.policy-harness.result }}
+      RESULT_MEMORY_PLUGIN: ${{ needs.memory-plugin.result }}
+      RESULT_SECURITY_SCANS: ${{ needs.security-scans.result }}
+      RESULT_COMPATIBILITY_MATRIX: ${{ needs.compatibility-matrix.result }}
+      RESULT_FRESH_HOST: ${{ needs.fresh-host.result }}
+    steps:
+      - name: Evaluate acceptance verdict
+        run: >-
+          failed=0;
+          for lane in DEEP_QUALITY_GATE POLICY_HARNESS MEMORY_PLUGIN SECURITY_SCANS COMPATIBILITY_MATRIX FRESH_HOST; do
+          eval "result=\${RESULT_${lane}}";
+          echo "${lane}: ${result}";
+          if [ "${result}" = "failure" ] || [ "${result}" = "cancelled" ]; then failed=1; fi;
+          done;
+          if [ "${failed}" -ne 0 ]; then echo "End-to-end acceptance failed."; exit 1; fi;
+          echo "End-to-end acceptance passed (skipped lanes are out of selected scope)."
