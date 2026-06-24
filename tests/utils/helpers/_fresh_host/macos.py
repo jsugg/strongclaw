@@ -10,6 +10,7 @@ from pathlib import Path
 from tests.utils.helpers._fresh_host.linux import run_clawops_bootstrap
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.shell import (
+    TRANSIENT_KILL_EXIT_CODES,
     best_effort,
     compose_file_for_component,
     context_path,
@@ -249,6 +250,13 @@ def verify_macos_launchd(context: FreshHostContext) -> None:
             raise FreshHostError(f"launchd state check failed for {target}")
 
 
+def _reclaim_repo_local_stack(down_command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
+    """Tear a partially-started repo-local stack down to reclaim memory before a retry."""
+    warning = best_effort(down_command, cwd=cwd, env=env)
+    if warning is not None:
+        log(warning)
+
+
 def _run_repo_local_cycle(
     context: FreshHostContext, component: str, *, bring_down: bool = True
 ) -> list[str]:
@@ -276,7 +284,17 @@ def _run_repo_local_cycle(
         "down",
         "--repo-local-state",
     )
-    run_command(up_command, cwd=repo_root, env=env)
+    # Bringing the repo-local stack up is the most memory-intensive step on the
+    # hosted macOS runner; an OS kill (exit 137/143) there is transient pressure,
+    # so retry once after tearing the partial stack down to reclaim memory.
+    run_command(
+        up_command,
+        cwd=repo_root,
+        env=env,
+        retries=1,
+        retry_on_exit_codes=TRANSIENT_KILL_EXIT_CODES,
+        on_retry=lambda: _reclaim_repo_local_stack(down_command, cwd=repo_root, env=env),
+    )
     if component == "sidecars":
         verify_sidecar_services_running(
             compose_file,

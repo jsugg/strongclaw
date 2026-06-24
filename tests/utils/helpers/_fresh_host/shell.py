@@ -8,7 +8,7 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Literal, cast
 
@@ -34,6 +34,12 @@ SIDECAR_EXPECTED_SERVICES: tuple[str, ...] = (
     "qdrant",
 )
 SIDECAR_HEALTHY_SERVICES: tuple[str, ...] = ("postgres", "litellm", "qdrant")
+
+# Exit codes that mean the OS killed the process (128 + SIGKILL / 128 + SIGTERM).
+# On the memory-constrained hosted macOS Docker runner these almost always signal
+# transient memory pressure while the sidecar stack starts, not a deterministic
+# failure, so callers may retry them after reclaiming resources.
+TRANSIENT_KILL_EXIT_CODES: tuple[int, ...] = (137, 143)
 
 
 def phase_env(context: FreshHostContext) -> dict[str, str]:
@@ -114,21 +120,47 @@ def run_command(
     env: dict[str, str],
     timeout_seconds: int = 3600,
     check: bool = True,
+    retries: int = 0,
+    retry_on_exit_codes: Collection[int] = (),
+    on_retry: Callable[[], None] | None = None,
+    retry_backoff_seconds: float = 10.0,
 ) -> None:
-    """Run one inherited subprocess command."""
-    log("Running: " + " ".join(command))
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        check=False,
-        timeout=timeout_seconds,
-        text=True,
-    )
-    if check and completed.returncode != 0:
-        raise FreshHostError(
-            f"Command failed with exit {completed.returncode}: {' '.join(command)}"
+    """Run one inherited subprocess command.
+
+    When *retries* is positive, a non-zero exit whose code is listed in
+    *retry_on_exit_codes* triggers up to *retries* additional attempts. The
+    optional *on_retry* hook runs between attempts so callers can reclaim
+    resources (for example, tearing a partially-started stack down to relieve
+    memory pressure) before the next try.
+    """
+    attempts = retries + 1
+    for attempt in range(1, attempts + 1):
+        log("Running: " + " ".join(command))
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            check=False,
+            timeout=timeout_seconds,
+            text=True,
         )
+        if completed.returncode == 0:
+            return
+        if attempt < attempts and completed.returncode in retry_on_exit_codes:
+            log(
+                f"Command exited with {completed.returncode} "
+                f"(attempt {attempt}/{attempts}); reclaiming resources and retrying: "
+                + " ".join(command)
+            )
+            if on_retry is not None:
+                on_retry()
+            time.sleep(retry_backoff_seconds)
+            continue
+        if check:
+            raise FreshHostError(
+                f"Command failed with exit {completed.returncode}: {' '.join(command)}"
+            )
+        return
 
 
 def ensure_dir(path: Path, *, mode: int | None = None) -> None:

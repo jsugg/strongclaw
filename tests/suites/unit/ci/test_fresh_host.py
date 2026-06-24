@@ -457,6 +457,93 @@ def test_wait_for_docker_backend_retries_after_transient_failure(
     assert attempts["count"] == 3
 
 
+def test_run_command_retries_os_kill_after_reclaiming_resources(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """An OS-killed command (exit 137) should retry once after the recovery hook runs."""
+    attempts = {"count": 0}
+    recoveries = {"count": 0}
+    sleeps: list[float] = []
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text
+        attempts["count"] += 1
+        returncode = 137 if attempts["count"] == 1 else 0
+        return subprocess.CompletedProcess(args=["clawops"], returncode=returncode)
+
+    def fake_recover() -> None:
+        recoveries["count"] += 1
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=sleeps.append)
+
+    fresh_host_shell.run_command(
+        ["clawops", "sidecars", "up"],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        retries=1,
+        retry_on_exit_codes=fresh_host_shell.TRANSIENT_KILL_EXIT_CODES,
+        on_retry=fake_recover,
+    )
+
+    assert attempts["count"] == 2
+    assert recoveries["count"] == 1
+    assert sleeps == [10.0]
+
+
+def test_run_command_does_not_retry_unlisted_exit_code(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A deterministic failure (exit 1) should surface immediately without recovery."""
+    attempts = {"count": 0}
+    recoveries = {"count": 0}
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text
+        attempts["count"] += 1
+        return subprocess.CompletedProcess(args=["clawops"], returncode=1)
+
+    def fake_recover() -> None:
+        recoveries["count"] += 1
+
+    def fake_sleep(_seconds: float) -> None:
+        return None
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=fake_sleep)
+
+    with pytest.raises(fresh_host_shell.FreshHostError):
+        fresh_host_shell.run_command(
+            ["clawops", "sidecars", "up"],
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin"},
+            retries=1,
+            retry_on_exit_codes=fresh_host_shell.TRANSIENT_KILL_EXIT_CODES,
+            on_retry=fake_recover,
+        )
+
+    assert attempts["count"] == 1
+    assert recoveries["count"] == 0
+
+
 def test_verify_compose_services_running_accepts_json_lines_output(
     tmp_path: Path,
     test_context: TestContext,
@@ -940,8 +1027,11 @@ def test_exercise_linux_sidecars_waits_for_docker_backend_and_verifies_runtime(
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     def _fake_verify_sidecars(
@@ -1088,8 +1178,11 @@ def test_exercise_linux_recovery_smoke_runs_security_workflow_command(
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         seen_commands.append(" ".join(command))
 
     test_context.patch.patch_object(
@@ -1135,8 +1228,11 @@ def test_exercise_linux_browser_lab_verifies_runtime_before_teardown(
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     def _fake_verify_compose_services(
@@ -1212,8 +1308,11 @@ def test_macos_sidecars_exercise_leaves_stack_running_when_channels_runtime_foll
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     test_context.patch.patch_object(
@@ -1288,8 +1387,11 @@ def test_macos_sidecars_exercise_brings_stack_down_when_no_channels_runtime_foll
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     test_context.patch.patch_object(
@@ -1362,8 +1464,11 @@ def test_exercise_macos_channels_runtime_skips_sidecars_startup_when_already_up(
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     test_context.patch.patch_object(
@@ -1442,8 +1547,11 @@ def test_exercise_macos_channels_runtime_starts_sidecars_when_no_sidecar_phase_p
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         calls.append("run:" + " ".join(command))
 
     test_context.patch.patch_object(
@@ -1514,8 +1622,11 @@ def test_exercise_macos_recovery_smoke_runs_security_workflow_command(
         env: dict[str, str],
         timeout_seconds: int = 3600,
         check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
     ) -> None:
-        del cwd, env, timeout_seconds, check
+        del cwd, env, timeout_seconds, check, retries, retry_on_exit_codes, on_retry
         seen_commands.append(" ".join(command))
 
     test_context.patch.patch_object(
