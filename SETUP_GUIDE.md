@@ -254,12 +254,6 @@ clawops render-openclaw-config --profile acp
 
 This installs the acpx config templates and writes the ACP worker overlay.
 
-Then rerender the OpenClaw config with the ACP worker profile:
-
-```bash
-clawops render-openclaw-config --profile acp
-```
-
 Smoke test:
 
 ```bash
@@ -324,7 +318,7 @@ clawops doctor
 
 That profile keeps QMD out of the rendered contract and verifies that both the dense and sparse Qdrant lanes are healthy instead of silently degrading to the SQLite fallback path.
 
-## 11. Add channels carefully
+## 10. Add channels carefully
 
 ### Telegram
 
@@ -357,12 +351,11 @@ Re-run channel verification after WhatsApp is enabled:
 clawops verify-platform channels
 ```
 
-## 12. Enable observability
+## 11. Enable observability
 
 First start OTEL only:
 
 ```bash
-clawops verify-platform observability
 clawops verify-platform observability
 ```
 
@@ -372,7 +365,7 @@ Optional: start Langfuse on a separate VM or separate sidecar host using:
 docker compose -f platform/compose/docker-compose.langfuse.optional.yaml up -d
 ```
 
-## 13. Keep browser lab separate
+## 12. Keep browser lab separate
 
 Do **not** enable browser automation on the main control-plane host.
 
@@ -409,7 +402,7 @@ If your rollout does not enable browser-lab as part of launch evidence, exclude 
 clawops baseline verify --exclude-browser-lab
 ```
 
-## 14. Backups and retention
+## 13. Backups and retention
 
 Create and verify a backup:
 
@@ -424,19 +417,21 @@ Prune old artifacts:
 clawops recovery prune-retention
 ```
 
-## 15. CI/CD
+## 14. CI/CD
 
-Push the repo and enable branch protection. The included workflows provide:
+Push the repo and enable branch protection on `main`. The required status check is the `CI / Verdict` context produced by `.github/workflows/ci-gate.yml`, which classifies changed files and orchestrates the reusable heavy lanes (policy harness, compatibility matrix, memory-plugin verification, fresh-host acceptance, and security scans), running only a lightweight docs-parity lane for documentation-only pull requests.
 
-- CodeQL
-- Semgrep
-- Gitleaks
-- Trivy
-- harness smoke
-- nightly regression
-- upstream merge gate
+The repository also ships:
 
-## 16. Linux host notes
+- security scanning: CodeQL, Semgrep, Gitleaks, and Trivy
+- nightly regression plus fresh-host cache warming
+- upstream merge validation and tagged-release provenance with SBOM and build attestations
+- devflow contract checks for the public `clawops devflow` surface
+- a manual end-to-end acceptance pipeline (`.github/workflows/e2e-acceptance.yml`) for release candidates
+
+See [`platform/docs/CI_AND_SECURITY.md`](platform/docs/CI_AND_SECURITY.md) for the full gate, lane, and provenance details.
+
+## 15. Linux host notes
 
 When you run on Linux:
 

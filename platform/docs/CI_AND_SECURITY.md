@@ -14,6 +14,7 @@ The repository includes:
 - Devflow contract checks for the public `clawops devflow` surface
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
 - Upstream Integration Validation
+- a manual end-to-end acceptance pipeline that chains the deep quality gate, policy harness, plugin verification, security scans, and live runtime, stack, and model smokes
 
 Workflow policy:
 
@@ -38,6 +39,16 @@ single required branch-protection check for `main` via the stable
 success.
 - The final `Verdict` job always runs, summarizes lane outcomes, and fails when
 any required lane does not complete successfully.
+
+## End-to-end acceptance
+
+`.github/workflows/e2e-acceptance.yml` is a manual (`workflow_dispatch`) acceptance pipeline for release candidates and large changes. It chains the heavy reusable lanes and adds live runtime smokes that the per-PR gate does not run.
+
+- The `scope` input selects depth. `standard` runs the deep quality gate (`clawops supply-chain quality-gate`), the policy harness, memory-plugin verification, and the security scans on Linux. `full` additionally runs the compatibility matrix and the reusable fresh-host install acceptance, which adds hosted macOS and multi-arch coverage and is slow.
+- `Runtime Smokes` exercise public CLI surfaces through `tests/scripts/e2e_acceptance.py`: skills intake (`skills-smoke`), worktree lifecycle (`worktree-smoke`), and an ACP worker session (`acp-smoke`).
+- `Live Stack Smokes` bring up the Postgres, Qdrant, Neo4j, and OTel collector sidecars from `platform/compose/docker-compose.aux-stack.yaml`, then run observability, retrieval, and degradation failure-injection smokes against the live stack.
+- `Live Model Smokes` start a pinned local Ollama runtime, pull a tiny model, and run a live inference plus agent-turn smoke.
+- The `Acceptance Verdict` job always runs, prints each lane result, and fails if any in-scope lane failed or was cancelled while treating out-of-scope skips as passing.
 
 ## Fresh-host acceptance
 
