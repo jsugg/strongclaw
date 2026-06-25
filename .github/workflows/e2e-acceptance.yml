@@ -95,6 +95,96 @@ jobs:
       enable_package_cache: ${{ inputs.enable_package_cache }}
     secrets: inherit
 
+  runtime-smokes:
+    name: Runtime Smokes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Skills intake smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py skills-smoke
+      - name: Worktree lifecycle smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py worktree-smoke
+      - name: ACP worker session smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py acp-smoke
+
+  live-stack-smokes:
+    name: Live Stack Smokes
+    runs-on: ubuntu-latest
+    env:
+      AUX_COMPOSE_FILE: platform/compose/docker-compose.aux-stack.yaml
+      STRONGCLAW_COMPOSE_STATE_DIR: ${{ github.workspace }}/.e2e-stack-state
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: e2e-acceptance-neo4j
+      LITELLM_DB_PASSWORD: e2e-acceptance-litellm-db
+      LANGFUSE_OTEL_ENDPOINT: http://127.0.0.1:4318
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Prepare compose state directory
+        run: mkdir -p "${STRONGCLAW_COMPOSE_STATE_DIR}"
+      - name: Bring up retrieval and observability sidecars
+        run: docker compose -f "${AUX_COMPOSE_FILE}" up -d postgres qdrant neo4j otel-collector
+      - name: Wait for sidecars to answer
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py stack-wait
+      - name: Live observability smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py observability-smoke --asset-root .
+      - name: Live retrieval smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py retrieval-smoke --neo4j-password "${NEO4J_PASSWORD}"
+      - name: Degradation failure-injection smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py degradation-smoke
+      - name: Capture sidecar state
+        if: always()
+        run: docker compose -f "${AUX_COMPOSE_FILE}" ps
+      - name: Tear down sidecars
+        if: always()
+        run: docker compose -f "${AUX_COMPOSE_FILE}" down -v
+
+  live-model-smokes:
+    name: Live Model Smokes
+    runs-on: ubuntu-latest
+    env:
+      OLLAMA_IMAGE: ollama/ollama:0.11.11@sha256:24d41d792306fc3221de215bb6f225faf981712d1f38083d8c61301dfa2b69b3
+      E2E_ACCEPTANCE_MODEL: qwen2.5:0.5b
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Start local model runtime
+        run: docker run -d --name e2e-ollama -p 127.0.0.1:11434:11434 "${OLLAMA_IMAGE}"
+      - name: Wait for model runtime
+        run: >-
+          n=0; while [ "$n" -lt 30 ]; do if docker exec e2e-ollama ollama list >/dev/null 2>&1;
+          then exit 0; fi; n=$((n + 1)); sleep 2; done;
+          echo "model runtime did not become ready"; exit 1
+      - name: Pull tiny local model
+        run: docker exec e2e-ollama ollama pull "${E2E_ACCEPTANCE_MODEL}"
+      - name: Live model inference and agent-turn smoke
+        run: uv run python3 ./tests/scripts/e2e_acceptance.py inference-smoke --base-url http://127.0.0.1:11434 --model "${E2E_ACCEPTANCE_MODEL}"
+      - name: Stop model runtime
+        if: always()
+        run: docker rm -f e2e-ollama
+
   verdict:
     name: Acceptance Verdict
     needs:
@@ -104,6 +194,9 @@ jobs:
       - security-scans
       - compatibility-matrix
       - fresh-host
+      - runtime-smokes
+      - live-stack-smokes
+      - live-model-smokes
     if: always()
     runs-on: ubuntu-latest
     env:
@@ -113,11 +206,14 @@ jobs:
       RESULT_SECURITY_SCANS: ${{ needs.security-scans.result }}
       RESULT_COMPATIBILITY_MATRIX: ${{ needs.compatibility-matrix.result }}
       RESULT_FRESH_HOST: ${{ needs.fresh-host.result }}
+      RESULT_RUNTIME_SMOKES: ${{ needs.runtime-smokes.result }}
+      RESULT_LIVE_STACK_SMOKES: ${{ needs.live-stack-smokes.result }}
+      RESULT_LIVE_MODEL_SMOKES: ${{ needs.live-model-smokes.result }}
     steps:
       - name: Evaluate acceptance verdict
         run: >-
           failed=0;
-          for lane in DEEP_QUALITY_GATE POLICY_HARNESS MEMORY_PLUGIN SECURITY_SCANS COMPATIBILITY_MATRIX FRESH_HOST; do
+          for lane in DEEP_QUALITY_GATE POLICY_HARNESS MEMORY_PLUGIN SECURITY_SCANS COMPATIBILITY_MATRIX FRESH_HOST RUNTIME_SMOKES LIVE_STACK_SMOKES LIVE_MODEL_SMOKES; do
           eval "result=\${RESULT_${lane}}";
           echo "${lane}: ${result}";
           if [ "${result}" = "failure" ] || [ "${result}" = "cancelled" ]; then failed=1; fi;
