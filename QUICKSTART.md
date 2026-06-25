@@ -205,10 +205,6 @@ clawops devflow audit --run-id <run-id>
 ```
 
 See [`platform/docs/DEVFLOW.md`](platform/docs/DEVFLOW.md) for the operator run layout, recovery flow, and audit bundle details.
-- `clawops verify-platform sidecars`
-- `clawops verify-platform observability`
-- `clawops verify-platform channels`
-- companion-tool smoke tests
 
 For the deeper StrongClaw readiness scan, including model/provider validation and platform verification in one place, run:
 
@@ -216,7 +212,7 @@ For the deeper StrongClaw readiness scan, including model/provider validation an
 make doctor
 ```
 
-## 6. Optional staged layers
+## 7. Optional staged layers
 
 Add these only in order:
 
@@ -250,6 +246,6 @@ ssh -N -L 18789:127.0.0.1:18789 <gateway-user>@<gateway-host>
 
 Do not forward `9222` or `3128`.
 
-## 7. Read the real guide
+## 8. Read the real guide
 
 The quickstart is intentionally narrow. For the actual end-to-end production bring-up, use [`SETUP_GUIDE.md`](SETUP_GUIDE.md).
