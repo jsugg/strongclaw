@@ -111,6 +111,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        if args.command == "run-docs-parity":
+            repo_root = Path(args.repo_root).expanduser().resolve()
+            run_checked(["uv", "sync", "--locked"], cwd=repo_root)
+            run_checked(
+                [
+                    "uv",
+                    "run",
+                    "pytest",
+                    "-q",
+                    "tests/suites/contracts/repo/test_docs_parity.py",
+                ],
+                cwd=repo_root,
+            )
+            return 0
+
         selection = selection_from_output_flags(
             docs_only=str(args.docs_only),
             fresh_host=str(args.fresh_host),
@@ -191,20 +206,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0 if success else 1
 
-        if args.command == "run-docs-parity":
-            repo_root = Path(args.repo_root).expanduser().resolve()
-            run_checked(["uv", "sync", "--locked"], cwd=repo_root)
-            run_checked(
-                [
-                    "uv",
-                    "run",
-                    "pytest",
-                    "-q",
-                    "tests/suites/contracts/repo/test_docs_parity.py",
-                ],
-                cwd=repo_root,
-            )
-            return 0
     except CiWorkflowError as exc:
         print(f"ci-gate error: {exc}", file=sys.stderr)
         return 1
