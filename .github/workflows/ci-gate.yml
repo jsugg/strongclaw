@@ -88,7 +88,7 @@ jobs:
   dependency_review:
     name: Dependency Review
     needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.dependency_review == 'true'
+    if: needs.classify.outputs.dependency_review == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,6 +103,7 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: github.event_name == 'pull_request'
         continue-on-error: true
       - name: Audit resolved Python dependencies
         run: uv run python3 ./tests/scripts/ci_gate.py run-dependency-audit --repo-root .
