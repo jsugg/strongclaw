@@ -156,7 +156,7 @@ def test_ci_gate_workflow_runs_on_pull_requests_main_push_and_emits_verdict() ->
 
 
 def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
-    """Dependency review should block dependency PRs with vulnerable lock output."""
+    """Dependency review should block dependency changes on PRs and main pushes."""
     workflow = yaml.safe_load(_workflow_text("ci-gate.yml"))
     jobs = cast(dict[str, object], workflow["jobs"])
     dependency_review = cast(dict[str, object], jobs["dependency_review"])
@@ -164,10 +164,7 @@ def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
     filters_text = _ci_gate_filters_text()
 
     assert dependency_review["name"] == "Dependency Review"
-    assert (
-        dependency_review["if"]
-        == "github.event_name == 'pull_request' && needs.classify.outputs.dependency_review == 'true'"
-    )
+    assert dependency_review["if"] == "needs.classify.outputs.dependency_review == 'true'"
     assert dependency_review["permissions"] == {
         "contents": "read",
         "pull-requests": "read",
@@ -175,6 +172,7 @@ def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
     assert any(
         step.get("uses")
         == "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
+        and step.get("if") == "github.event_name == 'pull_request'"
         and step.get("continue-on-error") is True
         for step in dependency_review_steps
     )
@@ -185,6 +183,7 @@ def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
     assert any(
         str(step.get("run", ""))
         == "uv run python3 ./tests/scripts/ci_gate.py run-dependency-audit --repo-root ."
+        and step.get("if") is None
         for step in dependency_review_steps
     )
     assert "dependency_review:" in filters_text
