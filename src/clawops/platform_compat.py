@@ -13,8 +13,7 @@ DEFAULT_ACPX_VERSION = "0.3.0"
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
 DEFAULT_MANAGED_PROJECT_PYTHON_VERSION = "3.12"
-SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT = "torch==2.8.0"
-DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT = "torch==2.2.2"
+SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT = "torch==2.12.1"
 _SUPPORTED_LOCAL_RERANK_PYTHON_VERSIONS = {(3, 12), (3, 13)}
 
 
@@ -107,8 +106,6 @@ def supports_hypermemory_local_rerank(
     )
     if resolved_python not in _SUPPORTED_LOCAL_RERANK_PYTHON_VERSIONS:
         return False
-    if host.os_name == "darwin" and host.architecture == "x86_64":
-        return resolved_python == (3, 12)
     if host.os_name == "darwin" and host.architecture == "arm64":
         return True
     if host.os_name == "linux" and host.architecture in {"x86_64", "arm64"}:
@@ -122,8 +119,6 @@ def resolve_hypermemory_local_rerank_torch_constraint(
     """Return any host-specific torch constraint for local reranking."""
     if not supports_hypermemory_local_rerank(host, python_version=python_version):
         return None
-    if host.os_name == "darwin" and host.architecture == "x86_64":
-        return DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
     return SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT
 
 

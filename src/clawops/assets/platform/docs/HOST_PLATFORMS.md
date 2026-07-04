@@ -15,7 +15,7 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 
 | Component | Supported / pinned version | Why |
 | --- | --- | --- |
-| Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
+| Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12,<3.14`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
 | Managed install baseline | Python `3.12` | `make install` and bootstrap prefer Python `3.12` on supported Darwin/Linux hosts so the default hypermemory local-rerank path stays on the broadest compatible interpreter. |
 | Node.js | `22.16.x`, `24.x` | OpenClaw `2026.3.13` requires `>=22.16.0`; ACPX `0.3.0`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
 | `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
@@ -24,7 +24,7 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 | ACPX | `0.3.0` | Setup installs this exact CLI version. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
-| Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; this is the current launch-supported local rerank path. Compatibility pins also exist for macOS `arm64`, macOS `x86_64`, and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI. | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
+| Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; this is the current launch-supported local rerank path. Compatibility pins also exist for macOS `arm64` and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI. | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
 
 CI enforces this support statement through:
 
@@ -36,7 +36,8 @@ CI enforces this support statement through:
 For low-end or older hosts, this split matters:
 
 - x86_64 Linux hosts stay on the continuously validated local rerank path and represent the launch-supported local rerank baseline.
-- Apple Silicon Macs, Intel Macs, and Linux arm64 hosts can use the documented compatibility pins, but those combinations are best-effort until they are added to CI.
+- Apple Silicon Macs and Linux arm64 hosts can use the documented compatibility pins, but those combinations are best-effort until they are added to CI.
+- Intel Macs skip the local rerank dependency and should use `compatible-http` if reranking is required.
 - Raspberry Pi 4/5 running 64-bit Raspberry Pi OS or Ubuntu arm64 should be treated as operator-validated, best-effort local rerank surfaces.
 - 32-bit Raspberry Pi Linux hosts skip the local rerank dependency and should use `compatible-http` if reranking is required
 
