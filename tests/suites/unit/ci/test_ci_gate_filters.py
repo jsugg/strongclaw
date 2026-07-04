@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from tests.utils.helpers._ci_workflows.change_router import (
     CiGateSelection,
+    build_results,
     evaluate_filter_matches,
+    evaluate_verdict,
     evidence_from_changed_paths,
     evidence_from_output_file_lists,
     load_ci_gate_filters,
     parse_output_file_list,
     render_selection_summary,
+    render_verdict_json,
     selection_from_filter_matches,
 )
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError
@@ -69,10 +73,20 @@ def test_core_runtime_change_routes_to_heavy_lanes() -> None:
 def test_memory_plugin_package_change_routes_to_memory_compatibility_and_fresh_host() -> None:
     selection = _select("platform/plugins/memory-lancedb-pro/package.json")
 
+    assert selection.dependency_review is True
     assert selection.memory_plugin is True
     assert selection.compatibility_matrix is True
     assert selection.fresh_host is True
     assert selection.docs_parity_required is False
+
+
+def test_lockfile_change_routes_to_dependency_review_without_heavy_local_runtime() -> None:
+    selection = _select("uv.lock")
+
+    assert selection.dependency_review is True
+    assert selection.security is True
+    assert selection.compatibility_matrix is True
+    assert selection.fresh_host is True
 
 
 def test_security_config_change_routes_to_security_lane() -> None:
@@ -99,6 +113,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
         docs_only=True,
         fresh_host=True,
         security=True,
+        dependency_review=True,
         harness=True,
         memory_plugin=True,
         compatibility_matrix=True,
@@ -107,6 +122,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
         docs_only_files='["platform/docs/CI_AND_SECURITY.md"]',
         fresh_host_files='["src/clawops/strongclaw_runtime.py"]',
         security_files='["security/semgrep/semgrep.yml"]',
+        dependency_review_files='["uv.lock"]',
         harness_files='["platform/configs/harness/policy_regressions.yaml"]',
         memory_plugin_files='["platform/plugins/memory-lancedb-pro/package.json"]',
         compatibility_matrix_files='["src/clawops/strongclaw_runtime.py"]',
@@ -115,6 +131,7 @@ def test_selection_summary_explains_docs_only_plus_heavy_overlap() -> None:
     summary = render_selection_summary(selection, evidence=evidence)
 
     assert "`docs_only` is `True` because matching changes were detected" in summary
+    assert "`dependency_review` is `True` because matching changes were detected" in summary
     assert "`harness` is `True` because matching changes were detected" in summary
     assert (
         "`docs_parity_required` is `False` even with `docs_only=True` because heavy lanes are also required"
@@ -139,3 +156,43 @@ def test_evidence_from_changed_paths_uses_repo_filter_logic() -> None:
 
     assert ".github/workflows/fresh-host-core.yml" in evidence.fresh_host
     assert "platform/docs/CI_AND_SECURITY.md" in evidence.docs_only
+
+
+def test_verdict_json_records_selected_required_and_advisory_lanes() -> None:
+    """The compact verdict artifact should expose required and advisory lane state."""
+    selection = CiGateSelection(
+        docs_only=False,
+        fresh_host=False,
+        security=True,
+        dependency_review=True,
+        harness=False,
+        memory_plugin=False,
+        compatibility_matrix=False,
+    )
+    results = build_results(
+        classify="success",
+        docs_parity="skipped",
+        harness="skipped",
+        compatibility_matrix="skipped",
+        memory_plugin="skipped",
+        fresh_host_pr_fast="skipped",
+        security="success",
+        dependency_review="success",
+    )
+    _, failures = evaluate_verdict(selection=selection, results=results)
+
+    payload = render_verdict_json(selection=selection, results=results, failures=failures)
+    lanes = payload["lanes"]
+    assert isinstance(lanes, list)
+    lane_by_name: dict[str, dict[str, object]] = {}
+    for lane_value in cast(list[object], lanes):
+        assert isinstance(lane_value, dict)
+        lane = cast(dict[str, object], lane_value)
+        name = lane.get("name")
+        assert isinstance(name, str)
+        lane_by_name[name] = lane
+
+    assert payload["requiredStatusContext"] == "Verdict"
+    assert lane_by_name["security"]["required"] is True
+    assert lane_by_name["dependency_review"]["advisory"] is True
+    assert lane_by_name["dependency_review"]["required"] is False

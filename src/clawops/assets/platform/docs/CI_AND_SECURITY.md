@@ -20,25 +20,92 @@ Workflow policy:
 
 - GitHub Actions workflows stay thin. Multi-step operational logic lives in
 semantic helper entrypoints under `tests/scripts/`, with unit coverage in `tests/suites/unit/ci/` and repo contract coverage under `tests/suites/contracts/repo/`.
+- Local contributors can run `make ci` as the non-mutating source CI mirror. It
+  wraps `clawops supply-chain quality-gate` and may write local reports, but it
+  does not run formatting hooks that edit source files.
+
+## CodeQL baseline governance
+
+`.github/codeql-triage.json` records the captured 15-alert baseline and an
+explicit accepted-risk rationale for every alert. All 15 findings are inside
+vendored third-party `memory-lancedb-pro`; this repository does not maintain or
+patch that plugin. Strongclaw maintains only `strongclaw-hypermemory`. Live
+alerts are dismissed as `won't fix` with this maintenance-boundary rationale,
+not misclassified as false positives.
+`security/codeql/codeql-config.yml` excludes that vendored plugin from future
+analysis while continuing to scan maintained `strongclaw-hypermemory`.
+
+`.github/workflows/codeql-alert-age.yml` is scheduled/manual and report-only.
+It inventories open high/critical alerts at least 30 days old, uploads JSON and
+Markdown evidence for 14 days, and never runs on pull requests or becomes a
+required status. Any future age-based enforcement requires a clean baseline and
+separate owner approval.
+
+Trusted post-merge verification:
+
+```bash
+gh api 'repos/jsugg/strongclaw/code-scanning/alerts?per_page=100&state=open'
+```
 
 ## Pull-request gate orchestration
 
 Pull requests now flow through `.github/workflows/ci-gate.yml`, which is the
 single required branch-protection check for `main` via the stable
-`CI / Verdict` context.
+`Verdict` API context. GitHub's UI may display that workflow/job as
+`CI / Verdict`; branch protection and release preflight audits must still use
+the exact API context `Verdict`.
 
-- The gate always runs on `pull_request` and classifies file changes with
+- `.github/required-checks.json` is the repo-owned manifest for the required
+  check, solo-maintainer branch-protection settings, and rollback evidence.
+- The gate always runs on `pull_request` and on pushes to `main`, then
+  classifies file changes with
 `dorny/paths-filter` using `.github/ci/ci-gate-filters.yml`.
 - Docs-only pull requests run only the lightweight docs parity lane:
 `uv run pytest -q tests/suites/contracts/repo/test_docs_parity.py`.
 - Heavy CI lanes are orchestrated as reusable workflow calls from the gate:
 `harness.yml`, `compatibility-matrix.yml`, `memory-plugin-verification.yml`,
 `fresh-host-acceptance.yml`, and `security.yml`.
+- Dependency manifest and lockfile pull requests also run an advisory
+  `Dependency Review Advisory` lane through GitHub's dependency-review action.
+  It is path-selected and `continue-on-error` while the repository calibrates
+  native alert noise; `Verdict` remains the only required status context.
 - Stage ordering keeps fast signals first (`harness`, `compatibility_matrix`,
 `memory_plugin`) and gates long lanes (`fresh_host`, `security`) on stage-one
 success.
-- The final `Verdict` job always runs, summarizes lane outcomes, and fails when
-any required lane does not complete successfully.
+- The final `Verdict` job always runs, summarizes lane outcomes, uploads a
+  compact `ci-verdict` artifact containing `ci-verdict.json`, and fails when any
+  required lane does not complete successfully.
+- Release tag preflight requires a tagged commit that is reachable from
+  `origin/main` and has a successful `Verdict` check run, so `main` pushes also
+  receive the same stable verdict context.
+
+## Repository governance controls
+
+- `CODEOWNERS` currently assigns all paths to `@jsugg`, the sole maintainer.
+- Non-admin contributors require one approving `@jsugg` CODEOWNER review.
+- Admin enforcement stays disabled so sole admin `jsugg` retains a documented
+  break-glass path and cannot be deadlocked by an impossible self-review.
+- Branch protection keeps `Verdict` strict/up-to-date, disables force pushes and
+  deletions, and requires conversation resolution while preserving admin
+  break-glass for the solo maintainer.
+- `tests/scripts/required_checks_policy.py audit-live` is a trusted maintainer
+  command only. Do not run it on untrusted fork pull requests because it reads
+  live repository policy through GitHub CLI credentials.
+
+Snapshot audit example:
+
+```bash
+uv run python tests/scripts/required_checks_policy.py audit-snapshot \
+  --branch-protection-json "$(cat .local/live-config-snapshots/latest-after)/branch-protection.json"
+```
+
+Live audit example:
+
+```bash
+uv run python tests/scripts/required_checks_policy.py audit-live \
+  --repository jsugg/strongclaw \
+  --branch main
+```
 
 ## End-to-end acceptance
 
@@ -111,6 +178,8 @@ config, registers the plugin through the local SDK stub, verifies the exported `
 
 - `.github/workflows/dependency-submission.yml` generates `sbom.spdx.json` with
 `anchore/sbom-action` and submits the resulting dependency snapshot to the GitHub dependency graph.
+- `.github/dependabot.yml` watches the `uv`, GitHub Actions, and shipped
+  Docker Compose dependency surfaces on a low-noise weekly cadence.
 - `.github/workflows/security.yml`,
 `.github/workflows/upstream-merge-validation.yml`, and `.github/workflows/release.yml` all call the centralized `clawops supply-chain quality-gate` surface so linting, typing, tests, coverage, and compile checks stay aligned.
 - That shared quality gate now enforces one overall coverage floor plus named
@@ -139,16 +208,21 @@ prerequisites: the centralized release quality gate, the reusable fresh-host
 acceptance workflow, and the reusable memory-plugin verification workflow. It
 builds the Python sdist/wheel only after those prerequisites pass, verifies each
 artifact with `twine check` plus fresh install smoke tests through the
-dedicated release helper script, publishes or updates the GitHub release with
-`gh`, and emits GitHub attestations for both build provenance and the generated
-SBOM.
+dedicated release helper script, generates `strongclaw-release-manifest.json`
+and `SHA256SUMS`, publishes or updates the GitHub release with `gh`, and emits
+GitHub attestations for both build provenance and the generated SBOM.
+- Release publishing uses the `release` environment and the
+  [release break-glass runbook](./runbooks/release-break-glass.md) so a
+  solo-maintainer emergency path is explicit and auditable.
+- The active tag ruleset restricts creation of matching `v*` tags to the
+  `jsugg` bypass actor and blocks normal update/deletion of released tags.
 - `.github/workflows/upstream-merge-validation.yml` runs the repo quality gate
 plus nightly validation steps after an upstream merge lands in the fork.
 - `.github/workflows/memory-plugin-verification.yml` runs the dedicated
 hypermemory Qdrant checks against the official pinned Qdrant GHCR image instead of Docker Hub.
 - `.github/workflows/devflow-contract.yml` syncs the locked environment,
 compile-checks the repo, runs targeted devflow tests, and validates `clawops devflow plan --goal "contract smoke"` without live ACP providers.
-- Operators can verify published provenance with GitHub's attestation tooling
-after a tagged release lands.
+- Operators can verify published assets with `SHA256SUMS`, the release
+manifest, and GitHub's attestation tooling after a tagged release lands.
 
 Canonical plugin support status lives in [Plugin Inventory](./PLUGIN_INVENTORY.md).

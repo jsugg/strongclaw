@@ -419,7 +419,12 @@ clawops recovery prune-retention
 
 ## 14. CI/CD
 
-Push the repo and enable branch protection on `main`. The required status check is the `CI / Verdict` context produced by `.github/workflows/ci-gate.yml`, which classifies changed files and orchestrates the reusable heavy lanes (policy harness, compatibility matrix, memory-plugin verification, fresh-host acceptance, and security scans), running only a lightweight docs-parity lane for documentation-only pull requests.
+Push the repo and enable branch protection on `main`. The required status-check
+API context is `Verdict` from `.github/workflows/ci-gate.yml`; GitHub may render
+it in the UI as `CI / Verdict`. The gate classifies changed files and
+orchestrates the reusable heavy lanes (policy harness, compatibility matrix,
+memory-plugin verification, fresh-host acceptance, and security scans), running
+only a lightweight docs-parity lane for documentation-only pull requests.
 
 The repository also ships:
 

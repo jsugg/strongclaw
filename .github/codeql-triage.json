@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "repository": "jsugg/strongclaw",
+  "capturedAt": "2026-07-04T00:00:00Z",
+  "baselineAlertNumbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "baselineDisposition": "accepted_risk_third_party",
+  "maintenanceBoundary": {
+    "maintainedPlugin": "platform/plugins/strongclaw-hypermemory",
+    "thirdPartyPlugin": "platform/plugins/memory-lancedb-pro",
+    "policy": "Do not patch memory-lancedb-pro locally; Strongclaw maintains only strongclaw-hypermemory."
+  },
+  "liveVerificationRequired": false,
+  "liveDismissedAt": "2026-07-04T03:18:04Z",
+  "rollbackSnapshot": ".local/live-config-snapshots/20260704T031723Z-pre-codeql-third-party-dismiss/codeql-open-alerts.json",
+  "postChangeSnapshot": ".local/live-config-snapshots/20260704T031804Z-post-codeql-third-party-dismiss",
+  "liveVerificationCommand": "gh api 'repos/jsugg/strongclaw/code-scanning/alerts?per_page=100&state=open'",
+  "liveDismissal": {
+    "reason": "won't_fix",
+    "comment": "Accepted risk: alert is in vendored third-party memory-lancedb-pro, which this repository does not maintain. Local patching is prohibited; Strongclaw maintains only strongclaw-hypermemory."
+  },
+  "alerts": [
+    {
+      "number": 1,
+      "rule": "js/incomplete-multi-character-sanitization",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/index.ts:1354-1400",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 2,
+      "rule": "js/weak-cryptographic-algorithm",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/examples/new-session-distill/hook/enqueue-lesson-extract/handler.ts:37",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 3,
+      "rule": "js/weak-cryptographic-algorithm",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/src/reflection-event-store.ts:53",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 4,
+      "rule": "js/insecure-randomness",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/index.ts:450-501",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 5,
+      "rule": "js/polynomial-redos",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/src/embedder.ts:126-170",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 6,
+      "rule": "js/polynomial-redos",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/index.ts:191-218",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 7,
+      "rule": "js/polynomial-redos",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/index.ts:1337-1383",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 8,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:504",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 9,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:509",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 10,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:511",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 11,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:552",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 12,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:555",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 13,
+      "rule": "js/clear-text-logging",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/cli.ts:593",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 14,
+      "rule": "js/stack-trace-exposure",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/test/cjk-recursion-regression.test.mjs:34",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    },
+    {
+      "number": 15,
+      "rule": "js/reflected-xss",
+      "originalLocation": "platform/plugins/memory-lancedb-pro/src/llm-oauth.ts:520",
+      "disposition": "accepted_risk_third_party",
+      "rationale": "Vendored third-party plugin code is outside Strongclaw's maintenance boundary; local patches are prohibited.",
+      "followUp": "Track an upstream release or replace the vendor; do not modify the vendored plugin locally."
+    }
+  ]
+}

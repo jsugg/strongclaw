@@ -1,0 +1,40 @@
+name: CodeQL Alert Age
+
+on:
+  schedule:
+    - cron: "37 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-alert-age
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Report stale high/critical alerts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Prepare report directory
+        run: mkdir -p .artifacts/codeql-alert-age
+      - name: Fetch open CodeQL alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?state=open&per_page=100" > .artifacts/codeql-alert-age/alerts.json
+      - name: Generate report-only alert-age evidence
+        run: python3 ./tests/scripts/codeql_alert_age.py --input-json .artifacts/codeql-alert-age/alerts.json --repository "${GITHUB_REPOSITORY}"
+      - name: Upload alert-age report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codeql-alert-age
+          path: .artifacts/codeql-alert-age/
+          if-no-files-found: error
+          retention-days: 14

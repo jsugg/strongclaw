@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -41,6 +42,34 @@ def _workflow_text(workflow_name: str) -> str:
 def _ci_gate_filters_text() -> str:
     """Return the CI gate path-filter definition text."""
     return (REPO_ROOT / ".github" / "ci" / "ci-gate-filters.yml").read_text(encoding="utf-8")
+
+
+def _workflow_payload(workflow_name: str) -> dict[str, object]:
+    """Return one workflow payload as a typed string-keyed dictionary."""
+    loaded_workflow: object = yaml.safe_load(_workflow_text(workflow_name))
+    assert isinstance(loaded_workflow, dict), workflow_name
+    workflow: dict[str, object] = {}
+    for key, value in cast(dict[object, object], loaded_workflow).items():
+        if isinstance(key, str):
+            workflow[key] = value
+    assert workflow, workflow_name
+    return workflow
+
+
+def _workflow_jobs(workflow_name: str) -> dict[str, object]:
+    """Return one workflow's jobs mapping."""
+    jobs = _as_str_object_dict(_workflow_payload(workflow_name).get("jobs"))
+    assert jobs is not None, workflow_name
+    return jobs
+
+
+def _job_permissions(jobs: dict[str, object], job_name: str) -> dict[str, object]:
+    """Return one job's permissions mapping."""
+    job = _as_str_object_dict(jobs[job_name])
+    assert job is not None, job_name
+    permissions = _as_str_object_dict(job.get("permissions"))
+    assert permissions is not None, job_name
+    return permissions
 
 
 def _as_str_object_dict(value: object) -> dict[str, object] | None:
@@ -114,14 +143,187 @@ def test_fresh_host_acceptance_workflow_routes_to_reusable_core() -> None:
     assert "uses: ./.github/workflows/fresh-host-core.yml" in text
 
 
-def test_ci_gate_workflow_runs_on_pull_requests_and_emits_verdict() -> None:
-    """The CI gate should always run on pull requests and expose a stable verdict job."""
+def test_ci_gate_workflow_runs_on_pull_requests_main_push_and_emits_verdict() -> None:
+    """The CI gate should run before PR merge and on merged main commits."""
     text = _workflow_text("ci-gate.yml")
 
     assert "on:\n  pull_request:" in text
+    assert "push:\n    branches:\n      - main" in text
     assert "name: Verdict" in text
     assert "docs_parity_required" in text
+    assert "dependency_review" in text
     assert "predicate-quantifier:" not in text
+
+
+def test_ci_gate_dependency_review_is_advisory_and_path_selected() -> None:
+    """Dependency review should run on dependency PRs without becoming required yet."""
+    workflow = yaml.safe_load(_workflow_text("ci-gate.yml"))
+    jobs = cast(dict[str, object], workflow["jobs"])
+    dependency_review = cast(dict[str, object], jobs["dependency_review"])
+    dependency_review_steps = cast(list[dict[str, object]], dependency_review["steps"])
+    filters_text = _ci_gate_filters_text()
+
+    assert dependency_review["name"] == "Dependency Review Advisory"
+    assert (
+        dependency_review["if"]
+        == "github.event_name == 'pull_request' && needs.classify.outputs.dependency_review == 'true'"
+    )
+    assert dependency_review["permissions"] == {
+        "contents": "read",
+        "pull-requests": "read",
+    }
+    assert any(
+        step.get("uses")
+        == "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
+        and step.get("continue-on-error") is True
+        for step in dependency_review_steps
+    )
+    assert "dependency_review:" in filters_text
+    assert "uv.lock" in filters_text
+    assert "package-lock.json" in filters_text
+
+
+def test_workflow_write_permissions_are_job_scoped() -> None:
+    """Workflow write tokens should be scoped to only jobs that need writes."""
+    write_permissions = {
+        "actions": "write",
+        "attestations": "write",
+        "checks": "write",
+        "contents": "write",
+        "deployments": "write",
+        "id-token": "write",
+        "issues": "write",
+        "packages": "write",
+        "pages": "write",
+        "pull-requests": "write",
+        "security-events": "write",
+        "statuses": "write",
+    }
+    workflows_root = REPO_ROOT / ".github" / "workflows"
+
+    for workflow_path in workflows_root.glob("*.yml"):
+        workflow = _workflow_payload(workflow_path.name)
+        permissions = _as_str_object_dict(workflow.get("permissions"))
+        assert permissions is not None, workflow_path.name
+        unexpected_writes = {
+            key: value for key, value in permissions.items() if write_permissions.get(key) == value
+        }
+        assert unexpected_writes == {}, workflow_path.name
+
+    ci_gate_jobs = _workflow_jobs("ci-gate.yml")
+    assert _job_permissions(ci_gate_jobs, "dependency_review") == {
+        "contents": "read",
+        "pull-requests": "read",
+    }
+    assert _job_permissions(ci_gate_jobs, "security") == {
+        "actions": "read",
+        "contents": "read",
+        "pull-requests": "read",
+        "security-events": "write",
+    }
+
+    security_jobs = _workflow_jobs("security.yml")
+    assert _job_permissions(security_jobs, "run-security-scans") == {
+        "contents": "read",
+        "pull-requests": "read",
+        "security-events": "write",
+    }
+    assert _job_permissions(security_jobs, "run-codeql-analysis") == {
+        "actions": "read",
+        "contents": "read",
+        "security-events": "write",
+    }
+
+    e2e_jobs = _workflow_jobs("e2e-acceptance.yml")
+    assert _job_permissions(e2e_jobs, "security-scans") == {
+        "actions": "read",
+        "contents": "read",
+        "pull-requests": "read",
+        "security-events": "write",
+    }
+
+    release_jobs = _workflow_jobs("release.yml")
+    assert _job_permissions(release_jobs, "publish-release-artifacts") == {
+        "checks": "read",
+        "contents": "write",
+        "attestations": "write",
+        "id-token": "write",
+    }
+
+    dependency_jobs = _workflow_jobs("dependency-submission.yml")
+    assert _job_permissions(dependency_jobs, "submit-dependency-snapshot") == {
+        "contents": "write",
+        "id-token": "write",
+    }
+
+
+def test_codeql_alert_age_workflow_is_report_only_and_least_privilege() -> None:
+    """Alert-age governance should stay scheduled/manual and non-enforcing."""
+    text = _workflow_text("codeql-alert-age.yml")
+    jobs = _workflow_jobs("codeql-alert-age.yml")
+
+    assert "schedule:" in text
+    assert "workflow_dispatch:" in text
+    assert "pull_request:" not in text
+    assert "push:" not in text
+    assert "codeql_alert_age.py" in text
+    assert "enforcement" not in text
+    assert _job_permissions(jobs, "report") == {
+        "contents": "read",
+        "security-events": "read",
+    }
+
+
+def test_ci_gate_verdict_uploads_compact_json_artifact() -> None:
+    """Verdict should preserve markdown summary and upload machine-readable evidence."""
+    workflow = yaml.safe_load(_workflow_text("ci-gate.yml"))
+    jobs = cast(dict[str, object], workflow["jobs"])
+    verdict = cast(dict[str, object], jobs["verdict"])
+    steps = cast(list[dict[str, object]], verdict["steps"])
+    needs = cast(list[str], verdict["needs"])
+
+    assert "dependency_review" in needs
+    assert any(
+        step.get("run") is not None
+        and "--verdict-json-file ci-verdict.json" in str(step["run"])
+        and "--dependency-review-result" in str(step["run"])
+        for step in steps
+    )
+    assert any(
+        step.get("uses") == "actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f"
+        and step.get("if") == "always()"
+        and step.get("with")
+        == {
+            "name": "ci-verdict",
+            "path": "ci-verdict.json",
+            "if-no-files-found": "error",
+        }
+        for step in steps
+    )
+
+
+def test_required_check_manifest_tracks_verdict_api_context() -> None:
+    """Required-check policy should preserve the stable API context, not UI labels."""
+    manifest = json.loads(
+        (REPO_ROOT / ".github" / "required-checks.json").read_text(encoding="utf-8")
+    )
+    workflow = yaml.safe_load(_workflow_text("ci-gate.yml"))
+    jobs = cast(dict[str, object], workflow["jobs"])
+    verdict = cast(dict[str, object], jobs["verdict"])
+    contexts = cast(list[dict[str, object]], manifest["requiredContexts"])
+    branch_protection = cast(dict[str, object], manifest["branchProtection"])
+    status_checks = cast(dict[str, object], branch_protection["requiredStatusChecks"])
+    reviews = cast(dict[str, object], branch_protection["pullRequestReviews"])
+
+    assert [context["context"] for context in contexts] == ["Verdict"]
+    assert contexts[0]["jobName"] == verdict["name"] == "Verdict"
+    assert contexts[0]["uiLabel"] == "CI / Verdict"
+    assert status_checks["strict"] is True
+    assert status_checks["contexts"] == ["Verdict"]
+    assert branch_protection["allowForcePushes"] is False
+    assert branch_protection["requiredConversationResolution"] is True
+    assert reviews["requiredApprovingReviewCount"] == 1
+    assert reviews["requireCodeOwnerReviews"] is True
 
 
 def test_ci_gate_paths_filter_uses_default_quantifier() -> None:
@@ -365,8 +567,35 @@ def test_remaining_workflow_logic_routes_through_semantic_scripts() -> None:
     assert "./tests/scripts/release_workflow.py clean-artifacts" in release
     assert "./tests/scripts/release_workflow.py runtime-readiness --repo-root ." in release
     assert "./tests/scripts/release_workflow.py verify-tag-version --tag" in release
+    assert "./tests/scripts/release_workflow.py verify-tag-preflight" in release
     assert "./tests/scripts/release_workflow.py verify-artifacts" in release
+    assert "./tests/scripts/release_workflow.py write-release-metadata" in release
     assert "./tests/scripts/release_workflow.py publish-github-release" in release
+
+
+def test_release_workflow_publishes_manifest_checksums_and_scoped_attestations() -> None:
+    """Release assets should include metadata while SBOM attestations stay scoped."""
+    release = _workflow_text("release.yml")
+
+    assert "Generate release manifest and checksums" in release
+    assert "environment: release" in release
+    assert "checks: read" in release
+    assert "dist/*" in release
+    assert "sbom.spdx.json" in release
+    assert "dist/*.whl" in release
+    assert "dist/*.tar.gz" in release
+
+
+def test_release_break_glass_runbook_preserves_solo_maintainer_escape_hatch() -> None:
+    """The shipped release runbook should document solo-safe bypass boundaries."""
+    runbook = (REPO_ROOT / "platform" / "docs" / "runbooks" / "release-break-glass.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "`jsugg` alone" in runbook
+    assert "admin bypass" in runbook
+    assert "required release-environment reviewer" in runbook
+    assert "artifact manifest hash" in runbook
 
 
 def test_release_workflow_blocks_publish_on_fresh_host_and_memory_plugin_prerequisites() -> None:
@@ -431,8 +660,10 @@ def test_security_harness_tracks_the_context_provider_namespace() -> None:
     assert 'stdout_contains: ["codebase"]' in text
 
 
-def test_codeql_config_ignores_packaged_runtime_asset_mirror() -> None:
-    """CodeQL should scan the maintained source tree, not the packaged asset mirror."""
+def test_codeql_config_ignores_unmaintained_and_packaged_vendor_code() -> None:
+    """CodeQL should scan maintained source, not mirrors or third-party plugin code."""
     text = (REPO_ROOT / "security/codeql/codeql-config.yml").read_text(encoding="utf-8")
 
     assert "src/clawops/assets" in text
+    assert "platform/plugins/memory-lancedb-pro" in text
+    assert "platform/plugins/strongclaw-hypermemory" not in text

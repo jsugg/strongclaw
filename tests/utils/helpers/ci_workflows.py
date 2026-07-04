@@ -21,7 +21,9 @@ from tests.utils.helpers._ci_workflows.release import (
     publish_github_release,
     run_release_runtime_readiness,
     verify_release_artifacts,
+    verify_release_tag_preflight,
     verify_tag_version_parity,
+    write_release_metadata,
 )
 from tests.utils.helpers._ci_workflows.security import (
     append_coverage_summary,
@@ -58,8 +60,10 @@ __all__ = [
     "run_clawops_memory_migration",
     "run_vendored_host_checks",
     "verify_channels_contract",
+    "verify_release_tag_preflight",
     "verify_release_artifacts",
     "verify_tag_version_parity",
     "wait_for_qdrant",
+    "write_release_metadata",
     "write_empty_sarif",
 ]

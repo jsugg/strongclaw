@@ -2,12 +2,13 @@ name: CI
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 permissions:
   actions: read
   contents: read
-  pull-requests: write
-  security-events: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -23,6 +24,7 @@ jobs:
       harness: ${{ steps.selection.outputs.harness }}
       memory_plugin: ${{ steps.selection.outputs.memory_plugin }}
       compatibility_matrix: ${{ steps.selection.outputs.compatibility_matrix }}
+      dependency_review: ${{ steps.selection.outputs.dependency_review }}
       docs_parity_required: ${{ steps.selection.outputs.docs_parity_required }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -42,6 +44,7 @@ jobs:
           DOCS_ONLY_FILES: ${{ steps.filter.outputs.docs_only_files }}
           FRESH_HOST_FILES: ${{ steps.filter.outputs.fresh_host_files }}
           SECURITY_FILES: ${{ steps.filter.outputs.security_files }}
+          DEPENDENCY_REVIEW_FILES: ${{ steps.filter.outputs.dependency_review_files }}
           HARNESS_FILES: ${{ steps.filter.outputs.harness_files }}
           MEMORY_PLUGIN_FILES: ${{ steps.filter.outputs.memory_plugin_files }}
           COMPATIBILITY_MATRIX_FILES: ${{ steps.filter.outputs.compatibility_matrix_files }}
@@ -50,12 +53,14 @@ jobs:
           --docs-only "${{ steps.filter.outputs.docs_only }}"
           --fresh-host "${{ steps.filter.outputs.fresh_host }}"
           --security "${{ steps.filter.outputs.security }}"
+          --dependency-review "${{ steps.filter.outputs.dependency_review }}"
           --harness "${{ steps.filter.outputs.harness }}"
           --memory-plugin "${{ steps.filter.outputs.memory_plugin }}"
           --compatibility-matrix "${{ steps.filter.outputs.compatibility_matrix }}"
           --docs-only-files "$DOCS_ONLY_FILES"
           --fresh-host-files "$FRESH_HOST_FILES"
           --security-files "$SECURITY_FILES"
+          --dependency-review-files "$DEPENDENCY_REVIEW_FILES"
           --harness-files "$HARNESS_FILES"
           --memory-plugin-files "$MEMORY_PLUGIN_FILES"
           --compatibility-matrix-files "$COMPATIBILITY_MATRIX_FILES"
@@ -79,6 +84,19 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - run: python3 ./tests/scripts/ci_gate.py run-docs-parity --repo-root .
+
+  dependency_review:
+    name: Dependency Review Advisory
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.dependency_review == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        continue-on-error: true
 
   harness:
     needs: classify
@@ -118,6 +136,11 @@ jobs:
     secrets: inherit
 
   security:
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
     needs:
       - classify
       - harness
@@ -140,6 +163,7 @@ jobs:
     needs:
       - classify
       - docs_parity
+      - dependency_review
       - harness
       - compatibility_matrix
       - memory_plugin
@@ -150,4 +174,10 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
       - name: Evaluate final verdict
-        run: python3 ./tests/scripts/ci_gate.py verdict --docs-only "${{ needs.classify.outputs.docs_only }}" --fresh-host "${{ needs.classify.outputs.fresh_host }}" --security "${{ needs.classify.outputs.security }}" --harness "${{ needs.classify.outputs.harness }}" --memory-plugin "${{ needs.classify.outputs.memory_plugin }}" --compatibility-matrix "${{ needs.classify.outputs.compatibility_matrix }}" --classify-result "${{ needs.classify.result }}" --docs-parity-result "${{ needs.docs_parity.result }}" --harness-result "${{ needs.harness.result }}" --compatibility-matrix-result "${{ needs.compatibility_matrix.result }}" --memory-plugin-result "${{ needs.memory_plugin.result }}" --fresh-host-pr-fast-result "${{ needs.fresh_host_pr_fast.result }}" --security-result "${{ needs.security.result }}" --github-summary-file "$GITHUB_STEP_SUMMARY"
+        run: python3 ./tests/scripts/ci_gate.py verdict --docs-only "${{ needs.classify.outputs.docs_only }}" --fresh-host "${{ needs.classify.outputs.fresh_host }}" --security "${{ needs.classify.outputs.security }}" --dependency-review "${{ needs.classify.outputs.dependency_review }}" --harness "${{ needs.classify.outputs.harness }}" --memory-plugin "${{ needs.classify.outputs.memory_plugin }}" --compatibility-matrix "${{ needs.classify.outputs.compatibility_matrix }}" --classify-result "${{ needs.classify.result }}" --docs-parity-result "${{ needs.docs_parity.result }}" --harness-result "${{ needs.harness.result }}" --compatibility-matrix-result "${{ needs.compatibility_matrix.result }}" --memory-plugin-result "${{ needs.memory_plugin.result }}" --fresh-host-pr-fast-result "${{ needs.fresh_host_pr_fast.result }}" --security-result "${{ needs.security.result }}" --dependency-review-result "${{ needs.dependency_review.result }}" --github-summary-file "$GITHUB_STEP_SUMMARY" --verdict-json-file ci-verdict.json
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: ci-verdict
+          path: ci-verdict.json
+          if-no-files-found: error

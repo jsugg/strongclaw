@@ -85,6 +85,15 @@ security:
   - "!**/*.pdf"
   - "!LICENSE*"
 
+dependency_review:
+  - ".github/dependabot.yml"
+  - "pyproject.toml"
+  - "uv.lock"
+  - "platform/plugins/**/package.json"
+  - "platform/plugins/**/package-lock.json"
+  - "src/clawops/assets/platform/plugins/**/package.json"
+  - "src/clawops/assets/platform/plugins/**/package-lock.json"
+
 harness:
   - ".github/workflows/harness.yml"
   - "src/clawops/harness.py"

@@ -6,9 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  attestations: write
-  id-token: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -64,12 +62,18 @@ jobs:
 
   publish-release-artifacts:
     name: Build Verify and Publish Release
+    permissions:
+      checks: read
+      contents: write
+      attestations: write
+      id-token: write
     needs:
       - release-quality-gate
       - release-fresh-host-acceptance
       - release-memory-plugin-verification
       - release-runtime-readiness
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -84,6 +88,10 @@ jobs:
       - run: uv sync --locked
       - name: Verify release tag matches package version
         run: python3 ./tests/scripts/release_workflow.py verify-tag-version --tag "${GITHUB_REF_NAME}" --repo-root .
+      - name: Verify release tag preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ./tests/scripts/release_workflow.py verify-tag-preflight --tag "${GITHUB_REF_NAME}" --repo-root . --repository "${GITHUB_REPOSITORY}"
       - name: Clean release artifact directories
         run: python3 ./tests/scripts/release_workflow.py clean-artifacts --path build --path dist
       - name: Build release artifacts
@@ -98,6 +106,8 @@ jobs:
           dependency-snapshot: false
           upload-artifact: false
           upload-release-assets: false
+      - name: Generate release manifest and checksums
+        run: python3 ./tests/scripts/release_workflow.py write-release-metadata --tag "${GITHUB_REF_NAME}" --repo-root . --dist-dir dist --sbom-path sbom.spdx.json
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: release-artifacts
@@ -112,8 +122,10 @@ jobs:
         with:
           subject-path: |
             dist/*
+            sbom.spdx.json
       - uses: actions/attest-sbom@07e74fc4e78d1aad915e867f9a094073a9f71527 # v4.0.0
         with:
           subject-path: |
-            dist/*
+            dist/*.whl
+            dist/*.tar.gz
           sbom-path: sbom.spdx.json

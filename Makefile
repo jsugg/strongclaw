@@ -16,7 +16,7 @@ DOCTOR_ARGS ?=
 PREFERRED_PYTHON := $(shell $(PYTHON) src/clawops/platform_compat.py --field preferred_project_python_version 2>/dev/null)
 UV_SYNC := $(UV) sync $(if $(PREFERRED_PYTHON),--python $(PREFERRED_PYTHON),)
 
-.PHONY: help install setup doctor dev dev-shell fmt lint imports typecheck actionlint shellcheck precommit dev-check test test-unit test-integration test-contracts test-framework test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup sync-runtime-assets
+.PHONY: help install setup doctor dev dev-shell fmt lint imports typecheck actionlint shellcheck precommit dev-check ci test test-unit test-integration test-contracts test-framework test-e2e test-hypermemory test-qdrant test-all test-governance compile start-sidecars stop-sidecars render-config verify context-index run-harness backup sync-runtime-assets
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -70,6 +70,9 @@ precommit: ## Apply mutating hooks, then verify the full pre-commit stack.
 dev-check: precommit ## Run pre-commit, tests, and a compile smoke.
 	$(PYTEST) -q
 	$(RUN) python -m compileall -q src tests
+
+ci: ## Run the non-mutating local CI mirror.
+	$(RUN) python -m clawops supply-chain --repo-root . quality-gate
 
 test: ## Run pytest in the managed dev environment.
 	$(PYTEST) -q
