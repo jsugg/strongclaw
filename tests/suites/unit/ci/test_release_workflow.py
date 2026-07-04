@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tarfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -15,6 +16,16 @@ from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import ci_workflows
 from tests.utils.helpers._ci_workflows import release as release_helpers
 from tests.utils.helpers.repo import REPO_ROOT
+
+
+def _copy_required_checks_manifest(repo_root: Path) -> None:
+    """Copy the repository policy manifest into a temporary release checkout."""
+    destination = repo_root / ".github" / "required-checks.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        (REPO_ROOT / ".github" / "required-checks.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
 
 def test_clean_artifact_directories_removes_paths(tmp_path: Path) -> None:
@@ -96,6 +107,11 @@ def test_publish_github_release_creates_when_missing(
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir()
     (dist_dir / "artifact.whl").write_text("wheel", encoding="utf-8")
+    (dist_dir / release_helpers.RELEASE_MANIFEST_NAME).write_text("{}", encoding="utf-8")
+    (dist_dir / release_helpers.RELEASE_CHECKSUMS_NAME).write_text(
+        "0  artifact.whl\n",
+        encoding="utf-8",
+    )
     sbom_path = tmp_path / "sbom.spdx.json"
     sbom_path.write_text("{}", encoding="utf-8")
     seen_commands: list[list[str]] = []
@@ -120,6 +136,100 @@ def test_publish_github_release_creates_when_missing(
 
     assert seen_commands[0] == ["gh", "release", "view", "v1.0.0"]
     assert seen_commands[1][:3] == ["gh", "release", "create"]
+    assert str(dist_dir / release_helpers.RELEASE_MANIFEST_NAME) in seen_commands[1]
+    assert str(dist_dir / release_helpers.RELEASE_CHECKSUMS_NAME) in seen_commands[1]
+    assert str(sbom_path) in seen_commands[1]
+
+
+def test_write_release_metadata_records_artifacts_and_platform_inventory(
+    tmp_path: Path,
+) -> None:
+    """Release metadata should bind artifacts, SBOM, runtime assets, and image digests."""
+    repo_root = tmp_path / "repo"
+    dist_dir = tmp_path / "dist"
+    package_dir = repo_root / "src" / "clawops"
+    package_dir.mkdir(parents=True)
+    dist_dir.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "clawops"\nversion = "1.2.3"\nrequires-python = ">=3.12"\n',
+        encoding="utf-8",
+    )
+    (package_dir / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
+    wheel_path = dist_dir / "clawops-1.2.3-py3-none-any.whl"
+    pinned_digest = "a" * 64
+    with zipfile.ZipFile(wheel_path, mode="w") as archive:
+        archive.writestr("clawops/assets/platform/docs/SECURITY_MODEL.md", "# Security\n")
+        archive.writestr(
+            "clawops/assets/platform/compose/docker-compose.aux-stack.yaml",
+            f"services:\n  db:\n    image: postgres:16-alpine@sha256:{pinned_digest}\n",
+        )
+    sdist_path = dist_dir / "clawops-1.2.3.tar.gz"
+    sdist_path.write_text("sdist", encoding="utf-8")
+    sbom_path = tmp_path / "sbom.spdx.json"
+    sbom_path.write_text("{}", encoding="utf-8")
+
+    manifest_path, checksums_path = ci_workflows.write_release_metadata(
+        tag="v1.2.3",
+        repo_root=repo_root,
+        dist_dir=dist_dir,
+        sbom_path=sbom_path,
+    )
+
+    payload = cast(dict[str, Any], json.loads(manifest_path.read_text(encoding="utf-8")))
+    runtime_assets = cast(dict[str, Any], payload["runtimeAssets"])
+    container_images = cast(list[dict[str, Any]], payload["containerImages"])
+    checksum_text = checksums_path.read_text(encoding="utf-8")
+
+    assert payload["manifestVersion"] == 1
+    assert cast(dict[str, Any], payload["release"])["tag"] == "v1.2.3"
+    assert cast(dict[str, Any], payload["installAuthority"])["primaryArtifact"] == wheel_path.name
+    assert runtime_assets["sourceArtifact"] == wheel_path.name
+    assert runtime_assets["fileCount"] == 2
+    assert container_images == [
+        {
+            "path": "compose/docker-compose.aux-stack.yaml",
+            "line": 3,
+            "reference": f"postgres:16-alpine@sha256:{pinned_digest}",
+            "digest": f"sha256:{pinned_digest}",
+            "digestPinned": True,
+        }
+    ]
+    assert wheel_path.name in checksum_text
+    assert sdist_path.name in checksum_text
+    assert sbom_path.name in checksum_text
+    assert release_helpers.RELEASE_MANIFEST_NAME in checksum_text
+    assert release_helpers.RELEASE_CHECKSUMS_NAME not in checksum_text
+
+
+def test_write_release_metadata_rejects_unpinned_container_images(tmp_path: Path) -> None:
+    """Release metadata should fail if shipped compose images are not digest-pinned."""
+    repo_root = tmp_path / "repo"
+    dist_dir = tmp_path / "dist"
+    package_dir = repo_root / "src" / "clawops"
+    package_dir.mkdir(parents=True)
+    dist_dir.mkdir()
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "clawops"\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    (package_dir / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
+    wheel_path = dist_dir / "clawops-1.2.3-py3-none-any.whl"
+    with zipfile.ZipFile(wheel_path, mode="w") as archive:
+        archive.writestr(
+            "clawops/assets/platform/compose/docker-compose.aux-stack.yaml",
+            "services:\n  db:\n    image: postgres:16-alpine\n",
+        )
+    (dist_dir / "clawops-1.2.3.tar.gz").write_text("sdist", encoding="utf-8")
+    sbom_path = tmp_path / "sbom.spdx.json"
+    sbom_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ci_workflows.CiWorkflowError, match="digest-pinned images"):
+        ci_workflows.write_release_metadata(
+            tag="v1.2.3",
+            repo_root=repo_root,
+            dist_dir=dist_dir,
+            sbom_path=sbom_path,
+        )
 
 
 def test_release_workflow_main_dispatches_verify_artifacts(
@@ -180,6 +290,112 @@ def test_release_workflow_main_dispatches_verify_tag_version(
     assert seen_calls == [("v0.1.0", tmp_path.resolve())]
 
 
+def test_verify_release_tag_preflight_requires_main_and_verdict(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Release tag preflight should require a main-reachable, CI-green tag."""
+    (tmp_path / "src" / "clawops").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "clawops"\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "clawops" / "__init__.py").write_text(
+        '__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    _copy_required_checks_manifest(tmp_path)
+    seen_commands: list[list[str]] = []
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        capture_output: bool = False,
+    ) -> Any:
+        del cwd, env, timeout_seconds
+        seen_commands.append(command)
+        if command[:2] == ["git", "rev-parse"]:
+            assert capture_output is True
+            return SimpleNamespace(stdout="abc123\n", stderr="")
+        if command[:2] == ["gh", "api"]:
+            assert capture_output is True
+            return SimpleNamespace(stdout="1\n", stderr="")
+        return SimpleNamespace(stdout="", stderr="")
+
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
+
+    ci_workflows.verify_release_tag_preflight(
+        tag="v1.2.3",
+        repo_root=tmp_path,
+        repository="jsugg/strongclaw",
+    )
+
+    assert ["git", "rev-parse", "v1.2.3^{commit}"] in seen_commands
+    assert [
+        "git",
+        "fetch",
+        "--no-tags",
+        "origin",
+        f"+main:{release_helpers.RELEASE_MAIN_REF}",
+    ] in seen_commands
+    assert [
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        "abc123",
+        release_helpers.RELEASE_MAIN_REF,
+    ] in seen_commands
+    assert any(
+        command[:2] == ["gh", "api"] and "check-runs" in command[2] for command in seen_commands
+    )
+    check_command = next(command for command in seen_commands if command[:2] == ["gh", "api"])
+    assert ".app.id == 15368" in check_command[-1]
+
+
+def test_verify_release_tag_preflight_rejects_missing_verdict(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """Release tag preflight should fail when Verdict has not succeeded."""
+    (tmp_path / "src" / "clawops").mkdir(parents=True)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "clawops"\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "clawops" / "__init__.py").write_text(
+        '__version__ = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    _copy_required_checks_manifest(tmp_path)
+
+    def fake_run_checked(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,
+        capture_output: bool = False,
+    ) -> Any:
+        del cwd, env, timeout_seconds, capture_output
+        if command[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(stdout="abc123\n", stderr="")
+        if command[:2] == ["gh", "api"]:
+            return SimpleNamespace(stdout="0\n", stderr="")
+        return SimpleNamespace(stdout="", stderr="")
+
+    test_context.patch.patch_object(release_helpers, "run_checked", new=fake_run_checked)
+
+    with pytest.raises(ci_workflows.CiWorkflowError, match="Verdict check run from app 15368"):
+        ci_workflows.verify_release_tag_preflight(
+            tag="v1.2.3",
+            repo_root=tmp_path,
+            repository="jsugg/strongclaw",
+        )
+
+
 def test_release_workflow_main_dispatches_runtime_readiness(
     test_context: TestContext,
     tmp_path: Path,
@@ -208,6 +424,95 @@ def test_release_workflow_main_dispatches_runtime_readiness(
 
     assert exit_code == 0
     assert seen_calls == [tmp_path.resolve()]
+
+
+def test_release_workflow_main_dispatches_verify_tag_preflight(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch release tag preflight checks."""
+    from tests.scripts import release_workflow as release_workflow_script
+
+    seen_calls: list[tuple[str, Path, str | None]] = []
+
+    def fake_verify_release_tag_preflight(
+        *,
+        tag: str,
+        repo_root: Path,
+        repository: str | None,
+    ) -> None:
+        seen_calls.append((tag, repo_root, repository))
+
+    test_context.patch.patch_object(
+        release_workflow_script,
+        "verify_release_tag_preflight",
+        new=fake_verify_release_tag_preflight,
+    )
+
+    exit_code = release_workflow_script.main(
+        [
+            "verify-tag-preflight",
+            "--tag",
+            "v0.1.0",
+            "--repo-root",
+            str(tmp_path),
+            "--repository",
+            "jsugg/strongclaw",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [("v0.1.0", tmp_path.resolve(), "jsugg/strongclaw")]
+
+
+def test_release_workflow_main_dispatches_write_release_metadata(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """The CLI should dispatch release metadata generation."""
+    from tests.scripts import release_workflow as release_workflow_script
+
+    seen_calls: list[tuple[str, Path, Path, Path]] = []
+
+    def fake_write_release_metadata(
+        *,
+        tag: str,
+        repo_root: Path,
+        dist_dir: Path,
+        sbom_path: Path,
+    ) -> tuple[Path, Path]:
+        seen_calls.append((tag, repo_root, dist_dir, sbom_path))
+        return dist_dir / release_helpers.RELEASE_MANIFEST_NAME, dist_dir / "SHA256SUMS"
+
+    test_context.patch.patch_object(
+        release_workflow_script,
+        "write_release_metadata",
+        new=fake_write_release_metadata,
+    )
+
+    exit_code = release_workflow_script.main(
+        [
+            "write-release-metadata",
+            "--tag",
+            "v0.1.0",
+            "--repo-root",
+            str(tmp_path / "repo"),
+            "--dist-dir",
+            str(tmp_path / "dist"),
+            "--sbom-path",
+            str(tmp_path / "sbom.spdx.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen_calls == [
+        (
+            "v0.1.0",
+            (tmp_path / "repo").resolve(),
+            (tmp_path / "dist").resolve(),
+            (tmp_path / "sbom.spdx.json").resolve(),
+        )
+    ]
 
 
 def test_verify_tag_version_parity_rejects_mismatched_tag(tmp_path: Path) -> None:

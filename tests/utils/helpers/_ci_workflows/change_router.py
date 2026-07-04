@@ -22,6 +22,7 @@ class CiGateSelection:
     docs_only: bool
     fresh_host: bool
     security: bool
+    dependency_review: bool
     harness: bool
     memory_plugin: bool
     compatibility_matrix: bool
@@ -56,6 +57,7 @@ class CiGateResults:
     memory_plugin: str
     fresh_host_pr_fast: str
     security: str
+    dependency_review: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,7 @@ class CiGateEvidence:
     docs_only: tuple[str, ...]
     fresh_host: tuple[str, ...]
     security: tuple[str, ...]
+    dependency_review: tuple[str, ...]
     harness: tuple[str, ...]
     memory_plugin: tuple[str, ...]
     compatibility_matrix: tuple[str, ...]
@@ -85,6 +88,7 @@ def selection_from_output_flags(
     docs_only: str,
     fresh_host: str,
     security: str,
+    dependency_review: str,
     harness: str,
     memory_plugin: str,
     compatibility_matrix: str,
@@ -94,6 +98,10 @@ def selection_from_output_flags(
         docs_only=parse_github_boolean(docs_only, label="docs_only"),
         fresh_host=parse_github_boolean(fresh_host, label="fresh_host"),
         security=parse_github_boolean(security, label="security"),
+        dependency_review=parse_github_boolean(
+            dependency_review,
+            label="dependency_review",
+        ),
         harness=parse_github_boolean(harness, label="harness"),
         memory_plugin=parse_github_boolean(memory_plugin, label="memory_plugin"),
         compatibility_matrix=parse_github_boolean(
@@ -128,6 +136,7 @@ def evidence_from_output_file_lists(
     docs_only_files: str,
     fresh_host_files: str,
     security_files: str,
+    dependency_review_files: str,
     harness_files: str,
     memory_plugin_files: str,
     compatibility_matrix_files: str,
@@ -137,6 +146,10 @@ def evidence_from_output_file_lists(
         docs_only=parse_output_file_list(docs_only_files, label="docs_only"),
         fresh_host=parse_output_file_list(fresh_host_files, label="fresh_host"),
         security=parse_output_file_list(security_files, label="security"),
+        dependency_review=parse_output_file_list(
+            dependency_review_files,
+            label="dependency_review",
+        ),
         harness=parse_output_file_list(harness_files, label="harness"),
         memory_plugin=parse_output_file_list(memory_plugin_files, label="memory_plugin"),
         compatibility_matrix=parse_output_file_list(
@@ -156,6 +169,7 @@ def evidence_from_changed_paths(
         "docs_only",
         "fresh_host",
         "security",
+        "dependency_review",
         "harness",
         "memory_plugin",
         "compatibility_matrix",
@@ -178,6 +192,7 @@ def evidence_from_changed_paths(
         docs_only=tuple(matched_by_lane["docs_only"]),
         fresh_host=tuple(matched_by_lane["fresh_host"]),
         security=tuple(matched_by_lane["security"]),
+        dependency_review=tuple(matched_by_lane["dependency_review"]),
         harness=tuple(matched_by_lane["harness"]),
         memory_plugin=tuple(matched_by_lane["memory_plugin"]),
         compatibility_matrix=tuple(matched_by_lane["compatibility_matrix"]),
@@ -230,6 +245,7 @@ def selection_from_filter_matches(matches: dict[str, bool]) -> CiGateSelection:
         docs_only=_required_match(matches, "docs_only"),
         fresh_host=_required_match(matches, "fresh_host"),
         security=_required_match(matches, "security"),
+        dependency_review=_required_match(matches, "dependency_review"),
         harness=_required_match(matches, "harness"),
         memory_plugin=_required_match(matches, "memory_plugin"),
         compatibility_matrix=_required_match(matches, "compatibility_matrix"),
@@ -245,6 +261,7 @@ def build_results(
     memory_plugin: str,
     fresh_host_pr_fast: str,
     security: str,
+    dependency_review: str,
 ) -> CiGateResults:
     """Build validated per-job result values for verdict evaluation."""
     return CiGateResults(
@@ -257,6 +274,10 @@ def build_results(
         memory_plugin=_validate_job_result(memory_plugin, label="memory_plugin"),
         fresh_host_pr_fast=_validate_job_result(fresh_host_pr_fast, label="fresh_host_pr_fast"),
         security=_validate_job_result(security, label="security"),
+        dependency_review=_validate_job_result(
+            dependency_review,
+            label="dependency_review",
+        ),
     )
 
 
@@ -302,6 +323,7 @@ def render_selection_summary(
         f"| memory_plugin | {selection.memory_plugin} |",
         f"| fresh_host | {selection.fresh_host} |",
         f"| security | {selection.security} |",
+        f"| dependency_review | {selection.dependency_review} |",
         f"| any_heavy | {selection.any_heavy} |",
         f"| docs_parity_required | {selection.docs_parity_required} |",
     ]
@@ -317,6 +339,11 @@ def render_selection_summary(
         ("memory_plugin", selection.memory_plugin, evidence.memory_plugin if evidence else ()),
         ("fresh_host", selection.fresh_host, evidence.fresh_host if evidence else ()),
         ("security", selection.security, evidence.security if evidence else ()),
+        (
+            "dependency_review",
+            selection.dependency_review,
+            evidence.dependency_review if evidence else (),
+        ),
     )
 
     lines.append("")
@@ -362,6 +389,7 @@ def render_verdict_summary(
         ("memory_plugin", selection.memory_plugin, results.memory_plugin),
         ("fresh_host_pr_fast", selection.fresh_host, results.fresh_host_pr_fast),
         ("security", selection.security, results.security),
+        ("dependency_review", False, results.dependency_review),
     ]
     lines = [
         "### CI Verdict",
@@ -384,6 +412,133 @@ def render_verdict_summary(
         lines.append("")
         lines.append("All required lanes completed successfully.")
     return "\n".join(lines)
+
+
+def render_verdict_json(
+    *,
+    selection: CiGateSelection,
+    results: CiGateResults,
+    failures: tuple[str, ...],
+) -> dict[str, object]:
+    """Render a compact machine-readable verdict artifact."""
+    success = not failures
+    return {
+        "schemaVersion": 1,
+        "requiredStatusContext": "Verdict",
+        "success": success,
+        "failures": list(failures),
+        "lanes": [
+            _verdict_lane(
+                name="classify",
+                selected=True,
+                required=True,
+                advisory=False,
+                result=results.classify,
+                artifact_names=(),
+                follow_up_commands=("Inspect the Classify Changes job summary.",),
+            ),
+            _verdict_lane(
+                name="docs_parity",
+                selected=selection.docs_parity_required,
+                required=selection.docs_parity_required,
+                advisory=False,
+                result=results.docs_parity,
+                artifact_names=(),
+                follow_up_commands=(
+                    "uv run pytest -q tests/suites/contracts/repo/test_docs_parity.py",
+                ),
+            ),
+            _verdict_lane(
+                name="harness",
+                selected=selection.harness,
+                required=selection.harness,
+                advisory=False,
+                result=results.harness,
+                artifact_names=("harness-runs",),
+                follow_up_commands=("make run-harness",),
+            ),
+            _verdict_lane(
+                name="compatibility_matrix",
+                selected=selection.compatibility_matrix,
+                required=selection.compatibility_matrix,
+                advisory=False,
+                result=results.compatibility_matrix,
+                artifact_names=(),
+                follow_up_commands=("uv run pytest -q",),
+            ),
+            _verdict_lane(
+                name="memory_plugin",
+                selected=selection.memory_plugin,
+                required=selection.memory_plugin,
+                advisory=False,
+                result=results.memory_plugin,
+                artifact_names=(),
+                follow_up_commands=(
+                    "npm --prefix platform/plugins/strongclaw-hypermemory run test:openclaw-host",
+                ),
+            ),
+            _verdict_lane(
+                name="fresh_host_pr_fast",
+                selected=selection.fresh_host,
+                required=selection.fresh_host,
+                advisory=False,
+                result=results.fresh_host_pr_fast,
+                artifact_names=(
+                    "linux-fresh-host-artifacts-openclaw-default",
+                    "linux-fresh-host-artifacts-hypermemory",
+                ),
+                follow_up_commands=(
+                    "Review hosted fresh-host artifacts; no local Docker mandate.",
+                ),
+            ),
+            _verdict_lane(
+                name="security",
+                selected=selection.security,
+                required=selection.security,
+                advisory=False,
+                result=results.security,
+                artifact_names=("security-artifacts",),
+                follow_up_commands=("make ci",),
+            ),
+            _verdict_lane(
+                name="dependency_review",
+                selected=selection.dependency_review,
+                required=False,
+                advisory=True,
+                result=results.dependency_review,
+                artifact_names=(),
+                follow_up_commands=("Review Dependency Review Advisory job summary.",),
+            ),
+        ],
+        "nextCommands": [
+            "uv run pytest -q tests/suites/contracts/repo tests/suites/unit/ci",
+            "uv run pre-commit run actionlint --all-files",
+        ],
+    }
+
+
+def _verdict_lane(
+    *,
+    name: str,
+    selected: bool,
+    required: bool,
+    advisory: bool,
+    result: str,
+    artifact_names: tuple[str, ...],
+    follow_up_commands: tuple[str, ...],
+) -> dict[str, object]:
+    """Return one compact verdict lane entry."""
+    skipped = result == "skipped"
+    return {
+        "name": name,
+        "selected": selected,
+        "required": required,
+        "advisory": advisory,
+        "skipped": skipped,
+        "result": result,
+        "artifactNames": list(artifact_names),
+        "followUpCommands": list(follow_up_commands),
+    }
 
 
 def write_github_output(entries: dict[str, str], *, github_output_file: Path | None) -> None:

@@ -25,6 +25,18 @@ def test_security_and_upstream_workflows_use_central_quality_gate() -> None:
         assert "python -m compileall -q src tests" not in workflow
 
 
+def test_make_ci_wraps_central_quality_gate_without_mutating_hooks() -> None:
+    """Local CI should mirror the central quality gate without formatting edits."""
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "ci: ## Run the non-mutating local CI mirror." in makefile
+    assert "$(RUN) python -m clawops supply-chain --repo-root . quality-gate" in makefile
+    ci_block = makefile.split("ci: ## Run the non-mutating local CI mirror.", maxsplit=1)[1]
+    ci_block = ci_block.split("\n\ntest:", maxsplit=1)[0]
+    assert "pre-commit" not in ci_block
+    assert "ruff check --fix" not in ci_block
+
+
 def test_release_workflow_runs_quality_gate_before_publish() -> None:
     workflow = yaml.safe_load(_workflow_text("release.yml"))
     jobs = workflow["jobs"]
@@ -45,6 +57,7 @@ def test_release_workflow_runs_quality_gate_before_publish() -> None:
     )
     assert "release-quality-gate" in publish_job["needs"]
     assert "release-runtime-readiness" in publish_job["needs"]
+    assert publish_job["environment"] == "release"
 
 
 def test_quality_gate_workflows_install_shellcheck_before_gate() -> None:

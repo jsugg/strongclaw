@@ -19,7 +19,9 @@ from tests.utils.helpers._ci_workflows.release import (  # noqa: E402
     publish_github_release,
     run_release_runtime_readiness,
     verify_release_artifacts,
+    verify_release_tag_preflight,
     verify_tag_version_parity,
+    write_release_metadata,
 )
 
 
@@ -44,6 +46,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     tag_parser.add_argument("--tag", required=True)
     tag_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
 
+    tag_preflight_parser = subparsers.add_parser(
+        "verify-tag-preflight",
+        help="Assert that the release tag is on main and has a passing Verdict check.",
+    )
+    tag_preflight_parser.add_argument("--tag", required=True)
+    tag_preflight_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    tag_preflight_parser.add_argument("--repository")
+
     readiness_parser = subparsers.add_parser(
         "runtime-readiness",
         help="Run release runtime-readiness command checks.",
@@ -57,6 +67,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     publish_parser.add_argument("--tag", required=True)
     publish_parser.add_argument("--dist-dir", type=Path, required=True)
     publish_parser.add_argument("--sbom-path", type=Path, required=True)
+
+    metadata_parser = subparsers.add_parser(
+        "write-release-metadata",
+        help="Write the release manifest and checksum assets.",
+    )
+    metadata_parser.add_argument("--tag", required=True)
+    metadata_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    metadata_parser.add_argument("--dist-dir", type=Path, required=True)
+    metadata_parser.add_argument("--sbom-path", type=Path, required=True)
 
     return parser.parse_args(argv)
 
@@ -77,6 +96,14 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root=Path(args.repo_root).expanduser().resolve(),
             )
             return 0
+        if args.command == "verify-tag-preflight":
+            repository = None if args.repository is None else str(args.repository)
+            verify_release_tag_preflight(
+                tag=str(args.tag),
+                repo_root=Path(args.repo_root).expanduser().resolve(),
+                repository=repository,
+            )
+            return 0
         if args.command == "runtime-readiness":
             run_release_runtime_readiness(repo_root=Path(args.repo_root).expanduser().resolve())
             return 0
@@ -85,6 +112,14 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.tag),
                 Path(args.dist_dir).expanduser().resolve(),
                 Path(args.sbom_path).expanduser().resolve(),
+            )
+            return 0
+        if args.command == "write-release-metadata":
+            write_release_metadata(
+                tag=str(args.tag),
+                repo_root=Path(args.repo_root).expanduser().resolve(),
+                dist_dir=Path(args.dist_dir).expanduser().resolve(),
+                sbom_path=Path(args.sbom_path).expanduser().resolve(),
             )
             return 0
     except CiWorkflowError as exc:

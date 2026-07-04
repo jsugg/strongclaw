@@ -35,10 +35,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: read
   contents: read
-  pull-requests: write
-  security-events: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -76,6 +73,11 @@ jobs:
 
   security-scans:
     name: Security Scans
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      security-events: write
     uses: ./.github/workflows/security.yml
     secrets: inherit
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from tests.utils.helpers._ci_workflows.change_router import (  # noqa: E402
     load_ci_gate_filters,
     parse_output_file_list,
     render_selection_summary,
+    render_verdict_json,
     render_verdict_summary,
     selection_from_filter_matches,
     selection_from_output_flags,
@@ -67,7 +69,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verdict.add_argument("--memory-plugin-result", required=True)
     verdict.add_argument("--fresh-host-pr-fast-result", required=True)
     verdict.add_argument("--security-result", required=True)
+    verdict.add_argument("--dependency-review-result", required=True)
     verdict.add_argument("--github-summary-file", type=Path)
+    verdict.add_argument("--verdict-json-file", type=Path)
 
     run_docs_parity = subparsers.add_parser(
         "run-docs-parity",
@@ -82,6 +86,7 @@ def _add_lane_flag_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docs-only", required=True)
     parser.add_argument("--fresh-host", required=True)
     parser.add_argument("--security", required=True)
+    parser.add_argument("--dependency-review", required=True)
     parser.add_argument("--harness", required=True)
     parser.add_argument("--memory-plugin", required=True)
     parser.add_argument("--compatibility-matrix", required=True)
@@ -91,6 +96,7 @@ def _add_lane_file_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--docs-only-files", default="[]")
     parser.add_argument("--fresh-host-files", default="[]")
     parser.add_argument("--security-files", default="[]")
+    parser.add_argument("--dependency-review-files", default="[]")
     parser.add_argument("--harness-files", default="[]")
     parser.add_argument("--memory-plugin-files", default="[]")
     parser.add_argument("--compatibility-matrix-files", default="[]")
@@ -130,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             docs_only=str(args.docs_only),
             fresh_host=str(args.fresh_host),
             security=str(args.security),
+            dependency_review=str(args.dependency_review),
             harness=str(args.harness),
             memory_plugin=str(args.memory_plugin),
             compatibility_matrix=str(args.compatibility_matrix),
@@ -150,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                     docs_only_files=str(args.docs_only_files),
                     fresh_host_files=str(args.fresh_host_files),
                     security_files=str(args.security_files),
+                    dependency_review_files=str(args.dependency_review_files),
                     harness_files=str(args.harness_files),
                     memory_plugin_files=str(args.memory_plugin_files),
                     compatibility_matrix_files=str(args.compatibility_matrix_files),
@@ -159,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                     "docs_only": str(selection.docs_only).lower(),
                     "fresh_host": str(selection.fresh_host).lower(),
                     "security": str(selection.security).lower(),
+                    "dependency_review": str(selection.dependency_review).lower(),
                     "harness": str(selection.harness).lower(),
                     "memory_plugin": str(selection.memory_plugin).lower(),
                     "compatibility_matrix": str(selection.compatibility_matrix).lower(),
@@ -190,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
                 memory_plugin=str(args.memory_plugin_result),
                 fresh_host_pr_fast=str(args.fresh_host_pr_fast_result),
                 security=str(args.security_result),
+                dependency_review=str(args.dependency_review_result),
             )
             success, failures = evaluate_verdict(selection=selection, results=results)
             write_github_summary(
@@ -204,6 +214,21 @@ def main(argv: list[str] | None = None) -> int:
                     else None
                 ),
             )
+            if args.verdict_json_file is not None:
+                verdict_json_file = Path(args.verdict_json_file).expanduser().resolve()
+                verdict_json_file.write_text(
+                    json.dumps(
+                        render_verdict_json(
+                            selection=selection,
+                            results=results,
+                            failures=failures,
+                        ),
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
             return 0 if success else 1
 
     except CiWorkflowError as exc:

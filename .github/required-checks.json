@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "repository": "jsugg/strongclaw",
+  "branch": "main",
+  "trustedAuditOnly": true,
+  "requiredContexts": [
+    {
+      "context": "Verdict",
+      "appId": 15368,
+      "workflow": ".github/workflows/ci-gate.yml",
+      "jobId": "verdict",
+      "jobName": "Verdict",
+      "uiLabel": "CI / Verdict"
+    }
+  ],
+  "branchProtection": {
+    "requiredStatusChecks": {
+      "strict": true,
+      "contexts": ["Verdict"]
+    },
+    "allowForcePushes": false,
+    "allowDeletions": false,
+    "requiredConversationResolution": true,
+    "enforceAdmins": false,
+    "pullRequestReviews": {
+      "requiredApprovingReviewCount": 1,
+      "requireCodeOwnerReviews": true,
+      "soloMaintainerRationale": "Non-admin contributors require one @jsugg CODEOWNER approval; enforceAdmins=false preserves the sole-admin break-glass path without weakening contributor review."
+    }
+  },
+  "doNotRequire": [
+    "Classify Changes",
+    "Docs Parity",
+    "Policy Harness Smoke Tests",
+    "Compatibility Matrix",
+    "Memory Plugin Integration Checks",
+    "Fresh Host PR Fast",
+    "Repository Security Analysis"
+  ],
+  "rollback": {
+    "source": ".local/live-config-snapshots",
+    "restore": "Reapply the captured branch-protection JSON or relax only the review/CODEOWNER sub-rule if the solo-maintainer path deadlocks."
+  }
+}

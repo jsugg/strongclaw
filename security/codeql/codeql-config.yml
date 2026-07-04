@@ -4,5 +4,6 @@ paths:
   - platform/plugins
 paths-ignore:
   - src/clawops/assets
+  - platform/plugins/memory-lancedb-pro
   - platform/compose/state
   - platform/skills/quarantine
