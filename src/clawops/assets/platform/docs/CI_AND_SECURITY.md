@@ -65,10 +65,10 @@ the exact API context `Verdict`.
 - Heavy CI lanes are orchestrated as reusable workflow calls from the gate:
 `harness.yml`, `compatibility-matrix.yml`, `memory-plugin-verification.yml`,
 `fresh-host-acceptance.yml`, and `security.yml`.
-- Dependency manifest and lockfile pull requests also run an advisory
-  `Dependency Review Advisory` lane through GitHub's dependency-review action.
-  It is path-selected and `continue-on-error` while the repository calibrates
-  native alert noise; `Verdict` remains the only required status context.
+- Dependency manifest and lockfile pull requests also run the blocking
+  `Dependency Review` lane. It runs GitHub's dependency-review action and audits
+  the resolved `uv.lock` export so vulnerable or unresolvable dependency state
+  fails before merge.
 - Stage ordering keeps fast signals first (`harness`, `compatibility_matrix`,
 `memory_plugin`) and gates long lanes (`fresh_host`, `security`) on stage-one
 success.

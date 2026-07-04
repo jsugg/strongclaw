@@ -158,8 +158,8 @@ def test_evidence_from_changed_paths_uses_repo_filter_logic() -> None:
     assert "platform/docs/CI_AND_SECURITY.md" in evidence.docs_only
 
 
-def test_verdict_json_records_selected_required_and_advisory_lanes() -> None:
-    """The compact verdict artifact should expose required and advisory lane state."""
+def test_verdict_json_records_selected_required_lanes() -> None:
+    """The compact verdict artifact should expose required lane state."""
     selection = CiGateSelection(
         docs_only=False,
         fresh_host=False,
@@ -194,5 +194,33 @@ def test_verdict_json_records_selected_required_and_advisory_lanes() -> None:
 
     assert payload["requiredStatusContext"] == "Verdict"
     assert lane_by_name["security"]["required"] is True
-    assert lane_by_name["dependency_review"]["advisory"] is True
-    assert lane_by_name["dependency_review"]["required"] is False
+    assert lane_by_name["dependency_review"]["advisory"] is False
+    assert lane_by_name["dependency_review"]["required"] is True
+
+
+def test_selected_dependency_review_failure_blocks_verdict() -> None:
+    """Dependency surfaces must not merge when resolved dependency audit fails."""
+    selection = CiGateSelection(
+        docs_only=False,
+        fresh_host=False,
+        security=False,
+        dependency_review=True,
+        harness=False,
+        memory_plugin=False,
+        compatibility_matrix=False,
+    )
+    results = build_results(
+        classify="success",
+        docs_parity="skipped",
+        harness="skipped",
+        compatibility_matrix="skipped",
+        memory_plugin="skipped",
+        fresh_host_pr_fast="skipped",
+        security="skipped",
+        dependency_review="failure",
+    )
+
+    success, failures = evaluate_verdict(selection=selection, results=results)
+
+    assert success is False
+    assert failures == ("dependency_review is required but finished with result='failure'",)

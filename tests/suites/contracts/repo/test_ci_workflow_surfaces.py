@@ -155,15 +155,15 @@ def test_ci_gate_workflow_runs_on_pull_requests_main_push_and_emits_verdict() ->
     assert "predicate-quantifier:" not in text
 
 
-def test_ci_gate_dependency_review_is_advisory_and_path_selected() -> None:
-    """Dependency review should run on dependency PRs without becoming required yet."""
+def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
+    """Dependency review should block dependency PRs with vulnerable lock output."""
     workflow = yaml.safe_load(_workflow_text("ci-gate.yml"))
     jobs = cast(dict[str, object], workflow["jobs"])
     dependency_review = cast(dict[str, object], jobs["dependency_review"])
     dependency_review_steps = cast(list[dict[str, object]], dependency_review["steps"])
     filters_text = _ci_gate_filters_text()
 
-    assert dependency_review["name"] == "Dependency Review Advisory"
+    assert dependency_review["name"] == "Dependency Review"
     assert (
         dependency_review["if"]
         == "github.event_name == 'pull_request' && needs.classify.outputs.dependency_review == 'true'"
@@ -176,6 +176,15 @@ def test_ci_gate_dependency_review_is_advisory_and_path_selected() -> None:
         step.get("uses")
         == "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
         and step.get("continue-on-error") is True
+        for step in dependency_review_steps
+    )
+    assert any(
+        step.get("uses") == "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78"
+        for step in dependency_review_steps
+    )
+    assert any(
+        str(step.get("run", ""))
+        == "uv run python3 ./tests/scripts/ci_gate.py run-dependency-audit --repo-root ."
         for step in dependency_review_steps
     )
     assert "dependency_review:" in filters_text

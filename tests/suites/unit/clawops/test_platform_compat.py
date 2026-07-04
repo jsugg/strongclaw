@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from clawops.platform_compat import (
-    DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT,
     DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION,
     DEFAULT_MANAGED_PROJECT_PYTHON_VERSION,
     DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
@@ -64,19 +63,16 @@ def test_build_compatibility_record_reports_when_override_is_required() -> None:
     assert record["memory_plugin_lancedb_version"] == DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_default_lancedb_version"] == DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION
     assert record["memory_plugin_override_required"] is True
-    assert record["hypermemory_local_rerank_supported"] is True
-    assert (
-        record["hypermemory_local_rerank_torch_constraint"]
-        == DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
-    )
-    assert record["hypermemory_local_rerank_requires_http_fallback"] is False
+    assert record["hypermemory_local_rerank_supported"] is False
+    assert record["hypermemory_local_rerank_torch_constraint"] is None
+    assert record["hypermemory_local_rerank_requires_http_fallback"] is True
 
 
 def test_local_rerank_support_matrix_tracks_known_host_python_combinations() -> None:
     assert supports_hypermemory_local_rerank(HostPlatform("darwin", "arm64"), python_version="3.13")
     assert supports_hypermemory_local_rerank(HostPlatform("linux", "x86_64"), python_version="3.13")
     assert supports_hypermemory_local_rerank(HostPlatform("linux", "arm64"), python_version="3.12")
-    assert supports_hypermemory_local_rerank(
+    assert not supports_hypermemory_local_rerank(
         HostPlatform("darwin", "x86_64"),
         python_version="3.12",
     )
@@ -116,7 +112,7 @@ def test_local_rerank_constraint_tracks_supported_host_specific_pins() -> None:
             HostPlatform("darwin", "x86_64"),
             python_version="3.12",
         )
-        == DARWIN_X64_LOCAL_RERANK_TORCH_CONSTRAINT
+        is None
     )
     assert (
         resolve_hypermemory_local_rerank_torch_constraint(

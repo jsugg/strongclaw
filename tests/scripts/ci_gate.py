@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +80,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     run_docs_parity.add_argument("--repo-root", type=Path, required=True)
 
+    run_dependency_audit = subparsers.add_parser(
+        "run-dependency-audit",
+        help="Audit the resolved Python dependency lock for known vulnerabilities.",
+    )
+    run_dependency_audit.add_argument("--repo-root", type=Path, required=True)
+
     return parser.parse_args(argv)
 
 
@@ -130,6 +137,40 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 cwd=repo_root,
             )
+            return 0
+
+        if args.command == "run-dependency-audit":
+            repo_root = Path(args.repo_root).expanduser().resolve()
+            with tempfile.TemporaryDirectory(prefix="strongclaw-dependency-audit-") as temp_dir:
+                requirements_file = Path(temp_dir) / "requirements.txt"
+                run_checked(
+                    [
+                        "uv",
+                        "export",
+                        "--format",
+                        "requirements.txt",
+                        "--frozen",
+                        "--no-emit-project",
+                        "--no-hashes",
+                        "--output-file",
+                        requirements_file.as_posix(),
+                    ],
+                    cwd=repo_root,
+                    timeout_seconds=300,
+                )
+                run_checked(
+                    [
+                        "uvx",
+                        "--from",
+                        "pip-audit==2.10.1",
+                        "pip-audit",
+                        "--strict",
+                        "--requirement",
+                        requirements_file.as_posix(),
+                    ],
+                    cwd=repo_root,
+                    timeout_seconds=300,
+                )
             return 0
 
         selection = selection_from_output_flags(

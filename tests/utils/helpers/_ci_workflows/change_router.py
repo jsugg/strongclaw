@@ -296,6 +296,7 @@ def evaluate_verdict(
         "memory_plugin": (selection.memory_plugin, results.memory_plugin),
         "fresh_host_pr_fast": (selection.fresh_host, results.fresh_host_pr_fast),
         "security": (selection.security, results.security),
+        "dependency_review": (selection.dependency_review, results.dependency_review),
     }
     for lane_name, (required, result) in required_lanes.items():
         if required and result != "success":
@@ -503,11 +504,11 @@ def render_verdict_json(
             _verdict_lane(
                 name="dependency_review",
                 selected=selection.dependency_review,
-                required=False,
-                advisory=True,
+                required=selection.dependency_review,
+                advisory=False,
                 result=results.dependency_review,
                 artifact_names=(),
-                follow_up_commands=("Review Dependency Review Advisory job summary.",),
+                follow_up_commands=("Review Dependency Review job summary.",),
             ),
         ],
         "nextCommands": [
