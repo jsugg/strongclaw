@@ -145,6 +145,13 @@ sidecars and browser-lab mutable data live in Docker-managed volumes instead of 
 macOS path without changing the required PR gate.
 - The workflow stays declarative by delegating runtime setup, image warming,
 diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Compose image availability is verified with bounded retries and heartbeat logging.
+- Hosted macOS repo-local stack activation is reconciled once after any failed
+  `up`: the helper removes partial containers, re-probes the Docker backend, and
+  retries the idempotent activation. A repeated failure remains blocking.
+- Diagnostic, summary, artifact, and final runner-cleanup steps are best-effort
+  observers; they remain visible in the job log but cannot replace the scenario's
+  pass/fail result. macOS artifacts include OrbStack unified logs, runtime version
+  and status, Docker state, disk usage, and VM memory statistics.
 - `.github/workflows/nightly.yml` warms the fresh-host caches before it calls the reusable fresh-host core lane for the scheduled validation sweep.
 - Repository workflow contract tests verify that shell steps invoking
 `tests/scripts/*.py` either call an explicit Python interpreter or target an executable script, so nightly cache warming cannot silently regress on file mode drift.

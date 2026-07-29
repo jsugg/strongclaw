@@ -1350,6 +1350,81 @@ def test_macos_sidecars_exercise_leaves_stack_running_when_channels_runtime_foll
     assert verify_kwargs["repo_local_state"] is True
 
 
+def test_macos_sidecars_retry_reclaims_stack_and_reprobes_docker(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A failed repo-local startup should recover once before surfacing the failure."""
+    github_env = tmp_path / "github.env"
+    runner_temp = tmp_path / "runner-temp"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.apply_profiles("fresh_host_macos_orbstack")
+    context = fresh_host.prepare_context(
+        scenario_id="macos-sidecars",
+        repo_root=workspace,
+        runner_temp=runner_temp,
+        workspace=workspace,
+        github_env_file=github_env,
+    )
+    calls: list[str] = []
+    retry_codes: list[int] = []
+
+    def fake_wait_for_docker_backend(*, cwd: Path, env: dict[str, str]) -> None:
+        del env
+        calls.append(f"wait:{cwd}")
+
+    def fake_best_effort(command: list[str], *, cwd: Path, env: dict[str, str]) -> str | None:
+        del cwd, env
+        calls.append("recover:" + " ".join(command))
+        return None
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+        timeout_seconds: int = 3600,
+        check: bool = True,
+        retries: int = 0,
+        retry_on_exit_codes: object = (),
+        on_retry: object = None,
+    ) -> None:
+        del cwd, env, timeout_seconds, check
+        calls.append("run:" + " ".join(command))
+        assert retries == 1
+        assert isinstance(retry_on_exit_codes, tuple)
+        retry_codes.extend(cast(tuple[int, ...], retry_on_exit_codes))
+        assert callable(on_retry)
+        on_retry()
+
+    def fake_verify_sidecars(compose_file: Path, **kwargs: object) -> None:
+        del kwargs
+        calls.append(f"verify:{compose_file.name}")
+
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "wait_for_docker_backend",
+        new=fake_wait_for_docker_backend,
+    )
+    test_context.patch.patch_object(fresh_host_macos, "best_effort", new=fake_best_effort)
+    test_context.patch.patch_object(fresh_host_macos, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(
+        fresh_host_macos,
+        "verify_sidecar_services_running",
+        new=fake_verify_sidecars,
+    )
+
+    fresh_host_macos.exercise_macos_sidecars(context)
+
+    assert retry_codes == [1, *fresh_host_shell.TRANSIENT_KILL_EXIT_CODES]
+    assert calls[0].startswith("wait:")
+    assert calls[1].endswith("sidecars up --repo-local-state")
+    assert calls[2].endswith("sidecars down --repo-local-state")
+    assert calls[3].startswith("wait:")
+    assert calls[4] == "verify:docker-compose.aux-stack.ci-hosted-macos.yaml"
+
+
 def test_macos_sidecars_exercise_brings_stack_down_when_no_channels_runtime_follows(
     tmp_path: Path,
     test_context: TestContext,

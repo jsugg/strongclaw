@@ -714,7 +714,10 @@ def test_collect_runtime_diagnostics_uses_compose_probe_env(
     command_names = {" ".join(command) for command, _env in commands}
     assert "docker context ls" in command_names
     assert "orb status" in command_names
-    assert "orb logs" in command_names
+    assert "orb version" in command_names
+    assert any(command.startswith("/usr/bin/log show") for command in command_names)
+    assert "vm_stat" in command_names
+    assert "df -h" in command_names
     compose_commands = [
         env for command, env in commands if command[:3] == ["docker", "compose", "-f"]
     ]

@@ -71,9 +71,11 @@ jobs:
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect Linux fresh-host diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Write Linux fresh-host summary
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
@@ -192,12 +194,15 @@ jobs:
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect hosted macOS Docker diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Collect macOS fresh-host diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Write macOS fresh-host summary
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}
@@ -215,4 +220,5 @@ jobs:
           include-hidden-files: true
       - name: Clean up macOS fresh-host context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
