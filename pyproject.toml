@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69.0.0", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,7 +24,7 @@ dependencies = [
   "opentelemetry-sdk>=1.29.0",
   "opentelemetry-exporter-otlp>=1.29.0",
   "sentence-transformers==5.3.0; ((((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14'))",
-  "torch==2.12.1; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
+  "torch==2.13.0; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
 ]
 authors = [
   {name = "Juan P. Sugg", email = "juanpedrosugg@gmail.com"}
@@ -80,6 +80,10 @@ where = ["src"]
 
 [tool.uv]
 default-groups = ["dev"]
+constraint-dependencies = [
+  "click>=8.3.3",
+  "setuptools>=83.0.0",
+]
 
 [tool.ruff]
 target-version = "py312"

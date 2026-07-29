@@ -19,6 +19,7 @@ def test_dependabot_tracks_runtime_update_surfaces() -> None:
     by_ecosystem = {str(entry["package-ecosystem"]): entry for entry in updates}
 
     assert by_ecosystem["uv"]["directory"] == "/"
+    assert by_ecosystem["uv"]["versioning-strategy"] == "increase"
     assert by_ecosystem["github-actions"]["directory"] == "/"
     assert by_ecosystem["docker-compose"]["directories"] == [
         "/platform/compose",

@@ -69,6 +69,9 @@ the exact API context `Verdict`.
   `Dependency Review` lane. It runs GitHub's dependency-review action and audits
   the resolved `uv.lock` export so vulnerable or unresolvable dependency state
   fails before merge.
+- The `uv` Dependabot lane uses `versioning-strategy: increase` so exact
+  compatibility pins move to the selected version instead of producing
+  overlapping old/new requirements during lock regeneration.
 - Stage ordering keeps fast signals first (`harness`, `compatibility_matrix`,
 `memory_plugin`) and gates long lanes (`fresh_host`, `security`) on stage-one
 success.
