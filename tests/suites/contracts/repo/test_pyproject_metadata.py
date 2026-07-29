@@ -42,7 +42,21 @@ def test_rerank_dependency_markers_cover_supported_host_matrix() -> None:
     ]
     assert numpy_deps == []
     assert torch_deps == [
-        "torch==2.12.1; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
+        "torch==2.13.0; (((sys_platform == 'darwin' and (platform_machine == 'arm64' or platform_machine == 'aarch64')) or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'linux' and platform_machine == 'aarch64') or (sys_platform == 'linux' and platform_machine == 'arm64')) and python_version >= '3.12' and python_version < '3.14')",
+    ]
+
+
+def test_dependency_security_floors_cover_build_and_transitive_runtime_tools() -> None:
+    """Known-safe floors should constrain both build and resolved runtime dependencies."""
+    payload = _pyproject()
+    build_system = as_mapping(payload["build-system"], path="pyproject.build-system")
+    assert build_system["requires"] == ["setuptools>=83.0.0", "wheel"]
+
+    tool_config = as_mapping(payload["tool"], path="pyproject.tool")
+    uv_config = as_mapping(tool_config["uv"], path="pyproject.tool.uv")
+    assert uv_config["constraint-dependencies"] == [
+        "click>=8.3.3",
+        "setuptools>=83.0.0",
     ]
 
 
