@@ -77,7 +77,20 @@ def collect_runtime_diagnostics_for_context(
             "{{json .}}",
         ],
         resolved_diagnostics_dir / "orb-status.txt": ["orb", "status"],
-        resolved_diagnostics_dir / "orb-logs.txt": ["orb", "logs"],
+        resolved_diagnostics_dir / "orb-version.txt": ["orb", "version"],
+        resolved_diagnostics_dir
+        / "orbstack-unified.log": [
+            "/usr/bin/log",
+            "show",
+            "--style",
+            "compact",
+            "--last",
+            "30m",
+            "--predicate",
+            'process CONTAINS[c] "OrbStack" OR subsystem CONTAINS[c] "orbstack"',
+        ],
+        resolved_diagnostics_dir / "vm-stat.txt": ["vm_stat"],
+        resolved_diagnostics_dir / "disk-usage.txt": ["df", "-h"],
     }
     if context.compose_files:
         primary_compose_file = context.compose_files[0]

@@ -482,6 +482,36 @@ def test_fresh_host_core_workflow_preserves_current_macos_matrix_and_variant_sup
     assert "scenario_id: macos-browser-lab" in text
 
 
+def test_fresh_host_observability_and_cleanup_steps_do_not_override_scenario_results() -> None:
+    """Best-effort reporting and cleanup must not turn a passing scenario red."""
+    jobs = _workflow_jobs("fresh-host-core.yml")
+    expected_steps = {
+        "linux-fresh-host": {
+            "Collect Linux fresh-host diagnostics",
+            "Write Linux fresh-host summary",
+        },
+        "macos-fresh-host": {
+            "Collect hosted macOS Docker diagnostics",
+            "Collect macOS fresh-host diagnostics",
+            "Write macOS fresh-host summary",
+            "Clean up macOS fresh-host context",
+        },
+    }
+
+    for job_name, expected_names in expected_steps.items():
+        job = _as_str_object_dict(jobs.get(job_name))
+        assert job is not None, job_name
+        steps = job.get("steps")
+        assert isinstance(steps, list), job_name
+        by_name = {
+            str(step.get("name")): step
+            for raw_step in cast(list[object], steps)
+            if (step := _as_str_object_dict(raw_step)) is not None and step.get("name")
+        }
+        for step_name in expected_names:
+            assert by_name[step_name].get("continue-on-error") is True
+
+
 def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     """Fresh-host core should keep the current package cache restores."""
     text = _workflow_text("fresh-host-core.yml")

@@ -29,6 +29,9 @@ from tests.utils.helpers._fresh_host.shell import (
 from tests.utils.helpers._fresh_host.storage import log
 
 HOSTED_MACOS_SIDECAR_STARTUP_TIMEOUT_SECONDS = 300
+# `docker compose up` collapses daemon transport failures into exit 1. The command is
+# idempotent, so one cleanup-backed retry is safe; deterministic failures still surface.
+RETRYABLE_REPO_LOCAL_UP_EXIT_CODES: tuple[int, ...] = (1, *TRANSIENT_KILL_EXIT_CODES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,11 +253,12 @@ def verify_macos_launchd(context: FreshHostContext) -> None:
             raise FreshHostError(f"launchd state check failed for {target}")
 
 
-def _reclaim_repo_local_stack(down_command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
-    """Tear a partially-started repo-local stack down to reclaim memory before a retry."""
+def _recover_repo_local_stack(down_command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
+    """Reclaim a partial stack and verify Docker readiness before retrying."""
     warning = best_effort(down_command, cwd=cwd, env=env)
     if warning is not None:
         log(warning)
+    wait_for_docker_backend(cwd=cwd, env=env)
 
 
 def _run_repo_local_cycle(
@@ -284,16 +288,15 @@ def _run_repo_local_cycle(
         "down",
         "--repo-local-state",
     )
-    # Bringing the repo-local stack up is the most memory-intensive step on the
-    # hosted macOS runner; an OS kill (exit 137/143) there is transient pressure,
-    # so retry once after tearing the partial stack down to reclaim memory.
+    # Hosted OrbStack can transiently lose its task-service connection while the
+    # repo-local stack starts. Reconcile once after cleanup and a fresh backend probe.
     run_command(
         up_command,
         cwd=repo_root,
         env=env,
         retries=1,
-        retry_on_exit_codes=TRANSIENT_KILL_EXIT_CODES,
-        on_retry=lambda: _reclaim_repo_local_stack(down_command, cwd=repo_root, env=env),
+        retry_on_exit_codes=RETRYABLE_REPO_LOCAL_UP_EXIT_CODES,
+        on_retry=lambda: _recover_repo_local_stack(down_command, cwd=repo_root, env=env),
     )
     if component == "sidecars":
         verify_sidecar_services_running(
