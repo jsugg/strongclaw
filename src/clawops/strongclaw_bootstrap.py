@@ -78,7 +78,10 @@ def _apt_command(arguments: Sequence[str]) -> list[str]:
         f"Acquire::https::Timeout={_APT_ACQUIRE_TIMEOUT_SECONDS}",
         f"Acquire::ftp::Timeout={_APT_ACQUIRE_TIMEOUT_SECONDS}",
     )
-    return ["sudo", *(f"-o{option}" for option in acquire_options), "apt-get", *arguments]
+    # NOTE: the `-o` acquire options are apt-get flags and MUST follow `apt-get`.
+    # Placing them before it makes `sudo` consume them (`sudo: invalid option -- 'o'`),
+    # which is why the original ordering never ran apt-get at all.
+    return ["sudo", "apt-get", *(f"-o{option}" for option in acquire_options), *arguments]
 
 
 def _pin_apt_mirror() -> None:

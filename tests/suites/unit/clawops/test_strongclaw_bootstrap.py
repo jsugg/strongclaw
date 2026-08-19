@@ -700,8 +700,12 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
             ]
         ),
     ]
+    # The acquire options are apt-get flags and must follow "apt-get", not sudo,
+    # or sudo consumes them ("sudo: invalid option -- 'o'"). Assert position, not
+    # just presence.
+    assert recorded_commands[0][:2] == ["sudo", "apt-get"]
     tested_acquire_args: list[str] = [
-        arg for arg in recorded_commands[0] if arg.startswith("-o")
+        arg for arg in recorded_commands[0][2:] if arg.startswith("-o")
     ]
     assert tested_acquire_args == ["-o" + o for o in (
         "Acquire::Retries=3",
@@ -771,3 +775,16 @@ def test_pin_apt_mirror_prefers_stable_mirror_over_azure(test_context: TestConte
         expression = sed_command[3]
         assert "azure.archive.ubuntu.com" in expression
         assert "archive.ubuntu.com" in expression
+
+
+def test_apt_command_orders_acquire_flags_after_apt_get() -> None:
+    """Acquire options must follow `apt-get`, not sudo, or sudo rejects them."""
+    assert strongclaw_bootstrap._apt_command(["update"]) == [
+        "sudo",
+        "apt-get",
+        "-oAcquire::Retries=3",
+        "-oAcquire::http::Timeout=20",
+        "-oAcquire::https::Timeout=20",
+        "-oAcquire::ftp::Timeout=20",
+        "update",
+    ]
