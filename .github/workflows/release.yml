@@ -27,7 +27,8 @@ jobs:
           version: "0.10.9"
           enable-cache: true
       - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+        timeout-minutes: 5
+        run: command -v shellcheck >/dev/null 2>&1 || curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" | sudo tar -xJv -C /usr/local/bin --strip-components=1 shellcheck-stable/shellcheck || sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
       - name: Run repository quality gate
         run: uv run python -m clawops supply-chain --repo-root . quality-gate
