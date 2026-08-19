@@ -707,12 +707,15 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
     tested_acquire_args: list[str] = [
         arg for arg in recorded_commands[0][2:] if arg.startswith("-o")
     ]
-    assert tested_acquire_args == ["-o" + o for o in (
-        "Acquire::Retries=3",
-        "Acquire::http::Timeout=20",
-        "Acquire::https::Timeout=20",
-        "Acquire::ftp::Timeout=20",
-    )]
+    assert tested_acquire_args == [
+        "-o" + o
+        for o in (
+            "Acquire::Retries=3",
+            "Acquire::http::Timeout=20",
+            "Acquire::https::Timeout=20",
+            "Acquire::ftp::Timeout=20",
+        )
+    ]
     assert recorded_commands[-1] == [
         "sudo",
         "npm",
