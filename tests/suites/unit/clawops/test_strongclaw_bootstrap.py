@@ -1,6 +1,8 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import pathlib
+import subprocess
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
 from typing import Any, cast
@@ -675,21 +677,30 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
     assert payload["dockerInstalledByBootstrap"] is True
     assert repair_calls == ["solo-dev"]
     assert recorded_commands[:2] == [
-        ["sudo", "apt-get", "update"],
-        [
-            "sudo",
-            "apt-get",
-            "install",
-            "-y",
-            "python3",
-            "python3-pip",
-            "sqlite3",
-            "curl",
-            "unzip",
-            "ca-certificates",
-            "gnupg",
-        ],
+        strongclaw_bootstrap._apt_command(["update"]),
+        strongclaw_bootstrap._apt_command(
+            [
+                "install",
+                "-y",
+                "python3",
+                "python3-pip",
+                "sqlite3",
+                "curl",
+                "unzip",
+                "ca-certificates",
+                "gnupg",
+            ]
+        ),
     ]
+    tested_acquire_args: list[str] = [
+        arg for arg in recorded_commands[0] if arg.startswith("-o")
+    ]
+    assert tested_acquire_args == ["-o" + o for o in (
+        "Acquire::Retries=3",
+        "Acquire::http::Timeout=20",
+        "Acquire::https::Timeout=20",
+        "Acquire::ftp::Timeout=20",
+    )]
     assert recorded_commands[-1] == [
         "sudo",
         "npm",
@@ -698,3 +709,57 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         f"openclaw@{strongclaw_bootstrap.DEFAULT_OPENCLAW_VERSION}",
         f"acpx@{strongclaw_bootstrap.DEFAULT_ACPX_VERSION}",
     ]
+
+
+def test_apt_update_retries_timeout_then_raises_after_budget(test_context: TestContext) -> None:
+    """A stalled apt-get update should retry within a bounded budget and then fail fast."""
+    attempts = {"count": 0}
+    sleeps: list[float] = []
+
+    def _raise_timeout(command: Sequence[str], **kwargs: object) -> None:
+        del kwargs
+        assert command[0] == "sudo"
+        attempts["count"] += 1
+        raise subprocess.TimeoutExpired(cmd=list(command), timeout=10.0)
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=_raise_timeout,
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap.time, "sleep", new=sleeps.append)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        strongclaw_bootstrap._apt_update()
+
+    assert attempts["count"] == strongclaw_bootstrap._APT_UPDATE_MAX_ATTEMPTS
+    assert sleeps == [15.0] * (strongclaw_bootstrap._APT_UPDATE_MAX_ATTEMPTS - 1)
+
+
+def test_pin_apt_mirror_prefers_stable_mirror_over_azure(test_context: TestContext) -> None:
+    """Mirror pinning rewrites azure archive references before the apt update runs."""
+    recorded: list[list[str]] = []
+
+    def _record(command: Sequence[str], **kwargs: object) -> None:
+        del kwargs
+        recorded.append(list(command))
+
+    def _present(_self: object) -> bool:
+        return True
+
+    # Treat both candidate source files as present so the rewrite paths are exercised.
+    test_context.patch.patch_object(pathlib.Path, "is_file", new=_present)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_stream_checked",
+        new=_record,
+    )
+
+    strongclaw_bootstrap._pin_apt_mirror()
+
+    sed_commands = [cmd for cmd in recorded if cmd[:3] == ["sudo", "sed", "-i"]]
+    assert len(sed_commands) == 2
+    for sed_command in sed_commands:
+        expression = sed_command[3]
+        assert "azure.archive.ubuntu.com" in expression
+        assert "archive.ubuntu.com" in expression

@@ -8,6 +8,7 @@ import os
 import pathlib
 import platform
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Sequence
@@ -57,6 +58,66 @@ _UV_SYNC_MAX_ATTEMPTS = 3
 _UV_SYNC_RETRY_DELAY_SECONDS = 5
 _NPM_GLOBAL_INSTALL_MAX_ATTEMPTS = 2
 _NPM_GLOBAL_INSTALL_RETRY_DELAY_SECONDS = 15
+# apt's default per-download timeout is effectively unbounded on CI runners, and the
+# regional `azure.archive.ubuntu.com` mirror is frequently unreachable there. Bound the
+# acquire window and cap each phase so a flaky mirror fails fast instead of stalling.
+_APT_ACQUIRE_RETRIES = 3
+_APT_ACQUIRE_TIMEOUT_SECONDS = 20
+_APT_DEFAULT_TIMEOUT_SECONDS = 600
+_APT_UPDATE_MAX_ATTEMPTS = 3
+_APT_UPDATE_RETRY_DELAY_SECONDS = 15
+_UNRELIABLE_APT_MIRROR = "azure.archive.ubuntu.com"
+_STABLE_APT_MIRROR = "archive.ubuntu.com"
+
+
+def _apt_command(arguments: Sequence[str]) -> list[str]:
+    """Build a sudo apt-get argv with bounded, retryable network acquire options."""
+    acquire_options = (
+        f"Acquire::Retries={_APT_ACQUIRE_RETRIES}",
+        f"Acquire::http::Timeout={_APT_ACQUIRE_TIMEOUT_SECONDS}",
+        f"Acquire::https::Timeout={_APT_ACQUIRE_TIMEOUT_SECONDS}",
+        f"Acquire::ftp::Timeout={_APT_ACQUIRE_TIMEOUT_SECONDS}",
+    )
+    return ["sudo", *(f"-o{option}" for option in acquire_options), "apt-get", *arguments]
+
+
+def _pin_apt_mirror() -> None:
+    """Prefer the stable Ubuntu mirror over the unreliable azure archive on CI."""
+    for sources_file in (
+        pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources"),
+        pathlib.Path("/etc/apt/sources.list"),
+    ):
+        if not sources_file.is_file():
+            continue
+        _stream_checked(
+            [
+                "sudo",
+                "sed",
+                "-i",
+                f"s|{_UNRELIABLE_APT_MIRROR}|{_STABLE_APT_MIRROR}|g",
+                str(sources_file),
+            ],
+            timeout_seconds=30,
+        )
+
+
+def _apt_update() -> None:
+    """Refresh apt package indexes, retrying transient mirror failures."""
+    command = _apt_command(["update"])
+    for attempt in range(1, _APT_UPDATE_MAX_ATTEMPTS + 1):
+        try:
+            _stream_checked(command, timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS)
+            return
+        except (subprocess.TimeoutExpired, CommandError) as err:
+            if attempt == _APT_UPDATE_MAX_ATTEMPTS:
+                raise
+            print(
+                f"apt-get update failed (attempt {attempt}/{_APT_UPDATE_MAX_ATTEMPTS}); ",
+                "retrying:",
+                err,
+                file=sys.stderr,
+            )
+            time.sleep(_APT_UPDATE_RETRY_DELAY_SECONDS)
 
 
 def _stream_checked(
@@ -173,7 +234,10 @@ def _ensure_node_runtime_linux() -> None:
         ["bash", "-lc", "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"],
         timeout_seconds=1800,
     )
-    _stream_checked(["sudo", "apt-get", "install", "-y", "nodejs"], timeout_seconds=1800)
+    _stream_checked(
+        _apt_command(["install", "-y", "nodejs"]),
+        timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
+    )
     if not _node_satisfies_minimum():
         raise CommandError("node >= 22.16 is required")
 
@@ -283,8 +347,8 @@ def ensure_docker_compatible_runtime(host_os: str) -> bool:
         if not command_exists("apt-get"):
             raise CommandError("apt-get is required to install Docker on Linux")
         _stream_checked(
-            ["sudo", "apt-get", "install", "-y", "docker.io", "docker-compose-plugin"],
-            timeout_seconds=3600,
+            _apt_command(["install", "-y", "docker.io", "docker-compose-plugin"]),
+            timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
         )
     else:
         raise CommandError(f"unsupported host OS for Docker installation: {host_os}")
@@ -550,29 +614,23 @@ def bootstrap_host(
             or not command_exists("curl")
         ):
             raise CommandError("Linux bootstrap requires sudo, apt-get, and curl")
+        _pin_apt_mirror()
+        _apt_update()
         _stream_checked(
-            [
-                "sudo",
-                "apt-get",
-                "update",
-            ],
-            timeout_seconds=3600,
-        )
-        _stream_checked(
-            [
-                "sudo",
-                "apt-get",
-                "install",
-                "-y",
-                "python3",
-                "python3-pip",
-                "sqlite3",
-                "curl",
-                "unzip",
-                "ca-certificates",
-                "gnupg",
-            ],
-            timeout_seconds=3600,
+            _apt_command(
+                [
+                    "install",
+                    "-y",
+                    "python3",
+                    "python3-pip",
+                    "sqlite3",
+                    "curl",
+                    "unzip",
+                    "ca-certificates",
+                    "gnupg",
+                ]
+            ),
+            timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
         )
         _ensure_node_runtime_linux()
     else:

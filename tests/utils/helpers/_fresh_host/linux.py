@@ -36,7 +36,16 @@ def run_clawops_bootstrap(
         "--profile",
         context.profile,
     ]
-    run_command(full_command, cwd=repo_root, env=env)
+    # Bootstrap can trigger apt/uv/npm work on a fresh host; fail fast and retry once
+    # on a timeout so a transient infra flake does not stall the phase for an hour.
+    run_command(
+        full_command,
+        cwd=repo_root,
+        env=env,
+        timeout_seconds=1800,
+        retries=1,
+        retry_on_timeout=True,
+    )
     return full_command
 
 
