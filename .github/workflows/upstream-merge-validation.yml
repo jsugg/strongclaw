@@ -24,16 +24,7 @@ jobs:
           enable-cache: true
       - name: Install shellcheck
         timeout-minutes: 5
-        run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck --version
-          elif curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" \
-            | sudo tar -xJv -C /usr/local/bin --strip-components=1 shellcheck-stable/shellcheck; then
-            shellcheck --version
-          else
-            sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update \
-              && sudo apt-get install --yes shellcheck
-          fi
+        run: command -v shellcheck >/dev/null 2>&1 || curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz" | sudo tar -xJv -C /usr/local/bin --strip-components=1 shellcheck-stable/shellcheck || sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update && sudo apt-get install --yes shellcheck
       - run: uv sync --locked
       - run: uv run python -m clawops supply-chain --repo-root . quality-gate
       - run: mkdir -p "$RUNNER_TEMP/strongclaw/upstream"
