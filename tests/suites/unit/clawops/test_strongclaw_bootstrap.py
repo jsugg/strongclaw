@@ -549,6 +549,9 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
     def _ensure_node_runtime_linux() -> None:
         return None
 
+    def _pin_apt_mirror() -> None:
+        return None
+
     def _ensure_docker_compatible_runtime(_host_os: str) -> bool:
         return True
 
@@ -617,6 +620,11 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         strongclaw_bootstrap,
         "_ensure_node_runtime_linux",
         new=_ensure_node_runtime_linux,
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "_pin_apt_mirror",
+        new=_pin_apt_mirror,
     )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
