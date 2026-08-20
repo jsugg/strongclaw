@@ -22,7 +22,7 @@ jobs:
           enable-cache: true
       # Install and run pre-commit BEFORE any other checks
       - name: Install pre-commit environment
-        run: uv run pre-commit install-hooks --install-hooks
+        run: uv run pre-commit install
       # Use Makefile targets for consistency with local development workflow
       - name: Format and lint via Makefile
         run: make fmt lint imports typecheck
