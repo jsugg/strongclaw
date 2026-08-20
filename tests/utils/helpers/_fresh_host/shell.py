@@ -162,8 +162,7 @@ def run_command(
             if attempt < attempts and retry_on_timeout:
                 log(
                     f"Command timed out after {timeout_seconds}s (attempt {attempt}/{attempts}); "
-                    "reclaiming resources and retrying: "
-                    + " ".join(command)
+                    "reclaiming resources and retrying: " + " ".join(command)
                 )
                 if on_retry is not None:
                     on_retry()
