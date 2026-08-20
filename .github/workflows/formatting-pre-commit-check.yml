@@ -23,5 +23,6 @@ jobs:
       # Install and run pre-commit BEFORE any other checks
       - name: Install pre-commit environment
         run: uv run pre-commit install-hooks --install-hooks
-      - name: Run pre-commit on staged changes
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+      # Use Makefile targets for consistency with local development workflow
+      - name: Format and lint via Makefile
+        run: make fmt lint imports typecheck
