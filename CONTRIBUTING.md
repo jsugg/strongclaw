@@ -37,9 +37,16 @@ remain CI-owned; do not make those mandatory local pre-push steps.
 - Update docs and contract tests in the same change when touching workflows,
   release artifacts, security policy, dependency manifests, or packaged runtime
   assets.
-- `CODEOWNERS` intentionally points to `@jsugg` only while the repo has one
-  maintainer. Non-admin contributions require that CODEOWNER's approval;
-  `enforceAdmins=false` preserves the documented solo-admin break-glass path.
+- `CODEOWNERS` intentionally points to `@jsugg` while the repo has one
+  maintainer. It routes ownership and review requests but is not a required
+  approval: GitHub cannot accept the author's self-review. Every merge still
+  requires a pull request, strict `Verdict`, and resolved conversations.
+- Merge authority comes from repository access, not review participation.
+  `@jsugg` is the only collaborator; external contributors can propose pull
+  requests from forks but cannot merge them. Do not grant collaborator access
+  merely so someone can contribute.
+- `enforceAdmins=false` preserves the documented emergency break-glass path; it
+  is not the normal merge path.
 - Do not patch vendored third-party `platform/plugins/memory-lancedb-pro`.
   Strongclaw maintains only `platform/plugins/strongclaw-hypermemory`; vendor
   changes must arrive through an explicit upstream pin/update.

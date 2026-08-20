@@ -23,9 +23,9 @@
     "requiredConversationResolution": true,
     "enforceAdmins": false,
     "pullRequestReviews": {
-      "requiredApprovingReviewCount": 1,
-      "requireCodeOwnerReviews": true,
-      "soloMaintainerRationale": "Non-admin contributors require one @jsugg CODEOWNER approval; enforceAdmins=false preserves the sole-admin break-glass path without weakening contributor review."
+      "requiredApprovingReviewCount": 0,
+      "requireCodeOwnerReviews": false,
+      "soloMaintainerRationale": "Pull requests, strict Verdict checks, and resolved conversations remain mandatory, but GitHub cannot accept a self-approval from the sole maintainer. Merge authority comes from repository access: @jsugg is the only collaborator, while external contributors may propose pull requests but cannot merge them."
     }
   },
   "doNotRequire": [
@@ -39,6 +39,6 @@
   ],
   "rollback": {
     "source": ".local/live-config-snapshots",
-    "restore": "Reapply the captured branch-protection JSON or relax only the review/CODEOWNER sub-rule if the solo-maintainer path deadlocks."
+    "restore": "Reapply the captured branch-protection JSON. If another maintainer is granted merge access, reconsider required approvals without weakening the pull-request, Verdict, or conversation-resolution gates."
   }
 }

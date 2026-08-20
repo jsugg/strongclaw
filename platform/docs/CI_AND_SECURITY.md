@@ -85,12 +85,18 @@ success.
 ## Repository governance controls
 
 - `CODEOWNERS` currently assigns all paths to `@jsugg`, the sole maintainer.
-- Non-admin contributors require one approving `@jsugg` CODEOWNER review.
-- Admin enforcement stays disabled so sole admin `jsugg` retains a documented
-  break-glass path and cannot be deadlocked by an impossible self-review.
+- `main` requires a pull request but no approving review while there is only one
+  maintainer; GitHub cannot accept the author's self-review. `CODEOWNERS` still
+  routes ownership and voluntary review requests.
+- Merge authority is controlled through repository access. `jsugg` is the only
+  collaborator, so external contributors may open pull requests from forks but
+  cannot merge them. On this personal-account repository, granting collaborator
+  access also grants merge capability.
+- Admin enforcement stays disabled only to preserve the documented emergency
+  break-glass path. Routine merges must satisfy the pull-request, strict
+  `Verdict`, and conversation-resolution gates.
 - Branch protection keeps `Verdict` strict/up-to-date, disables force pushes and
-  deletions, and requires conversation resolution while preserving admin
-  break-glass for the solo maintainer.
+  deletions, and requires conversation resolution.
 - `tests/scripts/required_checks_policy.py audit-live` is a trusted maintainer
   command only. Do not run it on untrusted fork pull requests because it reads
   live repository policy through GitHub CLI credentials.

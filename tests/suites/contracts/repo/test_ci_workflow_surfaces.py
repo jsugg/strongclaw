@@ -310,8 +310,8 @@ def test_ci_gate_verdict_uploads_compact_json_artifact() -> None:
     )
 
 
-def test_required_check_manifest_tracks_verdict_api_context() -> None:
-    """Required-check policy should preserve the stable API context, not UI labels."""
+def test_required_check_manifest_tracks_solo_maintainer_merge_policy() -> None:
+    """Required-check policy should preserve CI gates without requiring self-review."""
     manifest = json.loads(
         (REPO_ROOT / ".github" / "required-checks.json").read_text(encoding="utf-8")
     )
@@ -330,8 +330,8 @@ def test_required_check_manifest_tracks_verdict_api_context() -> None:
     assert status_checks["contexts"] == ["Verdict"]
     assert branch_protection["allowForcePushes"] is False
     assert branch_protection["requiredConversationResolution"] is True
-    assert reviews["requiredApprovingReviewCount"] == 1
-    assert reviews["requireCodeOwnerReviews"] is True
+    assert reviews["requiredApprovingReviewCount"] == 0
+    assert reviews["requireCodeOwnerReviews"] is False
 
 
 def test_ci_gate_paths_filter_uses_default_quantifier() -> None:
