@@ -1,0 +1,27 @@
+name: Formatting pre-commit for localization
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  # Run all pre-commit hooks on PRs and on push to main
+  # This prevents formatting issues from reaching quality-gate
+  pre-commit-check:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      # Install and run pre-commit BEFORE any other checks
+      - name: Install pre-commit environment
+        run: uv run pre-commit install-hooks --install-hooks
+      - name: Run pre-commit on staged changes
+        run: uv run pre-commit run --all-files --show-diff-on-failure
