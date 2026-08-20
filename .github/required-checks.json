@@ -11,6 +11,11 @@
       "jobId": "verdict",
       "jobName": "Verdict",
       "uiLabel": "CI / Verdict"
+    },
+    {
+      "context": "pre-commit-hooks",
+      "workflow": ".github/workflows/formatting-pre-commit-check.yml",
+      "jobName": "CI / Pre-commit hooks"
     }
   ],
   "branchProtection": {
