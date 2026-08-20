@@ -53,7 +53,7 @@ typecheck: ## Run mypy and pyright.
 	$(RUN) pyright
 
 actionlint: ## Run the actionlint pre-commit hook.
-	$(PRE_COMMIT) run actionlint --all-files
+	PRE_COMMIT_TIMEOUT=120 $(PRE_COMMIT) run actionlint --all-files
 
 shellcheck: ## Run ShellCheck through the pre-commit hook.
 	$(PRE_COMMIT) run shellcheck --all-files
