@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Collection
 from pathlib import Path
@@ -122,28 +123,59 @@ def run_command(
     check: bool = True,
     retries: int = 0,
     retry_on_exit_codes: Collection[int] = (),
+    retry_on_timeout: bool = False,
     on_retry: Callable[[], None] | None = None,
     retry_backoff_seconds: float = 10.0,
 ) -> None:
     """Run one inherited subprocess command.
 
     When *retries* is positive, a non-zero exit whose code is listed in
-    *retry_on_exit_codes* triggers up to *retries* additional attempts. The
-    optional *on_retry* hook runs between attempts so callers can reclaim
+    *retry_on_exit_codes* triggers up to *retries* additional attempts. When
+    *retry_on_timeout* is set, a subprocess timeout is treated as retryable too.
+    The optional *on_retry* hook runs between attempts so callers can reclaim
     resources (for example, tearing a partially-started stack down to relieve
     memory pressure) before the next try.
     """
     attempts = retries + 1
     for attempt in range(1, attempts + 1):
         log("Running: " + " ".join(command))
-        completed = subprocess.run(
-            command,
-            cwd=cwd,
-            env=env,
-            check=False,
-            timeout=timeout_seconds,
-            text=True,
-        )
+        stop_heartbeat = threading.Event()
+
+        def _heartbeat(stop: threading.Event = stop_heartbeat) -> None:
+            elapsed = 0
+            while not stop.wait(60):
+                elapsed += 60
+                log(f"Command still running ({elapsed}s): " + " ".join(command)[:160])
+
+        heartbeat = threading.Thread(target=_heartbeat, daemon=True)
+        heartbeat.start()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                check=False,
+                timeout=timeout_seconds,
+                text=True,
+            )
+        except subprocess.TimeoutExpired as err:
+            if attempt < attempts and retry_on_timeout:
+                log(
+                    f"Command timed out after {timeout_seconds}s (attempt {attempt}/{attempts}); "
+                    "reclaiming resources and retrying: "
+                    + " ".join(command)
+                )
+                if on_retry is not None:
+                    on_retry()
+                time.sleep(retry_backoff_seconds)
+                continue
+            if check:
+                raise FreshHostError(
+                    f"Command timed out after {timeout_seconds}s: {' '.join(command)}"
+                ) from err
+            raise
+        finally:
+            stop_heartbeat.set()
         if completed.returncode == 0:
             return
         if attempt < attempts and completed.returncode in retry_on_exit_codes:

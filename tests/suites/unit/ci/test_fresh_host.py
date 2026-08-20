@@ -544,6 +544,87 @@ def test_run_command_does_not_retry_unlisted_exit_code(
     assert recoveries["count"] == 0
 
 
+def test_run_command_retries_subprocess_timeout_when_opted_in(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A subprocess timeout should retry once when retry_on_timeout is set."""
+    attempts = {"count": 0}
+    recoveries = {"count": 0}
+    sleeps: list[float] = []
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise subprocess.TimeoutExpired(cmd=["clawops"], timeout=5.0)
+        return subprocess.CompletedProcess(args=["clawops"], returncode=0)
+
+    def fake_recover() -> None:
+        recoveries["count"] += 1
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=sleeps.append)
+
+    fresh_host_shell.run_command(
+        ["clawops", "bootstrap"],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        retries=1,
+        retry_on_timeout=True,
+        on_retry=fake_recover,
+    )
+
+    assert attempts["count"] == 2
+    assert recoveries["count"] == 1
+    assert sleeps == [10.0]
+
+
+def test_run_command_does_not_retry_timeout_by_default(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Without retry_on_timeout a subprocess timeout surfaces immediately."""
+    attempts = {"count": 0}
+
+    def fake_run(
+        args: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = False,
+        timeout: float | None = None,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del args, cwd, env, check, timeout, text
+        attempts["count"] += 1
+        raise subprocess.TimeoutExpired(cmd=["clawops"], timeout=5.0)
+
+    def fake_sleep(_seconds: float) -> None:
+        return None
+
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=fake_run)
+    test_context.patch.patch_object(fresh_host_shell.time, "sleep", new=fake_sleep)
+
+    with pytest.raises(fresh_host_shell.FreshHostError):
+        fresh_host_shell.run_command(
+            ["clawops", "bootstrap"],
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin"},
+            retries=1,
+        )
+
+    assert attempts["count"] == 1
+
+
 def test_verify_compose_services_running_accepts_json_lines_output(
     tmp_path: Path,
     test_context: TestContext,
