@@ -139,6 +139,18 @@ def test_progress_tracker_counts_only_real_progress() -> None:
     assert tracker.bytes_observed == 2_100_000
 
 
+def test_progress_tracker_counts_extraction_after_a_completed_download() -> None:
+    """Regression: extraction bytes restart below the downloaded size and still progress."""
+    tracker = ProgressTracker()
+
+    assert tracker.observe("f969fa5e591f: Downloading [=====>  ]  262.9MB/262.9MB")
+    assert tracker.observe("f969fa5e591f: Download complete")
+    assert tracker.observe("f969fa5e591f: Extracting [>   ]  126.5MB/262.9MB")
+    assert tracker.observe("f969fa5e591f: Extracting [=>  ]  127MB/262.9MB")
+    assert not tracker.observe("f969fa5e591f: Extracting [=>  ]  127MB/262.9MB")
+    assert tracker.bytes_observed == 262_900_000
+
+
 def test_split_terminal_output_strips_cursor_control_and_keeps_partial_lines() -> None:
     lines, remainder = split_terminal_output("\x1b[1A\x1b[2Kabc: Waiting\r\ndef: Downl")
 

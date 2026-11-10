@@ -44,6 +44,7 @@ _LAYER_LINE: Final[re.Pattern[str]] = re.compile(
     r"^(?P<layer>[0-9a-f]{12}): (?P<status>[A-Za-z][A-Za-z ]*?)"
     r"(?:\s+\[[=> ]*\])?(?:\s+(?P<current>[\d.]+)\s*(?P<unit>[kMG]?B)/[\d.]+\s*[kMG]?B)?\s*$"
 )
+_DOWNLOADING: Final[str] = "Downloading"
 _UNIT_BYTES: Final[Mapping[str, int]] = {"B": 1, "kB": 1_000, "MB": 1_000_000, "GB": 1_000_000_000}
 
 # Ordered most specific first; the first matching class wins.
@@ -136,7 +137,7 @@ class DockerPullClient(Protocol):
         ...
 
 
-def _layer_bytes() -> dict[str, int]:
+def _phase_bytes() -> dict[tuple[str, str], int]:
     return {}
 
 
@@ -152,14 +153,15 @@ def _seen_lines() -> set[str]:
 class ProgressTracker:
     """Decide whether new pull output reflects real progress."""
 
-    layer_bytes: dict[str, int] = field(default_factory=_layer_bytes)
+    # Peak counters per (layer, status): extraction restarts below the downloaded size.
+    phase_bytes: dict[tuple[str, str], int] = field(default_factory=_phase_bytes)
     statuses: set[tuple[str, str]] = field(default_factory=_seen_statuses)
     other_lines: set[str] = field(default_factory=_seen_lines)
 
     @property
     def bytes_observed(self) -> int:
-        """Return the summed peak byte counters across layers."""
-        return sum(self.layer_bytes.values())
+        """Return the summed peak download counters across layers."""
+        return sum(peak for (_, status), peak in self.phase_bytes.items() if status == _DOWNLOADING)
 
     def observe(self, line: str) -> bool:
         """Record one output line; return whether it shows progress."""
@@ -172,16 +174,15 @@ class ProgressTracker:
                 return False
             self.other_lines.add(text)
             return True
-        layer = match["layer"]
+        phase = (match["layer"], match["status"].strip())
         progressed = False
-        status_key = (layer, match["status"].strip())
-        if status_key not in self.statuses:
-            self.statuses.add(status_key)
+        if phase not in self.statuses:
+            self.statuses.add(phase)
             progressed = True
         if match["current"] is not None:
-            current = int(float(match["current"]) * _UNIT_BYTES[match["unit"]])
-            if current > self.layer_bytes.get(layer, 0):
-                self.layer_bytes[layer] = current
+            current = round(float(match["current"]) * _UNIT_BYTES[match["unit"]])
+            if current > self.phase_bytes.get(phase, 0):
+                self.phase_bytes[phase] = current
                 progressed = True
         return progressed
 
