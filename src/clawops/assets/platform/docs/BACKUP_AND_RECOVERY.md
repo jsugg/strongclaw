@@ -87,6 +87,8 @@ Prefer targeted cleanup over deleting the whole tree:
 - `clawops ops reset-compose-state --component qdrant`
 - `clawops ops reset-compose-state --component postgres`
 
+Qdrant storage is derived from hypermemory's Markdown, so it does not need continuity: when the pinned Qdrant release line changes, `clawops ops sidecars up` resets the Qdrant storage and reindexes. See [HYPERMEMORY.md](HYPERMEMORY.md#qdrant-upgrades).
+
 ## Recovery order
 
 1. verify the archive

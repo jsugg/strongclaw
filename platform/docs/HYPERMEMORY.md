@@ -246,3 +246,19 @@ Corpus path globs are segment-aware:
 - if two configured corpus sources resolve to the same repo-relative document, the first configured source wins and later duplicates are skipped during indexing
 
 When `CLAWOPS_STRUCTURED_LOGS=1` is set, hypermemory emits compact JSON lines for embedding calls, Qdrant search, lexical planning, fusion, rerank, rerank errors, fallback activation, and vector sync. When OTLP tracing is enabled through `CLAWOPS_OTEL_ENABLED=1` or the standard `OTEL_EXPORTER_OTLP_*` variables, the same operations emit spans through the shared ClawOps observability pipeline, including a dedicated `clawops.hypermemory.rerank` span.
+
+## Qdrant upgrades
+
+Qdrant holds only a derived index, so StrongClaw upgrades it by rebuilding rather than migrating. Qdrant supports upgrading one minor release at a time, and newer releases refuse storage formats they have dropped: storage written by 1.15 with a RocksDB-backed payload index makes 1.20 panic at startup (`unknown variant rocks_db`).
+
+`clawops ops sidecars up` checks before it starts the stack:
+
+- it reads the pinned `qdrant` image from `docker compose config` and takes its `major.minor` release line
+- it compares that with the stamp `qdrant.storage-version.json` in the compose state directory (beside, not inside, the Qdrant storage)
+- storage with no stamp (every install from before the stamp existed) or a stamp for another release line is reset; a matching line, including a patch-level change, is left alone, so repeated runs are no-ops
+- every `major.minor` bump of the pinned image therefore costs a full reset and reindex, even when Qdrant could have upgraded that one minor in place; a patch bump costs nothing
+- a reset is logged as `[clawops] Resetting qdrant storage at ...` on stderr and as the `clawops.ops.sidecars.qdrant_storage` structured event, and shows up as the `reset-qdrant-storage` step in `--json` output
+
+A reset touches only Qdrant state: the bind-mounted `<compose state>/qdrant` directory (Linux), or this compose project's own named volume (the hosted macOS variant). It refuses relative or symlinked storage paths, any path other than `<compose state>/qdrant`, external volumes, and volumes from another compose project. Markdown memory, the SQLite derived index, and Postgres state are never touched.
+
+Once Qdrant is healthy, the same command runs `clawops hypermemory --config <rendered config> index --json` and records a `reindex-hypermemory` step. The reindex re-embeds the whole corpus through the dense embedding route (one call per `embedding.batch_size` snippets; sparse vectors are computed locally), so its time and any provider cost grow with the corpus. It has a 30-minute limit. The stamp is marked `reindex_pending: true` before anything is deleted, so a reset interrupted part-way is resumed, and its reindex still runs, on the next `clawops ops sidecars up`. If the reindex fails or Qdrant is not ready yet, the flag stays set and the next `clawops ops sidecars up` retries it. Starting the stack with raw `docker compose up` skips this check. After a manual `clawops ops reset-compose-state --component qdrant`, run the `index` command yourself.

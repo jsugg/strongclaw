@@ -12,6 +12,7 @@ from typing import Any, Protocol, cast
 import pytest
 
 from clawops import strongclaw_ops
+from clawops.qdrant_storage import StorageDecision
 from clawops.strongclaw_runtime import CommandError
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.repo import REPO_ROOT
@@ -114,6 +115,19 @@ def test_compose_state_dir_repo_local_override_wins(
     monkeypatch.setenv("STRONGCLAW_REPO_LOCAL_COMPOSE_STATE_DIR", str(override_dir))
 
     assert _compose_state_dir(tmp_path, repo_local_state=True) == override_dir
+
+
+def _stub_qdrant_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep sidecar orchestration tests focused; the qdrant upgrade has its own suite."""
+
+    def prepare(_execution: object) -> StorageDecision:
+        return StorageDecision("none", "stubbed", "1.20", "1.20")
+
+    def complete(_execution: object) -> str:
+        return "not-needed"
+
+    monkeypatch.setattr(strongclaw_ops, "_prepare_qdrant_storage", prepare)
+    monkeypatch.setattr(strongclaw_ops, "_complete_qdrant_reindex", complete)
 
 
 def test_compose_execution_returns_direct_compose_command() -> None:
@@ -538,6 +552,7 @@ def test_sidecars_up_bootstraps_litellm_before_starting_runtime_services(
     monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _compose_service_statuses)
     monkeypatch.setattr(strongclaw_ops, "_wait_for_compose_service", _wait_for_compose_service)
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+    _stub_qdrant_storage(monkeypatch)
 
     assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
     assert [service for service, _, _, _ in waited_services] == [
@@ -690,6 +705,7 @@ def test_sidecars_up_skips_bootstrap_when_litellm_is_already_healthy(
     monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _compose_service_statuses)
     monkeypatch.setattr(strongclaw_ops, "_wait_for_compose_service", _wait_for_compose_service)
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+    _stub_qdrant_storage(monkeypatch)
 
     assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
     assert waited_services == ["postgres", "postgres", "litellm", "qdrant", "neo4j"]
@@ -802,6 +818,7 @@ def test_sidecars_up_recreates_postgres_after_initial_wait_timeout(
     monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _compose_service_statuses)
     monkeypatch.setattr(strongclaw_ops, "_wait_for_compose_service", _wait_for_compose_service)
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+    _stub_qdrant_storage(monkeypatch)
 
     assert strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False) == 0
     assert waited_services == ["postgres", "postgres", "postgres", "litellm", "qdrant", "neo4j"]
@@ -892,6 +909,7 @@ def test_sidecars_up_fails_when_postgres_never_turns_healthy(
         return 0
 
     monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+    _stub_qdrant_storage(monkeypatch)
 
     with pytest.raises(
         strongclaw_ops.CommandError, match="timed out waiting for compose service 'postgres'"

@@ -12,41 +12,11 @@ import pytest
 import requests
 
 from clawops.hypermemory import HypermemoryEngine, SearchBackend, load_config
+from tests.utils.helpers.embeddings import DeterministicEmbeddingProvider
 from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 from tests.utils.helpers.qdrant_runtime import QdrantRuntime
 
 pytestmark = [pytest.mark.qdrant(mode="real"), pytest.mark.network_local]
-
-
-class _DeterministicEmbeddingProvider:
-    def embed_texts(
-        self, texts: Sequence[str], *, timeout_ms: int | None = None
-    ) -> list[list[float]]:
-        del timeout_ms
-        return [self._embed(text) for text in texts]
-
-    def _embed(self, text: str) -> list[float]:
-        normalized = text.lower()
-        vector = [
-            (
-                1.0
-                if any(
-                    token in normalized
-                    for token in ("gateway", "token", "credential", "rollover", "runbook")
-                )
-                else 0.0
-            ),
-            (
-                1.0
-                if any(token in normalized for token in ("deploy", "playbook", "cutovers"))
-                else 0.0
-            ),
-            1.0 if "alice" in normalized else 0.0,
-        ]
-        if sum(value * value for value in vector) == 0.0:
-            vector = [0.01, 0.01, 0.01]
-        norm = sum(value * value for value in vector) ** 0.5
-        return [value / norm for value in vector]
 
 
 def _query_points(
@@ -106,7 +76,7 @@ def _build_engine(
         qdrant=replace(config.qdrant, enabled=True, url=qdrant_url, collection=collection),
     )
     return (
-        HypermemoryEngine(config, embedding_provider=_DeterministicEmbeddingProvider()),
+        HypermemoryEngine(config, embedding_provider=DeterministicEmbeddingProvider()),
         config,
         workspace,
         qdrant_url,
