@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 
 from clawops import strongclaw_varlock_env
@@ -286,7 +286,7 @@ def test_varlock_env_main_honors_env_mode_wrapper(
     configure_calls: list[tuple[bool, bool]] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 

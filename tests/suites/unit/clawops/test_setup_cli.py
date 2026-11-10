@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
@@ -646,7 +646,7 @@ def test_setup_cli_honors_env_mode_wrapper(
     requested_modes: list[str] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 
@@ -717,7 +717,7 @@ def test_doctor_cli_honors_env_mode_wrapper(
     requested_modes: list[str] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 
@@ -788,7 +788,7 @@ def test_doctor_host_cli_honors_env_mode_wrapper(
     requested_modes: list[str] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 

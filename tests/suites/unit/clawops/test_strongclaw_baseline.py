@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import Mapping, cast
 
@@ -799,7 +799,7 @@ def test_main_honors_env_mode_and_exclude_browser_lab(
     exclude_values: list[bool] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 

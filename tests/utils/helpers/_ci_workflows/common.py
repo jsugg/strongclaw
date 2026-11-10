@@ -10,7 +10,7 @@ import stat
 import subprocess
 import tarfile
 import urllib.request
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 
 
@@ -23,7 +23,7 @@ def patched_environment(
     entries: Mapping[str, str],
     *,
     unset: Iterable[str] = (),
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Temporarily update the process environment."""
     previous: dict[str, str | None] = {key: os.environ.get(key) for key in entries}
     removed: dict[str, str | None] = {key: os.environ.get(key) for key in unset}

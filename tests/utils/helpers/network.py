@@ -7,7 +7,7 @@ import http.server
 import socket
 import socketserver
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
 
 type Endpoint = tuple[str, int]
@@ -30,7 +30,7 @@ class _StaticHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def tcp_listener() -> Iterator[Endpoint]:
+def tcp_listener() -> Generator[Endpoint, None, None]:
     """Yield an open local TCP listener."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
@@ -61,7 +61,7 @@ def tcp_listener() -> Iterator[Endpoint]:
 
 
 @contextlib.contextmanager
-def disconnecting_listener() -> Iterator[Endpoint]:
+def disconnecting_listener() -> Generator[Endpoint, None, None]:
     """Yield a local TCP listener that immediately closes accepted sockets."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
@@ -91,7 +91,7 @@ def disconnecting_listener() -> Iterator[Endpoint]:
 
 
 @contextlib.contextmanager
-def http_server(body: bytes) -> Iterator[Endpoint]:
+def http_server(body: bytes) -> Generator[Endpoint, None, None]:
     """Yield a local HTTP server that always serves the provided body."""
 
     class Handler(_StaticHandler):

@@ -8,7 +8,7 @@ import json
 import os
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from pathlib import Path
 from typing import Any, Final, cast
 
@@ -773,7 +773,7 @@ def _run_recovery_cycle(
 
 
 @contextlib.contextmanager
-def _force_tar_fallback_for_recovery() -> Iterator[None]:
+def _force_tar_fallback_for_recovery() -> Generator[None, None, None]:
     """Temporarily force strongclaw_recovery helpers down the tar fallback path."""
     original_which = recovery_helpers.shutil.which
     recovery_shutil: Any = recovery_helpers.shutil
