@@ -28,7 +28,7 @@ jobs:
           package-manager-cache: false
       - name: Restore package download caches
         id: linux_package_cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .github-cache/npm
@@ -60,7 +60,7 @@ jobs:
           package-manager-cache: false
       - name: Restore package download caches
         id: macos_package_cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .github-cache/npm
