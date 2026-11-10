@@ -13,11 +13,18 @@ import pytest
 from clawops.strongclaw_runtime import varlock_local_env_file, write_env_assignments
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import fresh_host, hosted_docker
+from tests.utils.helpers._fresh_host.budget import (
+    PhaseDeadline,
+    initialize_job_budget,
+    pull_phase_deadline,
+)
 from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._hosted_docker import diagnostics as hosted_docker_diagnostics
 from tests.utils.helpers._hosted_docker import images as hosted_docker_images
 from tests.utils.helpers._hosted_docker import runtime as hosted_docker_runtime
 from tests.utils.helpers._hosted_docker import shell as hosted_docker_shell
+from tests.utils.helpers._hosted_docker.events import PullEventLog, read_events
+from tests.utils.helpers.clock import FakeClock
 
 
 class _PullOneImage(Protocol):
@@ -420,7 +427,14 @@ def test_ensure_images_warms_linux_scenario_images(
         pull_timeout_seconds: int = hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
         recovery_cwd: Path | None = None,
         recovery_env: dict[str, str] | None = None,
+        deadline: PhaseDeadline | None = None,
+        clock: object = None,
+        event_log: object = None,
+        recover_runtime: object = None,
     ) -> hosted_docker.PullReport:
+        del clock, event_log
+        pulled_payload["deadline"] = deadline
+        pulled_payload["recover_runtime"] = recover_runtime
         pulled_payload["images"] = list(images)
         pulled_payload["parallelism"] = parallelism
         pulled_payload["max_attempts"] = max_attempts
@@ -454,6 +468,9 @@ def test_ensure_images_warms_linux_scenario_images(
         pulled_payload["pull_timeout_seconds"] == hosted_docker.DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS
     )
     assert pulled_payload["recovery_cwd"] == workspace.resolve()
+    assert isinstance(pulled_payload["deadline"], PhaseDeadline)
+    # Linux has no OrbStack runtime to restart; recovery stays a readiness wait.
+    assert pulled_payload["recover_runtime"] is None
     recovery_env = cast(dict[str, str], pulled_payload["recovery_env"])
     assert recovery_env["NEO4J_PASSWORD"].strip() != ""
     assert recovery_env["LITELLM_DB_PASSWORD"].strip() != ""
@@ -1042,3 +1059,247 @@ def test_run_checked_handles_none_outputs_when_capture_output_is_false(
 
     with pytest.raises(fresh_host.FreshHostError, match="command failed"):
         hosted_docker_shell.run_checked(["false"], cwd=tmp_path, env={}, capture_output=False)
+
+
+def _budgeted_deadline(clock: FakeClock, seconds: int) -> PhaseDeadline:
+    return pull_phase_deadline(None, clock=clock, phase_cap_seconds=seconds)
+
+
+def test_pull_images_clips_attempt_timeout_to_phase_deadline(
+    test_context: TestContext,
+) -> None:
+    """No single pull may outlive the phase deadline."""
+    clock = FakeClock()
+    timeouts: list[int] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        timeouts.append(timeout_seconds)
+        return image, 0, 0.1, ""
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+
+    report = hosted_docker.pull_images(
+        ["postgres:16"],
+        parallelism=1,
+        max_attempts=5,
+        deadline=_budgeted_deadline(clock, 400),
+        clock=clock,
+    )
+
+    assert report.exit_code == 0
+    assert timeouts == [400]
+
+
+def test_pull_images_stops_when_budget_cannot_fit_another_attempt(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A slow failing pull must end in budget_exhausted instead of a fresh attempt."""
+    clock = FakeClock()
+    attempts: list[str] = []
+    probes: list[int] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        attempts.append(image)
+        clock.advance(timeout_seconds - 30)
+        return image, 1, float(timeout_seconds), "docker pull timed out"
+
+    def fake_wait_for_docker_ready(*, cwd: Path, env: dict[str, str], max_attempts: int) -> None:
+        del cwd, env
+        probes.append(max_attempts)
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+    events = PullEventLog(tmp_path / "events.jsonl")
+
+    report = hosted_docker.pull_images(
+        ["postgres:16"],
+        parallelism=1,
+        max_attempts=5,
+        recovery_cwd=tmp_path,
+        recovery_env={},
+        deadline=_budgeted_deadline(clock, 600),
+        clock=clock,
+        event_log=events,
+    )
+
+    assert report.exit_code == 1
+    assert report.failure_class == "budget_exhausted"
+    assert attempts == ["postgres:16"]
+    assert probes == []
+    assert clock.sleeps == []
+    assert [event["event"] for event in read_events(events.path)] == [
+        "attempt_started",
+        "image_result",
+        "budget_exhausted",
+    ]
+
+
+def test_pull_images_skips_backoff_that_would_breach_budget(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Backoff and recovery probes are clipped to what the remaining budget allows."""
+    clock = FakeClock()
+    probes: list[int] = []
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        del timeout_seconds
+        return image, 1, 1.0, "context deadline exceeded"
+
+    def fake_wait_for_docker_ready(*, cwd: Path, env: dict[str, str], max_attempts: int) -> None:
+        del cwd, env
+        probes.append(max_attempts)
+        clock.advance(40)
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+
+    report = hosted_docker.pull_images(
+        ["qdrant/qdrant:v1"],
+        parallelism=1,
+        max_attempts=5,
+        recovery_cwd=tmp_path,
+        recovery_env={},
+        deadline=_budgeted_deadline(clock, 105),
+        clock=clock,
+    )
+
+    # 105s budget: one probe sized to fit (105 // 32 = 3) leaves 65s; the 10s backoff would
+    # leave less than one 60s attempt window, so the loop stops without sleeping.
+    assert report.failure_class == "budget_exhausted"
+    assert probes == [3]
+    assert clock.sleeps == []
+
+
+def test_pull_images_restarts_runtime_on_daemon_failure_when_hook_given(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A dead daemon triggers runtime recovery (OrbStack restart), not only a readiness wait."""
+    calls: list[str] = []
+    attempts = {"count": 0}
+
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        del timeout_seconds
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return image, 1, 0.1, "Cannot connect to the Docker daemon at unix:///x.sock"
+        return image, 0, 0.1, ""
+
+    def fake_wait_for_docker_ready(*, cwd: Path, env: dict[str, str], max_attempts: int) -> None:
+        del cwd, env, max_attempts
+        calls.append("wait")
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+    test_context.patch.patch_object(
+        hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
+    )
+    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
+
+    report = hosted_docker.pull_images(
+        ["postgres:16"],
+        parallelism=1,
+        max_attempts=3,
+        recovery_cwd=tmp_path,
+        recovery_env={},
+        recover_runtime=lambda: calls.append("restart"),
+    )
+
+    assert report.exit_code == 0
+    assert calls == ["restart"]
+
+
+def test_pull_images_reports_daemon_unavailable_when_recovery_fails(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
+        del timeout_seconds
+        return image, 1, 0.1, "error during connect: EOF"
+
+    def failed_recovery() -> None:
+        raise fresh_host.FreshHostError("orbstack_recovery_failed")
+
+    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
+
+    report = hosted_docker.pull_images(
+        ["postgres:16"],
+        parallelism=1,
+        max_attempts=3,
+        recovery_cwd=tmp_path,
+        recovery_env={},
+        recover_runtime=failed_recovery,
+    )
+
+    assert report.exit_code == 1
+    assert report.failure_class == "daemon_unavailable"
+
+
+def _linux_context(tmp_path: Path, test_context: TestContext) -> fresh_host.FreshHostContext:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    test_context.env.set("GITHUB_EVENT_NAME", "push")
+    return fresh_host.prepare_context(
+        scenario_id="linux",
+        repo_root=workspace,
+        runner_temp=tmp_path / "runner-temp",
+        workspace=workspace,
+        github_env_file=tmp_path / "github.env",
+    )
+
+
+def test_ensure_images_fails_fast_and_reports_when_budget_is_exhausted(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Reaching the scenario/observer reserve must fail before pulling, with evidence."""
+    context = _linux_context(tmp_path, test_context)
+    clock = FakeClock()
+    budget = initialize_job_budget(
+        job_timeout_minutes=75,
+        scenario_reserve_minutes=20,
+        observer_reserve_minutes=9,
+        environ={},
+        clock=clock,
+    )
+    clock.advance(60 * 60)
+
+    with pytest.raises(fresh_host.FreshHostError, match="budget_exhausted"):
+        hosted_docker.ensure_images(
+            Path(context.context_path), environ=budget.to_env(), clock=clock
+        )
+
+    assert context.image_report_path is not None
+    payload = json.loads(Path(context.image_report_path).read_text(encoding="utf-8"))
+    assert payload["failure_class"] == "budget_exhausted"
+    assert payload["pull_attempt_count"] == 0
+
+
+def test_ensure_images_writes_report_when_resolution_fails(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """Any pre-pull failure must still leave an ensure report and phase event."""
+    context = _linux_context(tmp_path, test_context)
+
+    def failing_run_checked(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        raise fresh_host.FreshHostError("compose config failed")
+
+    test_context.patch.patch_object(hosted_docker_images, "run_checked", new=failing_run_checked)
+
+    with pytest.raises(fresh_host.FreshHostError, match="compose config failed"):
+        hosted_docker.ensure_images(Path(context.context_path), environ={})
+
+    assert context.image_report_path is not None
+    payload = json.loads(Path(context.image_report_path).read_text(encoding="utf-8"))
+    assert payload["failure_reason"] == "compose config failed"
+    assert payload["failure_class"] == "ensure_failed"
+    assert payload["pull_deadline_limited_by"] == "phase-cap"
+    events = read_events(Path(cast(str, payload["pull_events_path"])))
+    assert [event["event"] for event in events] == ["phase_started"]

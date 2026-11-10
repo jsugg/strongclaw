@@ -181,6 +181,20 @@ sidecars and browser-lab mutable data live in Docker-managed volumes instead of 
 macOS path without changing the required PR gate.
 - The workflow stays declarative by delegating runtime setup, image warming,
 diagnostics, and summary generation to executable helper scripts under `tests/scripts/`. Compose image availability is verified with bounded retries and heartbeat logging.
+- Each fresh-host job records a non-resettable budget right after checkout
+  (`fresh_host.py initialize-budget`): an absolute deadline inside the job's
+  `timeout-minutes` cap, plus scenario and observer reserves that equal the
+  scenario step timeout and the summed observer step timeouts. Image pulls stop at
+  `min(now + 30m, job deadline - scenario reserve - observer reserve)`. Each pull
+  attempt, backoff, and recovery probe is clipped to that deadline, so a stalled
+  pull ends as `budget_exhausted` while there is still time for the scenario
+  verdict and the diagnostics upload. Every heavy and observer step also has its
+  own `timeout-minutes`.
+- `ensure-images` owns the only retry loop. On macOS it restarts OrbStack in place
+  after a daemon-connectivity failure, rather than rerunning the whole operation
+  from the shell. It always writes `image-ensure-report.json`, and it appends
+  `image-pull-events.jsonl` one event at a time, so a job killed mid-pull still
+  uploads evidence.
 - Hosted macOS repo-local stack activation is reconciled once after any failed
   `up`: the helper removes partial containers, re-probes the Docker backend, and
   retries the idempotent activation. A repeated failure remains blocking.

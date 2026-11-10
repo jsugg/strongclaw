@@ -8,8 +8,14 @@ import re
 from pathlib import Path
 from typing import Iterator, cast
 
+import pytest
 import yaml
 
+from tests.utils.helpers._fresh_host.budget import (
+    JOB_START_SKEW_SECONDS,
+    PULL_PHASE_CAP_SECONDS,
+    PULL_PHASE_FLUSH_SECONDS,
+)
 from tests.utils.helpers.repo import REPO_ROOT
 
 _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
@@ -474,6 +480,73 @@ def test_fresh_host_core_workflow_stays_thin() -> None:
     assert "python3 - <<'PY'" not in text
     assert "run: |" not in text
     assert ".github/scripts/fresh_host_images.py" not in text
+
+
+_INITIALIZE_BUDGET_PATTERN = re.compile(
+    r"initialize-budget --job-timeout-minutes (?P<job>\d+) "
+    r"--scenario-reserve-minutes (?P<scenario>\d+) --observer-reserve-minutes (?P<observers>\d+)"
+)
+_BOUNDED_FRESH_HOST_COMMANDS: tuple[str, ...] = (
+    "hosted_docker.py setup-orbstack",
+    "hosted_docker.py wait-runtime-ready",
+    "hosted_docker.py ensure-images",
+    "fresh_host.py run-scenario",
+    "collect-diagnostics",
+    "fresh_host.py write-summary",
+    "fresh_host.py cleanup",
+)
+
+
+def _step_timeout(step: dict[str, object]) -> int:
+    """Return one step's timeout-minutes, failing when it is absent."""
+    timeout = step.get("timeout-minutes")
+    assert isinstance(timeout, int), step.get("name", step.get("uses"))
+    return timeout
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    ["linux-fresh-host", "macos-fresh-host"],
+)
+def test_fresh_host_core_budget_reserves_match_step_timeouts(job_id: str) -> None:
+    """The recorded job budget must agree with the job cap and every phase step timeout."""
+    job = cast(dict[str, object], _workflow_jobs("fresh-host-core.yml")[job_id])
+    steps = cast(list[dict[str, object]], job["steps"])
+    runs = [str(step.get("run", "")) for step in steps]
+
+    assert str(steps[0]["uses"]).startswith("actions/checkout@")
+    budget = _INITIALIZE_BUDGET_PATTERN.search(runs[1])
+    assert budget is not None, "the job budget must be recorded right after checkout"
+    job_minutes = int(budget["job"])
+    scenario_reserve = int(budget["scenario"])
+    observer_reserve = int(budget["observers"])
+
+    ensure_index = next(i for i, run in enumerate(runs) if "hosted_docker.py ensure-images" in run)
+    scenario_index = next(i for i, run in enumerate(runs) if "fresh_host.py run-scenario" in run)
+    ensure_step = steps[ensure_index]
+    observers = steps[scenario_index + 1 :]
+
+    assert job["timeout-minutes"] == job_minutes
+    assert _step_timeout(steps[scenario_index]) == scenario_reserve
+    assert sum(_step_timeout(step) for step in observers) == observer_reserve
+    assert _step_timeout(ensure_step) * 60 >= PULL_PHASE_CAP_SECONDS + PULL_PHASE_FLUSH_SECONDS
+    assert (
+        _step_timeout(ensure_step) * 60
+        + (scenario_reserve + observer_reserve) * 60
+        + JOB_START_SKEW_SECONDS
+        <= job_minutes * 60
+    )
+    # One helper-owned retry loop; a shell-level rerun would double the worst case.
+    assert "||" not in runs[ensure_index]
+    assert "sleep" not in runs[ensure_index]
+    for step in observers:
+        assert "always()" in str(step.get("if", "")), step.get("name")
+        assert step.get("continue-on-error") is True, step.get("name")
+    for step, run in zip(steps, runs, strict=True):
+        if any(command in run for command in _BOUNDED_FRESH_HOST_COMMANDS):
+            _step_timeout(step)
+        if str(step.get("uses", "")).startswith(("actions/cache/", "actions/upload-artifact@")):
+            _step_timeout(step)
 
 
 def test_fresh_host_core_linux_job_honors_pull_tuning_inputs() -> None:

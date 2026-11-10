@@ -6,27 +6,41 @@ import concurrent.futures
 import os
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Final
 
 from clawops.strongclaw_runtime import load_env_assignments, varlock_local_env_file
+from tests.utils.helpers._fresh_host.budget import (
+    SYSTEM_CLOCK,
+    Clock,
+    JobBudget,
+    PhaseDeadline,
+    pull_phase_deadline,
+)
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context
+from tests.utils.helpers._hosted_docker.events import PullEventLog
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
 from tests.utils.helpers._hosted_docker.models import (
+    BUDGET_EXHAUSTED,
     DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
+    MAX_RECOVERY_PROBES,
+    MIN_PULL_ATTEMPT_SECONDS,
     PULL_HEARTBEAT_SECONDS,
     PULL_RETRY_BACKOFF_CAP_SECONDS,
+    READINESS_PROBE_SECONDS,
     REGISTRY_RETRY_BACKOFF_BASE_SECONDS,
     REGISTRY_RETRY_BACKOFF_CAP_SECONDS,
     ImageEnsureReport,
     PullReport,
 )
+from tests.utils.helpers._hosted_docker.runtime import wait_runtime_ready
 from tests.utils.helpers._hosted_docker.shell import run_checked, wait_for_docker_ready
 
 COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
+PULL_EVENTS_FILE_NAME: Final[str] = "image-pull-events.jsonl"
 DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "connection refused",
     "connection reset by peer",
@@ -160,6 +174,30 @@ def _retry_backoff_seconds(*, attempt_count: int, registry_failure: bool) -> int
     return min(PULL_RETRY_BACKOFF_CAP_SECONDS, 2 * attempt_count)
 
 
+def _attempt_timeout_seconds(
+    pull_timeout_seconds: int, deadline: PhaseDeadline | None, clock: Clock
+) -> int:
+    """Clip one pull attempt's timeout so it cannot outlive the phase deadline."""
+    if deadline is None:
+        return pull_timeout_seconds
+    return max(1, min(pull_timeout_seconds, int(deadline.remaining(clock))))
+
+
+def _recovery_probe_attempts(deadline: PhaseDeadline | None, clock: Clock) -> int:
+    """Return how many readiness probes fit in the remaining budget."""
+    if deadline is None:
+        return MAX_RECOVERY_PROBES
+    fitting = int(deadline.remaining(clock) // READINESS_PROBE_SECONDS)
+    return max(1, min(MAX_RECOVERY_PROBES, fitting))
+
+
+def _budget_allows(deadline: PhaseDeadline | None, clock: Clock, *, spend: float = 0.0) -> bool:
+    """Return whether *spend* seconds still leave room for one more pull attempt."""
+    if deadline is None:
+        return True
+    return deadline.remaining(clock) - spend >= MIN_PULL_ATTEMPT_SECONDS
+
+
 def pull_images(
     images: Sequence[str],
     *,
@@ -168,23 +206,44 @@ def pull_images(
     pull_timeout_seconds: int = DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
     recovery_cwd: Path | None = None,
     recovery_env: dict[str, str] | None = None,
+    deadline: PhaseDeadline | None = None,
+    clock: Clock = SYSTEM_CLOCK,
+    event_log: PullEventLog | None = None,
+    recover_runtime: Callable[[], object] | None = None,
 ) -> PullReport:
-    """Pull images with bounded retries and reduced retry parallelism."""
+    """Pull images with bounded retries, reduced retry parallelism, and a phase deadline."""
     if parallelism < 1 or max_attempts < 1 or pull_timeout_seconds < 1:
         raise FreshHostError("parallelism, max_attempts, and pull_timeout_seconds must be positive")
     if (recovery_cwd is None) != (recovery_env is None):
         raise FreshHostError("recovery_cwd and recovery_env must be provided together")
+
+    def emit(event: str, **fields: object) -> None:
+        if event_log is not None:
+            event_log.emit(event, **fields)
+
     outstanding = list(images)
     pulled_images: list[str] = []
     retried_images: list[str] = []
     seen_retries: set[str] = set()
     attempt_parallelism = parallelism
     attempt_count = 0
+    budget_exhausted = False
     while outstanding and attempt_count < max_attempts:
+        if not _budget_allows(deadline, clock):
+            budget_exhausted = True
+            break
         attempt_count += 1
+        attempt_timeout = _attempt_timeout_seconds(pull_timeout_seconds, deadline, clock)
         log(
             f"Pulling {len(outstanding)} image(s) with parallelism={attempt_parallelism} "
-            f"(attempt {attempt_count}/{max_attempts})."
+            f"(attempt {attempt_count}/{max_attempts}, timeout {attempt_timeout}s)."
+        )
+        emit(
+            "attempt_started",
+            attempt=attempt_count,
+            images=list(outstanding),
+            parallelism=attempt_parallelism,
+            timeout_seconds=attempt_timeout,
         )
         failures: list[str] = []
         daemon_connectivity_failure = False
@@ -193,7 +252,7 @@ def pull_images(
             max_workers=min(attempt_parallelism, len(outstanding))
         ) as executor:
             futures = {
-                executor.submit(pull_one_image, image, pull_timeout_seconds): image
+                executor.submit(pull_one_image, image, attempt_timeout): image
                 for image in outstanding
             }
             pending = set(futures)
@@ -208,6 +267,14 @@ def pull_images(
                     continue
                 for future in done:
                     image, returncode, duration_seconds, output = future.result()
+                    emit(
+                        "image_result",
+                        attempt=attempt_count,
+                        image=image,
+                        returncode=returncode,
+                        duration_seconds=round(duration_seconds, 3),
+                        output_tail=output[-2000:],
+                    )
                     if returncode == 0:
                         log(f"[ok] {image} in {duration_seconds:.1f}s")
                         pulled_images.append(image)
@@ -227,6 +294,9 @@ def pull_images(
             if image not in seen_retries:
                 seen_retries.add(image)
                 retried_images.append(image)
+        if not _budget_allows(deadline, clock):
+            budget_exhausted = True
+            break
         if recovery_cwd is not None and recovery_env is not None:
             if daemon_connectivity_failure:
                 log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
@@ -235,15 +305,26 @@ def pull_images(
             else:
                 log("Retrying image pull after failure; probing Docker runtime before retry.")
             try:
-                wait_for_docker_ready(cwd=recovery_cwd, env=recovery_env, max_attempts=90)
+                if daemon_connectivity_failure and recover_runtime is not None:
+                    # A dead runtime needs a restart, not just a wait (OrbStack on macOS).
+                    emit("runtime_recovery", attempt=attempt_count)
+                    recover_runtime()
+                else:
+                    wait_for_docker_ready(
+                        cwd=recovery_cwd,
+                        env=recovery_env,
+                        max_attempts=_recovery_probe_attempts(deadline, clock),
+                    )
             except FreshHostError as exc:
                 log(f"Docker daemon recovery probe failed: {exc}")
+                emit("recovery_failed", attempt=attempt_count, error=str(exc))
                 return PullReport(
                     exit_code=1,
                     pulled_images=pulled_images,
                     failed_images=outstanding,
                     attempt_count=attempt_count,
                     retried_images=retried_images,
+                    failure_class="daemon_unavailable",
                 )
         next_parallelism = max(1, attempt_parallelism // 2)
         if next_parallelism != attempt_parallelism:
@@ -253,89 +334,139 @@ def pull_images(
             attempt_count=attempt_count,
             registry_failure=transient_registry_failure and not daemon_connectivity_failure,
         )
+        if not _budget_allows(deadline, clock, spend=backoff_seconds):
+            budget_exhausted = True
+            break
         log(f"Retrying {len(outstanding)} image(s) after {backoff_seconds}s.")
-        time.sleep(backoff_seconds)
+        emit("backoff", attempt=attempt_count, seconds=backoff_seconds)
+        clock.sleep(backoff_seconds)
+    if budget_exhausted and outstanding:
+        remaining = None if deadline is None else round(deadline.remaining(clock), 1)
+        log(f"Image pull budget exhausted with {len(outstanding)} image(s) outstanding.")
+        emit("budget_exhausted", attempt=attempt_count, remaining_seconds=remaining)
     return PullReport(
         exit_code=0 if not outstanding else 1,
         pulled_images=pulled_images,
         failed_images=outstanding,
         attempt_count=attempt_count,
         retried_images=retried_images,
+        failure_class=BUDGET_EXHAUSTED if budget_exhausted and outstanding else None,
     )
 
 
-def ensure_images(context_path: Path) -> ImageEnsureReport:
-    """Ensure the scenario's compose images exist locally."""
+def _failure_class_for(reason: str) -> str:
+    """Classify a pre-pull failure message for the ensure report."""
+    return BUDGET_EXHAUSTED if reason.startswith(BUDGET_EXHAUSTED) else "ensure_failed"
+
+
+def ensure_images(
+    context_path: Path,
+    *,
+    environ: Mapping[str, str] | None = None,
+    clock: Clock = SYSTEM_CLOCK,
+) -> ImageEnsureReport:
+    """Ensure the scenario's compose images exist locally within the job budget."""
     context = load_context(context_path)
     report_path = Path(context.image_report_path).resolve() if context.image_report_path else None
     repo_root = Path(context.repo_root).resolve()
     compose_files = [Path(path).resolve() for path in context.compose_files]
-    env = compose_probe_env(
-        context=context, repo_root=repo_root, compose_state_dir_name="compose-prepull"
-    )
     started_at = now_iso()
-    started = time.monotonic()
+    started = clock.monotonic()
+    events_path = Path(context.report_dir).resolve() / PULL_EVENTS_FILE_NAME
+    state: dict[str, list[str]] = {
+        "images": [],
+        "local_before": [],
+        "missing_before_pull": [],
+        "missing_after_pull": [],
+    }
+    pull_report: PullReport | None = None
+    deadline: PhaseDeadline | None = None
 
-    if not context.ensure_images:
+    def build_report(failure_reason: str | None, failure_class: str | None) -> ImageEnsureReport:
         finished_at = now_iso()
-        report = ImageEnsureReport(
+        return ImageEnsureReport(
             compose_files=[str(path) for path in compose_files],
-            images=[],
-            local_before=[],
-            missing_before_pull=[],
-            pulled_images=[],
-            missing_after_pull=[],
+            images=state["images"],
+            local_before=state["local_before"],
+            missing_before_pull=state["missing_before_pull"],
+            pulled_images=[] if pull_report is None else list(pull_report.pulled_images),
+            missing_after_pull=state["missing_after_pull"],
             pull_parallelism=context.docker_pull_parallelism,
-            pull_attempt_count=0,
-            retried_images=[],
-            failure_reason=None,
+            pull_attempt_count=0 if pull_report is None else pull_report.attempt_count,
+            retried_images=[] if pull_report is None else list(pull_report.retried_images),
+            failure_reason=failure_reason,
             started_at=started_at,
             finished_at=finished_at,
-            duration_seconds=round(time.monotonic() - started, 3),
+            duration_seconds=round(clock.monotonic() - started, 3),
             created_at=finished_at,
+            failure_class=failure_class,
+            pull_deadline_epoch=None if deadline is None else deadline.wall_deadline_epoch,
+            pull_deadline_limited_by=None if deadline is None else deadline.limited_by,
+            pull_events_path=str(events_path) if context.ensure_images else None,
         )
+
+    def persist(report: ImageEnsureReport) -> ImageEnsureReport:
         if report_path is not None:
             write_json(asdict(report), report_path)
         return report
 
-    images = resolve_compose_images(compose_files, cwd=repo_root, env=env)
-    local_before = list_local_images(images)
-    missing_before_pull = [image for image in images if image not in local_before]
-    pull_report = None
-    if missing_before_pull:
-        pull_report = pull_images(
-            missing_before_pull,
-            parallelism=context.docker_pull_parallelism,
-            max_attempts=context.docker_pull_max_attempts,
-            recovery_cwd=repo_root,
-            recovery_env=env,
+    if not context.ensure_images:
+        return persist(build_report(None, None))
+
+    try:
+        deadline = pull_phase_deadline(
+            JobBudget.from_env(os.environ if environ is None else environ), clock=clock
         )
-    local_after_pull = list_local_images(images)
-    missing_after_pull = [image for image in images if image not in local_after_pull]
-    failure_reason = None
+        event_log = PullEventLog(events_path)
+        event_log.emit(
+            "phase_started",
+            deadline_epoch=deadline.wall_deadline_epoch,
+            limited_by=deadline.limited_by,
+            remaining_seconds=round(deadline.remaining(clock), 1),
+        )
+        env = compose_probe_env(
+            context=context, repo_root=repo_root, compose_state_dir_name="compose-prepull"
+        )
+        state["images"] = resolve_compose_images(compose_files, cwd=repo_root, env=env)
+        state["local_before"] = list_local_images(state["images"])
+        state["missing_before_pull"] = [
+            image for image in state["images"] if image not in state["local_before"]
+        ]
+        if state["missing_before_pull"]:
+            pull_report = pull_images(
+                state["missing_before_pull"],
+                parallelism=context.docker_pull_parallelism,
+                max_attempts=context.docker_pull_max_attempts,
+                recovery_cwd=repo_root,
+                recovery_env=env,
+                deadline=deadline,
+                clock=clock,
+                event_log=event_log,
+                recover_runtime=(
+                    (lambda: wait_runtime_ready(context_path))
+                    if context.platform == "macos"
+                    else None
+                ),
+            )
+        local_after_pull = list_local_images(state["images"])
+        state["missing_after_pull"] = [
+            image for image in state["images"] if image not in local_after_pull
+        ]
+    except Exception as exc:
+        # Evidence first: a failed ensure must still leave a report for the observers.
+        persist(build_report(str(exc), _failure_class_for(str(exc))))
+        raise
+
+    failure_reason: str | None = None
+    failure_class: str | None = None
     if pull_report is not None and pull_report.exit_code != 0:
         failure_reason = "docker pull failed"
-    elif missing_after_pull:
+        failure_class = pull_report.failure_class or "pull_failed"
+    elif state["missing_after_pull"]:
         failure_reason = "images remain unavailable after pull"
-    finished_at = now_iso()
-    report = ImageEnsureReport(
-        compose_files=[str(path) for path in compose_files],
-        images=images,
-        local_before=local_before,
-        missing_before_pull=missing_before_pull,
-        pulled_images=[] if pull_report is None else list(pull_report.pulled_images),
-        missing_after_pull=missing_after_pull,
-        pull_parallelism=context.docker_pull_parallelism,
-        pull_attempt_count=0 if pull_report is None else pull_report.attempt_count,
-        retried_images=[] if pull_report is None else list(pull_report.retried_images),
-        failure_reason=failure_reason,
-        started_at=started_at,
-        finished_at=finished_at,
-        duration_seconds=round(time.monotonic() - started, 3),
-        created_at=finished_at,
-    )
-    if report_path is not None:
-        write_json(asdict(report), report_path)
+        failure_class = "images_missing"
+    report = persist(build_report(failure_reason, failure_class))
+    event_log.emit("phase_finished", failure_class=failure_class)
     if failure_reason is not None:
-        raise FreshHostError(failure_reason)
+        raise FreshHostError(f"{failure_reason} ({failure_class})")
     return report

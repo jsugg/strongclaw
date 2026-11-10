@@ -8,6 +8,12 @@ from typing import Final
 LOG_PREFIX: Final[str] = "[hosted-docker]"
 DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS: Final[int] = 1800
 PULL_HEARTBEAT_SECONDS: Final[int] = 30
+# Do not start a pull attempt, backoff, or recovery probe that cannot finish in budget.
+MIN_PULL_ATTEMPT_SECONDS: Final[int] = 60
+# One `wait_for_docker_ready` probe: 30s `docker info` timeout plus the 2s poll gap.
+READINESS_PROBE_SECONDS: Final[int] = 32
+MAX_RECOVERY_PROBES: Final[int] = 90
+BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
 # Backoff cap for generic pull failures (daemon hiccups, transient tooling errors).
 PULL_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 10
 # Transient Docker registry connectivity failures (e.g. Docker Hub "context deadline
@@ -27,6 +33,7 @@ class PullReport:
     failed_images: list[str]
     attempt_count: int
     retried_images: list[str]
+    failure_class: str | None = None
 
 
 @dataclass(slots=True)
@@ -93,3 +100,7 @@ class ImageEnsureReport:
     finished_at: str
     duration_seconds: float
     created_at: str
+    failure_class: str | None = None
+    pull_deadline_epoch: float | None = None
+    pull_deadline_limited_by: str | None = None
+    pull_events_path: str | None = None
