@@ -22,6 +22,7 @@ QDRANT_SERVICE_NAME: Final[str] = "qdrant"
 QDRANT_STORAGE_TARGET: Final[str] = "/qdrant/storage"
 QDRANT_STATE_COMPONENT: Final[str] = "qdrant"
 STORAGE_STAMP_FILE_NAME: Final[str] = "qdrant.storage-version.json"
+UNKNOWN_RELEASE_LINE: Final[str] = "unknown"
 _STAMP_SCHEMA_VERSION: Final[int] = 1
 _IMAGE_RELEASE: Final[re.Pattern[str]] = re.compile(
     r":v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:@|$)"
@@ -166,14 +167,26 @@ def write_stamp(path: pathlib.Path, stamp: StorageStamp) -> None:
     staging.replace(path)
 
 
+def _now() -> str:
+    return datetime.datetime.now(tz=datetime.UTC).isoformat()
+
+
 def new_stamp(release: QdrantRelease, image: str, *, reindex_pending: bool) -> StorageStamp:
     """Return a stamp for *release* recorded now."""
     return StorageStamp(
-        release_line=release.line,
-        image=image,
-        reindex_pending=reindex_pending,
-        updated_at=datetime.datetime.now(tz=datetime.UTC).isoformat(),
+        release_line=release.line, image=image, reindex_pending=reindex_pending, updated_at=_now()
     )
+
+
+def reset_intent_stamp(stamp: StorageStamp | None) -> StorageStamp:
+    """Return the stamp recorded before a reset deletes anything.
+
+    It keeps the previous owner's release line, so an interrupted reset is retried while storage
+    remains, and marks the reindex pending, so it is not lost once storage is already gone.
+    """
+    if stamp is None:
+        return StorageStamp(UNKNOWN_RELEASE_LINE, "", True, _now())
+    return dataclasses.replace(stamp, reindex_pending=True, updated_at=_now())
 
 
 def decide_storage_action(
@@ -289,13 +302,16 @@ def prepare_storage(
             "reindexed from its Markdown source of truth."
         )
         operations.stop_service()
+        write_stamp(stamp_file, reset_intent_stamp(stamp))
         if storage_dir is not None:
             clear_directory(storage_dir)
         elif volume_name is not None:
             operations.remove_volume(volume_name)
         write_stamp(stamp_file, new_stamp(target, image, reindex_pending=True))
     elif stamp is None or stamp.release_line != target.line:
-        write_stamp(stamp_file, new_stamp(target, image, reindex_pending=False))
+        # Storage is gone; keep a reindex an interrupted reset recorded before deleting it.
+        pending = stamp is not None and stamp.reindex_pending
+        write_stamp(stamp_file, new_stamp(target, image, reindex_pending=pending))
     return decision
 
 

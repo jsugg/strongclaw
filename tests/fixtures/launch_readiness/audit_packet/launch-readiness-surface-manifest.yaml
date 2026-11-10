@@ -99,7 +99,7 @@ surfaces:
   - surface_id: hypermemory
     declared_sources:
       - README.md:110-132
-      - platform/docs/HYPERMEMORY.md:1-263
+      - platform/docs/HYPERMEMORY.md:1-264
     surface_type: optional_exposed
     owner_lane: optional_surfaces
     launch_blocker_default: "yes"

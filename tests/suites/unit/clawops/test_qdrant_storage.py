@@ -11,6 +11,7 @@ import pytest
 
 from clawops import strongclaw_ops
 from clawops.qdrant_storage import (
+    UNKNOWN_RELEASE_LINE,
     QdrantRelease,
     QdrantStorageError,
     QdrantStorageMount,
@@ -24,6 +25,7 @@ from clawops.qdrant_storage import (
     new_stamp,
     prepare_storage,
     read_stamp,
+    reset_intent_stamp,
     resolve_storage_mount,
     resolve_target_release,
     stamp_path,
@@ -40,8 +42,11 @@ _PROJECT = "strongclaw-sidecars-unit"
 class _RecordingOperations:
     """Record every side effect requested by `prepare_storage`."""
 
-    def __init__(self, *, existing_volumes: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, *, existing_volumes: tuple[str, ...] = (), remove_error: Exception | None = None
+    ) -> None:
         self.existing_volumes = set(existing_volumes)
+        self.remove_error = remove_error
         self.calls: list[str] = []
         self.messages: list[str] = []
 
@@ -59,6 +64,8 @@ class _RecordingOperations:
 
     def _remove_volume(self, name: str) -> None:
         self.calls.append(f"remove:{name}")
+        if self.remove_error is not None:
+            raise self.remove_error
         self.existing_volumes.discard(name)
 
 
@@ -339,6 +346,84 @@ def test_volume_mismatch_removes_only_the_project_volume(tmp_path: pathlib.Path)
     )
     assert again.action == "none"
     assert recorder.calls[-1] == f"inspect:{volume}"
+
+
+def test_reset_intent_keeps_the_previous_owner_and_marks_reindex() -> None:
+    legacy = reset_intent_stamp(None)
+    assert legacy.release_line == UNKNOWN_RELEASE_LINE and legacy.reindex_pending
+    previous = reset_intent_stamp(_stamp("1.15"))
+    assert previous.release_line == "1.15" and previous.reindex_pending
+
+
+@pytest.mark.parametrize("intent_line", ["1.15", UNKNOWN_RELEASE_LINE])
+def test_reset_interrupted_after_clearing_still_reindexes(
+    tmp_path: pathlib.Path, intent_line: str
+) -> None:
+    state_dir = tmp_path / "compose-state"
+    storage_dir = state_dir / "qdrant"
+    storage_dir.mkdir(parents=True)
+    write_stamp(stamp_path(state_dir), _stamp(intent_line, pending=True))
+    recorder = _RecordingOperations()
+
+    decision = prepare_storage(
+        compose_config=_bind_config(storage_dir),
+        compose_state_dir=state_dir,
+        operations=recorder.build(),
+    )
+
+    assert decision.action == "none"
+    assert recorder.calls == []
+    stamp = read_stamp(stamp_path(state_dir))
+    assert stamp is not None and stamp.release_line == "1.20" and stamp.reindex_pending
+    assert (
+        complete_reindex(compose_state_dir=state_dir, qdrant_ready=True, reindex=lambda: True)
+        == "reindexed"
+    )
+
+
+def test_old_stamp_without_pending_reindex_does_not_reindex_empty_storage(
+    tmp_path: pathlib.Path,
+) -> None:
+    write_stamp(stamp_path(tmp_path), _stamp("1.15"))
+    prepare_storage(
+        compose_config=_bind_config(tmp_path / "qdrant"),
+        compose_state_dir=tmp_path,
+        operations=_RecordingOperations().build(),
+    )
+    stamp = read_stamp(stamp_path(tmp_path))
+    assert stamp is not None and stamp.release_line == "1.20" and not stamp.reindex_pending
+
+
+@pytest.mark.parametrize("volume_survives", [True, False])
+def test_failed_volume_removal_is_recovered_with_a_reindex(
+    tmp_path: pathlib.Path, volume_survives: bool
+) -> None:
+    volume = f"{_PROJECT}_qdrant-data"
+    write_stamp(stamp_path(tmp_path), _stamp("1.15"))
+    failing = _RecordingOperations(
+        existing_volumes=(volume,), remove_error=QdrantStorageError("volume is in use")
+    )
+    with pytest.raises(QdrantStorageError, match="in use"):
+        prepare_storage(
+            compose_config=_volume_config(), compose_state_dir=tmp_path, operations=failing.build()
+        )
+    assert failing.calls == [f"inspect:{volume}", "stop", f"remove:{volume}"]
+    intent = read_stamp(stamp_path(tmp_path))
+    assert intent is not None and intent.release_line == "1.15" and intent.reindex_pending
+
+    retry = _RecordingOperations(existing_volumes=(volume,) if volume_survives else ())
+    decision = prepare_storage(
+        compose_config=_volume_config(), compose_state_dir=tmp_path, operations=retry.build()
+    )
+
+    assert decision.action == ("reset" if volume_survives else "none")
+    assert (f"remove:{volume}" in retry.calls) is volume_survives
+    stamp = read_stamp(stamp_path(tmp_path))
+    assert stamp is not None and stamp.release_line == "1.20" and stamp.reindex_pending
+    assert (
+        complete_reindex(compose_state_dir=tmp_path, qdrant_ready=True, reindex=lambda: True)
+        == "reindexed"
+    )
 
 
 def test_volume_absent_is_stamped_without_reset(tmp_path: pathlib.Path) -> None:
