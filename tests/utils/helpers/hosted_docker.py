@@ -5,9 +5,6 @@ from tests.utils.helpers._hosted_docker.images import (
     ensure_images,
     list_local_images,
     pull_images,
-)
-from tests.utils.helpers._hosted_docker.images import pull_one_image as _pull_one_image
-from tests.utils.helpers._hosted_docker.images import (
     resolve_compose_images,
 )
 from tests.utils.helpers._hosted_docker.models import (
@@ -18,6 +15,13 @@ from tests.utils.helpers._hosted_docker.models import (
     RuntimeInstallReport,
     RuntimeRecoveryAttemptReport,
 )
+from tests.utils.helpers._hosted_docker.pull_client import (
+    STALL_TIMEOUT_SECONDS,
+    CliDockerPullClient,
+    DockerPullClient,
+    PullOutcome,
+    classify_pull_failure,
+)
 from tests.utils.helpers._hosted_docker.runtime import (
     setup_orbstack,
     wait_runtime_ready,
@@ -27,16 +31,20 @@ from tests.utils.helpers._hosted_docker.shell import run_command as _run_command
 from tests.utils.helpers._hosted_docker.shell import wait_for_docker_ready as _wait_for_docker_ready
 
 __all__ = [
+    "CliDockerPullClient",
     "DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS",
+    "DockerPullClient",
     "ImageEnsureReport",
     "PULL_HEARTBEAT_SECONDS",
+    "PullOutcome",
     "PullReport",
+    "STALL_TIMEOUT_SECONDS",
     "RuntimeRecoveryAttemptReport",
     "RuntimeInstallReport",
-    "_pull_one_image",
     "_run_checked",
     "_run_command",
     "_wait_for_docker_ready",
+    "classify_pull_failure",
     "collect_runtime_diagnostics",
     "ensure_images",
     "list_local_images",

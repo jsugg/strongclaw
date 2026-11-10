@@ -14,6 +14,8 @@ MIN_PULL_ATTEMPT_SECONDS: Final[int] = 60
 READINESS_PROBE_SECONDS: Final[int] = 32
 MAX_RECOVERY_PROBES: Final[int] = 90
 BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
+# A stalled pull is retried at most this many times before it becomes terminal.
+MAX_STALL_RETRIES: Final[int] = 2
 # Backoff cap for generic pull failures (daemon hiccups, transient tooling errors).
 PULL_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 10
 # Transient Docker registry connectivity failures (e.g. Docker Hub "context deadline
@@ -22,6 +24,25 @@ PULL_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 10
 # every attempt within a few seconds.
 REGISTRY_RETRY_BACKOFF_BASE_SECONDS: Final[int] = 10
 REGISTRY_RETRY_BACKOFF_CAP_SECONDS: Final[int] = 45
+
+
+@dataclass(slots=True)
+class PullAttemptRecord:
+    """One image's result within one pull attempt."""
+
+    image: str
+    attempt: int
+    returncode: int
+    duration_seconds: float
+    failure_class: str | None
+    seconds_since_progress: float
+    bytes_observed: int
+    output_tail: str
+
+
+def _empty_attempt_records() -> list[PullAttemptRecord]:
+    """Return a typed empty attempt-record list."""
+    return []
 
 
 @dataclass(slots=True)
@@ -34,6 +55,7 @@ class PullReport:
     attempt_count: int
     retried_images: list[str]
     failure_class: str | None = None
+    attempts: list[PullAttemptRecord] = field(default_factory=_empty_attempt_records)
 
 
 @dataclass(slots=True)
