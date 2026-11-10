@@ -45,6 +45,16 @@ _ORBSTACK_ONLY = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _skip_linux_disk_preflight(test_context: TestContext) -> None:
+    """Keep pull-focused tests off the host disk; the preflight has its own suite."""
+
+    def no_preflight(**kwargs: object) -> None:
+        del kwargs
+
+    test_context.patch.patch_object(hosted_docker_images, "preflight_linux_disk", new=no_preflight)
+
+
 def _sleep(_: float) -> None:
     return None
 
