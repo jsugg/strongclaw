@@ -26,14 +26,14 @@ processors:
     trace_statements:
       - context: span
         statements:
-          - replace_all_patterns(attributes, "value", "sk-[A-Za-z0-9_-]+", "[REDACTED_OPENAI_KEY]")
-          - replace_all_patterns(attributes, "value", "ghp_[A-Za-z0-9]+", "[REDACTED_GITHUB_TOKEN]")
-          - replace_all_patterns(attributes, "value", "xox[baprs]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]")
+          - replace_all_patterns(span.attributes, "value", "sk-[A-Za-z0-9_-]+", "[REDACTED_OPENAI_KEY]")
+          - replace_all_patterns(span.attributes, "value", "ghp_[A-Za-z0-9]+", "[REDACTED_GITHUB_TOKEN]")
+          - replace_all_patterns(span.attributes, "value", "xox[baprs]-[A-Za-z0-9-]+", "[REDACTED_SLACK_TOKEN]")
     log_statements:
       - context: log
         statements:
-          - replace_all_patterns(attributes, "value", "sk-[A-Za-z0-9_-]+", "[REDACTED_OPENAI_KEY]")
-          - replace_all_patterns(attributes, "value", "ghp_[A-Za-z0-9]+", "[REDACTED_GITHUB_TOKEN]")
+          - replace_all_patterns(log.attributes, "value", "sk-[A-Za-z0-9_-]+", "[REDACTED_OPENAI_KEY]")
+          - replace_all_patterns(log.attributes, "value", "ghp_[A-Za-z0-9]+", "[REDACTED_GITHUB_TOKEN]")
 
   batch:
     send_batch_size: 1024
@@ -46,7 +46,7 @@ exporters:
   prometheus:
     endpoint: 0.0.0.0:9464
 
-  otlphttp/langfuse:
+  otlp_http/langfuse:
     endpoint: ${LANGFUSE_OTEL_ENDPOINT}
     headers:
       Authorization: ${LANGFUSE_OTEL_BASIC_AUTH}
@@ -56,7 +56,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/scrub, transform/redact, batch]
-      exporters: [debug, otlphttp/langfuse]
+      exporters: [debug, otlp_http/langfuse]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
