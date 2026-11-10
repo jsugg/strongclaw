@@ -50,8 +50,9 @@ gh api 'repos/jsugg/strongclaw/code-scanning/alerts?per_page=100&state=open'
 ## Pull-request gate orchestration
 
 Pull requests now flow through `.github/workflows/ci-gate.yml`, which is the
-single required branch-protection check for `main` via the stable
-`Verdict` API context. GitHub's UI may display that workflow/job as
+aggregate required branch-protection check for `main` via the stable
+`Verdict` API context. The only other required context is the standalone
+`Attribution Guard` (see below). GitHub's UI may display that workflow/job as
 `CI / Verdict`; branch protection and release preflight audits must still use
 the exact API context `Verdict`.
 
@@ -82,6 +83,35 @@ success.
   `origin/main` and has a successful `Verdict` check run, so `main` pushes also
   receive the same stable verdict context.
 
+## Attribution guard
+
+`.github/workflows/attribution-guard.yml` publishes the required `Attribution Guard`
+context. It rejects AI-tool attribution in branch and tag names, commit messages,
+commit author/committer emails, pull-request titles and bodies, and labels. Naming
+a provider or dependency as the subject of the work stays allowed.
+
+- It runs on `pull_request` (`opened`, `reopened`, `synchronize`, `edited`,
+  `labeled`, `unlabeled`, `ready_for_review`) and on pushes to `main` as a
+  post-merge audit. It has no path filters, skip conditions, or actor exemptions,
+  so Dependabot commits pass on content alone.
+- It stays a separate required context rather than a `Verdict` lane. Metadata-only
+  events must re-evaluate it without new commits, and rerunning the path-classified
+  `Verdict` graph on every title or label edit would be costly and could reset
+  in-flight lanes.
+- The job reads with `contents: read` and `pull-requests: read`, checks out the
+  base revision with `persist-credentials: false`, and refetches the pull request
+  through the API instead of trusting the event payload. It checks every commit
+  and fails closed when the API returns fewer commits than the pull request
+  reports.
+- Patterns are vendored byte-identical in
+  `tests/utils/helpers/_ci_workflows/attribution_patterns.py`, shared with the
+  repository rulesets and local agent hooks, and pinned by SHA-256 fingerprints
+  in the unit suite.
+- `make dev` (`pre-commit install`) wires local `commit-msg` and `pre-push` hooks
+  through `default_install_hook_types`. pre-commit hands pre-push hooks only the
+  first updated ref of a multi-ref push, so the server-side check remains
+  authoritative.
+
 ## Repository governance controls
 
 - `CODEOWNERS` currently assigns all paths to `@jsugg`, the sole maintainer.
@@ -95,8 +125,8 @@ success.
 - Admin enforcement stays disabled only to preserve the documented emergency
   break-glass path. Routine merges must satisfy the pull-request, strict
   `Verdict`, and conversation-resolution gates.
-- Branch protection keeps `Verdict` strict/up-to-date, disables force pushes and
-  deletions, and requires conversation resolution.
+- Branch protection keeps `Verdict` and `Attribution Guard` strict/up-to-date,
+  disables force pushes and deletions, and requires conversation resolution.
 - `tests/scripts/required_checks_policy.py audit-live` is a trusted maintainer
   command only. Do not run it on untrusted fork pull requests because it reads
   live repository policy through GitHub CLI credentials.

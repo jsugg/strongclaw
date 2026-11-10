@@ -11,12 +11,21 @@
       "jobId": "verdict",
       "jobName": "Verdict",
       "uiLabel": "CI / Verdict"
+    },
+    {
+      "context": "Attribution Guard",
+      "appId": 15368,
+      "workflow": ".github/workflows/attribution-guard.yml",
+      "jobId": "attribution-guard",
+      "jobName": "Attribution Guard",
+      "uiLabel": "Attribution Guard / Attribution Guard",
+      "rationale": "Required on its own because edited and labeled pull-request events must re-evaluate title, body, and label attribution without new commits, and the path-classified Verdict aggregate does not rerun on metadata-only events."
     }
   ],
   "branchProtection": {
     "requiredStatusChecks": {
       "strict": true,
-      "contexts": ["Verdict"]
+      "contexts": ["Verdict", "Attribution Guard"]
     },
     "allowForcePushes": false,
     "allowDeletions": false,

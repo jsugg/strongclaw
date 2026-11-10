@@ -15,8 +15,11 @@ def test_required_check_policy_accepts_maintainer_gated_branch_snapshot() -> Non
     branch_protection: dict[str, object] = {
         "required_status_checks": {
             "strict": True,
-            "contexts": ["Verdict"],
-            "checks": [{"context": "Verdict", "app_id": 15368}],
+            "contexts": ["Verdict", "Attribution Guard"],
+            "checks": [
+                {"context": "Verdict", "app_id": 15368},
+                {"context": "Attribution Guard", "app_id": 15368},
+            ],
         },
         "allow_force_pushes": {"enabled": False},
         "allow_deletions": {"enabled": False},
@@ -43,8 +46,11 @@ def test_required_check_policy_flags_required_review_drift() -> None:
     branch_protection: dict[str, object] = {
         "required_status_checks": {
             "strict": True,
-            "contexts": ["Verdict"],
-            "checks": [{"context": "Verdict", "app_id": 15368}],
+            "contexts": ["Verdict", "Attribution Guard"],
+            "checks": [
+                {"context": "Verdict", "app_id": 15368},
+                {"context": "Attribution Guard", "app_id": 15368},
+            ],
         },
         "allow_force_pushes": {"enabled": False},
         "allow_deletions": {"enabled": False},
@@ -84,3 +90,28 @@ def test_required_check_policy_flags_context_drift() -> None:
     findings = audit_branch_protection(manifest=manifest, branch_protection=branch_protection)
 
     assert any("contexts mismatch" in finding for finding in findings)
+
+
+def test_required_check_policy_flags_missing_attribution_guard() -> None:
+    """Dropping the metadata-sensitive guard from live protection must be reported."""
+    manifest = load_required_check_manifest(REPO_ROOT / ".github" / "required-checks.json")
+    branch_protection: dict[str, object] = {
+        "required_status_checks": {
+            "strict": True,
+            "contexts": ["Verdict"],
+            "checks": [{"context": "Verdict", "app_id": 15368}],
+        },
+        "allow_force_pushes": {"enabled": False},
+        "allow_deletions": {"enabled": False},
+        "required_conversation_resolution": {"enabled": True},
+        "enforce_admins": {"enabled": False},
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 0,
+            "require_code_owner_reviews": False,
+        },
+    }
+
+    findings = audit_branch_protection(manifest=manifest, branch_protection=branch_protection)
+
+    assert any("required_status_checks.contexts mismatch" in finding for finding in findings)
+    assert any("required_status_checks.checks contexts mismatch" in finding for finding in findings)

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, Final, Literal, cast
 
@@ -529,7 +529,7 @@ def use_varlock_env_mode(
     env_mode: VarlockEnvMode,
     *,
     default: VarlockEnvMode = VARLOCK_ENV_MODE_AUTO,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """Temporarily set the process-level Varlock env-mode contract."""
     normalized_mode = normalize_varlock_env_mode(env_mode, default=default)
     previous_primary = os.environ.get(VARLOCK_ENV_MODE_ENV)

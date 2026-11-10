@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -244,7 +244,7 @@ def test_main_applies_requested_varlock_env_mode(
     observed_mode: dict[str, str] = {}
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         observed_mode["value"] = env_mode
         yield
 
@@ -521,7 +521,7 @@ def test_model_auth_main_honors_env_mode_wrapper(
     requested_modes: list[str] = []
 
     @contextmanager
-    def _use_varlock_env_mode(env_mode: str) -> Iterator[None]:
+    def _use_varlock_env_mode(env_mode: str) -> Generator[None, None, None]:
         requested_modes.append(env_mode)
         yield
 

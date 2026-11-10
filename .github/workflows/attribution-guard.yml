@@ -1,0 +1,50 @@
+name: Attribution Guard
+
+# Required status in its own right: metadata-only events (edited, labeled) must re-evaluate
+# it without new commits, which the path-classified aggregate Verdict cannot do cheaply.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  attribution-guard:
+    name: Attribution Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Run the guard from the trusted base revision so a pull request cannot rewrite its own check.
+      - name: Check out trusted guard revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
+          persist-credentials: false
+      - name: Check out pull request revision to bootstrap the guard
+        if: github.event_name == 'pull_request' && hashFiles('tests/scripts/attribution_guard.py') == ''
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Check pull request metadata and commits
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 ./tests/scripts/attribution_guard.py pull-request --repository "${GITHUB_REPOSITORY}" --number "${PR_NUMBER}"
+      - name: Audit pushed commits
+        if: github.event_name == 'push'
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: python3 ./tests/scripts/attribution_guard.py push --ref "${GITHUB_REF}" --before "${PUSH_BEFORE}" --after "${GITHUB_SHA}" --repo-root .

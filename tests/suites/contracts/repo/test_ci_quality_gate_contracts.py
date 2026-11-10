@@ -98,6 +98,20 @@ def test_pre_commit_python_type_hooks_only_run_for_python_changes() -> None:
         assert hooks[hook_id]["types_or"] == ["python", "pyi"]
 
 
+def test_pre_commit_installs_attribution_guards_at_commit_msg_and_pre_push() -> None:
+    payload = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    local_repo = next(repo for repo in payload["repos"] if repo["repo"] == "local")
+    hooks = {hook["id"]: hook for hook in local_repo["hooks"]}
+
+    assert payload["default_install_hook_types"] == ["pre-commit", "commit-msg", "pre-push"]
+    assert payload["default_stages"] == ["pre-commit"]
+    assert hooks["attribution-commit-msg"]["stages"] == ["commit-msg"]
+    assert hooks["attribution-commit-msg"]["entry"].endswith("attribution_guard.py commit-msg")
+    assert hooks["attribution-pre-push"]["stages"] == ["pre-push"]
+    assert hooks["attribution-pre-push"]["pass_filenames"] is False
+    assert hooks["attribution-pre-push"]["entry"].endswith("attribution_guard.py pre-push")
+
+
 def test_security_workflow_verifies_downloaded_tool_archives() -> None:
     workflow = _workflow_text("security.yml")
 

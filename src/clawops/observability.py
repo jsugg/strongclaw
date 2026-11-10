@@ -8,7 +8,7 @@ import dataclasses
 import os
 import sys
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from typing import Any
 
 from clawops import __version__
@@ -156,7 +156,7 @@ class ObservedSpan:
 @contextlib.contextmanager
 def observed_span(
     name: str, *, attributes: Mapping[str, TelemetryValue] | None = None
-) -> Iterator[ObservedSpan]:
+) -> Generator[ObservedSpan, None, None]:
     """Yield a tracing span when OTLP export is enabled."""
     tracer_state = _get_tracer_state()
     if tracer_state is None:
