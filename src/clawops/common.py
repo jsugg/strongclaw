@@ -43,7 +43,7 @@ def load_json(path: pathlib.Path) -> Any:
 
 def load_json5(path: pathlib.Path, *, allow_duplicate_keys: bool = False) -> Any:
     """Load full JSON5 content from *path* for human-edited overlays."""
-    return cast(Any, json5.loads(load_text(path), allow_duplicate_keys=allow_duplicate_keys))
+    return json5.loads(load_text(path), allow_duplicate_keys=allow_duplicate_keys)
 
 
 def load_overlay(path: pathlib.Path) -> Any:
