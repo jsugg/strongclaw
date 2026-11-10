@@ -8,6 +8,10 @@ import yaml
 
 from tests.utils.helpers.repo import REPO_ROOT
 
+# Dependabot's parser rejected semver-* cooldown keys for github-actions and docker-compose
+# (check run 85120245285); only ecosystems proven to accept them belong here.
+_SEMVER_COOLDOWN_ECOSYSTEMS = frozenset({"uv"})
+
 
 def test_dependabot_tracks_runtime_update_surfaces() -> None:
     """Dependabot should watch Python, Actions, and shipped compose image surfaces."""
@@ -42,4 +46,21 @@ def test_dependabot_limits_solo_maintainer_pr_noise() -> None:
         assert entry["open-pull-requests-limit"] == 2
         assert entry["schedule"]["interval"] == "weekly"
         assert entry["schedule"]["timezone"] == "America/Sao_Paulo"
-        assert entry["cooldown"]["semver-major-days"] >= 14
+
+
+def test_dependabot_cooldown_uses_keys_each_ecosystem_parser_accepts() -> None:
+    """An unsupported cooldown key invalidates the whole file and silently stops updates."""
+    payload = cast(
+        dict[str, Any],
+        yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")),
+    )
+    updates = cast(list[dict[str, Any]], payload["updates"])
+    semver_keys = {"semver-major-days", "semver-minor-days", "semver-patch-days"}
+
+    for entry in updates:
+        cooldown = cast(dict[str, int], entry["cooldown"])
+        if entry["package-ecosystem"] in _SEMVER_COOLDOWN_ECOSYSTEMS:
+            assert cooldown["semver-major-days"] >= 14
+        else:
+            assert semver_keys.isdisjoint(cooldown), entry["package-ecosystem"]
+            assert cooldown["default-days"] >= 14

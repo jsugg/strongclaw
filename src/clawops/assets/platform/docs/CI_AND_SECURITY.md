@@ -225,7 +225,11 @@ config, registers the plugin through the local SDK stub, verifies the exported `
 - `.github/workflows/dependency-submission.yml` generates `sbom.spdx.json` with
 `anchore/sbom-action` and submits the resulting dependency snapshot to the GitHub dependency graph.
 - `.github/dependabot.yml` watches the `uv`, GitHub Actions, and shipped
-  Docker Compose dependency surfaces on a low-noise weekly cadence.
+  Docker Compose dependency surfaces on a low-noise weekly cadence. Only `uv`
+  uses per-semver cooldown keys; GitHub Actions and Docker Compose use
+  `cooldown.default-days` because Dependabot rejects semver cooldown keys for
+  those ecosystems, and one unsupported key invalidates the whole file and
+  silently stops every scheduled version update.
 - `.github/workflows/security.yml`,
 `.github/workflows/upstream-merge-validation.yml`, and `.github/workflows/release.yml` all call the centralized `clawops supply-chain quality-gate` surface so linting, typing, tests, coverage, and compile checks stay aligned.
 - That shared quality gate now enforces one overall coverage floor plus named

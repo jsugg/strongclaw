@@ -37,10 +37,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # Dependabot rejects semver-* cooldown keys for this ecosystem, which invalidates the
+    # whole file; one window must therefore cover majors, so keep the 14-day major floor.
     cooldown:
-      semver-major-days: 14
-      semver-minor-days: 3
-      semver-patch-days: 1
+      default-days: 14
 
   - package-ecosystem: "docker-compose"
     directories:
@@ -60,7 +60,7 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # Dependabot rejects semver-* cooldown keys for this ecosystem, which invalidates the
+    # whole file; one window must therefore cover majors, so keep the 14-day major floor.
     cooldown:
-      semver-major-days: 14
-      semver-minor-days: 3
-      semver-patch-days: 1
+      default-days: 14
