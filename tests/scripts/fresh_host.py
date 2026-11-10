@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from tests.utils.helpers.fresh_host import (  # noqa: E402
     collect_diagnostics,
     prepare_context,
     preview_context,
+    record_job_budget,
     run_scenario,
     write_summary,
 )
@@ -28,6 +30,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    budget_parser = subparsers.add_parser(
+        "initialize-budget",
+        help="Record the non-resettable job deadline and phase reserves.",
+    )
+    budget_parser.add_argument("--job-timeout-minutes", type=int, required=True)
+    budget_parser.add_argument("--scenario-reserve-minutes", type=int, required=True)
+    budget_parser.add_argument("--observer-reserve-minutes", type=int, required=True)
+    budget_parser.add_argument("--github-env-file", type=Path)
 
     prepare_parser = subparsers.add_parser("prepare-context", help="Create a fresh-host context.")
     prepare_parser.add_argument(
@@ -75,6 +86,20 @@ def main(argv: list[str] | None = None) -> int:
     """Run the requested fresh-host subcommand."""
     args = _parse_args(argv)
     try:
+        if args.command == "initialize-budget":
+            budget = record_job_budget(
+                job_timeout_minutes=int(args.job_timeout_minutes),
+                scenario_reserve_minutes=int(args.scenario_reserve_minutes),
+                observer_reserve_minutes=int(args.observer_reserve_minutes),
+                environ=os.environ,
+                github_env_file=(
+                    Path(args.github_env_file).expanduser().resolve()
+                    if args.github_env_file is not None
+                    else None
+                ),
+            )
+            print(f"fresh-host job budget: {budget.to_env()}")
+            return 0
         if args.command == "prepare-context":
             prepare_context(
                 scenario_id=str(args.scenario),

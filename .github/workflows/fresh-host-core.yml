@@ -43,6 +43,9 @@ jobs:
           - hypermemory
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Reserves equal the scenario step timeout and the summed observer step timeouts.
+      - name: Initialize Linux fresh-host job budget
+        run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 75 --scenario-reserve-minutes 20 --observer-reserve-minutes 9 --github-env-file "${GITHUB_ENV}"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
@@ -53,6 +56,7 @@ jobs:
       - name: Restore package download caches
         id: linux_package_cache
         if: ${{ inputs.enable_package_cache }}
+        timeout-minutes: 5
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
@@ -66,22 +70,28 @@ jobs:
       - name: Preview Linux fresh-host context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Ensure Linux fresh-host Docker images
+        timeout-minutes: 32
         run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - name: Run Linux fresh-host scenario
+        timeout-minutes: 20
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect Linux fresh-host diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 3
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Write Linux fresh-host summary
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 1
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.linux_package_cache.outputs.cache-hit == 'true' }}
         run: ./tests/scripts/fresh_host.py write-summary --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
-      - if: always()
+      - name: Upload Linux fresh-host artifacts
+        if: always()
         continue-on-error: true
+        timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-fresh-host-artifacts-${{ matrix.profile }}
@@ -125,13 +135,18 @@ jobs:
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: ${{ inputs.docker_pull_max_attempts }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Reserves equal the scenario step timeout and the summed observer step timeouts.
+      - name: Initialize macOS fresh-host job budget
+        run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 90 --scenario-reserve-minutes 35 --observer-reserve-minutes 15 --github-env-file "${GITHUB_ENV}"
       - name: Restore OrbStack DMG cache
         id: orbstack_dmg_cache
+        timeout-minutes: 5
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: /tmp/orbstack.dmg
           key: orbstack-v1.5.1-16857-amd64
       - name: Set up Docker via OrbStack
+        timeout-minutes: 10
         # v1.6.0+ panics on GHA macos-15-intel (Skylake CPU check); v1.5.1 is safe.
         # Placed first to overlap OrbStack startup with toolchain setup (~90s saved).
         env:
@@ -153,6 +168,7 @@ jobs:
       - name: Restore package download caches
         id: macos_package_cache
         if: ${{ inputs.enable_package_cache }}
+        timeout-minutes: 5
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
@@ -163,6 +179,7 @@ jobs:
             fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
       - name: Save OrbStack DMG cache
         if: steps.orbstack_dmg_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: /tmp/orbstack.dmg
@@ -179,36 +196,40 @@ jobs:
       - name: Preview macOS fresh-host context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
       - name: Wait for hosted macOS Docker runtime
+        timeout-minutes: 10
         run: >-
           ./tests/scripts/hosted_docker.py wait-runtime-ready
           --context "${FRESH_HOST_CONTEXT}"
           --github-env-file "${GITHUB_ENV}"
+      # The helper owns classified retries and OrbStack recovery inside one phase budget.
       - name: Ensure hosted macOS Docker images
-        run: >-
-          ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}" ||
-          (echo "[fresh-host] ensure-images failed on first attempt; retrying once after runtime probe." &&
-          sleep 10 &&
-          ./tests/scripts/hosted_docker.py wait-runtime-ready --context "${FRESH_HOST_CONTEXT}" &&
-          ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}")
+        timeout-minutes: 32
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - name: Run macOS fresh-host scenario
+        timeout-minutes: 35
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect hosted macOS Docker diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 4
         run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Collect macOS fresh-host diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 3
         run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
       - name: Write macOS fresh-host summary
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 1
         env:
           FRESH_HOST_PACKAGE_CACHE_ENABLED: ${{ inputs.enable_package_cache }}
           FRESH_HOST_PACKAGE_CACHE_HIT: ${{ steps.macos_package_cache.outputs.cache-hit == 'true' }}
         run: ./tests/scripts/fresh_host.py write-summary --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
-      - if: always()
+      - name: Upload macOS fresh-host artifacts
+        if: always()
         continue-on-error: true
+        timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact_name }}
@@ -221,4 +242,5 @@ jobs:
       - name: Clean up macOS fresh-host context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true
+        timeout-minutes: 2
         run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
