@@ -36,7 +36,7 @@ _NON_IMPACTFUL_PATH_FILTER_MARKERS = (
     '"**/*.pdf"',
     '"LICENSE*"',
 )
-_CACHE_ACTION_NODE24_SHA = "caa296126883cff596d87d8935842f9db880ef25"
+_CACHE_ACTION_NODE24_SHA = "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
 
 
 def _workflow_text(workflow_name: str) -> str:
@@ -652,6 +652,20 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
     assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text
+
+
+def test_cache_restore_and_save_share_one_pinned_release() -> None:
+    """Restore and save must move together; a split major can strand saved caches."""
+    pins = {
+        match.group(1)
+        for workflow_path in (REPO_ROOT / ".github" / "workflows").glob("*.yml")
+        for match in re.finditer(
+            r"actions/cache/(?:restore|save)@([0-9a-f]{40})",
+            workflow_path.read_text(encoding="utf-8"),
+        )
+    }
+
+    assert pins == {_CACHE_ACTION_NODE24_SHA}
 
 
 def test_fresh_host_cache_warm_workflow_uses_semantic_cache_warmer() -> None:
