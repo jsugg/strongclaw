@@ -126,3 +126,4 @@ class ImageEnsureReport:
     pull_deadline_epoch: float | None = None
     pull_deadline_limited_by: str | None = None
     pull_events_path: str | None = None
+    disk_preflight_path: str | None = None

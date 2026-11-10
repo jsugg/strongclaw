@@ -203,6 +203,15 @@ diagnostics, and summary generation to executable helper scripts under `tests/sc
   `disk_full`, `deterministic`, or `unknown`. Only transient classes are retried:
   stalls at most twice per image, with full-jitter backoff clipped to the
   remaining budget. Deterministic and disk-full failures fail immediately.
+- Before any Linux pull, a disk preflight estimates the capacity the missing
+  images need: measured unpacked sizes per repository, plus pull-transient and
+  scenario headroom. It measures the Docker root filesystem. When space is short,
+  it removes expendable hosted-runner toolchains one at a time, and only from an
+  audited allowlist (Android SDK, GHC/ghcup, .NET, Swift, CodeQL, PowerShell,
+  Boost). It never touches the workspace or the Python/Node toolcache. If space is
+  still short, the phase fails with `insufficient_disk` before any pull starts.
+  `disk-preflight.json` records free space before and after, the estimate, and
+  every removed path.
 - Hosted macOS repo-local stack activation is reconciled once after any failed
   `up`: the helper removes partial containers, re-probes the Docker backend, and
   retries the idempotent activation. A repeated failure remains blocking.

@@ -21,6 +21,11 @@ from tests.utils.helpers._fresh_host.budget import (
 )
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context
+from tests.utils.helpers._hosted_docker.disk import (
+    INSUFFICIENT_DISK,
+    docker_root_dir,
+    ensure_pull_capacity,
+)
 from tests.utils.helpers._hosted_docker.events import PullEventLog
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
 from tests.utils.helpers._hosted_docker.models import (
@@ -50,6 +55,7 @@ from tests.utils.helpers._hosted_docker.shell import run_checked, wait_for_docke
 
 COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
 PULL_EVENTS_FILE_NAME: Final[str] = "image-pull-events.jsonl"
+DISK_PREFLIGHT_FILE_NAME: Final[str] = "disk-preflight.json"
 
 
 def compose_probe_env(
@@ -378,7 +384,42 @@ def pull_images(
 
 def _failure_class_for(reason: str) -> str:
     """Classify a pre-pull failure message for the ensure report."""
-    return BUDGET_EXHAUSTED if reason.startswith(BUDGET_EXHAUSTED) else "ensure_failed"
+    for failure_class in (BUDGET_EXHAUSTED, INSUFFICIENT_DISK):
+        if reason.startswith(failure_class):
+            return failure_class
+    return "ensure_failed"
+
+
+def preflight_linux_disk(
+    *,
+    context: FreshHostContext,
+    repo_root: Path,
+    env: Mapping[str, str],
+    missing_images: Sequence[str],
+    event_log: PullEventLog,
+) -> str | None:
+    """Assert Linux pull capacity before pulling; return the preflight report path."""
+    if context.platform != "linux" or not missing_images:
+        return None
+    report_path = Path(context.report_dir).resolve() / DISK_PREFLIGHT_FILE_NAME
+    try:
+        report = ensure_pull_capacity(
+            docker_root=docker_root_dir(cwd=repo_root, env=env),
+            missing_images=missing_images,
+            report_path=report_path,
+        )
+    except FreshHostError as exc:
+        event_log.emit("disk_preflight", sufficient=False, error=str(exc))
+        raise
+    event_log.emit(
+        "disk_preflight",
+        sufficient=True,
+        required_bytes=report.required_bytes,
+        free_before_bytes=report.free_before_bytes,
+        free_after_bytes=report.free_after_bytes,
+        removed_paths=report.removed_paths,
+    )
+    return str(report_path)
 
 
 def ensure_images(
@@ -403,6 +444,7 @@ def ensure_images(
     }
     pull_report: PullReport | None = None
     deadline: PhaseDeadline | None = None
+    artifacts: dict[str, str | None] = {"disk_preflight_path": None}
 
     def build_report(failure_reason: str | None, failure_class: str | None) -> ImageEnsureReport:
         finished_at = now_iso()
@@ -425,6 +467,7 @@ def ensure_images(
             pull_deadline_epoch=None if deadline is None else deadline.wall_deadline_epoch,
             pull_deadline_limited_by=None if deadline is None else deadline.limited_by,
             pull_events_path=str(events_path) if context.ensure_images else None,
+            disk_preflight_path=artifacts["disk_preflight_path"],
         )
 
     def persist(report: ImageEnsureReport) -> ImageEnsureReport:
@@ -454,6 +497,13 @@ def ensure_images(
         state["missing_before_pull"] = [
             image for image in state["images"] if image not in state["local_before"]
         ]
+        artifacts["disk_preflight_path"] = preflight_linux_disk(
+            context=context,
+            repo_root=repo_root,
+            env=env,
+            missing_images=state["missing_before_pull"],
+            event_log=event_log,
+        )
         if state["missing_before_pull"]:
             pull_report = pull_images(
                 state["missing_before_pull"],
