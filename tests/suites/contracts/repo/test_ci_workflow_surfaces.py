@@ -30,7 +30,7 @@ _NON_IMPACTFUL_PATH_FILTER_MARKERS = (
     '"**/*.pdf"',
     '"LICENSE*"',
 )
-_CACHE_ACTION_NODE24_SHA = "668228422ae6a00e4ad889ee87cd7109ec5666a7"
+_CACHE_ACTION_NODE24_SHA = "caa296126883cff596d87d8935842f9db880ef25"
 
 
 def _workflow_text(workflow_name: str) -> str:
@@ -298,7 +298,7 @@ def test_ci_gate_verdict_uploads_compact_json_artifact() -> None:
         for step in steps
     )
     assert any(
-        step.get("uses") == "actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f"
+        step.get("uses") == "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
         and step.get("if") == "always()"
         and step.get("with")
         == {
