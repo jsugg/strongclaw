@@ -35,10 +35,6 @@ class _WaitForDockerReady(Protocol):
     def __call__(self, *, cwd: Path, env: dict[str, str], max_attempts: int = 60) -> None: ...
 
 
-_pull_one_image = cast(
-    _PullOneImage,
-    cast(Any, hosted_docker)._pull_one_image,
-)
 _wait_for_docker_ready = cast(
     _WaitForDockerReady,
     cast(Any, hosted_docker)._wait_for_docker_ready,
@@ -51,6 +47,30 @@ _ORBSTACK_ONLY = pytest.mark.skipif(
 
 def _sleep(_: float) -> None:
     return None
+
+
+def _no_jitter(cap_seconds: float) -> float:
+    return cap_seconds
+
+
+class _FunctionPullClient:
+    """Adapt a fake ``(image, timeout) -> (image, rc, duration, output)`` pull into a client."""
+
+    def __init__(self, pull: _PullOneImage) -> None:
+        self._pull = pull
+
+    def pull(
+        self, image: str, *, timeout_seconds: float, stall_seconds: float
+    ) -> hosted_docker.PullOutcome:
+        del stall_seconds
+        pulled, returncode, duration, output = self._pull(image, int(timeout_seconds))
+        return hosted_docker.PullOutcome(
+            image=pulled,
+            returncode=returncode,
+            duration_seconds=duration,
+            output_tail=output,
+            failure_class=None if returncode == 0 else hosted_docker.classify_pull_failure(output),
+        )
 
 
 def test_pull_images_retries_with_reduced_parallelism(
@@ -66,13 +86,14 @@ def test_pull_images_retries_with_reduced_parallelism(
             return image, 1, 0.1, "unexpected EOF"
         return image, 0, 0.1, ""
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
-
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["postgres:16", "qdrant:v1"],
         parallelism=4,
         max_attempts=3,
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -113,20 +134,22 @@ def test_pull_images_waits_for_daemon_recovery_on_connectivity_failure(
     ) -> None:
         recovery_probes.append((cwd, dict(env), max_attempts))
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images,
         "wait_for_docker_ready",
         new=fake_wait_for_docker_ready,
     )
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
 
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["postgres:16"],
         parallelism=2,
         max_attempts=3,
         recovery_cwd=tmp_path,
         recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -165,20 +188,22 @@ def test_pull_images_probes_runtime_before_retry_for_non_connectivity_failure(
     ) -> None:
         recovery_probes.append((cwd, dict(env), max_attempts))
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images,
         "wait_for_docker_ready",
         new=fake_wait_for_docker_ready,
     )
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
 
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["ubuntu/squid"],
         parallelism=2,
         max_attempts=3,
         recovery_cwd=tmp_path,
         recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -220,21 +245,23 @@ def test_pull_images_classifies_docker_socket_eof_as_connectivity_failure(
     def fake_log(message: str) -> None:
         logs.append(message)
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images,
         "wait_for_docker_ready",
         new=fake_wait_for_docker_ready,
     )
     test_context.patch.patch_object(hosted_docker_images, "log", new=fake_log)
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
 
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["ubuntu/squid"],
         parallelism=2,
         max_attempts=3,
         recovery_cwd=tmp_path,
         recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -251,7 +278,6 @@ def test_pull_images_uses_extended_backoff_for_transient_registry_failure(
 ) -> None:
     """Transient registry timeouts should retry with a longer, capped exponential backoff."""
     attempts: dict[str, int] = {"qdrant/qdrant:v1": 0}
-    sleeps: list[float] = []
     logs: list[str] = []
 
     def fake_pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
@@ -277,27 +303,26 @@ def test_pull_images_uses_extended_backoff_for_transient_registry_failure(
     ) -> None:
         del cwd, env, max_attempts
 
-    def capture_sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-
     def fake_log(message: str) -> None:
         logs.append(message)
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images,
         "wait_for_docker_ready",
         new=fake_wait_for_docker_ready,
     )
     test_context.patch.patch_object(hosted_docker_images, "log", new=fake_log)
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=capture_sleep)
 
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["qdrant/qdrant:v1"],
         parallelism=2,
         max_attempts=5,
         recovery_cwd=tmp_path,
         recovery_env={"DOCKER_HOST": "unix:///tmp/docker.sock"},
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -305,7 +330,7 @@ def test_pull_images_uses_extended_backoff_for_transient_registry_failure(
     assert report.retried_images == ["qdrant/qdrant:v1"]
     # Exponential growth from the 10s base, capped at 45s — far longer than the 2s/4s
     # generic backoff so a brief Docker Hub outage is ridden out across the retry budget.
-    assert sleeps == [10, 20, 40, 45]
+    assert clock.sleeps == [10, 20, 40, 45]
     assert any(
         "Detected transient registry connectivity failure; backing off before retry." in entry
         for entry in logs
@@ -321,21 +346,6 @@ def test_pull_images_requires_recovery_cwd_and_env_together() -> None:
             max_attempts=1,
             recovery_cwd=Path("/tmp"),
         )
-
-
-def test_pull_one_image_reports_timeout(test_context: TestContext) -> None:
-    """Timed-out pulls should return a structured failure result."""
-
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(cmd=["docker", "pull", "postgres:16"], timeout=42)
-
-    test_context.patch.patch_object(hosted_docker_images.subprocess, "run", new=fake_run)
-
-    image, returncode, _, output = _pull_one_image("postgres:16", 42)
-
-    assert image == "postgres:16"
-    assert returncode == 1
-    assert output == "docker pull timed out after 42s"
 
 
 def test_resolve_compose_images_uses_first_seen_order(
@@ -1076,14 +1086,14 @@ def test_pull_images_clips_attempt_timeout_to_phase_deadline(
         timeouts.append(timeout_seconds)
         return image, 0, 0.1, ""
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
-
     report = hosted_docker.pull_images(
         ["postgres:16"],
         parallelism=1,
         max_attempts=5,
         deadline=_budgeted_deadline(clock, 400),
         clock=clock,
+        client=_FunctionPullClient(fake_pull_one_image),
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -1108,7 +1118,6 @@ def test_pull_images_stops_when_budget_cannot_fit_another_attempt(
         del cwd, env
         probes.append(max_attempts)
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
     )
@@ -1123,6 +1132,8 @@ def test_pull_images_stops_when_budget_cannot_fit_another_attempt(
         deadline=_budgeted_deadline(clock, 600),
         clock=clock,
         event_log=events,
+        client=_FunctionPullClient(fake_pull_one_image),
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 1
@@ -1154,7 +1165,6 @@ def test_pull_images_skips_backoff_that_would_breach_budget(
         probes.append(max_attempts)
         clock.advance(40)
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
     )
@@ -1167,6 +1177,8 @@ def test_pull_images_skips_backoff_that_would_breach_budget(
         recovery_env={},
         deadline=_budgeted_deadline(clock, 105),
         clock=clock,
+        client=_FunctionPullClient(fake_pull_one_image),
+        jitter=_no_jitter,
     )
 
     # 105s budget: one probe sized to fit (105 // 32 = 3) leaves 65s; the 10s backoff would
@@ -1195,12 +1207,11 @@ def test_pull_images_restarts_runtime_on_daemon_failure_when_hook_given(
         del cwd, env, max_attempts
         calls.append("wait")
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
     test_context.patch.patch_object(
         hosted_docker_images, "wait_for_docker_ready", new=fake_wait_for_docker_ready
     )
-    test_context.patch.patch_object(hosted_docker_images.time, "sleep", new=_sleep)
 
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["postgres:16"],
         parallelism=1,
@@ -1208,6 +1219,9 @@ def test_pull_images_restarts_runtime_on_daemon_failure_when_hook_given(
         recovery_cwd=tmp_path,
         recovery_env={},
         recover_runtime=lambda: calls.append("restart"),
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 0
@@ -1225,8 +1239,7 @@ def test_pull_images_reports_daemon_unavailable_when_recovery_fails(
     def failed_recovery() -> None:
         raise fresh_host.FreshHostError("orbstack_recovery_failed")
 
-    test_context.patch.patch_object(hosted_docker_images, "pull_one_image", new=fake_pull_one_image)
-
+    clock = FakeClock()
     report = hosted_docker.pull_images(
         ["postgres:16"],
         parallelism=1,
@@ -1234,6 +1247,9 @@ def test_pull_images_reports_daemon_unavailable_when_recovery_fails(
         recovery_cwd=tmp_path,
         recovery_env={},
         recover_runtime=failed_recovery,
+        client=_FunctionPullClient(fake_pull_one_image),
+        clock=clock,
+        jitter=_no_jitter,
     )
 
     assert report.exit_code == 1

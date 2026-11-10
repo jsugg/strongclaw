@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import random
 import subprocess
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -27,6 +27,7 @@ from tests.utils.helpers._hosted_docker.models import (
     BUDGET_EXHAUSTED,
     DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
     MAX_RECOVERY_PROBES,
+    MAX_STALL_RETRIES,
     MIN_PULL_ATTEMPT_SECONDS,
     PULL_HEARTBEAT_SECONDS,
     PULL_RETRY_BACKOFF_CAP_SECONDS,
@@ -34,33 +35,21 @@ from tests.utils.helpers._hosted_docker.models import (
     REGISTRY_RETRY_BACKOFF_BASE_SECONDS,
     REGISTRY_RETRY_BACKOFF_CAP_SECONDS,
     ImageEnsureReport,
+    PullAttemptRecord,
     PullReport,
+)
+from tests.utils.helpers._hosted_docker.pull_client import (
+    RETRYABLE_FAILURE_CLASSES,
+    STALL_TIMEOUT_SECONDS,
+    CliDockerPullClient,
+    DockerPullClient,
+    PullOutcome,
 )
 from tests.utils.helpers._hosted_docker.runtime import wait_runtime_ready
 from tests.utils.helpers._hosted_docker.shell import run_checked, wait_for_docker_ready
 
 COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
 PULL_EVENTS_FILE_NAME: Final[str] = "image-pull-events.jsonl"
-DOCKER_DAEMON_FAILURE_MARKERS: Final[tuple[str, ...]] = (
-    "connection refused",
-    "connection reset by peer",
-    "cannot connect to the docker daemon",
-    "/run/containerd/containerd.sock",
-    "error while dialing",
-    "error during connect",
-    "unexpected eof",
-)
-# Transient registry network errors (not daemon failures); retry with longer backoff
-REGISTRY_TRANSIENT_FAILURE_MARKERS: Final[tuple[str, ...]] = (
-    "context deadline exceeded",
-    "request canceled while waiting for connection",
-    "client.timeout exceeded while awaiting headers",
-    "timeout exceeded while awaiting headers",
-    "i/o timeout",
-    "tls handshake timeout",
-    "temporary failure in name resolution",
-    "no such host",
-)
 
 
 def compose_probe_env(
@@ -126,42 +115,6 @@ def list_local_images(images: Sequence[str]) -> list[str]:
     return present
 
 
-def pull_one_image(image: str, timeout_seconds: int) -> tuple[str, int, float, str]:
-    """Pull one image and return status information."""
-    started = time.monotonic()
-    try:
-        result = subprocess.run(
-            ["docker", "pull", image],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired:
-        return (
-            image,
-            1,
-            time.monotonic() - started,
-            f"docker pull timed out after {timeout_seconds}s",
-        )
-    output = "\n".join(chunk for chunk in (result.stdout.strip(), result.stderr.strip()) if chunk)
-    return image, result.returncode, time.monotonic() - started, output
-
-
-def _is_daemon_connectivity_failure(output: str) -> bool:
-    """Return whether a pull failure output indicates daemon connectivity problems."""
-    lowered = output.lower()
-    if any(marker in lowered for marker in DOCKER_DAEMON_FAILURE_MARKERS):
-        return True
-    return "docker.sock" in lowered and "eof" in lowered
-
-
-def _is_transient_registry_failure(output: str) -> bool:
-    """Return whether a pull failure output indicates a transient registry network blip."""
-    lowered = output.lower()
-    return any(marker in lowered for marker in REGISTRY_TRANSIENT_FAILURE_MARKERS)
-
-
 def _retry_backoff_seconds(*, attempt_count: int, registry_failure: bool) -> int:
     """Return the backoff before the next pull attempt.
 
@@ -198,6 +151,25 @@ def _budget_allows(deadline: PhaseDeadline | None, clock: Clock, *, spend: float
     return deadline.remaining(clock) - spend >= MIN_PULL_ATTEMPT_SECONDS
 
 
+def _full_jitter(cap_seconds: float) -> float:
+    """Return a full-jitter delay in [0, cap_seconds]."""
+    return random.uniform(0.0, cap_seconds)
+
+
+def _overall_failure_class(
+    *,
+    budget_exhausted: bool,
+    terminal: Sequence[PullOutcome],
+    last_classes: Sequence[str],
+) -> str | None:
+    """Pick the report-level failure class, preferring non-retryable causes."""
+    if terminal:
+        return terminal[0].failure_class or "unknown"
+    if budget_exhausted:
+        return BUDGET_EXHAUSTED
+    return last_classes[-1] if last_classes else None
+
+
 def pull_images(
     images: Sequence[str],
     *,
@@ -210,21 +182,43 @@ def pull_images(
     clock: Clock = SYSTEM_CLOCK,
     event_log: PullEventLog | None = None,
     recover_runtime: Callable[[], object] | None = None,
+    client: DockerPullClient | None = None,
+    jitter: Callable[[float], float] = _full_jitter,
+    stall_seconds: float = STALL_TIMEOUT_SECONDS,
 ) -> PullReport:
-    """Pull images with bounded retries, reduced retry parallelism, and a phase deadline."""
+    """Pull images with classified, budget-clipped retries and stall-aware pulls."""
     if parallelism < 1 or max_attempts < 1 or pull_timeout_seconds < 1:
         raise FreshHostError("parallelism, max_attempts, and pull_timeout_seconds must be positive")
     if (recovery_cwd is None) != (recovery_env is None):
         raise FreshHostError("recovery_cwd and recovery_env must be provided together")
+    pull_client = client if client is not None else CliDockerPullClient(clock=clock)
 
     def emit(event: str, **fields: object) -> None:
         if event_log is not None:
             event_log.emit(event, **fields)
 
+    def pull_within_budget(image: str) -> PullOutcome:
+        # Timeouts are computed when the pull actually starts, so queued pulls see the
+        # budget that is left then and never start once it is gone.
+        if not _budget_allows(deadline, clock):
+            return PullOutcome(
+                image=image,
+                returncode=1,
+                duration_seconds=0.0,
+                output_tail="pull not started: image-pull budget exhausted",
+                failure_class="budget_exhausted",
+            )
+        timeout = _attempt_timeout_seconds(pull_timeout_seconds, deadline, clock)
+        return pull_client.pull(image, timeout_seconds=timeout, stall_seconds=stall_seconds)
+
     outstanding = list(images)
     pulled_images: list[str] = []
     retried_images: list[str] = []
     seen_retries: set[str] = set()
+    terminal_failures: list[PullOutcome] = []
+    stall_retries: dict[str, int] = {}
+    attempt_records: list[PullAttemptRecord] = []
+    last_classes: list[str] = []
     attempt_parallelism = parallelism
     attempt_count = 0
     budget_exhausted = False
@@ -233,28 +227,23 @@ def pull_images(
             budget_exhausted = True
             break
         attempt_count += 1
-        attempt_timeout = _attempt_timeout_seconds(pull_timeout_seconds, deadline, clock)
         log(
             f"Pulling {len(outstanding)} image(s) with parallelism={attempt_parallelism} "
-            f"(attempt {attempt_count}/{max_attempts}, timeout {attempt_timeout}s)."
+            f"(attempt {attempt_count}/{max_attempts})."
         )
         emit(
             "attempt_started",
             attempt=attempt_count,
             images=list(outstanding),
             parallelism=attempt_parallelism,
-            timeout_seconds=attempt_timeout,
+            remaining_seconds=None if deadline is None else round(deadline.remaining(clock), 1),
         )
-        failures: list[str] = []
-        daemon_connectivity_failure = False
-        transient_registry_failure = False
+        retryable: list[str] = []
+        attempt_classes: set[str] = set()
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=min(attempt_parallelism, len(outstanding))
         ) as executor:
-            futures = {
-                executor.submit(pull_one_image, image, attempt_timeout): image
-                for image in outstanding
-            }
+            futures = {executor.submit(pull_within_budget, image): image for image in outstanding}
             pending = set(futures)
             while pending:
                 done, pending = concurrent.futures.wait(
@@ -266,29 +255,45 @@ def pull_images(
                     log("Waiting on " + ", ".join(sorted(futures[future] for future in pending)))
                     continue
                 for future in done:
-                    image, returncode, duration_seconds, output = future.result()
-                    emit(
-                        "image_result",
+                    outcome = future.result()
+                    record = PullAttemptRecord(
+                        image=outcome.image,
                         attempt=attempt_count,
-                        image=image,
-                        returncode=returncode,
-                        duration_seconds=round(duration_seconds, 3),
-                        output_tail=output[-2000:],
+                        returncode=outcome.returncode,
+                        duration_seconds=round(outcome.duration_seconds, 3),
+                        failure_class=outcome.failure_class,
+                        seconds_since_progress=round(outcome.seconds_since_progress, 1),
+                        bytes_observed=outcome.bytes_observed,
+                        output_tail=outcome.output_tail[-2000:],
                     )
-                    if returncode == 0:
-                        log(f"[ok] {image} in {duration_seconds:.1f}s")
-                        pulled_images.append(image)
+                    attempt_records.append(record)
+                    emit("image_result", **asdict(record))
+                    if outcome.ok:
+                        log(f"[ok] {outcome.image} in {outcome.duration_seconds:.1f}s")
+                        pulled_images.append(outcome.image)
                         continue
-                    log(f"[failed] {image} in {duration_seconds:.1f}s")
-                    if output:
-                        print(output, flush=True)
-                        if _is_daemon_connectivity_failure(output):
-                            daemon_connectivity_failure = True
-                        elif _is_transient_registry_failure(output):
-                            transient_registry_failure = True
-                    failures.append(image)
-        outstanding = failures
-        if not outstanding or attempt_count >= max_attempts:
+                    failure_class = outcome.failure_class or "unknown"
+                    log(
+                        f"[failed:{failure_class}] {outcome.image} "
+                        f"in {outcome.duration_seconds:.1f}s"
+                    )
+                    if outcome.output_tail:
+                        print(outcome.output_tail, flush=True)
+                    attempt_classes.add(failure_class)
+                    last_classes.append(failure_class)
+                    if failure_class == "stalled":
+                        stall_retries[outcome.image] = stall_retries.get(outcome.image, 0) + 1
+                    if failure_class == "budget_exhausted":
+                        budget_exhausted = True
+                        retryable.append(outcome.image)
+                    elif failure_class not in RETRYABLE_FAILURE_CLASSES or (
+                        stall_retries.get(outcome.image, 0) > MAX_STALL_RETRIES
+                    ):
+                        terminal_failures.append(outcome)
+                    else:
+                        retryable.append(outcome.image)
+        outstanding = retryable
+        if not outstanding or budget_exhausted or attempt_count >= max_attempts:
             break
         for image in outstanding:
             if image not in seen_retries:
@@ -297,15 +302,17 @@ def pull_images(
         if not _budget_allows(deadline, clock):
             budget_exhausted = True
             break
+        daemon_failure = "daemon_unavailable" in attempt_classes
+        registry_failure = "registry_transient" in attempt_classes and not daemon_failure
         if recovery_cwd is not None and recovery_env is not None:
-            if daemon_connectivity_failure:
+            if daemon_failure:
                 log("Detected Docker daemon connectivity failure; waiting for runtime recovery.")
-            elif transient_registry_failure:
+            elif registry_failure:
                 log("Detected transient registry connectivity failure; backing off before retry.")
             else:
                 log("Retrying image pull after failure; probing Docker runtime before retry.")
             try:
-                if daemon_connectivity_failure and recover_runtime is not None:
+                if daemon_failure and recover_runtime is not None:
                     # A dead runtime needs a restart, not just a wait (OrbStack on macOS).
                     emit("runtime_recovery", attempt=attempt_count)
                     recover_runtime()
@@ -321,18 +328,23 @@ def pull_images(
                 return PullReport(
                     exit_code=1,
                     pulled_images=pulled_images,
-                    failed_images=outstanding,
+                    failed_images=[outcome.image for outcome in terminal_failures] + outstanding,
                     attempt_count=attempt_count,
                     retried_images=retried_images,
                     failure_class="daemon_unavailable",
+                    attempts=attempt_records,
                 )
         next_parallelism = max(1, attempt_parallelism // 2)
         if next_parallelism != attempt_parallelism:
             log(f"Reducing retry parallelism {attempt_parallelism}->{next_parallelism}.")
         attempt_parallelism = next_parallelism
-        backoff_seconds = _retry_backoff_seconds(
-            attempt_count=attempt_count,
-            registry_failure=transient_registry_failure and not daemon_connectivity_failure,
+        backoff_seconds = round(
+            jitter(
+                _retry_backoff_seconds(
+                    attempt_count=attempt_count, registry_failure=registry_failure
+                )
+            ),
+            3,
         )
         if not _budget_allows(deadline, clock, spend=backoff_seconds):
             budget_exhausted = True
@@ -344,13 +356,23 @@ def pull_images(
         remaining = None if deadline is None else round(deadline.remaining(clock), 1)
         log(f"Image pull budget exhausted with {len(outstanding)} image(s) outstanding.")
         emit("budget_exhausted", attempt=attempt_count, remaining_seconds=remaining)
+    failed_images = [outcome.image for outcome in terminal_failures] + outstanding
     return PullReport(
-        exit_code=0 if not outstanding else 1,
+        exit_code=0 if not failed_images else 1,
         pulled_images=pulled_images,
-        failed_images=outstanding,
+        failed_images=failed_images,
         attempt_count=attempt_count,
         retried_images=retried_images,
-        failure_class=BUDGET_EXHAUSTED if budget_exhausted and outstanding else None,
+        failure_class=(
+            _overall_failure_class(
+                budget_exhausted=budget_exhausted and bool(outstanding),
+                terminal=terminal_failures,
+                last_classes=last_classes,
+            )
+            if failed_images
+            else None
+        ),
+        attempts=attempt_records,
     )
 
 

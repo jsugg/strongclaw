@@ -195,6 +195,14 @@ diagnostics, and summary generation to executable helper scripts under `tests/sc
   from the shell. It always writes `image-ensure-report.json`, and it appends
   `image-pull-events.jsonl` one event at a time, so a job killed mid-pull still
   uploads evidence.
+- Pulls are stall-aware. The helper runs `docker pull` under a pseudo-terminal,
+  so the CLI reports per-layer byte counters. It counts only a new layer status
+  or a larger byte count as progress, and terminates and reaps the pull's process
+  group after five minutes without progress. Failures are classified as
+  `stalled`, `budget_exhausted`, `registry_transient`, `daemon_unavailable`,
+  `disk_full`, `deterministic`, or `unknown`. Only transient classes are retried:
+  stalls at most twice per image, with full-jitter backoff clipped to the
+  remaining budget. Deterministic and disk-full failures fail immediately.
 - Hosted macOS repo-local stack activation is reconciled once after any failed
   `up`: the helper removes partial containers, re-probes the Docker backend, and
   retries the idempotent activation. A repeated failure remains blocking.
