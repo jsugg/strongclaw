@@ -7,7 +7,7 @@ import dataclasses
 import json
 import os
 import pathlib
-import shutil
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +16,15 @@ from typing import cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.observability import emit_structured_log
+from clawops.qdrant_storage import (
+    QDRANT_SERVICE_NAME,
+    QdrantStorageError,
+    StorageDecision,
+    StorageOperations,
+    clear_directory,
+    complete_reindex,
+    prepare_storage,
+)
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_compose import compose_project_name, resolve_compose_file
 from clawops.strongclaw_runtime import (
@@ -23,6 +32,7 @@ from clawops.strongclaw_runtime import (
     CommandError,
     ensure_docker_backend_ready,
     load_env_assignments,
+    rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_uses_hypermemory,
     rendered_openclaw_uses_qmd,
     resolve_openclaw_config_path,
@@ -30,6 +40,7 @@ from clawops.strongclaw_runtime import (
     resolve_repo_local_compose_state_dir,
     run_command,
     run_command_inherited,
+    run_managed_clawops_command,
     varlock_local_env_file,
     wrap_command_with_varlock,
 )
@@ -51,6 +62,7 @@ LITELLM_SERVICE_NAME = "litellm"
 SIDECAR_RUNTIME_SERVICE_NAMES = ("litellm", "otel-collector", "qdrant", "neo4j")
 COMPOSE_STATUS_TIMEOUT_SECONDS = 30
 POSTGRES_HEALTH_TIMEOUT_SECONDS = 180
+HYPERMEMORY_REINDEX_TIMEOUT_SECONDS = 1800
 LITELLM_BOOTSTRAP_TIMEOUT_SECONDS = 1800
 LITELLM_HEALTH_TIMEOUT_SECONDS = 180
 HOSTED_MACOS_LITELLM_HEALTH_TIMEOUT_SECONDS = 300
@@ -607,6 +619,102 @@ def _sidecars_report_payload(
     return payload
 
 
+def _compose_config_json(execution: _ComposeExecution) -> Mapping[str, object]:
+    """Return the resolved compose model for one execution context."""
+    result = run_command(
+        execution.command("config", "--format", "json"),
+        cwd=execution.cwd,
+        env=execution.env,
+        timeout_seconds=COMPOSE_STATUS_TIMEOUT_SECONDS,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker compose config failed"
+        raise CommandError(detail, result=result)
+    payload: object = json.loads(result.stdout or "{}")
+    return as_mapping(payload, path="docker compose config")
+
+
+def _checked_docker(execution: _ComposeExecution, command: Sequence[str], *, what: str) -> None:
+    """Run one docker command for the qdrant storage upgrade, failing loudly."""
+    result = run_command(command, cwd=execution.cwd, env=execution.env, timeout_seconds=120)
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or f"{what} failed"
+        raise CommandError(detail, result=result)
+
+
+def _log_qdrant_storage(message: str) -> None:
+    """Report a qdrant storage action to the operator and the structured log."""
+    print(f"[clawops] {message}", file=sys.stderr, flush=True)
+    emit_structured_log("clawops.ops.sidecars.qdrant_storage", {"message": message})
+
+
+def _prepare_qdrant_storage(execution: _ComposeExecution) -> StorageDecision:
+    """Reset qdrant storage written by another release line before the stack starts."""
+
+    def volume_exists(name: str) -> bool:
+        return run_command(
+            ["docker", "volume", "inspect", name],
+            cwd=execution.cwd,
+            env=execution.env,
+            timeout_seconds=COMPOSE_STATUS_TIMEOUT_SECONDS,
+        ).ok
+
+    operations = StorageOperations(
+        volume_exists=volume_exists,
+        stop_service=lambda: _checked_docker(
+            execution,
+            execution.command("rm", "--stop", "--force", QDRANT_SERVICE_NAME),
+            what="stopping qdrant",
+        ),
+        remove_volume=lambda name: _checked_docker(
+            execution, ["docker", "volume", "rm", name], what="removing the qdrant volume"
+        ),
+        log=_log_qdrant_storage,
+    )
+    try:
+        return prepare_storage(
+            compose_config=_compose_config_json(execution),
+            compose_state_dir=pathlib.Path(execution.env["STRONGCLAW_COMPOSE_STATE_DIR"]),
+            operations=operations,
+        )
+    except QdrantStorageError as exc:
+        raise CommandError(f"qdrant storage upgrade check failed: {exc}") from exc
+
+
+def _reindex_hypermemory(execution: _ComposeExecution) -> bool:
+    """Rebuild hypermemory's qdrant index; return False when hypermemory is not enabled."""
+    config_path = pathlib.Path(execution.env["OPENCLAW_CONFIG"]).expanduser().resolve()
+    if not rendered_openclaw_uses_hypermemory(config_path):
+        return False
+    hypermemory_config = rendered_openclaw_hypermemory_config_path(config_path)
+    if hypermemory_config is None or not hypermemory_config.exists():
+        raise CommandError(
+            "qdrant storage was reset, but the hypermemory config to reindex from is missing"
+        )
+    _log_qdrant_storage("Reindexing hypermemory into the reset qdrant storage.")
+    result = run_managed_clawops_command(
+        execution.repo_root,
+        ["hypermemory", "--config", str(hypermemory_config), "index", "--json"],
+        cwd=execution.repo_root,
+        timeout_seconds=HYPERMEMORY_REINDEX_TIMEOUT_SECONDS,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "hypermemory index failed"
+        raise CommandError(f"hypermemory reindex after qdrant reset failed: {detail}")
+    return True
+
+
+def _complete_qdrant_reindex(execution: _ComposeExecution) -> str:
+    """Reindex hypermemory after a qdrant reset once qdrant is healthy."""
+    qdrant_status = _compose_service_statuses(execution).get(QDRANT_SERVICE_NAME)
+    compose_state_dir = pathlib.Path(execution.env["STRONGCLAW_COMPOSE_STATE_DIR"])
+    return complete_reindex(
+        compose_state_dir=compose_state_dir,
+        qdrant_ready=_service_matches(qdrant_status, state="running", health="healthy"),
+        reindex=lambda: _reindex_hypermemory(execution),
+    )
+
+
 def _sidecars_up_report(
     repo_root: pathlib.Path,
     *,
@@ -627,6 +735,9 @@ def _sidecars_up_report(
     def _record_step(step: str, exit_code: int) -> int:
         command_steps.append({"step": step, "exitCode": exit_code})
         return exit_code
+
+    if _prepare_qdrant_storage(execution).action == "reset":
+        _record_step("reset-qdrant-storage", 0)
 
     postgres_exit = _record_step(
         "start-postgres",
@@ -773,6 +884,24 @@ def _sidecars_up_report(
                 error=str(exc),
                 failed_service=target.service_name,
             )
+
+    try:
+        reindex_outcome = _complete_qdrant_reindex(execution)
+    except CommandError as exc:
+        _record_step("reindex-hypermemory", 1)
+        if not suppress_wait_failures:
+            raise
+        return _sidecars_report_payload(
+            execution,
+            profile_flags=profile_flags,
+            targets=targets,
+            command_steps=command_steps,
+            command_exit_code=1,
+            error=str(exc),
+            failed_service=QDRANT_SERVICE_NAME,
+        )
+    if reindex_outcome == "reindexed":
+        _record_step("reindex-hypermemory", 0)
 
     payload = _sidecars_report_payload(
         execution,
@@ -999,11 +1128,7 @@ def reset_compose_state(
                 stop_result.stderr.strip() or stop_result.stdout.strip() or "docker stop failed"
             )
             raise CommandError(detail, result=stop_result)
-    for child in target_dir.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-            continue
-        child.unlink()
+    clear_directory(target_dir)
     return {"ok": True, "component": component, "stateDir": str(target_dir)}
 
 

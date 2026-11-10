@@ -140,7 +140,7 @@ findings:
     citations:
       - platform/docs/HYPERMEMORY.md:65-123
       - .github/workflows/memory-plugin-verification.yml:55-96
-      - tests/suites/integration/clawops/hypermemory/test_qdrant_integration.py:117-208
+      - tests/suites/integration/clawops/hypermemory/test_qdrant_integration.py:87-178
     evidence_summary: Hypermemory behavior has strong documentation plus CI and integration evidence.
 
   - finding_id: LR-012

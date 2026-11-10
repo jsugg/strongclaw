@@ -160,8 +160,8 @@ def test_memory_plugin_qdrant_workflow_uses_pinned_ghcr_service_image() -> None:
 
     assert "image: qdrant/qdrant" not in workflow
     assert (
-        "ghcr.io/qdrant/qdrant/qdrant:v1.15.5@sha256:"
-        "21934642fbdc0010b3df46ab214a755fda7a4631a58beec89b050baca4c78311"
+        "ghcr.io/qdrant/qdrant/qdrant:v1.20.0@sha256:"
+        "3a80102f9b2855184d74b6d79e3351320314298c4be1f88ecaf832f147ef7a02"
     ) in workflow
 
 

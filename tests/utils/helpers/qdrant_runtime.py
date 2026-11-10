@@ -19,7 +19,7 @@ from tests.utils.helpers.mode import ServiceMode
 
 QDRANT_URL_ENV = "TEST_QDRANT_URL"
 QDRANT_IMAGE_ENV = "TEST_QDRANT_IMAGE"
-DEFAULT_QDRANT_IMAGE = "ghcr.io/qdrant/qdrant/qdrant:v1.15.5@sha256:21934642fbdc0010b3df46ab214a755fda7a4631a58beec89b050baca4c78311"
+DEFAULT_QDRANT_IMAGE = "ghcr.io/qdrant/qdrant/qdrant:v1.20.0@sha256:3a80102f9b2855184d74b6d79e3351320314298c4be1f88ecaf832f147ef7a02"
 
 type CleanupFn = Callable[[], None]
 
