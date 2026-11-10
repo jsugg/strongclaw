@@ -27,7 +27,7 @@ MEASURED_UNPACKED_IMAGE_BYTES: Final[Mapping[str, int]] = {
     "mcr.microsoft.com/playwright": 3_000_000_000,
     "neo4j": 1_100_000_000,
     "postgres": 450_000_000,
-    "otel/opentelemetry-collector-contrib": 450_000_000,
+    "otel/opentelemetry-collector-contrib": 600_000_000,
     "ubuntu/squid": 350_000_000,
     "qdrant/qdrant": 300_000_000,
 }
