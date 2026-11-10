@@ -32,8 +32,15 @@ remain CI-owned; do not make those mandatory local pre-push steps.
 
 - Keep CI/CD workflow logic thin; put nontrivial behavior in `tests/scripts/`
   helpers with unit or contract coverage.
-- Preserve `.github/required-checks.json`: the only required branch-protection
-  API status context is `Verdict`.
+- Preserve `.github/required-checks.json`: the required branch-protection API
+  status contexts are the aggregate `Verdict` and the standalone
+  `Attribution Guard`, which must re-evaluate pull-request title, body, and
+  label edits without new commits.
+- Keep AI-tool attribution out of branch and tag names, commit messages, commit
+  emails, pull-request titles and bodies, and labels. Naming a provider or
+  dependency as the subject of the work is fine. `make dev` installs local
+  `commit-msg` and `pre-push` attribution hooks; the `Attribution Guard` check is
+  authoritative.
 - Update docs and contract tests in the same change when touching workflows,
   release artifacts, security policy, dependency manifests, or packaged runtime
   assets.

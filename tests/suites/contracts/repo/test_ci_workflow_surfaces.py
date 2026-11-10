@@ -323,15 +323,69 @@ def test_required_check_manifest_tracks_solo_maintainer_merge_policy() -> None:
     status_checks = cast(dict[str, object], branch_protection["requiredStatusChecks"])
     reviews = cast(dict[str, object], branch_protection["pullRequestReviews"])
 
-    assert [context["context"] for context in contexts] == ["Verdict"]
+    attribution_jobs = _workflow_jobs("attribution-guard.yml")
+    attribution_job = cast(dict[str, object], attribution_jobs["attribution-guard"])
+
+    assert [context["context"] for context in contexts] == ["Verdict", "Attribution Guard"]
     assert contexts[0]["jobName"] == verdict["name"] == "Verdict"
     assert contexts[0]["uiLabel"] == "CI / Verdict"
+    assert contexts[1]["workflow"] == ".github/workflows/attribution-guard.yml"
+    assert contexts[1]["jobId"] == "attribution-guard"
+    assert contexts[1]["jobName"] == attribution_job["name"] == "Attribution Guard"
     assert status_checks["strict"] is True
-    assert status_checks["contexts"] == ["Verdict"]
+    assert status_checks["contexts"] == ["Verdict", "Attribution Guard"]
     assert branch_protection["allowForcePushes"] is False
     assert branch_protection["requiredConversationResolution"] is True
     assert reviews["requiredApprovingReviewCount"] == 0
     assert reviews["requireCodeOwnerReviews"] is False
+
+
+def test_attribution_guard_workflow_rechecks_metadata_events_from_trusted_code() -> None:
+    """The guard must rerun on PR metadata edits, never skip, and run base-revision code."""
+    loaded: object = yaml.safe_load(_workflow_text("attribution-guard.yml"))
+    assert isinstance(loaded, dict)
+    raw_workflow = cast(dict[object, object], loaded)
+    # PyYAML reads the bare `on` key as boolean True.
+    triggers = cast(dict[str, object], raw_workflow[True])
+    pull_request = cast(dict[str, object], triggers["pull_request"])
+    push = cast(dict[str, object], triggers["push"])
+    text = _workflow_text("attribution-guard.yml")
+    job = cast(dict[str, object], _workflow_jobs("attribution-guard.yml")["attribution-guard"])
+    steps = cast(list[dict[str, object]], job["steps"])
+    checkouts = [
+        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+
+    assert set(triggers) == {"pull_request", "push"}
+    assert pull_request == {
+        "types": [
+            "opened",
+            "reopened",
+            "synchronize",
+            "edited",
+            "labeled",
+            "unlabeled",
+            "ready_for_review",
+        ]
+    }
+    assert push == {"branches": ["main"]}
+    assert "pull_request_target" not in text
+    assert "paths" not in text
+    assert "if" not in job
+    assert _workflow_payload("attribution-guard.yml")["permissions"] == {
+        "contents": "read",
+        "pull-requests": "read",
+    }
+    assert job["name"] == "Attribution Guard"
+    assert checkouts
+    assert all(
+        cast(dict[str, object], step["with"])["persist-credentials"] is False for step in checkouts
+    )
+    assert cast(dict[str, object], checkouts[0]["with"])["ref"] == (
+        "${{ github.event.pull_request.base.sha || github.sha }}"
+    )
+    assert "./tests/scripts/attribution_guard.py pull-request" in text
+    assert "./tests/scripts/attribution_guard.py push" in text
 
 
 def test_ci_gate_paths_filter_uses_default_quantifier() -> None:

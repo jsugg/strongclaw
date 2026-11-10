@@ -6,7 +6,6 @@ import contextlib
 import fnmatch
 import json
 import os
-import urllib.request
 import xml.etree.ElementTree as ET
 from collections.abc import Generator, Mapping
 from pathlib import Path
@@ -29,6 +28,12 @@ from tests.utils.helpers._ci_workflows.common import (
     extract_tar_member,
     verify_sha256,
 )
+from tests.utils.helpers._ci_workflows.github_api import (
+    GITHUB_API_BASE,
+)
+from tests.utils.helpers._ci_workflows.github_api import (
+    github_paginated_get as _github_paginated_get,
+)
 
 GLOBAL_COVERAGE_THRESHOLD = 75.0
 CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
@@ -37,7 +42,7 @@ CRITICAL_MODULE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "src/clawops/strongclaw_varlock_env.py": 35.0,
     "src/clawops/strongclaw_bootstrap.py": 28.0,
 }
-_GITHUB_API_BASE: Final[str] = "https://api.github.com"
+_GITHUB_API_BASE: Final[str] = GITHUB_API_BASE
 _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
     ".github/workflows/**",
     ".github/ci/**",
@@ -173,60 +178,6 @@ def write_empty_sarif(output_path: Path, *, information_uri: str) -> None:
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def _next_link(link_header: str | None) -> str | None:
-    """Extract the pagination next-link URL from one GitHub Link header."""
-    if link_header is None:
-        return None
-    for segment in link_header.split(","):
-        parts = [part.strip() for part in segment.split(";")]
-        if not parts:
-            continue
-        if any(part == 'rel="next"' for part in parts[1:]):
-            candidate = parts[0]
-            if candidate.startswith("<") and candidate.endswith(">"):
-                return candidate[1:-1]
-    return None
-
-
-def _github_paginated_get(
-    *,
-    url: str,
-    token: str,
-) -> list[dict[str, object]]:
-    """Fetch one GitHub API endpoint and follow pagination links."""
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    collected: list[dict[str, object]] = []
-    next_url: str | None = url
-    while next_url is not None:
-        request = urllib.request.Request(next_url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                body = response.read().decode("utf-8")
-                link_header = response.headers.get("Link")
-        except OSError as exc:
-            raise CiWorkflowError(f"github api request failed for {next_url}: {exc}") from exc
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise CiWorkflowError(f"github api returned invalid json for {next_url}") from exc
-        if not isinstance(payload, list):
-            raise CiWorkflowError(f"github api payload must be a list for {next_url}")
-        for row in cast(list[object], payload):
-            if not isinstance(row, dict):
-                raise CiWorkflowError(f"github api row must be an object for {next_url}")
-            normalized_row: dict[str, object] = {}
-            for key, value in cast(dict[object, object], row).items():
-                if isinstance(key, str):
-                    normalized_row[key] = value
-            collected.append(normalized_row)
-        next_url = _next_link(link_header)
-    return collected
 
 
 def _is_security_critical_path(path: str) -> bool:
