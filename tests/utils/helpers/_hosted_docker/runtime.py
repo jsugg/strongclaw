@@ -19,6 +19,7 @@ from tests.utils.helpers._hosted_docker.models import (
     RuntimeRecoveryAttemptReport,
 )
 from tests.utils.helpers._hosted_docker.shell import (
+    DOCKER_READY_POLL_SECONDS,
     macos_env,
     run_checked,
     run_command,
@@ -31,6 +32,24 @@ _POST_RECOVERY_DOCKER_READY_ATTEMPTS = 90
 _RECOVERY_BACKOFF_SECONDS = (5, 15)
 _RECOVERY_COMMAND_TIMEOUT_SECONDS = 120
 _READINESS_PROBE_TIMEOUT_SECONDS = 15
+
+
+def runtime_recovery_nominal_seconds() -> int:
+    """Return how long the readiness gate plus every OrbStack recovery attempt nominally takes.
+
+    Workflow step timeouts around `wait-runtime-ready` must exceed this, or the step is
+    killed before recovery runs. Probes are assumed to fail fast, so this is a floor.
+    """
+    initial = _INITIAL_DOCKER_READY_ATTEMPTS * DOCKER_READY_POLL_SECONDS
+    recovery = sum(
+        backoff
+        + _RECOVERY_COMMAND_TIMEOUT_SECONDS
+        + _POST_RECOVERY_DOCKER_READY_ATTEMPTS * DOCKER_READY_POLL_SECONDS
+        for backoff in _RECOVERY_BACKOFF_SECONDS
+    )
+    return initial + recovery
+
+
 _RECOVERABLE_RUNTIME_REASONS = {
     "docker_not_ready",
     "docker_probe_timeout",

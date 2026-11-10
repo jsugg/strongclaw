@@ -7,9 +7,12 @@ import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Final
 
 from tests.utils.helpers._fresh_host.models import FreshHostError
 from tests.utils.helpers._hosted_docker.io import log
+
+DOCKER_READY_POLL_SECONDS: Final[int] = 2
 
 
 def run_command(
@@ -62,7 +65,7 @@ def wait_for_docker_ready(
     cwd: Path,
     env: dict[str, str],
     max_attempts: int = 60,
-    poll_seconds: int = 2,
+    poll_seconds: int = DOCKER_READY_POLL_SECONDS,
     probe_timeout_seconds: int = 30,
 ) -> None:
     """Wait until the Docker daemon answers successfully."""

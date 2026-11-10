@@ -16,6 +16,7 @@ from tests.utils.helpers._fresh_host.budget import (
     PULL_PHASE_CAP_SECONDS,
     PULL_PHASE_FLUSH_SECONDS,
 )
+from tests.utils.helpers._hosted_docker.runtime import runtime_recovery_nominal_seconds
 from tests.utils.helpers.repo import REPO_ROOT
 
 _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
@@ -547,6 +548,17 @@ def test_fresh_host_core_budget_reserves_match_step_timeouts(job_id: str) -> Non
             _step_timeout(step)
         if str(step.get("uses", "")).startswith(("actions/cache/", "actions/upload-artifact@")):
             _step_timeout(step)
+
+
+def test_macos_runtime_wait_step_outlasts_the_helper_recovery_path() -> None:
+    """The step cap must not preempt the helper's own OrbStack recovery."""
+    job = cast(dict[str, object], _workflow_jobs("fresh-host-core.yml")["macos-fresh-host"])
+    steps = cast(list[dict[str, object]], job["steps"])
+    wait_step = next(
+        step for step in steps if "hosted_docker.py wait-runtime-ready" in str(step.get("run", ""))
+    )
+
+    assert _step_timeout(wait_step) * 60 >= runtime_recovery_nominal_seconds() + 120
 
 
 def test_fresh_host_core_linux_job_honors_pull_tuning_inputs() -> None:
