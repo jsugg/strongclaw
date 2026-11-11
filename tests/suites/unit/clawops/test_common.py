@@ -67,6 +67,6 @@ def test_load_json_remains_strict_for_machine_documents(tmp_path: pathlib.Path) 
     ],
 )
 def test_extract_json_document_skips_log_lines_before_the_payload(
-    output: str, expected: object
+    output: str, expected: dict[str, object] | list[object] | None
 ) -> None:
     assert extract_json_document(output) == expected
