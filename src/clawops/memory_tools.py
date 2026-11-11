@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final, cast
 
 from clawops.app_paths import scoped_state_dir
-from clawops.common import ResultSummary, load_json, write_json
+from clawops.common import ResultSummary, extract_json_document, load_json, write_json
 from clawops.hypermemory import HypermemoryEngine, default_config_path, load_config
 from clawops.process_runner import CommandResult, run_command
 from clawops.typed_values import as_mapping, as_mapping_list
@@ -442,10 +442,9 @@ def _search_memory_pro_cli(
     if not result.ok:
         error = result.stderr.strip() or result.stdout.strip() or "memory-pro search failed"
         return [], error
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        return [], f"unable to parse memory-pro JSON output: {exc}"
+    payload = extract_json_document(result.stdout)
+    if payload is None:
+        return [], f"memory-pro search printed no JSON document: {result.stdout.strip()[:300]}"
     items = _extract_openclaw_items(payload)
     candidates = [
         _candidate_from_openclaw_item(item, fallback_score=max(limit - index, 1))

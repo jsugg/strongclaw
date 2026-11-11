@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
+from clawops.common import extract_json_document
 from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
     CommandError,
@@ -31,7 +32,6 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
-JSON_DOCUMENT_START_RE = re.compile(r"(?m)^[ \t]*[\[{]")
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
 OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
@@ -49,19 +49,6 @@ def _mutable_mapping_or_none(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
     return cast(dict[str, object], value)
-
-
-def _extract_json_document(output: str) -> object | None:
-    """Return the first JSON document found in mixed command output."""
-    decoder = json.JSONDecoder()
-    for match in JSON_DOCUMENT_START_RE.finditer(output):
-        candidate = output[match.start() :].lstrip()
-        try:
-            payload, _ = decoder.raw_decode(candidate)
-        except json.JSONDecodeError:
-            continue
-        return cast(object, payload)
-    return None
 
 
 def _effective_env_assignments(repo_root: pathlib.Path) -> dict[str, str]:
@@ -115,7 +102,7 @@ def _list_agent_ids(repo_root: pathlib.Path) -> list[str]:
     if not result.ok:
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw agents list failed"
         raise CommandError(detail, result=result)
-    payload = _extract_json_document(result.stdout)
+    payload = extract_json_document(result.stdout)
     if payload is None:
         raise CommandError("invalid JSON from `openclaw agents list --json`")
     agent_ids = _extract_agent_ids(payload)
@@ -143,7 +130,7 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
     )
     if not result.ok:
         return False
-    payload = _extract_json_document(result.stdout)
+    payload = extract_json_document(result.stdout)
     if payload is None:
         return False
     payload_mapping = _mapping_or_none(payload)

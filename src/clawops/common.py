@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import time
 from typing import Any, Mapping, cast
 
@@ -49,6 +50,25 @@ def load_json5(path: pathlib.Path, *, allow_duplicate_keys: bool = False) -> Any
 def load_overlay(path: pathlib.Path) -> Any:
     """Load human-edited overlay content while rejecting duplicate keys."""
     return load_json5(path, allow_duplicate_keys=False)
+
+
+_JSON_DOCUMENT_START_RE = re.compile(r"(?m)^[ \t]*[\[{]")
+
+
+def extract_json_document(output: str) -> object | None:
+    """Return the first JSON document that starts a line of mixed command output.
+
+    CLI tools such as OpenClaw print plugin and doctor log lines (``[plugins] ...``) to stdout
+    ahead of their ``--json`` payload.
+    """
+    decoder = json.JSONDecoder()
+    for match in _JSON_DOCUMENT_START_RE.finditer(output):
+        try:
+            payload, _ = decoder.raw_decode(output[match.start() :].lstrip())
+        except json.JSONDecodeError:
+            continue
+        return cast(object, payload)
+    return None
 
 
 def dump_json(value: Any, *, indent: int = 2) -> str:
