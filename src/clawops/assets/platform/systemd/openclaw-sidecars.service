@@ -1,7 +1,6 @@
 [Unit]
 Description=OpenClaw Auxiliary Sidecars
-After=network-online.target docker.service
-Requires=docker.service
+After=network-online.target
 
 [Service]
 Type=oneshot
