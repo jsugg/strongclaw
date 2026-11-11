@@ -23,9 +23,6 @@ on:
         default: true
   schedule:
     - cron: "23 5 * * 1"
-  push:
-    branches:
-      - test/feature-verification-suite
 
 concurrency:
   group: feature-verification-${{ github.ref }}
