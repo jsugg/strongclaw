@@ -1,26 +1,4 @@
 {
-  // memory-lancedb-pro registers its memoryReflection session hooks (command:new, command:reset)
-  // as internal hooks, which OpenClaw only wires when internal hooks are on. The bundled hooks
-  // stay off so enabling the hook system changes nothing else.
-  "hooks": {
-    "internal": {
-      "enabled": true,
-      "entries": {
-        "boot-md": {
-          "enabled": false
-        },
-        "bootstrap-extra-files": {
-          "enabled": false
-        },
-        "command-logger": {
-          "enabled": false
-        },
-        "session-memory": {
-          "enabled": false
-        }
-      }
-    }
-  },
   "plugins": {
     "allow": [
       "memory-lancedb-pro"
