@@ -182,35 +182,6 @@ def test_uv_sync_managed_environment_raises_after_retry_budget(
     assert seen_sleeps == [5, 10]
 
 
-def test_install_global_node_tools_retries_after_cache_clean(test_context: TestContext) -> None:
-    """Global npm tool install should recover once from transient registry/cache errors."""
-    install_command = ["sudo", "npm", "install", "-g", "openclaw@2026.3.13", "acpx@0.3.0"]
-    seen_commands: list[list[str]] = []
-    seen_sleeps: list[int] = []
-
-    def fake_stream_checked(command: list[str], **kwargs: object) -> None:
-        seen_commands.append(command)
-        assert kwargs["timeout_seconds"] in {300, 3600}
-        if command == install_command and seen_commands.count(install_command) == 1:
-            raise strongclaw_bootstrap.CommandError("temporary registry miss")
-
-    test_context.patch.patch_object(
-        strongclaw_bootstrap,
-        "_stream_checked",
-        new=fake_stream_checked,
-    )
-    test_context.patch.patch_object(strongclaw_bootstrap.time, "sleep", new=seen_sleeps.append)
-
-    strongclaw_bootstrap.install_global_node_tools(install_command)
-
-    assert seen_commands == [
-        install_command,
-        ["sudo", "npm", "cache", "clean", "--force"],
-        install_command,
-    ]
-    assert seen_sleeps == [15]
-
-
 def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) -> None:
     """Prefer `nodejs` when `node` is unavailable."""
 
@@ -331,12 +302,20 @@ def test_bootstrap_host_darwin_happy_path(
     test_context: TestContext,
     tmp_path: pathlib.Path,
 ) -> None:
-    """Darwin bootstrap should run dependency setup, npm globals, and completion markers."""
+    """Darwin bootstrap should run dependency setup, the locked node tools, and completion markers."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     recorded_commands: list[list[str]] = []
+    node_tool_calls: list[dict[str, object]] = []
+
+    def _ensure_node_tools_installed(
+        *, repo_root: pathlib.Path | None = None, use_sudo: bool
+    ) -> object:
+        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo})
+        return None
+
     recorded_completion: dict[str, str] = {}
 
     def _platform_system() -> str:
@@ -491,6 +470,12 @@ def test_bootstrap_host_darwin_happy_path(
         new=_mark_bootstrap_complete,
     )
 
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_node_tools_installed",
+        new=_ensure_node_tools_installed,
+    )
+
     payload = strongclaw_bootstrap.bootstrap_host(
         repo_root, profile="hypermemory", home_dir=home_dir
     )
@@ -502,15 +487,8 @@ def test_bootstrap_host_darwin_happy_path(
         "runtimeUser": "solo-dev",
         "dockerInstalledByBootstrap": False,
     }
-    assert recorded_commands == [
-        [
-            "npm",
-            "install",
-            "-g",
-            f"openclaw@{strongclaw_bootstrap.DEFAULT_OPENCLAW_VERSION}",
-            f"acpx@{strongclaw_bootstrap.DEFAULT_ACPX_VERSION}",
-        ]
-    ]
+    assert recorded_commands == []
+    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": False}]
     assert recorded_completion == {
         "profile": "hypermemory",
         "host_os": "Darwin",
@@ -528,6 +506,14 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     recorded_commands: list[list[str]] = []
+    node_tool_calls: list[dict[str, object]] = []
+
+    def _ensure_node_tools_installed(
+        *, repo_root: pathlib.Path | None = None, use_sudo: bool
+    ) -> object:
+        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo})
+        return None
+
     repair_calls: list[str] = []
 
     def _platform_system() -> str:
@@ -677,6 +663,12 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         new=_mark_bootstrap_complete,
     )
 
+    test_context.patch.patch_object(
+        strongclaw_bootstrap,
+        "ensure_node_tools_installed",
+        new=_ensure_node_tools_installed,
+    )
+
     payload = strongclaw_bootstrap.bootstrap_host(
         repo_root, profile="openclaw-default", home_dir=home_dir
     )
@@ -716,14 +708,8 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
             "Acquire::ftp::Timeout=20",
         )
     ]
-    assert recorded_commands[-1] == [
-        "sudo",
-        "npm",
-        "install",
-        "-g",
-        f"openclaw@{strongclaw_bootstrap.DEFAULT_OPENCLAW_VERSION}",
-        f"acpx@{strongclaw_bootstrap.DEFAULT_ACPX_VERSION}",
-    ]
+    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": True}]
+    assert not any("npm" in command for command in recorded_commands)
 
 
 def test_apt_update_retries_timeout_then_raises_after_budget(test_context: TestContext) -> None:

@@ -20,8 +20,8 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 | Node.js | `22.16.x`, `24.x` | OpenClaw `2026.3.13` requires `>=22.16.0`; ACPX `0.3.0`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
 | `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
 | Varlock | `0.5.0` | Setup installs and verifies this exact version. |
-| OpenClaw | `2026.3.13` | Setup installs this exact CLI version. |
-| ACPX | `0.3.0` | Setup installs this exact CLI version. |
+| OpenClaw | `2026.3.13` | Setup installs this exact CLI version, plus its full dependency tree, from the committed `platform/node-tools/package-lock.json` with `npm ci`. |
+| ACPX | `0.3.0` | Installed from the same lock as OpenClaw. Both CLIs are linked into npm's global bin directory (`$(npm prefix -g)/bin`), the same place `npm install -g` uses. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
 | Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; this is the current launch-supported local rerank path. Compatibility pins also exist for macOS `arm64` and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI. | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |

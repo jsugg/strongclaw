@@ -21,6 +21,18 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
 - The shared verification path still runs in GitHub Actions and through
 `scripts/ci/verify_vendored_memory_plugin.sh`, but Intel macOS hosts now use the same compatibility matrix locally instead of hard-failing.
 
+## Local patches
+
+- `index.ts` `getExtensionApiImportSpecifiers()` also probes
+  `<prefix>/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js` for the
+  `/usr`, `/usr/local`, and `/opt/homebrew` prefixes, ahead of each legacy
+  `<prefix>/lib/node_modules/openclaw` path. `clawops bootstrap` installs OpenClaw from the
+  committed `platform/node-tools` lock into that managed tree and keeps the legacy path as a
+  compat symlink.
+- The `test/*.mjs` `NODE_PATH` lists add `<prefix>/lib/strongclaw-node-tools/current/node_modules`
+  next to each `<prefix>/lib/node_modules/openclaw/node_modules` entry: `npm ci` hoists OpenClaw's
+  dependencies there instead of nesting them under the package as `npm install -g` did.
+
 ## Review notes
 
 - The plugin is loaded from an absolute `plugins.load.paths` entry, which matches current OpenClaw plugin-loading guidance.

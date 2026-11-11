@@ -10,10 +10,13 @@ import jitiFactory from "jiti";
 process.env.NODE_PATH = [
   process.env.NODE_PATH,
   "/opt/homebrew/lib/node_modules/openclaw/node_modules",
+  "/opt/homebrew/lib/strongclaw-node-tools/current/node_modules",
   "/opt/homebrew/lib/node_modules",
   "/usr/local/lib/node_modules/openclaw/node_modules",
+  "/usr/local/lib/strongclaw-node-tools/current/node_modules",
   "/usr/local/lib/node_modules",
   "/usr/lib/node_modules/openclaw/node_modules",
+  "/usr/lib/strongclaw-node-tools/current/node_modules",
   "/usr/lib/node_modules",
 ].filter(Boolean).join(":");
 Module._initPaths();

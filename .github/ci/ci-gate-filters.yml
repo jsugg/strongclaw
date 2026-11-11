@@ -111,6 +111,9 @@ harness:
 
 memory_plugin:
   - ".github/workflows/memory-plugin-verification.yml"
+  - "platform/node-tools/**"
+  - "src/clawops/assets/platform/node-tools/**"
+  - "src/clawops/strongclaw_node_tools.py"
   - "platform/plugins/memory-lancedb-pro/**"
   - "platform/plugins/strongclaw-hypermemory/**"
   - "src/clawops/assets/platform/plugins/memory-lancedb-pro/**"

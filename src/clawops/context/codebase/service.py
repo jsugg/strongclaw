@@ -16,13 +16,14 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from types import TracebackType
 from typing import TYPE_CHECKING, Literal, LiteralString, Protocol, cast
 from urllib.parse import urlparse
 
 import requests
 
 if TYPE_CHECKING:
-    from neo4j import Driver as Neo4jDriver
+    from neo4j import Session as Neo4jSession
     from tree_sitter import Language as TreeSitterLanguage
     from tree_sitter import Node as TreeSitterNode
 
@@ -1352,6 +1353,35 @@ class SqliteGraphBackend:
         return [str(row["dst_id"]) for row in rows]
 
 
+class _Neo4jDriverHandle(Protocol):
+    """Typed view of the ``neo4j.Driver`` surface used by the graph backend.
+
+    neo4j 6 guards its typed driver/session signatures behind a private ``TYPE_CHECKING``
+    alias that pyright cannot resolve, so the untyped ``**config`` runtime fallbacks leak
+    through; this protocol pins the narrow contract the backend relies on.
+    """
+
+    def session(self, *, database: str) -> Neo4jSession:
+        """Open one session bound to *database*."""
+        ...
+
+    def verify_connectivity(self) -> None:
+        """Raise when the server cannot be reached."""
+        ...
+
+    def close(self) -> None:
+        """Release the driver connection pool."""
+        ...
+
+
+class _Neo4jDriverFactory(Protocol):
+    """Typed view of ``neo4j.GraphDatabase.driver``."""
+
+    def __call__(self, uri: str, *, auth: tuple[str, str]) -> _Neo4jDriverHandle:
+        """Create one driver for *uri*."""
+        ...
+
+
 class Neo4jGraphBackend:
     """Neo4j graph backend using the official driver."""
 
@@ -1359,7 +1389,7 @@ class Neo4jGraphBackend:
 
     def __init__(self, config: GraphConfig) -> None:
         self._config = config
-        self._driver: Neo4jDriver | None = None
+        self._driver: _Neo4jDriverHandle | None = None
 
     def _auth(self) -> tuple[str, str] | None:
         username = os.environ.get(self._config.neo4j_username_env)
@@ -1368,7 +1398,7 @@ class Neo4jGraphBackend:
             return None
         return username, password
 
-    def _get_driver(self) -> Neo4jDriver:
+    def _get_driver(self) -> _Neo4jDriverHandle:
         """Create or return the cached Neo4j driver."""
         auth = self._auth()
         if auth is None:
@@ -1376,14 +1406,21 @@ class Neo4jGraphBackend:
         if self._driver is not None:
             return self._driver
         try:
-            from neo4j import GraphDatabase
+            neo4j_module = importlib.import_module("neo4j")
         except ImportError as err:
             raise RuntimeError("neo4j driver is not installed") from err
-        self._driver = GraphDatabase.driver(
+        driver_factory = cast(_Neo4jDriverFactory, neo4j_module.GraphDatabase.driver)
+        self._driver = driver_factory(
             normalize_neo4j_driver_url(self._config.neo4j_url),
             auth=auth,
         )
         return self._driver
+
+    def close(self) -> None:
+        """Close the cached driver; neo4j 6 no longer closes drivers on garbage collection."""
+        driver, self._driver = self._driver, None
+        if driver is not None:
+            driver.close()
 
     def _run_query(
         self,
@@ -1564,6 +1601,21 @@ class CodebaseContextService:
         self._embedding_provider: EmbeddingProvider = create_embedding_provider(config.embedding)
         self._rerank_provider: RerankProvider = create_rerank_provider(config.rerank)
         self._vector_backend: VectorBackend = QdrantBackend(config.qdrant)
+
+    def __enter__(self) -> CodebaseContextService:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release pooled backend connections; safe to call more than once."""
+        self._neo4j_graph_backend.close()
 
     def override_runtime_deps(
         self,
@@ -3443,9 +3495,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     args = parse_args(argv)
-    service = service_from_config(
+    with service_from_config(
         args.config, expand(args.repo), scale=cast(ContextScale, args.scale)
-    )
+    ) as service:
+        return _run_command(service, args)
+
+
+def _run_command(service: CodebaseContextService, args: argparse.Namespace) -> int:
+    """Dispatch one parsed CLI command against *service*."""
     if args.command == "index":
         stats = service.index_with_stats()
         if args.json:
@@ -3474,10 +3531,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "benchmark":
         fixtures_path = expand(args.fixtures)
-        benchmark_service = _benchmark_service(service, fixtures_path=fixtures_path)
-        benchmark_service.index()
-        benchmark_service.consolidate_runtime_artifacts()
-        payload = benchmark_service.benchmark_cases(load_benchmark_cases(fixtures_path))
+        with _benchmark_service(service, fixtures_path=fixtures_path) as benchmark_service:
+            benchmark_service.index()
+            benchmark_service.consolidate_runtime_artifacts()
+            payload = benchmark_service.benchmark_cases(load_benchmark_cases(fixtures_path))
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if args.command == "worker":

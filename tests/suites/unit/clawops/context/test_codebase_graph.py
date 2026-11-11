@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 
+import neo4j
 import pytest
 
 from clawops.common import write_yaml
@@ -243,3 +244,75 @@ def test_neo4j_upsert_prunes_stale_edges_and_reports_cleanup_counts(
     assert cleanup.deleted_nodes == 1
     assert any("MATCH ()-[rel:CODE_EDGE]->()" in query for query in seen_queries)
     assert any("rel.snapshot_id <> $snapshot_id" in query for query in seen_queries)
+
+
+class _RecordingNeo4jDriver:
+    """Driver double that records lifecycle calls."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def verify_connectivity(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+def test_neo4j_backend_caches_one_driver_and_closes_it_once(
+    test_context: TestContext,
+) -> None:
+    driver = _RecordingNeo4jDriver()
+    created: list[tuple[str, tuple[str, str]]] = []
+
+    def _fake_driver_factory(uri: str, *, auth: tuple[str, str]) -> _RecordingNeo4jDriver:
+        created.append((uri, auth))
+        return driver
+
+    test_context.patch.patch_object(neo4j.GraphDatabase, "driver", new=_fake_driver_factory)
+    test_context.env.set("NEO4J_USERNAME", "neo4j")
+    test_context.env.set("NEO4J_PASSWORD", "secret")
+    backend = Neo4jGraphBackend(GraphConfig(neo4j_url="http://graph.local:7474"))
+
+    assert backend.health() == {"enabled": True, "healthy": True, "backend": "neo4j"}
+    assert backend.health()["healthy"] is True
+    assert created == [("bolt://graph.local:7687", ("neo4j", "secret"))]
+
+    backend.close()
+    backend.close()
+
+    assert driver.close_calls == 1
+
+
+def test_neo4j_backend_close_without_driver_is_a_noop() -> None:
+    Neo4jGraphBackend(GraphConfig()).close()
+
+
+def test_context_service_exit_closes_the_neo4j_backend(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = tmp_path / "context.yaml"
+    write_yaml(
+        config_path,
+        {
+            "index": {"db_path": ".clawops/context.sqlite"},
+            "graph": {"enabled": True, "backend": "neo4j"},
+            "embedding": {"enabled": False, "provider": "disabled"},
+            "qdrant": {"enabled": False},
+        },
+    )
+    closed: list[Neo4jGraphBackend] = []
+
+    def _record_close(self: Neo4jGraphBackend) -> None:
+        closed.append(self)
+
+    test_context.patch.patch_object(Neo4jGraphBackend, "close", new=_record_close)
+
+    with service_from_config(config_path, repo, scale="small") as service:
+        assert service.repo == repo.resolve()
+        assert closed == []
+
+    assert len(closed) == 1

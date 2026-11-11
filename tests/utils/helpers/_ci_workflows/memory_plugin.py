@@ -10,9 +10,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from clawops.strongclaw_node_tools import (
+    LocalPrefixWriter,
+    NodeToolsError,
+    load_node_tools_bundle,
+    resolve_node_tools_dir,
+    smoke_test_node_tools,
+    stage_node_tools_tree,
+)
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError, run_checked
 
-DEFAULT_OPENCLAW_PACKAGE_SPEC = "openclaw@2026.3.13"
 AWS_CREDENTIAL_ENV_VARS = (
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",
@@ -23,29 +30,26 @@ AWS_CREDENTIAL_ENV_VARS = (
 )
 
 
-def run_vendored_host_checks(
-    repo_root: Path,
-    *,
-    package_spec: str = DEFAULT_OPENCLAW_PACKAGE_SPEC,
-) -> None:
+def install_locked_node_tools(repo_root: Path, tool_dir: Path) -> Path:
+    """Install the committed OpenClaw/ACPX lock into *tool_dir* and return its bin directory."""
+    try:
+        bundle = load_node_tools_bundle(resolve_node_tools_dir(repo_root))
+        stage_node_tools_tree(bundle, tool_dir, LocalPrefixWriter())
+        bin_dir = tool_dir / "node_modules" / ".bin"
+        smoke_test_node_tools(bin_dir, bundle)
+    except NodeToolsError as exc:
+        raise CiWorkflowError(f"locked node-tools install failed: {exc}") from exc
+    return bin_dir
+
+
+def run_vendored_host_checks(repo_root: Path) -> None:
     """Run the vendored memory plugin host-functional verification."""
     resolved_repo_root = repo_root.expanduser().resolve()
     tool_dir = Path(tempfile.mkdtemp(prefix="strongclaw-openclaw-cli."))
     try:
-        run_checked(
-            [
-                "npm",
-                "install",
-                "--prefix",
-                str(tool_dir),
-                "--no-fund",
-                "--no-audit",
-                package_spec,
-            ],
-            cwd=resolved_repo_root,
-        )
+        bin_dir = install_locked_node_tools(resolved_repo_root, tool_dir)
         env = dict(os.environ)
-        env["PATH"] = f"{tool_dir / 'node_modules' / '.bin'}:{env.get('PATH', '')}"
+        env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
         for key in AWS_CREDENTIAL_ENV_VARS:
             env.pop(key, None)
         plugin_dir = resolved_repo_root / "platform" / "plugins" / "memory-lancedb-pro"

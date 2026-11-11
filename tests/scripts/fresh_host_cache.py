@@ -17,6 +17,7 @@ from clawops.strongclaw_bootstrap import (  # noqa: E402
     install_memory_plugin_asset,
     uv_sync_managed_environment,
 )
+from clawops.strongclaw_node_tools import prefetch_node_tools_packages  # noqa: E402
 from clawops.strongclaw_runtime import CommandError  # noqa: E402
 
 
@@ -26,6 +27,7 @@ def warm_packages(repo_root: Path, *, home_dir: Path | None = None) -> None:
     resolved_home_dir = home_dir.expanduser().resolve() if home_dir is not None else None
     uv_sync_managed_environment(resolved_repo_root, home_dir=resolved_home_dir)
     install_memory_plugin_asset(resolved_repo_root)
+    prefetch_node_tools_packages(repo_root=resolved_repo_root)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

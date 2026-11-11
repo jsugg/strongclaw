@@ -80,6 +80,19 @@ def test_memory_plugin_package_change_routes_to_memory_compatibility_and_fresh_h
     assert selection.docs_parity_required is False
 
 
+@pytest.mark.parametrize(
+    "changed_path",
+    [
+        "platform/node-tools/package-lock.json",
+        "src/clawops/assets/platform/node-tools/package.json",
+        "src/clawops/strongclaw_node_tools.py",
+    ],
+)
+def test_node_tools_change_routes_to_memory_plugin_lane(changed_path: str) -> None:
+    """The memory-plugin lane installs OpenClaw from the node-tools lock, so bumps must run it."""
+    assert _select(changed_path).memory_plugin is True
+
+
 def test_lockfile_change_routes_to_dependency_review_without_heavy_local_runtime() -> None:
     selection = _select("uv.lock")
 
