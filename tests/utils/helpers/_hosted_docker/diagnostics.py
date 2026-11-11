@@ -27,7 +27,16 @@ DIAGNOSTIC_COMMAND_TIMEOUT_SECONDS: Final[int] = 120
 SYSCTL_TIMEOUT_SECONDS: Final[int] = 10
 # Wall budget for the standalone `collect-diagnostics` observer step.
 DIAGNOSTICS_COLLECTION_CAP_SECONDS: Final[int] = 120
+# Tail kept from each OrbStack log; the VM manager log holds why a VM stopped.
+ORBSTACK_LOG_TAIL_BYTES: Final[int] = 1024 * 1024
 _ORB_START_LOG: Final[Path] = Path("/tmp/orb-start.log")
+# Host-side OrbStack processes, the Virtualization framework that runs its VM, and kernel
+# memory-pressure kills, so a stopped VM can be told apart from a killed one.
+_UNIFIED_LOG_PREDICATE: Final[str] = (
+    'process CONTAINS[c] "OrbStack" OR subsystem CONTAINS[c] "orbstack" '
+    'OR subsystem BEGINSWITH "com.apple.Virtualization" '
+    'OR (process == "kernel" AND eventMessage CONTAINS[c] "memorystatus")'
+)
 
 
 def _socket_state(env: dict[str, str]) -> str:
@@ -101,9 +110,37 @@ def _diagnostic_commands(context: FreshHostContext, root: Path) -> dict[Path, li
         "--last",
         "30m",
         "--predicate",
-        'process CONTAINS[c] "OrbStack" OR subsystem CONTAINS[c] "orbstack"',
+        _UNIFIED_LOG_PREDICATE,
     ]
     return commands
+
+
+def _tail_bytes(path: Path, limit: int) -> bytes:
+    """Return at most the last *limit* bytes of one file."""
+    with path.open("rb") as stream:
+        stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, stream.tell() - limit))
+        return stream.read()
+
+
+def _orbstack_log_dir() -> Path:
+    """Return the runner's OrbStack log directory."""
+    return Path.home() / ".orbstack" / "log"
+
+
+def _copy_orbstack_logs(diagnostics_dir: Path) -> None:
+    """Copy the tail of each OrbStack log; they hold the VM manager's account of a stopped VM."""
+    log_dir = _orbstack_log_dir()
+    if not log_dir.is_dir():
+        return
+    output_dir = diagnostics_dir / "orbstack-logs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for log_path in sorted(log_dir.glob("*.log")):
+        try:
+            content = _tail_bytes(log_path, ORBSTACK_LOG_TAIL_BYTES)
+        except OSError as exc:
+            content = f"failed to read {log_path}: {exc}\n".encode()
+        (output_dir / log_path.name).write_bytes(content)
 
 
 def _capture(
@@ -173,6 +210,7 @@ def collect_runtime_diagnostics_for_context(
             orb_start_content,
             encoding="utf-8",
         )
+    _copy_orbstack_logs(resolved_diagnostics_dir)
     for output_path, sysctl_name in (
         (resolved_diagnostics_dir / "host-cpu-count.txt", "hw.ncpu"),
         (resolved_diagnostics_dir / "host-memory-bytes.txt", "hw.memsize"),

@@ -19,6 +19,12 @@ from tests.utils.helpers._fresh_host.budget import (
     RUNTIME_PHASE_CAP_SECONDS,
     RUNTIME_PHASE_MIN_SECONDS,
 )
+from tests.utils.helpers._fresh_host.faults import (
+    FAULT_INJECTION_ENV,
+    FAULT_INJECTION_OFF,
+    KNOWN_FAULTS,
+    requested_fault,
+)
 from tests.utils.helpers._hosted_docker.diagnostics import DIAGNOSTICS_COLLECTION_CAP_SECONDS
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -971,3 +977,83 @@ def test_codeql_config_ignores_unmaintained_and_packaged_vendor_code() -> None:
     assert "src/clawops/assets" in text
     assert "platform/plugins/memory-lancedb-pro" in text
     assert "platform/plugins/strongclaw-hypermemory" not in text
+
+
+_CORE_FAULT_GATE = (
+    "${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' "
+    "&& inputs.fault_injection || '' }}"
+)
+_ACCEPTANCE_FAULT_FORWARD = (
+    "${{ github.event_name == 'workflow_dispatch' && inputs.fault_injection || '' }}"
+)
+
+
+def _workflow_trigger_inputs(workflow_name: str, trigger: str) -> dict[str, object]:
+    """Return one trigger's inputs; YAML 1.1 loads the `on:` key as `True`."""
+    loaded: object = yaml.safe_load(_workflow_text(workflow_name))
+    assert isinstance(loaded, dict), workflow_name
+    raw = cast(dict[object, object], loaded)
+    triggers = _as_str_object_dict(raw.get("on", raw.get(True)))
+    assert triggers is not None, workflow_name
+    trigger_config = _as_str_object_dict(triggers.get(trigger))
+    assert trigger_config is not None, (workflow_name, trigger)
+    inputs = _as_str_object_dict(trigger_config.get("inputs"))
+    assert inputs is not None, (workflow_name, trigger)
+    return inputs
+
+
+def _job_step(workflow_name: str, job_id: str, step_name: str) -> dict[str, object]:
+    """Return one named step of one job."""
+    job = _as_str_object_dict(_workflow_jobs(workflow_name)[job_id])
+    assert job is not None, job_id
+    steps = job.get("steps")
+    assert isinstance(steps, list), job_id
+    for raw_step in cast(list[object], steps):
+        step = _as_str_object_dict(raw_step)
+        if step is not None and step.get("name") == step_name:
+            return step
+    raise AssertionError(f"{workflow_name}:{job_id} has no step {step_name!r}")
+
+
+def test_fault_injection_cannot_be_enabled_on_push_to_main() -> None:
+    """The fault drill reaches the scenario only from a manual dispatch off main."""
+    leaked_push_env = {
+        FAULT_INJECTION_ENV: next(iter(KNOWN_FAULTS)),
+        "GITHUB_EVENT_NAME": "push",
+        "GITHUB_REF": "refs/heads/main",
+    }
+    assert requested_fault(leaked_push_env) is None
+
+    core_input = _as_str_object_dict(
+        _workflow_trigger_inputs("fresh-host-core.yml", "workflow_call").get("fault_injection")
+    )
+    assert core_input is not None
+    assert core_input["default"] == ""
+    assert _workflow_text("fresh-host-core.yml").count("inputs.fault_injection") == 1
+    scenario_step = _job_step(
+        "fresh-host-core.yml", "macos-fresh-host", "Run macOS fresh-host scenario"
+    )
+    assert scenario_step.get("env") == {FAULT_INJECTION_ENV: _CORE_FAULT_GATE}
+
+    assert "fault_injection" not in _workflow_trigger_inputs(
+        "fresh-host-acceptance.yml", "workflow_call"
+    )
+    dispatch_input = _as_str_object_dict(
+        _workflow_trigger_inputs("fresh-host-acceptance.yml", "workflow_dispatch").get(
+            "fault_injection"
+        )
+    )
+    assert dispatch_input is not None
+    assert dispatch_input["type"] == "choice"
+    assert dispatch_input["default"] == FAULT_INJECTION_OFF
+    assert dispatch_input["options"] == [FAULT_INJECTION_OFF, *sorted(KNOWN_FAULTS)]
+    acceptance_job = _as_str_object_dict(
+        _workflow_jobs("fresh-host-acceptance.yml")["fresh-host-acceptance"]
+    )
+    assert acceptance_job is not None
+    acceptance_with = _as_str_object_dict(acceptance_job.get("with"))
+    assert acceptance_with is not None
+    assert acceptance_with["fault_injection"] == _ACCEPTANCE_FAULT_FORWARD
+
+    for caller in ("ci-gate.yml", "nightly.yml", "release.yml", "e2e-acceptance.yml"):
+        assert "fault_injection" not in _workflow_text(caller), caller

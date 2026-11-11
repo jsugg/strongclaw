@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: true
+      # CI-only fault drill (see tests/utils/helpers/_fresh_host/faults.py); empty is off.
+      fault_injection:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -203,8 +208,12 @@ jobs:
       - name: Ensure hosted macOS Docker images
         timeout-minutes: 32
         run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      # The scenario recovers a Docker runtime lost mid-run inside its own budget. The fault
+      # drill reaches it only from a manual dispatch off main; the helper enforces that too.
       - name: Run macOS fresh-host scenario
         timeout-minutes: 35
+        env:
+          FRESH_HOST_FAULT_INJECTION: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && inputs.fault_injection || '' }}
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
       - name: Collect hosted macOS Docker diagnostics
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}

@@ -109,6 +109,22 @@ class RuntimeInstallReport:
 
 
 @dataclass(slots=True)
+class RuntimeLossReport:
+    """Structured report describing one runtime-loss recovery inside a scenario step."""
+
+    step: str
+    trigger_reason: str
+    recovered: bool
+    exhausted: bool
+    last_failure_reason: str | None
+    recovery_attempts: list[RuntimeRecoveryAttemptReport]
+    deadline_epoch: float
+    deadline_limited_by: str
+    started_at: str
+    finished_at: str
+
+
+@dataclass(slots=True)
 class ImageEnsureReport:
     """Structured report describing image ensure status."""
 

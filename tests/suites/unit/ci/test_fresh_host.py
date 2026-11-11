@@ -374,9 +374,12 @@ def test_run_scenario_records_successful_phase_sequence(
     def fake_run_named_phase(
         loaded_context: fresh_host.FreshHostContext,
         phase_name: str,
+        *,
+        recovery_window: object = None,
     ) -> list[str]:
         calls.append(phase_name)
         assert loaded_context.scenario_id == "linux"
+        assert recovery_window is None, "Linux scenarios never arm runtime-loss recovery"
         return ["echo", phase_name]
 
     test_context.patch.patch_object(

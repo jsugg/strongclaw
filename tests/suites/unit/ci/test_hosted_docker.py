@@ -65,6 +65,14 @@ def _skip_linux_disk_preflight(test_context: TestContext) -> None:
     test_context.patch.patch_object(hosted_docker_images, "preflight_linux_disk", new=no_preflight)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_orbstack_logs(tmp_path: Path, test_context: TestContext) -> None:
+    """Keep diagnostics tests off the host's real OrbStack logs."""
+    test_context.patch.patch_object(
+        hosted_docker_diagnostics, "_orbstack_log_dir", new=lambda: tmp_path / "orbstack-log"
+    )
+
+
 def _no_jitter(cap_seconds: float) -> float:
     return cap_seconds
 
@@ -1793,3 +1801,37 @@ def test_run_command_kills_the_whole_process_group_on_timeout(
     while not _process_is_gone(grandchild) and time.monotonic() < give_up:
         time.sleep(0.05)
     assert _process_is_gone(grandchild)
+
+
+def test_runtime_diagnostics_keep_the_tail_of_each_orbstack_log(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    """OrbStack's own logs explain a stopped VM; diagnostics keep a bounded tail of each."""
+    context = _macos_context(tmp_path, test_context)
+    log_dir = tmp_path / "orbstack-log"
+    log_dir.mkdir()
+    (log_dir / "vmgr.log").write_bytes(b"old-line\n" + b"vm stopped: guest panic\n")
+    (log_dir / "gui.log").write_bytes(b"gui ok\n")
+    (log_dir / "notes.txt").write_bytes(b"not a log\n")
+    test_context.patch.patch_object(hosted_docker_diagnostics, "ORBSTACK_LOG_TAIL_BYTES", new=24)
+
+    def unexpected_wait(
+        *, cwd: Path, env: dict[str, str], deadline: PhaseDeadline, clock: Clock
+    ) -> None:
+        raise AssertionError("diagnostics never wait for Docker")
+
+    commands = _patch_runtime_commands(test_context, wait=unexpected_wait)
+    diagnostics_dir = tmp_path / "diagnostics"
+    clock = FakeClock()
+
+    hosted_docker_diagnostics.collect_runtime_diagnostics_for_context(
+        context, diagnostics_dir, deadline=PhaseDeadline.after(30, clock=clock), clock=clock
+    )
+
+    copied = diagnostics_dir / "orbstack-logs"
+    assert sorted(path.name for path in copied.iterdir()) == ["gui.log", "vmgr.log"]
+    assert (copied / "vmgr.log").read_bytes() == b"vm stopped: guest panic\n"
+    unified_log = next(command for command, _ in commands if command[0] == "/usr/bin/log")
+    predicate = unified_log[unified_log.index("--predicate") + 1]
+    assert 'subsystem BEGINSWITH "com.apple.Virtualization"' in predicate
+    assert "memorystatus" in predicate

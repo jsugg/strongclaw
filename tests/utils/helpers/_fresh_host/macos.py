@@ -7,8 +7,13 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from tests.utils.helpers._fresh_host.faults import inject_sidecars_runtime_loss
 from tests.utils.helpers._fresh_host.linux import run_clawops_bootstrap
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
+from tests.utils.helpers._fresh_host.runtime_loss import (
+    RecoveryWindow,
+    run_with_runtime_recovery,
+)
 from tests.utils.helpers._fresh_host.shell import (
     TRANSIENT_KILL_EXIT_CODES,
     best_effort,
@@ -276,6 +281,8 @@ def _run_repo_local_cycle(
         context, "browser-lab" if component == "browser-lab" else "sidecars"
     )
     wait_for_docker_backend(cwd=repo_root, env=env)
+    if component == "sidecars":
+        inject_sidecars_runtime_loss(context)
     up_command = venv_clawops_command(
         context, "ops", "--asset-root", ".", component, "up", "--repo-local-state"
     )
@@ -328,35 +335,65 @@ def _venv_python(context: FreshHostContext) -> str:
     return venv_clawops_command(context)[0]
 
 
-def exercise_macos_sidecars(context: FreshHostContext) -> list[str]:
+def exercise_macos_sidecars(
+    context: FreshHostContext, *, recovery_window: RecoveryWindow | None = None
+) -> list[str]:
     """Exercise macOS repo-local sidecars.
 
     When *exercise-channels-runtime* is also scheduled the sidecars stack is left
     running after verification so the next phase can reuse it without a redundant
-    up/down cycle.
+    up/down cycle. A *recovery_window* lets a lost Docker runtime be recovered once.
     """
     bring_down = "exercise-channels-runtime" not in context.phase_names
-    return _run_repo_local_cycle(context, "sidecars", bring_down=bring_down)
+    return run_with_runtime_recovery(
+        context,
+        step="exercise-sidecars",
+        window=recovery_window,
+        action=lambda: _run_repo_local_cycle(context, "sidecars", bring_down=bring_down),
+    )
 
 
-def exercise_macos_browser_lab(context: FreshHostContext) -> list[str]:
-    """Exercise macOS repo-local browser-lab."""
-    return _run_repo_local_cycle(context, "browser-lab")
+def exercise_macos_browser_lab(
+    context: FreshHostContext, *, recovery_window: RecoveryWindow | None = None
+) -> list[str]:
+    """Exercise macOS repo-local browser-lab; a lost Docker runtime is recovered once."""
+    return run_with_runtime_recovery(
+        context,
+        step="exercise-browser-lab",
+        window=recovery_window,
+        action=lambda: _run_repo_local_cycle(context, "browser-lab"),
+    )
 
 
-def exercise_macos_channels_runtime(context: FreshHostContext) -> list[str]:
+def exercise_macos_channels_runtime(
+    context: FreshHostContext, *, recovery_window: RecoveryWindow | None = None
+) -> list[str]:
     """Exercise channels acceptance while sidecars are running repo-locally.
 
     When *exercise-sidecars* is also scheduled the sidecars stack is already running
     from that phase, so this function skips the redundant up/verify cycle and proceeds
-    directly to channels exercises before tearing the stack down.
+    directly to channels exercises before tearing the stack down. A retry after a
+    recovered runtime loss starts the stack again, since the lost runtime took it down.
     """
+    sidecars_already_up = "exercise-sidecars" in context.phase_names
+    return run_with_runtime_recovery(
+        context,
+        step="exercise-channels-runtime",
+        window=recovery_window,
+        action=lambda: _exercise_channels_runtime(context, sidecars_already_up=sidecars_already_up),
+        retry_action=lambda: _exercise_channels_runtime(context, sidecars_already_up=False),
+    )
+
+
+def _exercise_channels_runtime(
+    context: FreshHostContext, *, sidecars_already_up: bool
+) -> list[str]:
+    """Run the channels exercises, starting the sidecars stack unless it is already up."""
     repo_root, _ = repo_paths(context)
     env = phase_env(context)
     env.setdefault("STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN", "fresh-host-smoke-token")
     wait_for_docker_backend(cwd=repo_root, env=env)
 
-    sidecars_already_up = "exercise-sidecars" in context.phase_names
     if not sidecars_already_up:
         compose_file = compose_file_for_component(context, "sidecars")
         up_command = venv_clawops_command(

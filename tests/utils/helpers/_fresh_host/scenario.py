@@ -13,6 +13,7 @@ from tests.utils.helpers._fresh_host.models import (
     FreshHostReport,
     PhaseResult,
 )
+from tests.utils.helpers._fresh_host.runtime_loss import RecoveryWindow, arm_runtime_recovery
 from tests.utils.helpers._fresh_host.storage import (
     context_path,
     load_context,
@@ -28,8 +29,16 @@ def scenario_phase_names(context: FreshHostContext) -> list[str]:
     return list(context.phase_names)
 
 
-def run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | None:
-    """Execute one named scenario phase."""
+def run_named_phase(
+    context: FreshHostContext,
+    phase_name: str,
+    *,
+    recovery_window: RecoveryWindow | None = None,
+) -> list[str] | None:
+    """Execute one named scenario phase.
+
+    *recovery_window* arms hosted macOS runtime-loss recovery for Docker-backed phases.
+    """
     if phase_name == "bootstrap":
         return (
             linux.linux_bootstrap(context)
@@ -57,13 +66,13 @@ def run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | N
         return (
             linux.exercise_linux_sidecars(context)
             if context.platform == "linux"
-            else macos.exercise_macos_sidecars(context)
+            else macos.exercise_macos_sidecars(context, recovery_window=recovery_window)
         )
     if phase_name == "exercise-channels-runtime":
         return (
             linux.exercise_linux_channels_runtime(context)
             if context.platform == "linux"
-            else macos.exercise_macos_channels_runtime(context)
+            else macos.exercise_macos_channels_runtime(context, recovery_window=recovery_window)
         )
     if phase_name == "exercise-recovery-smoke":
         return (
@@ -75,7 +84,7 @@ def run_named_phase(context: FreshHostContext, phase_name: str) -> list[str] | N
         return (
             linux.exercise_linux_browser_lab(context)
             if context.platform == "linux"
-            else macos.exercise_macos_browser_lab(context)
+            else macos.exercise_macos_browser_lab(context, recovery_window=recovery_window)
         )
     if phase_name == "normalize-machine-name":
         return macos.normalize_macos_machine_name(context)
@@ -132,11 +141,12 @@ def run_scenario(context_file: Path) -> FreshHostReport:
     report = load_report(report_file)
     report.status = "running"
     write_report(report, report_file)
+    recovery_window = arm_runtime_recovery(context)
     for phase_name in scenario_phase_names(context):
         log(f"Starting phase={phase_name}.")
 
         def _run_phase(*, selected_phase_name: str = phase_name) -> list[str] | None:
-            return run_named_phase(context, selected_phase_name)
+            return run_named_phase(context, selected_phase_name, recovery_window=recovery_window)
 
         record_phase(
             report=report,
