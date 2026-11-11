@@ -405,6 +405,9 @@ function registerMemoryCli(program, runClawops) {
     .command("status")
     .description("Show StrongClaw hypermemory status.")
     .option("--json", "Print JSON.")
+    // OpenClaw 2026.5+ routes `openclaw memory status --deep` to the memory-slot plugin's CLI;
+    // the hypermemory status already reports backend health, so --deep adds nothing.
+    .option("--deep", "Accepted for `openclaw memory status --deep`; same report.")
     .action(async (opts) => {
       await runClawops(["status", ...(opts.json ? ["--json"] : [])], {
         captureJson: false,

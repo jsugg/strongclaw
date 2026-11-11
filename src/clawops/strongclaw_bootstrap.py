@@ -14,6 +14,7 @@ import time
 from collections.abc import Sequence
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
+from clawops.openclaw_sandbox import ensure_openclaw_sandbox_image
 from clawops.platform_compat import (
     MINIMUM_NODE_VERSION,
     MINIMUM_NODE_VERSION_TEXT,
@@ -36,6 +37,7 @@ from clawops.strongclaw_runtime import (
     CommandError,
     command_exists,
     detect_docker_runtime_provider,
+    docker_backend_ready,
     docker_cli_installed,
     docker_compose_available,
     docker_runtime_enable_guidance,
@@ -649,6 +651,14 @@ def bootstrap_host(
         raise CommandError(f"unsupported host OS for bootstrap: {normalized_host_os}")
 
     docker_installed_by_bootstrap = ensure_docker_compatible_runtime(normalized_host_os)
+    if docker_backend_ready():
+        ensure_openclaw_sandbox_image()
+    else:
+        print(
+            "note: Docker is not reachable yet; `clawops setup` builds the OpenClaw sandbox image "
+            "before it activates services.",
+            file=sys.stderr,
+        )
     ensure_varlock_installed(DEFAULT_VARLOCK_VERSION)
     uv_sync_managed_environment(repo_root, home_dir=home_dir)
     install_profile_assets(repo_root, profile=profile, home_dir=home_dir)

@@ -20,8 +20,9 @@ FIRST_PARTY_PLUGIN_SCOPE: Final[str] = "@openclaw/"
 CODEX_AGENT_RUNTIME_ID: Final[str] = "codex"
 ACPX_BACKEND_ID: Final[str] = "acpx"
 BUNDLED_DISCOVERY_COMPAT: Final[str] = "compat"
-# Provider plugins bundled with the pinned OpenClaw. They were core built-ins before
-# 2026.4, so restrictive `plugins.allow` lists never had to name them.
+# Bundled provider plugins behind the model-auth paths StrongClaw documents. They were core
+# built-ins before 2026.4, so restrictive `plugins.allow` lists never had to name them, and
+# model-auth may switch agents to any of them after render.
 BUNDLED_PROVIDER_PLUGIN_IDS: Final[frozenset[str]] = frozenset(
     {"anthropic", "github-copilot", "ollama", "openai", "openrouter"}
 )
@@ -174,7 +175,7 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
     Each plugin is made discoverable so OpenClaw never installs it from npm. A plugin the config
     requires is enabled, even over a stale `enabled: false`. An unused runtime or service plugin
     is disabled unless the operator configured or allowlisted it. With a restrictive
-    `plugins.allow`, the enabled plugins plus the bundled providers the agents use are
+    `plugins.allow`, the enabled plugins plus the documented bundled providers are
     allowlisted, and bundled discovery keeps OpenClaw's pre-2026.5 compatibility mode.
     """
     plugins = _child_object(config, "plugins")
@@ -202,7 +203,7 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
         ):
             entries[plugin.plugin_id] = {"enabled": False}
     if allowlist is not None:
-        for provider_id in sorted(configured_model_providers(config) & BUNDLED_PROVIDER_PLUGIN_IDS):
+        for provider_id in sorted(BUNDLED_PROVIDER_PLUGIN_IDS):
             _append_unique(allowlist, provider_id)
         plugins.setdefault("bundledDiscovery", BUNDLED_DISCOVERY_COMPAT)
     return config

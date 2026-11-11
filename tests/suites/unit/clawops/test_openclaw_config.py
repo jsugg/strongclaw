@@ -16,6 +16,7 @@ from clawops.app_paths import (
 )
 from clawops.openclaw_config import (
     DEV_RUNTIME_GATEWAY_PORT,
+    ensure_agent_directories,
     main,
     materialize_runtime_memory_configs,
     parse_args,
@@ -415,3 +416,25 @@ def test_main_uses_layout_derived_output_when_output_is_omitted(
     assert exit_code == 0
     assert payload["gateway"]["port"] == DEV_RUNTIME_GATEWAY_PORT
     assert f"Rendered {rendered_path}" in capsys.readouterr().out
+
+
+def test_ensure_agent_directories_creates_workspaces_and_agent_dirs(tmp_path: pathlib.Path) -> None:
+    """Every workspace and agentDir exists after render, so OpenClaw 2026.6 doctor can run."""
+    home_dir = tmp_path / "home"
+    workspace = tmp_path / "data" / "workspace" / "admin"
+    config: dict[str, object] = {
+        "agents": {
+            "defaults": {"workspace": str(workspace)},
+            "list": [
+                {"id": "admin", "workspace": str(workspace), "agentDir": "~/.openclaw/agents/a"},
+                {"id": "bare"},
+            ],
+        }
+    }
+
+    ensure_agent_directories(config, home_dir=home_dir)
+    ensure_agent_directories(config, home_dir=home_dir)
+
+    assert workspace.is_dir()
+    assert (home_dir / ".openclaw" / "agents" / "a").is_dir()
+    ensure_agent_directories({"agents": "malformed"}, home_dir=home_dir)

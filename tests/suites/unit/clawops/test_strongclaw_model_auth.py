@@ -639,3 +639,47 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
     assert (node_tools_dir / "node_modules" / "@openclaw" / "zai-provider").as_posix() in plugins[
         "load"
     ]["paths"]
+
+
+@pytest.mark.parametrize(
+    ("memory_search", "env_values", "expected"),
+    [
+        (None, {}, "none"),
+        (None, {"OPENAI_API_KEY": "sk-test"}, "openai"),
+        ({"provider": "auto"}, {}, "none"),
+        ({"provider": "ollama"}, {}, "ollama"),
+    ],
+    ids=["no-key-fts-only", "openai-key", "legacy-auto", "operator-choice"],
+)
+def test_memory_search_provider_replays_the_legacy_auto_selection(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+    memory_search: dict[str, str] | None,
+    env_values: dict[str, str],
+    expected: str,
+) -> None:
+    """2026.5+ defaults to OpenAI embeddings and fails closed; model-auth pins the old choice."""
+    config_path = tmp_path / "openclaw.json"
+    defaults: dict[str, object] = {"model": {"primary": "featver/featver-chat"}}
+    if memory_search is not None:
+        defaults["memorySearch"] = memory_search
+    config_path.write_text(json.dumps({"agents": {"defaults": defaults}}), encoding="utf-8")
+
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    apply_provider = cast(
+        Callable[[pathlib.Path, dict[str, str]], None],
+        vars(strongclaw_model_auth)["_apply_memory_search_provider"],
+    )
+
+    apply_provider(tmp_path, env_values)
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["agents"]["defaults"]["memorySearch"]["provider"] == expected

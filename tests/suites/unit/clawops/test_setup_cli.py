@@ -203,6 +203,7 @@ def test_setup_cli_keeps_model_auth_when_services_are_activated(
     monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
     monkeypatch.setattr(setup_cli, "ensure_model_auth", _ensure_model_auth)
     monkeypatch.setattr(setup_cli, "activate_services", _activate_services)
+    monkeypatch.setattr(setup_cli, "ensure_openclaw_sandbox_image", lambda: False)
     monkeypatch.setattr(setup_cli, "verify_baseline", _verify_baseline)
 
     exit_code = setup_cli.setup_main(["--asset-root", str(asset_root), "--non-interactive"])
@@ -627,6 +628,7 @@ def test_setup_cli_can_request_degraded_baseline_verification(
     monkeypatch.setattr(setup_cli, "_doctor_host_payload", _doctor_host_payload)
     monkeypatch.setattr(setup_cli, "ensure_model_auth", _ensure_model_auth)
     monkeypatch.setattr(setup_cli, "activate_services", _activate_services)
+    monkeypatch.setattr(setup_cli, "ensure_openclaw_sandbox_image", lambda: False)
     monkeypatch.setattr(setup_cli, "verify_baseline", _verify_baseline)
 
     exit_code = setup_cli.setup_main(

@@ -504,6 +504,21 @@ def test_bootstrap_host_darwin_happy_path(
         "ensure_docker_compatible_runtime",
         new=_ensure_docker_compatible_runtime,
     )
+    sandbox_builds: list[str] = []
+
+    def _docker_backend_ready() -> bool:
+        return True
+
+    def _ensure_openclaw_sandbox_image() -> bool:
+        sandbox_builds.append("built")
+        return True
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "docker_backend_ready", new=_docker_backend_ready
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "ensure_openclaw_sandbox_image", new=_ensure_openclaw_sandbox_image
+    )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_varlock_installed",
@@ -569,6 +584,7 @@ def test_bootstrap_host_darwin_happy_path(
     }
     assert recorded_commands == []
     assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": False, "home_dir": home_dir}]
+    assert sandbox_builds == ["built"]
     assert recorded_completion == {
         "profile": "hypermemory",
         "host_os": "Darwin",
@@ -700,6 +716,21 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         "ensure_docker_compatible_runtime",
         new=_ensure_docker_compatible_runtime,
     )
+    sandbox_builds: list[str] = []
+
+    def _docker_backend_ready() -> bool:
+        return False
+
+    def _ensure_openclaw_sandbox_image() -> bool:
+        sandbox_builds.append("built")
+        return True
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "docker_backend_ready", new=_docker_backend_ready
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "ensure_openclaw_sandbox_image", new=_ensure_openclaw_sandbox_image
+    )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_varlock_installed",
@@ -792,6 +823,7 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         )
     ]
     assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": True, "home_dir": home_dir}]
+    assert sandbox_builds == []
     assert not any("npm" in command for command in recorded_commands)
 
 

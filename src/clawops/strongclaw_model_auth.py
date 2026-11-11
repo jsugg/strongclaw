@@ -387,6 +387,34 @@ def _guidance_text(repo_root: pathlib.Path) -> str:
     )
 
 
+def _memory_search_provider(env_values: dict[str, str]) -> str:
+    """Return the embedding provider OpenClaw 2026.3's `auto` selection would have used.
+
+    2026.5+ defaults to OpenAI embeddings and fails closed without a key, so StrongClaw pins
+    the old behavior: OpenAI when a key is available, otherwise FTS-only recall.
+    """
+    return "openai" if value_is_effective(env_values.get("OPENAI_API_KEY")) else "none"
+
+
+def _apply_memory_search_provider(repo_root: pathlib.Path, env_values: dict[str, str]) -> None:
+    """Pin `agents.defaults.memorySearch.provider` unless the operator already chose one."""
+    config_path = resolve_openclaw_config_path(repo_root)
+    payload = load_openclaw_config(config_path)
+    defaults = _mutable_mapping_or_none(
+        (_mutable_mapping_or_none(payload.get("agents")) or {}).get("defaults")
+    )
+    if defaults is None:
+        return
+    memory_search = _mutable_mapping_or_none(defaults.get("memorySearch"))
+    if memory_search is None:
+        memory_search = {}
+        defaults["memorySearch"] = memory_search
+    if memory_search.get("provider") not in (None, "auto"):
+        return
+    memory_search["provider"] = _memory_search_provider(env_values)
+    config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def ensure_model_auth(
     repo_root: pathlib.Path,
     *,
@@ -404,6 +432,9 @@ def ensure_model_auth(
     # depending on provider auth or platform-specific OpenClaw agent discovery.
     if not check_only and setup_mode == "skip":
         return {"ok": True, "checkedOnly": False, "configured": False, "skipped": True}
+    env_values = _effective_env_assignments(repo_root)
+    if not check_only:
+        _apply_memory_search_provider(repo_root, env_values)
     ready, missing_agents = _all_agents_have_models(
         repo_root,
         probe=probe,
@@ -419,7 +450,7 @@ def ensure_model_auth(
             "missingAgents": missing_agents,
             "guidance": _guidance_text(repo_root),
         }
-    model_chain = _build_model_chain(_effective_env_assignments(repo_root))
+    model_chain = _build_model_chain(env_values)
     if model_chain:
         _apply_model_chain(repo_root, model_chain)
         ready, missing_agents = _all_agents_have_models(

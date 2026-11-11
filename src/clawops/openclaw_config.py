@@ -378,6 +378,39 @@ def render_openclaw_profile(
     )
 
 
+def _agent_directory_paths(config: Mapping[str, object]) -> list[str]:
+    """Return every workspace and agentDir path the rendered agents reference."""
+    agents = config.get("agents")
+    if not isinstance(agents, Mapping):
+        return []
+    agents_mapping = cast(Mapping[str, object], agents)
+    paths: list[str] = []
+    defaults = agents_mapping.get("defaults")
+    if isinstance(defaults, Mapping):
+        paths.append(str(cast(Mapping[str, object], defaults).get("workspace") or ""))
+    agent_list = agents_mapping.get("list")
+    for agent in cast(list[object], agent_list) if isinstance(agent_list, list) else []:
+        if isinstance(agent, Mapping):
+            agent_mapping = cast(Mapping[str, object], agent)
+            paths.extend(str(agent_mapping.get(key) or "") for key in ("workspace", "agentDir"))
+    return [path for path in paths if path]
+
+
+def ensure_agent_directories(config: Mapping[str, object], *, home_dir: pathlib.Path) -> None:
+    """Create the workspace and agent directories a rendered config points at.
+
+    OpenClaw 2026.6 `doctor` aborts with an unhandled `root dir not found` when an agent
+    workspace is missing, where 2026.3 created it lazily on the first turn.
+    """
+    for raw_path in _agent_directory_paths(config):
+        path = (
+            home_dir / raw_path[2:]
+            if raw_path.startswith("~/")
+            else pathlib.Path(raw_path).expanduser()
+        )
+        path.mkdir(parents=True, exist_ok=True)
+
+
 def build_profile_help() -> str:
     """Return a compact help block for named profiles."""
     lines = ["available profiles:"]
@@ -461,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             extra_overlays=tuple(args.overlay),
         )
     write_json(resolved_output_path, rendered)
+    ensure_agent_directories(rendered, home_dir=home_dir)
     print(f"Rendered {resolved_output_path}")
     if args.exec_approvals_output is not None:
         approvals = render_openclaw_overlay(

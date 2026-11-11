@@ -11,7 +11,12 @@ from typing import Literal, cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import write_json
-from clawops.openclaw_config import materialize_runtime_memory_configs, render_openclaw_profile
+from clawops.openclaw_config import (
+    ensure_agent_directories,
+    materialize_runtime_memory_configs,
+    render_openclaw_profile,
+)
+from clawops.openclaw_sandbox import ensure_openclaw_sandbox_image
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
 from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_baseline import verify_baseline
@@ -61,6 +66,7 @@ def _render_openclaw_config(
     )
     materialize_runtime_memory_configs(repo_root=repo_root, home_dir=home_dir)
     write_json(output_path, rendered)
+    ensure_agent_directories(rendered, home_dir=home_dir)
     return output_path
 
 
@@ -360,6 +366,7 @@ def setup_main(argv: list[str] | None = None) -> int:
             else:
                 _pause_for_linux_docker_refresh(repo_root)
         if activate_services_enabled:
+            ensure_openclaw_sandbox_image()
             activate_services(repo_root)
         else:
             render_service_files(repo_root)

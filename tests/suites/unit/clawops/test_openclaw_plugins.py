@@ -70,7 +70,7 @@ def test_unrestricted_allowlist_loads_all_and_disables_unused_runtimes() -> None
 
 
 def test_restrictive_allowlist_names_needed_plugins_and_bundled_providers() -> None:
-    """A memory-only allowlist keeps the providers and runtimes the agents rely on."""
+    """A memory-only allowlist keeps the runtimes the agents use and every documented provider."""
     config = _base_config(allow=["strongclaw-hypermemory"], load={"paths": ["/x/hypermemory"]})
     agents = cast(dict[str, object], config["agents"])
     agents["list"] = [
@@ -90,8 +90,11 @@ def test_restrictive_allowlist_names_needed_plugins_and_bundled_providers() -> N
         "codex",
         "moonshot",
         "zai",
+        "anthropic",
         "github-copilot",
+        "ollama",
         "openai",
+        "openrouter",
     ]
     assert plugins["entries"] == {"diagnostics-otel": {"enabled": False}}
     assert plugins["bundledDiscovery"] == "compat"

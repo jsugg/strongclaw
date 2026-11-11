@@ -246,6 +246,11 @@ async function main() {
       commands[0].subcommands.map((command) => command.name),
       ["status", "index", "search", "get", "store", "update", "reflect", "forget", "list-facts"],
     );
+    const statusCommand = commands[0].subcommands.find((command) => command.name === "status");
+    assert.deepEqual(
+      statusCommand?.options.map((option) => option.flag),
+      ["--json", "--deep"],
+    );
     const indexCommand = commands[0].subcommands.find((command) => command.name === "index");
     assert.ok(indexCommand?.action);
     await indexCommand.action({ json: true });
