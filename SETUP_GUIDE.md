@@ -8,7 +8,7 @@ You need:
 
 - a private clone of this repo
 - Python 3.12+
-- Node 24+ preferred, Node 22.16+ minimum
+- Node 24+ preferred, Node 22.19+ minimum
 - a dedicated non-admin runtime user for OpenClaw
 - a supported package manager for the host bootstrap path
 - either an already installed Docker-compatible runtime or permission to install Docker as the fallback runtime

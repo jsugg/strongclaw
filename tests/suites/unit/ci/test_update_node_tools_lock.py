@@ -10,11 +10,16 @@ from pathlib import Path
 
 import pytest
 
+from clawops.openclaw_plugins import FIRST_PARTY_PLUGINS
 from clawops.strongclaw_runtime import CommandError, ExecResult
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import update_node_tools_lock as updater
 
 _INTEGRITY = "sha512-" + "A" * 86 + "=="
+
+
+def _plugin_pins(openclaw: str) -> dict[str, str]:
+    return {plugin.package: openclaw for plugin in FIRST_PARTY_PLUGINS}
 
 
 def _manifest(pins: dict[str, str]) -> str:
@@ -29,12 +34,14 @@ def _fake_generate_lock(work_dir: Path, *, before: str | None) -> None:
     bins = {"openclaw": "openclaw.mjs", "acpx": "dist/cli.js"}
     packages: dict[str, object] = {"": {"name": "strongclaw-node-tools", "dependencies": pins}}
     for name, version in pins.items():
-        packages[f"node_modules/{name}"] = {
+        entry: dict[str, object] = {
             "version": version,
             "resolved": f"https://registry.npmjs.org/{name}/-/{name}-{version}.tgz",
             "integrity": _INTEGRITY,
-            "bin": {name: bins[name]},
         }
+        if name in bins:
+            entry["bin"] = {name: bins[name]}
+        packages[f"node_modules/{name}"] = entry
     lock = {"name": "strongclaw-node-tools", "lockfileVersion": 3, "packages": packages}
     (work_dir / "package-lock.json").write_text(json.dumps(lock, indent=2) + "\n")
 
@@ -92,6 +99,7 @@ def test_update_bumps_manifest_lock_mirror_and_quoted_versions(
     assert {package.name: package.version for package in bundle.packages} == {
         "acpx": "0.3.0",
         "openclaw": "2026.3.14",
+        **_plugin_pins("2026.3.14"),
     }
     assert seen_before == ["2026-11-07T12:00:00Z"]
     assert (repo_root / "README.md").read_text() == "Pins OpenClaw `2026.3.14`, ACPX `0.3.0`.\n"
@@ -116,6 +124,7 @@ def test_resolve_pins_rejects_ranges(tmp_path: Path) -> None:
     assert dict(updater.resolve_pins(manifest_path, {"acpx": "0.4.0"})) == {
         "acpx": "0.4.0",
         "openclaw": "2026.3.13",
+        **_plugin_pins("2026.3.13"),
     }
     with pytest.raises(CommandError, match="exact version"):
         updater.resolve_pins(manifest_path, {"openclaw": "^2026.4.0"})
@@ -158,3 +167,24 @@ def test_check_toolchain_requires_the_ci_node_and_npm(
             updater.check_toolchain(allow_mismatch=allow_mismatch)
     else:
         updater.check_toolchain(allow_mismatch=allow_mismatch)
+
+
+def test_resolve_pins_moves_first_party_plugins_with_openclaw(tmp_path: Path) -> None:
+    """Registry plugins track the OpenClaw pin; stale `@openclaw/*` pins are dropped."""
+    manifest_path = tmp_path / "package.json"
+    manifest_path.write_text(
+        _manifest(
+            {
+                "acpx": "0.3.0",
+                "openclaw": "2026.3.13",
+                "@openclaw/retired-plugin": "2026.3.13",
+                **_plugin_pins("2026.3.13"),
+            }
+        )
+    )
+
+    assert dict(updater.resolve_pins(manifest_path, {"openclaw": "2026.6.35"})) == {
+        "acpx": "0.3.0",
+        "openclaw": "2026.6.35",
+        **_plugin_pins("2026.6.35"),
+    }

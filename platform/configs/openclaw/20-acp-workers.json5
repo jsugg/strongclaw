@@ -92,5 +92,6 @@
         "workspace": "__UPSTREAM_REPO_ROOT__"
       }
     ]
-  }
+  },
+  "bindings": []
 }

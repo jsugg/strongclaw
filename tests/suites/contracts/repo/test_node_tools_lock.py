@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+import yaml
 
 from clawops import platform_compat
+from clawops.openclaw_plugins import FIRST_PARTY_PLUGIN_SCOPE, FIRST_PARTY_PLUGINS
 from clawops.strongclaw_node_tools import NODE_TOOLS_ASSET_DIR, load_node_tools_bundle
 from tests.utils.helpers.ci_node_installs import (
     find_floating_node_commands,
@@ -21,7 +23,7 @@ from tests.utils.helpers.repo import REPO_ROOT
 _SOURCE_DIR = REPO_ROOT / NODE_TOOLS_ASSET_DIR
 _PACKAGED_DIR = REPO_ROOT / "src" / "clawops" / "assets" / NODE_TOOLS_ASSET_DIR
 # npm cannot record integrity for git dependencies; each one must be reviewed explicitly.
-_REVIEWED_GIT_DEPENDENCIES = frozenset({"node_modules/libsignal"})
+_REVIEWED_GIT_DEPENDENCIES: frozenset[str] = frozenset()
 
 
 def _lock_packages() -> dict[str, dict[str, object]]:
@@ -41,6 +43,7 @@ def test_node_tools_bundle_is_valid_and_exposes_both_clis(asset_dir: Path) -> No
     assert {package.name: package.bins for package in bundle.packages} == {
         "openclaw": ("openclaw",),
         "acpx": ("acpx",),
+        **{plugin.package: () for plugin in FIRST_PARTY_PLUGINS},
     }
 
 
@@ -58,7 +61,8 @@ def test_every_lock_entry_has_an_immutable_integrity_checked_source() -> None:
     """Registry entries carry resolved+sha512 integrity; git entries are commit-pinned."""
     git_entries: set[str] = set()
     for key, entry in _lock_packages().items():
-        if not key:
+        # Bundled entries are extracted from their bundler's integrity-checked tarball.
+        if not key or entry.get("inBundle") is True:
             continue
         resolved = entry.get("resolved")
         assert isinstance(resolved, str), key
@@ -70,6 +74,23 @@ def test_every_lock_entry_has_an_immutable_integrity_checked_source() -> None:
         assert isinstance(integrity, str) and integrity.startswith("sha512-"), key
 
     assert git_entries == _REVIEWED_GIT_DEPENDENCIES
+
+
+def test_first_party_plugins_are_pinned_in_lockstep_with_openclaw() -> None:
+    """Every wired plugin is locked at the host's version, and nothing else is pinned."""
+    manifest = json.loads((_SOURCE_DIR / "package.json").read_text(encoding="utf-8"))
+    dependencies = cast(dict[str, str], manifest["dependencies"])
+    openclaw_version = dependencies["openclaw"]
+
+    assert set(dependencies) == {
+        *platform_compat.REQUIRED_NODE_TOOL_PACKAGES,
+        *(plugin.package for plugin in FIRST_PARTY_PLUGINS),
+    }
+    for plugin in FIRST_PARTY_PLUGINS:
+        assert plugin.package.startswith(FIRST_PARTY_PLUGIN_SCOPE)
+        assert dependencies[plugin.package] == openclaw_version, plugin.package
+        peers = _lock_packages()[f"node_modules/{plugin.package}"].get("peerDependencies")
+        assert peers == {"openclaw": f">={openclaw_version}"}, plugin.package
 
 
 def test_quoted_versions_match_the_manifest_everywhere() -> None:
@@ -84,6 +105,15 @@ def test_quoted_versions_match_the_manifest_everywhere() -> None:
 
     assert {mention.package for mention in mentions} == {"openclaw", "acpx"}
     assert stale == [], "run tests/scripts/update_node_tools_lock.py to resync: " + ", ".join(stale)
+
+
+def test_lock_changes_trigger_the_fresh_host_lanes() -> None:
+    """Bumping either node-tools copy must run the end-to-end bootstrap on real hosts."""
+    filters_path = REPO_ROOT / ".github" / "ci" / "ci-gate-filters.yml"
+    filters = cast(dict[str, list[str]], yaml.safe_load(filters_path.read_text(encoding="utf-8")))
+
+    assert f"{NODE_TOOLS_ASSET_DIR.as_posix()}/**" in filters["fresh_host"]
+    assert "src/clawops/**" in filters["fresh_host"]
 
 
 def test_node_tools_bundle_ships_in_package_data() -> None:

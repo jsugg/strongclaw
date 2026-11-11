@@ -9,7 +9,7 @@ The repository includes:
 - Policy Harness Smoke Tests
 - Nightly Test Run
 - Repository Dependency Snapshot from a generated SPDX SBOM snapshot
-- Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.3.13` host-functional coverage)
+- Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.6.35` host-functional coverage)
 - `strongclaw-hypermemory` host-functional checks through the local plugin SDK stub
 - Devflow contract checks for the public `clawops devflow` surface
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
@@ -235,7 +235,7 @@ The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on GitHub 
 - That flow reuses `clawops config memory --set-profile memory-lancedb-pro`, which
 auto-detects the host and installs the default LanceDB dependency on supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
 - The workflow delegates the host-functional orchestration to
-`tests/scripts/memory_plugin_verification.py`, which installs the pinned `openclaw@2026.3.13` CLI into a temporary tool directory and runs the host-functional `npm run test:openclaw-host` suite.
+`tests/scripts/memory_plugin_verification.py`, which installs the pinned `openclaw@2026.6.35` CLI into a temporary tool directory and runs the host-functional `npm run test:openclaw-host` suite.
 - The host-functional step clears ambient AWS credential env vars first so
 local Bedrock model discovery noise does not contaminate test assertions.
 

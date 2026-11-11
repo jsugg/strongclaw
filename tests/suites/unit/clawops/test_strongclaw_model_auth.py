@@ -555,3 +555,77 @@ def test_model_auth_main_honors_env_mode_wrapper(
 
     assert exit_code == 0
     assert requested_modes == ["legacy"]
+
+
+@pytest.mark.parametrize(
+    ("model_chain", "expected_model", "expected_runtime"),
+    [
+        (
+            ["openai/gpt-5.4", "zai/glm-5"],
+            {"primary": "openai/gpt-5.4", "fallbacks": ["zai/glm-5"]},
+            None,
+        ),
+        (
+            ["openai-codex/gpt-5.4", "github-copilot/gpt-4o", "openai/gpt-5.4"],
+            {"primary": "openai/gpt-5.4", "fallbacks": ["github-copilot/gpt-5.5"]},
+            {"id": "codex"},
+        ),
+    ],
+    ids=["api-key-route", "legacy-subscription-route"],
+)
+def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+    model_chain: list[str],
+    expected_model: dict[str, object],
+    expected_runtime: dict[str, str] | None,
+) -> None:
+    """Env-selected `openai/*` stays on API keys; legacy subscription refs keep Codex auth."""
+    config_path = tmp_path / "openclaw.json"
+    codex_runtime = {"agentRuntime": {"id": "codex"}}
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "model": {"primary": "openai/gpt-5.4", "fallbacks": []},
+                        "models": {"openai/gpt-5.4": {"alias": "gpt", **codex_runtime}},
+                    },
+                    "list": [
+                        {"id": "coder", "models": {"openai/gpt-5.4": dict(codex_runtime)}},
+                    ],
+                },
+                "plugins": {"allow": ["strongclaw-hypermemory"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
+        del repo_root
+        return config_path
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth,
+        "resolve_openclaw_config_path",
+        new=_resolve_openclaw_config_path,
+    )
+    apply_model_chain = cast(
+        Callable[[pathlib.Path, list[str]], None],
+        vars(strongclaw_model_auth)["_apply_model_chain"],
+    )
+
+    apply_model_chain(tmp_path, model_chain)
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    defaults = payload["agents"]["defaults"]
+    coder = payload["agents"]["list"][0]
+    plugins = payload["plugins"]
+    assert defaults["model"] == expected_model
+    assert coder["model"] == expected_model
+    assert defaults["models"]["openai/gpt-5.4"].get("agentRuntime") == expected_runtime
+    assert coder["models"]["openai/gpt-5.4"].get("agentRuntime") == expected_runtime
+    assert "github-copilot/gpt-4o" not in defaults["models"]
+    assert ("codex" in plugins["allow"]) is (expected_runtime is not None)
+    assert {"zai", "openai", "strongclaw-hypermemory"} <= set(plugins["allow"])
+    assert any(path.endswith("/@openclaw/zai-provider") for path in plugins["load"]["paths"])

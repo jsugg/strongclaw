@@ -78,12 +78,28 @@ updates:
       time: "07:30"
       timezone: "America/Sao_Paulo"
     open-pull-requests-limit: 2
+    # CalVer months count as minor bumps, so cooldown alone would not hold this line.
+    ignore:
+      # Node 24 migration needed: 2026.7+ requires Node >= 22.22.3 and 2026.10+ Node 24.
+      - dependency-name: "openclaw"
+        versions:
+          - ">=2026.7.0"
+      # First-party plugins peer on their own host version and move in lockstep with it.
+      - dependency-name: "@openclaw/*"
+        versions:
+          - ">=2026.7.0"
     groups:
       # One PR per dependency across both directories keeps the packaged mirror identical.
       node-tools:
         patterns:
           - "*"
         group-by: "dependency-name"
+      # `group-by` is version-updates only, so security PRs still split per directory; the
+      # mirror digest contract fails a one-sided PR, which is then redone with the updater.
+      node-tools-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
     # semver-* cooldown keys are unproven for this ecosystem here (see the docker-compose
     # note above), so one 14-day window covers every update type.
     cooldown:

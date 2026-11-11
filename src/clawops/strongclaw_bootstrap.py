@@ -14,7 +14,12 @@ import time
 from collections.abc import Sequence
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
-from clawops.platform_compat import detect_host_platform, resolve_memory_plugin_lancedb_version
+from clawops.platform_compat import (
+    MINIMUM_NODE_VERSION,
+    MINIMUM_NODE_VERSION_TEXT,
+    detect_host_platform,
+    resolve_memory_plugin_lancedb_version,
+)
 from clawops.runtime_assets import (
     mirror_asset_tree,
     resolve_asset_path,
@@ -65,6 +70,7 @@ _APT_UPDATE_MAX_ATTEMPTS = 3
 _APT_UPDATE_RETRY_DELAY_SECONDS = 15
 _UNRELIABLE_APT_MIRROR = "azure.archive.ubuntu.com"
 _STABLE_APT_MIRROR = "archive.ubuntu.com"
+_NODE_REQUIREMENT = f"node >= {MINIMUM_NODE_VERSION_TEXT}"
 
 
 def _apt_command(arguments: Sequence[str]) -> list[str]:
@@ -178,28 +184,39 @@ def _resolve_node_command() -> str | None:
 
 
 def _node_satisfies_minimum() -> bool:
-    """Return whether Node.js >= 22.16 is available."""
+    """Return whether Node.js >= MINIMUM_NODE_VERSION is available."""
     node_command = _resolve_node_command()
     if node_command is None:
         return False
+    major, minor = MINIMUM_NODE_VERSION
     result = run_command(
         [
             node_command,
             "-e",
-            "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 16) ? 0 : 1);",
+            "const [major, minor] = process.versions.node.split('.').map(Number); "
+            f"process.exit(major > {major} || (major === {major} && minor >= {minor}) ? 0 : 1);",
         ],
         timeout_seconds=10,
     )
     return result.ok
 
 
+def _brew_formula_installed(formula_name: str) -> bool:
+    """Return whether Homebrew already manages *formula_name*."""
+    return run_command(["brew", "list", "--versions", formula_name], timeout_seconds=60).ok
+
+
 def _ensure_node_runtime_darwin() -> None:
-    """Ensure macOS has a supported Node.js runtime."""
+    """Ensure macOS has a supported Node.js runtime, upgrading a too-old Homebrew node."""
     if _node_satisfies_minimum():
         return
-    _ensure_brew_formula("node")
+    # `brew install` leaves an outdated formula alone when HOMEBREW_NO_INSTALL_UPGRADE is set.
+    if _brew_formula_installed("node"):
+        _stream_checked(["brew", "upgrade", "node"], timeout_seconds=1800)
+    else:
+        _ensure_brew_formula("node")
     if not _node_satisfies_minimum():
-        raise CommandError("node >= 22.16 is required")
+        raise CommandError(f"{_NODE_REQUIREMENT} is required")
 
 
 def _ensure_node_runtime_linux() -> None:
@@ -207,9 +224,9 @@ def _ensure_node_runtime_linux() -> None:
     if _node_satisfies_minimum():
         return
     if not command_exists("sudo"):
-        raise CommandError("sudo is required to install node >= 22.16 on Linux")
+        raise CommandError(f"sudo is required to install {_NODE_REQUIREMENT} on Linux")
     if not command_exists("apt-get"):
-        raise CommandError("apt-get is required to install node >= 22.16 on Linux")
+        raise CommandError(f"apt-get is required to install {_NODE_REQUIREMENT} on Linux")
     _stream_checked(
         ["bash", "-lc", "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"],
         timeout_seconds=1800,
@@ -219,7 +236,7 @@ def _ensure_node_runtime_linux() -> None:
         timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
     )
     if not _node_satisfies_minimum():
-        raise CommandError("node >= 22.16 is required")
+        raise CommandError(f"{_NODE_REQUIREMENT} is required")
 
 
 def resolve_uv_binary(*, home_dir: pathlib.Path | None = None) -> pathlib.Path | None:
@@ -622,7 +639,9 @@ def bootstrap_host(
     install_profile_assets(repo_root, profile=profile, home_dir=home_dir)
 
     # Linux keeps the historical `sudo npm install -g` privilege rule for the global prefix.
-    ensure_node_tools_installed(repo_root=repo_root, use_sudo=normalized_host_os == "Linux")
+    ensure_node_tools_installed(
+        repo_root=repo_root, use_sudo=normalized_host_os == "Linux", home_dir=home_dir
+    )
 
     ensure_common_state_roots(home_dir=home_dir)
     _render_post_bootstrap_config(repo_root, profile=profile, home_dir=home_dir)

@@ -17,11 +17,12 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 | --- | --- | --- |
 | Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12,<3.14`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
 | Managed install baseline | Python `3.12` | `make install` and bootstrap prefer Python `3.12` on supported Darwin/Linux hosts so the default hypermemory local-rerank path stays on the broadest compatible interpreter. |
-| Node.js | `22.16.x`, `24.x` | OpenClaw `2026.3.13` requires `>=22.16.0`; ACPX `0.3.0`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
+| Node.js | `22.19.x`, `24.x` | OpenClaw `2026.6.35` requires `>=22.19.0` (2026.7+ needs `>=22.22.3`); ACPX `0.21.1`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
 | `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
 | Varlock | `0.5.0` | Setup installs and verifies this exact version. |
-| OpenClaw | `2026.3.13` | Setup installs this exact CLI version, plus its full dependency tree, from the committed `platform/node-tools/package-lock.json` with `npm ci`. |
-| ACPX | `0.3.0` | Installed from the same lock as OpenClaw. Both CLIs are linked into npm's global bin directory (`$(npm prefix -g)/bin`), the same place `npm install -g` uses. |
+| OpenClaw | `2026.6.35` | Setup installs this exact CLI version, plus its full dependency tree, from the committed `platform/node-tools/package-lock.json` with `npm ci`. |
+| ACPX | `0.21.1` | Installed from the same lock as OpenClaw. Both CLIs are linked into npm's global bin directory (`$(npm prefix -g)/bin`), the same place `npm install -g` uses. |
+| First-party OpenClaw plugins | same version as OpenClaw | OpenClaw 2026.4+ publishes some former built-ins as separate `@openclaw/*` plugins: the ACP backend, the Codex agent runtime, the Z.AI and Moonshot providers, and OpenTelemetry diagnostics. They are pinned in the same lock and rendered configs load them through `plugins.load.paths` from `<data>/node-tools`, so OpenClaw never installs them from npm. `@openclaw/whatsapp` is not locked yet: the WhatsApp channel overlay needs it installed separately. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
 | `lossless-claw` | `v0.3.0` | Setup installs this exact git ref for the context-engine plugin. |
 | Hypermemory local rerank | Continuously validated on Linux `x86_64` with Python `3.12`/`3.13`; this is the current launch-supported local rerank path. Compatibility pins also exist for macOS `arm64` and Linux `aarch64`/`arm64`, but those surfaces remain operator-validated and best-effort until they land in CI. | Upstream wheel coverage is narrower than the base project matrix. Unsupported combinations skip the local `sentence-transformers` dependency and fall back to `compatible-http` or fail-open search order. The shipped rerank config defaults `rerank.local.device: auto`, which prefers `cuda`, then `mps`, then `cpu`, and retries on CPU if auto-selected acceleration fails. |
@@ -29,8 +30,8 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 CI enforces this support statement through:
 
 - a Python matrix on `3.12` and `3.13`
-- a setup/install smoke matrix on Node `22.16.0` and `24.13.1`
-- a vendored memory-plugin integration matrix on Node `22.16.0` and `24.13.1`
+- a setup/install smoke matrix on Node `22.19.0` and `24.13.1`
+- a vendored memory-plugin integration matrix on Node `22.19.0` and `24.13.1`
 - a `strongclaw-hypermemory` OpenClaw host-functional lane on Ubuntu
 
 For low-end or older hosts, this split matters:
@@ -56,6 +57,7 @@ StrongClaw-generated runtime artifacts should not live inside the repository che
 | Workflow context packs | `<state>/workspaces/<scope>/context-packs` | `<state>/workspaces/<scope>/context-packs` |
 | QMD package files | `<data>/qmd` | `<data>/qmd` |
 | `lossless-claw` checkout | `<data>/plugins/lossless-claw` | `<data>/plugins/lossless-claw` |
+| Locked node-tools release (link) | `<data>/node-tools` | `<data>/node-tools` |
 
 Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`, `STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs to override those defaults. The Python-owned compose commands export `STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
 

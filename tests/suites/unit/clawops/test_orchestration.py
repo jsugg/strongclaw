@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 
@@ -21,6 +22,7 @@ from clawops.orchestration import (
     build_session_identity,
     resolve_orchestration_task,
 )
+from tests.utils.helpers.repo import REPO_ROOT
 
 
 def test_workspace_descriptor_rejects_paths_outside_project_root(tmp_path: pathlib.Path) -> None:
@@ -154,6 +156,9 @@ def test_backend_registry_exposes_pinned_contract_and_compatibility_fixture() ->
 
     assert codex.default_auth_mode == "subscription"
     assert claude.supports_auth_mode("cloud-provider") is True
-    assert PINNED_ACPX_VERSION == "0.3.0"
+    manifest = json.loads(
+        (REPO_ROOT / "platform" / "node-tools" / "package.json").read_text(encoding="utf-8")
+    )
+    assert PINNED_ACPX_VERSION == manifest["dependencies"]["acpx"]
     assert matrix["darwin-arm64"]["acpx_version"] == PINNED_ACPX_VERSION
     assert matrix["linux-x86_64"]["acpx_version"] == PINNED_ACPX_VERSION

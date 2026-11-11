@@ -48,5 +48,10 @@
         }
       }
     }
+  },
+  "commands": {
+    "ownerAllowFrom": [
+      "telegram:__OWNER_TELEGRAM_ID__"
+    ]
   }
 }

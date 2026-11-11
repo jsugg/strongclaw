@@ -8,9 +8,11 @@ import os
 import pathlib
 import re
 from collections.abc import Sequence
-from typing import cast
+from typing import Final, cast
 
+from clawops.app_paths import strongclaw_node_tools_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
+from clawops.openclaw_plugins import CODEX_AGENT_RUNTIME_ID, attach_first_party_plugins
 from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
     CommandError,
@@ -35,6 +37,11 @@ JSON_DOCUMENT_START_RE = re.compile(r"(?m)^[ \t]*[\[{]")
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
 OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
+# Upstream retired these refs; `openclaw doctor --fix` (2026.5.22+) applies the same mapping.
+RETIRED_MODEL_REF_SUCCESSORS: Final[dict[str, str]] = {
+    "github-copilot/gpt-4o": "github-copilot/gpt-5.5"
+}
+LEGACY_SUBSCRIPTION_PROVIDER: Final[str] = "openai-codex"
 
 
 def _mapping_or_none(value: object) -> dict[str, object] | None:
@@ -236,11 +243,36 @@ def _build_model_chain(env_values: dict[str, str]) -> list[str]:
     return model_chain
 
 
+def _canonical_model_ref(model_ref: str) -> tuple[str, bool]:
+    """Return the current ref for *model_ref* and whether it keeps subscription auth.
+
+    Legacy subscription refs become `openai/*` routed through the Codex runtime, matching the
+    `openclaw doctor --fix` migration; plain `openai/*` refs stay on API-key auth.
+    """
+    provider, _, model_id = model_ref.partition("/")
+    if provider == LEGACY_SUBSCRIPTION_PROVIDER and model_id:
+        return f"openai/{model_id}", True
+    return RETIRED_MODEL_REF_SUCCESSORS.get(model_ref, model_ref), False
+
+
+def _set_codex_runtime(model_settings: dict[str, object], *, enabled: bool) -> None:
+    """Pin or clear the Codex agent runtime for one per-model settings entry."""
+    runtime = _mapping_or_none(model_settings.get("agentRuntime"))
+    if enabled:
+        model_settings["agentRuntime"] = {"id": CODEX_AGENT_RUNTIME_ID}
+    elif runtime is not None and runtime.get("id") == CODEX_AGENT_RUNTIME_ID:
+        del model_settings["agentRuntime"]
+
+
 def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> None:
     """Apply one model chain to every configured agent."""
     if not model_chain:
         return
-    primary, *fallbacks = [str(item) for item in model_chain]
+    resolved_chain: dict[str, bool] = {}
+    for model_ref in model_chain:
+        canonical_ref, codex_runtime = _canonical_model_ref(str(model_ref))
+        resolved_chain.setdefault(canonical_ref, codex_runtime)
+    primary, *fallbacks = list(resolved_chain)
     config_path = resolve_openclaw_config_path(repo_root)
     payload = load_openclaw_config(config_path)
     agents_payload = _mutable_mapping_or_none(payload.get("agents"))
@@ -255,8 +287,10 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
     if model_registry is None:
         model_registry = {}
         defaults_payload["models"] = model_registry
-    for model_ref in (primary, *fallbacks):
-        model_registry.setdefault(model_ref, {})
+    for model_ref, codex_runtime in resolved_chain.items():
+        model_settings = _mutable_mapping_or_none(model_registry.setdefault(model_ref, {}))
+        if model_settings is not None:
+            _set_codex_runtime(model_settings, enabled=codex_runtime)
     local_ollama_models = [
         model_ref.removeprefix("ollama/")
         for model_ref in (primary, *fallbacks)
@@ -292,6 +326,16 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
                 f"invalid OpenClaw config at {config_path}: agent entry missing `id`"
             )
         agent["model"] = {"primary": primary, "fallbacks": list(fallbacks)}
+        agent_models = _mutable_mapping_or_none(agent.get("models"))
+        for model_ref, codex_runtime in resolved_chain.items():
+            model_settings = _mutable_mapping_or_none(
+                None if agent_models is None else agent_models.get(model_ref)
+            )
+            if model_settings is not None:
+                _set_codex_runtime(model_settings, enabled=codex_runtime)
+    attach_first_party_plugins(
+        payload, node_modules_dir=strongclaw_node_tools_dir() / "node_modules"
+    )
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

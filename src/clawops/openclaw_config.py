@@ -9,10 +9,11 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from clawops.app_paths import strongclaw_lossless_claw_dir
+from clawops.app_paths import strongclaw_lossless_claw_dir, strongclaw_node_tools_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
+from clawops.openclaw_plugins import attach_first_party_plugins
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_runtime import managed_python
 
@@ -371,7 +372,10 @@ def render_openclaw_profile(
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
-    return cast(dict[str, Any], merged)
+    return attach_first_party_plugins(
+        cast(dict[str, Any], merged),
+        node_modules_dir=strongclaw_node_tools_dir(home_dir=home_dir) / "node_modules",
+    )
 
 
 def build_profile_help() -> str:

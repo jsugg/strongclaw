@@ -25,6 +25,7 @@ for import_root in (SRC_ROOT, REPO_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
+from clawops.openclaw_plugins import FIRST_PARTY_PLUGIN_SCOPE, FIRST_PARTY_PLUGINS  # noqa: E402
 from clawops.platform_compat import parse_node_tool_pins  # noqa: E402
 from clawops.strongclaw_node_tools import (  # noqa: E402
     LOCK_FILE_NAME,
@@ -143,11 +144,20 @@ def render_manifest(manifest_path: Path, pins: Mapping[str, str]) -> str:
 
 
 def resolve_pins(manifest_path: Path, overrides: Mapping[str, str]) -> Mapping[str, str]:
-    """Merge version overrides into the current pins and validate the result."""
+    """Merge version overrides into the current pins and validate the result.
+
+    First-party OpenClaw plugins come from the plugin registry and always track the OpenClaw
+    pin, since each release peers on its own host version.
+    """
     current = parse_node_tool_pins(
         json.loads(manifest_path.read_text(encoding="utf-8")), source=str(manifest_path)
     )
-    merged = {**current, **overrides}
+    merged = {
+        name: version
+        for name, version in {**current, **overrides}.items()
+        if not name.startswith(FIRST_PARTY_PLUGIN_SCOPE)
+    }
+    merged.update({plugin.package: merged["openclaw"] for plugin in FIRST_PARTY_PLUGINS})
     try:
         return parse_node_tool_pins({"dependencies": merged}, source="requested pins")
     except ValueError as err:

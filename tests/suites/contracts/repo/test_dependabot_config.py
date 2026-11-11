@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import yaml
 
+from clawops import platform_compat
 from tests.utils.helpers.repo import REPO_ROOT
 
 # Dependabot's parser rejected semver-* cooldown keys for github-actions and docker-compose
@@ -37,6 +38,38 @@ def test_dependabot_tracks_runtime_update_surfaces() -> None:
         "/src/clawops/assets/platform/node-tools",
     ]
     assert by_ecosystem["npm"]["groups"]["node-tools"]["group-by"] == "dependency-name"
+
+
+def _npm_update() -> dict[str, Any]:
+    payload = cast(
+        dict[str, Any],
+        yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")),
+    )
+    updates = cast(list[dict[str, Any]], payload["updates"])
+    return next(entry for entry in updates if entry["package-ecosystem"] == "npm")
+
+
+def test_dependabot_holds_openclaw_below_the_node_24_line() -> None:
+    """OpenClaw 2026.7+ needs a newer Node than the supported floor, so it is bumped by hand."""
+    ignored = {
+        str(rule["dependency-name"]): list(rule["versions"])
+        for rule in cast(list[dict[str, Any]], _npm_update()["ignore"])
+    }
+    pinned = tuple(int(part) for part in platform_compat.DEFAULT_OPENCLAW_VERSION.split("."))
+
+    assert ignored == {"openclaw": [">=2026.7.0"], "@openclaw/*": [">=2026.7.0"]}
+    assert pinned < (2026, 7, 0)
+
+
+def test_dependabot_groups_node_tools_security_updates() -> None:
+    """Security fixes for the locked tree land as one grouped PR per node-tools directory."""
+    groups = cast(dict[str, dict[str, Any]], _npm_update()["groups"])
+
+    assert groups["node-tools-security"] == {
+        "applies-to": "security-updates",
+        "patterns": ["*"],
+    }
+    assert "applies-to" not in groups["node-tools"]
 
 
 def test_dependabot_limits_solo_maintainer_pr_noise() -> None:
