@@ -6,13 +6,19 @@ immutable release directory keyed by the lock digest, next to npm's own global t
     <npm prefix -g>/lib/strongclaw-node-tools/<digest>/      release (``npm ci`` output)
     <npm prefix -g>/lib/strongclaw-node-tools/current        -> <digest>
     <npm prefix -g>/bin/<bin>  -> ../lib/strongclaw-node-tools/current/node_modules/.bin/<bin>
+    <npm prefix -g>/lib/node_modules/<pkg>  -> ../strongclaw-node-tools/current/node_modules/<pkg>
 
 The bins land exactly where ``npm install -g`` used to put them, so shells, service units, and
-every ``openclaw``/``acpx`` call site keep resolving them through the same PATH entry. A release
+every ``openclaw``/``acpx`` call site keep resolving them through the same PATH entry. The
+``lib/node_modules/<pkg>`` compat links keep absolute-path consumers of the legacy global layout
+(for example the memory plugin's ``openclaw/dist/extensionAPI.js`` fallbacks) working. A release
 is smoke-tested before ``current`` is switched with an atomic rename, so the previous install
-keeps serving until the new one passes. Legacy ``npm install -g`` package directories are removed
-only after the links point at the managed tree; while they exist, ``npm uninstall -g`` would
-delete the shared bin links.
+keeps serving until the new one passes.
+
+npm sees the compat links as linked global packages. ``npm uninstall -g <pkg>`` therefore removes
+that package's compat link and bin link (never the managed release), and ``npm install -g <pkg>``
+replaces them with a floating install; both are explicit user overrides that the next
+``clawops bootstrap`` reconciles back to the lock.
 """
 
 from __future__ import annotations
@@ -147,6 +153,16 @@ class NodeToolsLayout:
         """Return the relative symlink target routing one bin through `current`."""
         target = self.current_link / "node_modules" / ".bin" / bin_name
         return os.path.relpath(target, self.bin_dir)
+
+    def compat_package_link(self, package_name: str) -> pathlib.Path:
+        """Return the legacy `npm install -g` package path kept as a compat link."""
+        return self.global_node_modules / package_name
+
+    def compat_package_target(self, package_name: str) -> str:
+        """Return the relative compat-link target routing one package through `current`."""
+        link = self.compat_package_link(package_name)
+        target = self.current_link / "node_modules" / package_name
+        return os.path.relpath(target, link.parent)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -558,7 +574,7 @@ class NodeToolsInstaller:
                 layout.bin_link(bin_name), layout.bin_link_target(bin_name)
             )
             changed = True
-        if self._remove_legacy_packages():
+        if self._link_compat_packages():
             changed = True
         if changed:
             smoke_test_node_tools(layout.bin_dir, self._bundle)
@@ -640,16 +656,27 @@ class NodeToolsInstaller:
             return None
         return os.readlink(current_link)
 
-    def _remove_legacy_packages(self) -> bool:
-        """Delete `npm install -g` copies so `npm uninstall -g` cannot unlink managed bins."""
-        removed = False
+    def _link_compat_packages(self) -> bool:
+        """Point each legacy global package path at the active release."""
+        changed = False
         for package in self._bundle.packages:
-            legacy_dir = self._layout.global_node_modules / package.name
-            if legacy_dir.is_symlink() or legacy_dir.exists():
-                print(f"node tools: removing legacy global package {legacy_dir}", flush=True)
-                self._writer.remove(legacy_dir)
-                removed = True
-        return removed
+            link = self._layout.compat_package_link(package.name)
+            target = self._layout.compat_package_target(package.name)
+            if link.is_symlink() and os.readlink(link) == target:
+                continue
+            self._writer.make_dirs(link.parent)
+            if link.exists() and not link.is_symlink():
+                # rename(2) cannot swap a directory for a symlink, so the old `npm install -g`
+                # copy moves aside first; the bins already route through the managed tree.
+                print(f"node tools: replacing legacy global package {link}", flush=True)
+                retired = self._layout.tool_root / (
+                    f"{_RETIRED_PREFIX}legacy-{package.name.replace('/', '+')}-{os.getpid()}"
+                )
+                self._writer.remove(retired)
+                self._writer.rename(link, retired)
+            self._writer.replace_symlink(link, target)
+            changed = True
+        return changed
 
     def _prune_inactive(self, *, keep: str) -> None:
         """Remove superseded releases plus leftover staging/retired/temporary entries."""

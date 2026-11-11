@@ -382,9 +382,16 @@ function getExtensionApiImportSpecifiers(): string[] {
     // ignore resolve failures and continue fallback probing
   }
 
-  specifiers.push(toImportSpecifier("/usr/lib/node_modules/openclaw/dist/extensionAPI.js"));
-  specifiers.push(toImportSpecifier("/usr/local/lib/node_modules/openclaw/dist/extensionAPI.js"));
-  specifiers.push(toImportSpecifier("/opt/homebrew/lib/node_modules/openclaw/dist/extensionAPI.js"));
+  // strongclaw: `clawops bootstrap` installs OpenClaw under <npm prefix -g>/lib/strongclaw-node-tools
+  // and keeps <npm prefix -g>/lib/node_modules/openclaw as a compat link; probe both layouts.
+  for (const prefix of ["/usr", "/usr/local", "/opt/homebrew"]) {
+    specifiers.push(
+      toImportSpecifier(
+        `${prefix}/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js`,
+      ),
+    );
+    specifiers.push(toImportSpecifier(`${prefix}/lib/node_modules/openclaw/dist/extensionAPI.js`));
+  }
 
   return [...new Set(specifiers.filter(Boolean))];
 }

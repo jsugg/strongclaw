@@ -55,6 +55,16 @@ bin_dir = pathlib.Path("node_modules", ".bin")
 bin_dir.mkdir(parents=True, exist_ok=True)
 for name, version in lock["packages"][""]["dependencies"].items():
     package_dir = pathlib.Path("node_modules", name)
+    package_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {"name": name, "version": version, "type": "module"}
+    (package_dir / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
+    if name == "openclaw":
+        api = package_dir / "dist" / "extensionAPI.js"
+        api.parent.mkdir(parents=True, exist_ok=True)
+        api.write_text(
+            f"export async function runEmbeddedPiAgent() {{ return '{version}'; }}\\n",
+            encoding="utf-8",
+        )
     for bin_name, relative in lock["packages"]["node_modules/" + name]["bin"].items():
         target = package_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +193,18 @@ def _install(
     ).ensure()
 
 
+def _assert_compat_links(layout: NodeToolsLayout, bundle: NodeToolsBundle) -> None:
+    """Legacy global package paths must be symlinks resolving into the active release."""
+    active_release = layout.release_dir(bundle.digest).resolve()
+    for package in bundle.packages:
+        link = layout.compat_package_link(package.name)
+        assert link.is_symlink(), link
+        assert os.readlink(link) == f"../strongclaw-node-tools/current/node_modules/{package.name}"
+        assert active_release in link.resolve().parents
+        manifest = json.loads((link / "package.json").read_text(encoding="utf-8"))
+        assert manifest["version"] == package.version
+
+
 @pytest.fixture
 def fake_npm(test_context: TestContext, tmp_path: pathlib.Path) -> _FakeNpm:
     return _FakeNpm(test_context, tmp_path)
@@ -215,6 +237,7 @@ def test_install_uses_npm_ci_links_bins_and_reruns_as_noop(
         )
     assert _run_bin(fake_npm.prefix, "openclaw") == "openclaw 2026.3.13"
     assert _run_bin(fake_npm.prefix, "acpx") == "acpx 0.3.0"
+    _assert_compat_links(layout, bundle)
     release_inode = layout.release_dir(bundle.digest).stat().st_ino
     assert sorted(path.name for path in layout.tool_root.iterdir()) == sorted(
         ["current", bundle.digest]
@@ -227,16 +250,17 @@ def test_install_uses_npm_ci_links_bins_and_reruns_as_noop(
     assert writer.operations == []
     assert len(fake_npm.ci_calls()) == 1
     assert layout.release_dir(bundle.digest).stat().st_ino == release_inode
+    _assert_compat_links(layout, bundle)
 
 
 def test_install_migrates_legacy_global_packages_without_a_missing_command_window(
     fake_npm: _FakeNpm, tmp_path: pathlib.Path
 ) -> None:
-    """Legacy `npm install -g` links are swapped atomically, then the old packages are deleted."""
+    """Legacy bins swap atomically first; legacy package dirs then become compat links."""
     bundle = _write_bundle(tmp_path / "assets")
     layout = NodeToolsLayout(fake_npm.prefix)
     for name, relative in (("openclaw", "openclaw.mjs"), ("acpx", "dist/cli.js")):
-        legacy_entry = layout.global_node_modules / name / relative
+        legacy_entry = layout.compat_package_link(name) / relative
         legacy_entry.parent.mkdir(parents=True)
         legacy_entry.write_text("#!/bin/sh\necho legacy\n", encoding="utf-8")
         legacy_entry.chmod(0o755)
@@ -247,21 +271,42 @@ def test_install_migrates_legacy_global_packages_without_a_missing_command_windo
 
     assert result.changed is True
     assert _run_bin(fake_npm.prefix, "openclaw") == "openclaw 2026.3.13"
-    assert not (layout.global_node_modules / "openclaw").exists()
-    assert not (layout.global_node_modules / "acpx").exists()
+    _assert_compat_links(layout, bundle)
+    assert sorted(path.name for path in layout.tool_root.iterdir()) == sorted(
+        ["current", bundle.digest]
+    )
     bin_links = {layout.bin_link("openclaw"), layout.bin_link("acpx")}
     assert all(operation != "remove" for operation, path in writer.operations if path in bin_links)
-    last_link_swap = max(
+    last_bin_swap = max(
         index
         for index, (operation, path) in enumerate(writer.operations)
         if operation == "replace_symlink" and path in bin_links
     )
-    first_legacy_removal = min(
+    compat_paths = {layout.compat_package_link("openclaw"), layout.compat_package_link("acpx")}
+    first_compat_change = min(
         index
-        for index, (operation, path) in enumerate(writer.operations)
-        if operation == "remove" and layout.global_node_modules in path.parents
+        for index, (_, path) in enumerate(writer.operations)
+        if path in compat_paths or path.name.startswith(".retired-legacy-")
     )
-    assert last_link_swap < first_legacy_removal
+    assert last_bin_swap < first_compat_change
+
+
+def test_legacy_extension_api_path_resolves_into_the_active_release(
+    fake_npm: _FakeNpm, tmp_path: pathlib.Path
+) -> None:
+    """Absolute `lib/node_modules/openclaw/...` consumers follow upgrades through `current`."""
+    layout = NodeToolsLayout(fake_npm.prefix)
+    legacy_api = layout.compat_package_link("openclaw") / "dist" / "extensionAPI.js"
+    previous = _write_bundle(tmp_path / "v1")
+    _install(previous, fake_npm.prefix)
+
+    assert legacy_api.resolve().is_relative_to(layout.release_dir(previous.digest).resolve())
+
+    candidate = _write_bundle(tmp_path / "v2", openclaw="2026.3.14")
+    _install(candidate, fake_npm.prefix)
+
+    assert legacy_api.resolve().is_relative_to(layout.release_dir(candidate.digest).resolve())
+    assert "2026.3.14" in legacy_api.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("occupant", ["file", "foreign-symlink"])
@@ -300,6 +345,7 @@ def test_failed_smoke_test_keeps_the_previous_release_active(
 
     assert os.readlink(layout.current_link) == previous.digest
     assert _run_bin(fake_npm.prefix, "acpx") == "acpx 0.3.0"
+    _assert_compat_links(layout, previous)
     assert sorted(path.name for path in layout.tool_root.iterdir()) == sorted(
         ["current", previous.digest]
     )
@@ -321,6 +367,7 @@ def test_lock_change_switches_release_and_prunes_the_old_one(
     assert os.readlink(layout.current_link) == candidate.digest
     assert _run_bin(fake_npm.prefix, "acpx") == "acpx 0.3.1"
     assert not layout.release_dir(previous.digest).exists()
+    _assert_compat_links(layout, candidate)
 
 
 def test_unhealthy_active_release_is_rebuilt(fake_npm: _FakeNpm, tmp_path: pathlib.Path) -> None:

@@ -13,6 +13,7 @@ import path from "node:path";
 process.env.NODE_PATH = [
     process.env.NODE_PATH,
     "/opt/homebrew/lib/node_modules/openclaw/node_modules",
+    "/opt/homebrew/lib/strongclaw-node-tools/current/node_modules",
     "/opt/homebrew/lib/node_modules",
 ].filter(Boolean).join(":");
 Module._initPaths();
