@@ -46,7 +46,7 @@ class OpenClawBackupBackend:
     ) -> tuple[bool, str | None, dict[str, object] | None]:
         """Create one archive through OpenClaw."""
         result = self._run_command(
-            ["openclaw", "backup", "create", str(archive_tmp_path)],
+            ["openclaw", "backup", "create", "--output", str(archive_tmp_path)],
             timeout_seconds=600,
         )
         if result.ok:

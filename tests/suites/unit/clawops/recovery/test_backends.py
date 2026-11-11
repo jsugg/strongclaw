@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pathlib
+
 from clawops.recovery.backends import OpenClawBackupBackend
 from clawops.strongclaw_runtime import ExecResult
 
@@ -25,3 +27,23 @@ def test_openclaw_backend_availability_uses_standard_which_signature() -> None:
 
     backend = OpenClawBackupBackend(which=fake_which, run_command=fake_run_command)
     assert backend.is_available() is True
+
+
+def test_openclaw_backend_passes_the_archive_path_through_the_output_option(
+    tmp_path: pathlib.Path,
+) -> None:
+    """OpenClaw takes the archive destination via --output, never as a positional argument."""
+    calls: list[list[str]] = []
+
+    def fake_run_command(argv: list[str], **_kwargs: object) -> ExecResult:
+        calls.append(argv)
+        return ExecResult(argv=tuple(argv), returncode=0, stdout="", stderr="", duration_ms=1)
+
+    def fake_which(command: str) -> str | None:
+        return command
+
+    backend = OpenClawBackupBackend(which=fake_which, run_command=fake_run_command)
+    archive = tmp_path / ".openclaw-20260101-000000.tar.gz.tmp"
+
+    assert backend.create(archive) == (True, None, None)
+    assert calls == [["openclaw", "backup", "create", "--output", str(archive)]]
