@@ -4,7 +4,7 @@
   "private": true,
   "description": "Pinned OpenClaw and ACPX CLIs installed by clawops bootstrap.",
   "dependencies": {
-    "acpx": "0.3.0",
+    "acpx": "0.21.1",
     "openclaw": "2026.3.13"
   }
 }
