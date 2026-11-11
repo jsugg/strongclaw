@@ -1,4 +1,26 @@
 {
+  // memory-lancedb-pro registers its memoryReflection session hooks (command:new, command:reset)
+  // as internal hooks, which OpenClaw only wires when internal hooks are on. The bundled hooks
+  // stay off so enabling the hook system changes nothing else.
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "boot-md": {
+          "enabled": false
+        },
+        "bootstrap-extra-files": {
+          "enabled": false
+        },
+        "command-logger": {
+          "enabled": false
+        },
+        "session-memory": {
+          "enabled": false
+        }
+      }
+    }
+  },
   "plugins": {
     "allow": [
       "memory-lancedb-pro"
@@ -21,6 +43,9 @@
           "autoRecall": false,
           "captureAssistant": false,
           "smartExtraction": true,
+          // The vendored release counts only the user messages new since the previous turn, so a
+          // gateway conversation (one new message per turn) never reaches the upstream default of 4.
+          "extractMinMessages": 1,
           "llm": {
             "apiKey": "ollama",
             "model": "qwen2.5:7b",

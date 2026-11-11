@@ -333,6 +333,18 @@ def test_memory_lancedb_pro_overlay_renders_vendor_local_paths() -> None:
     assert plugin["smartExtraction"] is True
     assert plugin["llm"]["baseURL"] == "http://127.0.0.1:11434/v1"
     assert plugin["selfImprovement"]["enabled"] is False
+    # Gateway turns add one user message each; a higher floor would never extract.
+    assert plugin["extractMinMessages"] == 1
+    # memoryReflection's command:new/command:reset hooks need OpenClaw's internal hook system,
+    # without loading OpenClaw's bundled hooks.
+    internal_hooks = rendered["hooks"]["internal"]
+    assert internal_hooks["enabled"] is True
+    assert {name: entry["enabled"] for name, entry in internal_hooks["entries"].items()} == {
+        "boot-md": False,
+        "bootstrap-extra-files": False,
+        "command-logger": False,
+        "session-memory": False,
+    }
 
 
 def test_vendored_memory_lancedb_pro_bundle_is_pinned() -> None:
