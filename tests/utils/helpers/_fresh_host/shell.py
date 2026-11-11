@@ -56,7 +56,7 @@ def phase_env(context: FreshHostContext) -> dict[str, str]:
         {
             "HOME": context.app_home,
             "OPENCLAW_CONFIG_PROFILE": context.profile,
-            "OPENCLAW_MODEL_SETUP_MODE": "skip",
+            "OPENCLAW_MODEL_SETUP_MODE": context.model_setup_mode,
             "PYTHONPATH": "src",
             "XDG_CONFIG_HOME": f"{context.app_home}/.config",
         }

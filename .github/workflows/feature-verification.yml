@@ -1,0 +1,287 @@
+name: Feature Verification
+
+# Verifies every feature in tests/feature_matrix.yaml against the OpenClaw/ACPX versions that
+# `clawops bootstrap` installs from platform/node-tools, on provisioned Linux and macOS hosts.
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which lanes to run.
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
+          - macos
+      fail_on_feature_failures:
+        description: Fail the run when any feature is FAIL.
+        required: true
+        type: boolean
+        default: true
+  schedule:
+    - cron: "23 5 * * 1"
+  push:
+    branches:
+      - test/feature-verification-suite
+
+concurrency:
+  group: feature-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
+  UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
+  npm_config_cache: ${{ github.workspace }}/.github-cache/npm
+
+jobs:
+  linux-lanes:
+    name: Linux Features (${{ matrix.lane }})
+    if: ${{ github.event_name == 'schedule' || inputs.platforms != 'macos' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: linux-core
+            profile: hypermemory
+            scenario: linux-features
+            # LiteLLM reaches the fake Ollama upstream from its container via host-gateway.
+            fake_model_host: 0.0.0.0
+            fake_model_ports: --port 8000 --port 11434
+          - lane: linux-lancedb
+            profile: memory-lancedb-pro
+            scenario: linux-features
+            fake_model_host: 0.0.0.0
+            fake_model_ports: --port 8000 --port 11434
+          - lane: linux-profiles
+            profile: openclaw-default
+            scenario: linux-features-local
+            fake_model_host: 127.0.0.1
+            # 11434 stays free for the optional Ollama compose stack this lane starts.
+            fake_model_ports: --port 8000
+    env:
+      FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM: "2"
+      FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: "5"
+      FEATURE_RESULTS_DIR: ${{ github.workspace }}/.feature-results
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Reserves equal the scenario+lane step timeouts and the summed observer step timeouts.
+      - name: Initialize Linux feature job budget
+        run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 150 --scenario-reserve-minutes 105 --observer-reserve-minutes 10 --github-env-file "${GITHUB_ENV}"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        timeout-minutes: 5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+      - name: Start the systemd user manager
+        if: ${{ matrix.scenario == 'linux-features' }}
+        timeout-minutes: 3
+        run: ./tests/scripts/feature_verification.py enable-systemd-user
+      - name: Prepare Linux feature context
+        run: ./tests/scripts/fresh_host.py prepare-context --scenario "${{ matrix.scenario }}" --profile "${{ matrix.profile }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
+      - name: Ensure Linux sidecar images
+        if: ${{ matrix.scenario == 'linux-features' }}
+        timeout-minutes: 32
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Start the fake model provider
+        timeout-minutes: 2
+        run: ./tests/scripts/feature_verification.py start-fake-model --host "${{ matrix.fake_model_host }}" ${{ matrix.fake_model_ports }} --state-dir "${RUNNER_TEMP}/fake-model"
+      - name: Point the env contract at the fake model provider
+        run: ./tests/scripts/feature_verification.py configure-model-provider --context "${FRESH_HOST_CONTEXT}"
+      # Bootstrap + setup are themselves verified features; a failure here is reported per
+      # feature by the lane, which falls back to a harness gateway for the remaining features.
+      - name: Bootstrap and set up the host
+        continue-on-error: true
+        timeout-minutes: 45
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Run lane features
+        timeout-minutes: 60
+        run: ./tests/scripts/feature_verification.py run-lane --context "${FRESH_HOST_CONTEXT}" --lane "${{ matrix.lane }}" --results "${FEATURE_RESULTS_DIR}/feature-results-${{ matrix.lane }}.json" --fake-model-dir "${RUNNER_TEMP}/fake-model"
+      - name: Collect lane diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: ./tests/scripts/feature_verification.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}" --output-dir "${FEATURE_RESULTS_DIR}/diagnostics"
+      - name: Collect fresh-host diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: ./tests/scripts/fresh_host.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
+      - name: Stop the fake model provider
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 1
+        run: ./tests/scripts/feature_verification.py stop-fake-model --state-dir "${RUNNER_TEMP}/fake-model"
+      - name: Upload lane results
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feature-results-${{ matrix.lane }}
+          path: |
+            ${{ github.workspace }}/.feature-results
+            ${{ runner.temp }}/fresh-host-reports
+            ${{ runner.temp }}/fake-model/fake-model.log
+          include-hidden-files: true
+
+  macos-lane:
+    name: macOS Features (macos-launchd)
+    if: ${{ github.event_name == 'schedule' || inputs.platforms != 'linux' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 150
+    env:
+      FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM: "2"
+      FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: "5"
+      FEATURE_RESULTS_DIR: ${{ github.workspace }}/.feature-results
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Initialize macOS feature job budget
+        run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 150 --scenario-reserve-minutes 75 --observer-reserve-minutes 12 --github-env-file "${GITHUB_ENV}"
+      - name: Restore OrbStack DMG cache
+        id: orbstack_dmg_cache
+        timeout-minutes: 5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/orbstack.dmg
+          key: orbstack-v1.5.1-16857-amd64
+      - name: Set up Docker via OrbStack
+        timeout-minutes: 10
+        # v1.6.0+ panics on GHA macos-15-intel (Skylake CPU check); v1.5.1 is safe.
+        env:
+          ORBSTACK_DMG_PATH: /tmp/orbstack.dmg
+          ORBSTACK_DMG_SHA256: fb95108ded54a27603b68184a13f7e666e0e758167652c0b65cd4dc5eff94617
+          ORBSTACK_DMG_URL: https://cdn-updates.orbstack.dev/amd64/OrbStack_v1.5.1_16857_amd64.dmg
+        run: >-
+          ./tests/scripts/hosted_docker.py setup-orbstack
+          --dmg-path "${ORBSTACK_DMG_PATH}"
+          --url "${ORBSTACK_DMG_URL}"
+          --sha256 "${ORBSTACK_DMG_SHA256}"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22.22.1"
+          package-manager-cache: false
+      - name: Restore package download caches
+        timeout-minutes: 5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .github-cache/npm
+            .github-cache/uv
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+      - name: Prepare macOS feature context
+        run: >-
+          ./tests/scripts/fresh_host.py prepare-context
+          --scenario macos-features
+          --profile openclaw-default
+          --repo-root .
+          --runner-temp "${RUNNER_TEMP}"
+          --workspace "${GITHUB_WORKSPACE}"
+          --github-env-file "${GITHUB_ENV}"
+      # Backstop only: the helper ends at its own deadline with recovery reserved inside it.
+      - name: Wait for hosted macOS Docker runtime
+        timeout-minutes: 12
+        run: >-
+          ./tests/scripts/hosted_docker.py wait-runtime-ready
+          --context "${FRESH_HOST_CONTEXT}"
+          --github-env-file "${GITHUB_ENV}"
+      - name: Ensure hosted macOS Docker images
+        timeout-minutes: 32
+        run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
+      - name: Start the fake model provider
+        timeout-minutes: 2
+        run: ./tests/scripts/feature_verification.py start-fake-model --host 127.0.0.1 --port 8000 --port 11434 --state-dir "${RUNNER_TEMP}/fake-model"
+      - name: Point the env contract at the fake model provider
+        run: ./tests/scripts/feature_verification.py configure-model-provider --context "${FRESH_HOST_CONTEXT}"
+      # The scenario recovers a Docker runtime lost mid-run inside its own budget.
+      - name: Bootstrap and set up the host
+        continue-on-error: true
+        timeout-minutes: 40
+        run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      - name: Run lane features
+        timeout-minutes: 35
+        run: ./tests/scripts/feature_verification.py run-lane --context "${FRESH_HOST_CONTEXT}" --lane macos-launchd --results "${FEATURE_RESULTS_DIR}/feature-results-macos-launchd.json" --fake-model-dir "${RUNNER_TEMP}/fake-model"
+      - name: Collect lane diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        run: ./tests/scripts/feature_verification.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}" --output-dir "${FEATURE_RESULTS_DIR}/diagnostics"
+      - name: Collect hosted macOS Docker diagnostics
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        timeout-minutes: 4
+        run: ./tests/scripts/hosted_docker.py collect-diagnostics --context "${FRESH_HOST_CONTEXT}"
+      - name: Stop the fake model provider
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 1
+        run: ./tests/scripts/feature_verification.py stop-fake-model --state-dir "${RUNNER_TEMP}/fake-model"
+      - name: Upload lane results
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feature-results-macos-launchd
+          path: |
+            ${{ github.workspace }}/.feature-results
+            ${{ runner.temp }}/fresh-host-reports
+            ${{ runner.temp }}/fake-model/fake-model.log
+          include-hidden-files: true
+      - name: Clean up macOS feature context
+        if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        run: ./tests/scripts/fresh_host.py cleanup --context "${FRESH_HOST_CONTEXT}"
+
+  report:
+    name: Feature Verification Report
+    needs:
+      - linux-lanes
+      - macos-lane
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.10.9"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Download lane results
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: feature-results-*
+          path: lane-results
+      - name: Write the per-feature report
+        run: uv run python3 ./tests/scripts/feature_report.py --results-dir lane-results --output feature-report/feature-verification.json --summary-file "${GITHUB_STEP_SUMMARY}" ${{ (github.event_name == 'schedule' || inputs.fail_on_feature_failures) && '--fail-on-failures' || '' }}
+      - name: Upload the per-feature report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feature-verification-report
+          path: feature-report/feature-verification.json

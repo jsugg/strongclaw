@@ -1,0 +1,139 @@
+"""Host lifecycle features: bootstrap, guided setup, service managers, env contract, doctors."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import cast
+
+from clawops.platform_compat import DEFAULT_ACPX_VERSION, DEFAULT_OPENCLAW_VERSION
+from clawops.strongclaw_runtime import load_bootstrap_state
+from tests.utils.helpers.feature_verification import FeatureHost
+from tests.utils.helpers.fresh_host import load_report
+
+SYSTEMD_PERSISTENT_UNITS = ("openclaw-gateway.service",)
+SYSTEMD_ONESHOT_UNITS = ("openclaw-sidecars.service",)
+SYSTEMD_TIMERS = (
+    "openclaw-backup-create.timer",
+    "openclaw-backup-verify.timer",
+    "openclaw-maintenance.timer",
+)
+LAUNCHD_JOBS = (
+    "ai.openclaw.backup-create",
+    "ai.openclaw.backup-verify",
+    "ai.openclaw.maintenance",
+)
+
+
+def _phase_status(feature_host: FeatureHost, phase: str) -> tuple[str, str]:
+    report = load_report(Path(feature_host.context.report_path))
+    for result in report.phases:
+        if result.name == phase:
+            return result.status, result.failure_reason or ""
+    return "missing", f"phase {phase!r} never ran; scenario status={report.status}"
+
+
+def test_bootstrap_installs_the_locked_toolchain(feature_host: FeatureHost) -> None:
+    status, reason = _phase_status(feature_host, "bootstrap")
+    assert status == "success", f"clawops bootstrap failed: {reason}"
+    state = load_bootstrap_state()
+    assert state is not None, "bootstrap did not persist its completion state"
+    assert state.profile == feature_host.lane.profile
+    openclaw_version = feature_host.run(["openclaw", "--version"]).require_ok().stdout
+    acpx_version = feature_host.run(["acpx", "--version"]).require_ok().stdout
+    assert DEFAULT_OPENCLAW_VERSION in openclaw_version, openclaw_version
+    assert DEFAULT_ACPX_VERSION in acpx_version, acpx_version
+    assert feature_host.python.is_file(), "bootstrap did not create the managed venv"
+
+
+def test_guided_setup_completes_with_service_activation(feature_host: FeatureHost) -> None:
+    status, reason = _phase_status(feature_host, "setup")
+    assert status == "success", f"clawops setup (with service activation) failed: {reason}"
+    config = feature_host.rendered_config()
+    agents = cast(dict[str, object], config["agents"])
+    defaults = cast(dict[str, object], agents["defaults"])
+    model = cast(dict[str, object], defaults["model"])
+    assert str(model["primary"]).startswith("vllm/"), model
+    feature_host.openclaw("config", "validate", timeout=120).require_ok()
+
+
+def test_systemd_user_units_are_installed_and_active(feature_host: FeatureHost) -> None:
+    unit_dir = feature_host.home / ".config" / "systemd" / "user"
+    for unit in (*SYSTEMD_PERSISTENT_UNITS, *SYSTEMD_ONESHOT_UNITS, *SYSTEMD_TIMERS):
+        rendered = unit_dir / unit
+        assert rendered.is_file(), f"{rendered} was not rendered"
+        assert "__REPO_ROOT__" not in rendered.read_text(encoding="utf-8")
+        enabled = feature_host.run(["systemctl", "--user", "is-enabled", unit], timeout=30)
+        assert enabled.stdout.strip() == "enabled", enabled.describe()
+    for unit in (*SYSTEMD_PERSISTENT_UNITS, *SYSTEMD_TIMERS):
+        active = feature_host.run(["systemctl", "--user", "is-active", unit], timeout=30)
+        assert active.stdout.strip() == "active", active.describe()
+    sidecars = feature_host.run(
+        ["systemctl", "--user", "show", "--property=ActiveState,Result", *SYSTEMD_ONESHOT_UNITS],
+        timeout=30,
+    ).require_ok()
+    assert (
+        "ActiveState=active" in sidecars.stdout and "Result=success" in sidecars.stdout
+    ), sidecars.describe()
+
+
+def test_launchd_agents_are_loaded_and_running(feature_host: FeatureHost) -> None:
+    domain = f"gui/{os.getuid()}"
+    gateway = feature_host.run(["launchctl", "print", f"{domain}/ai.openclaw.gateway"], timeout=30)
+    assert gateway.ok and "state = running" in gateway.stdout, gateway.describe()
+    sidecars = feature_host.run(
+        ["launchctl", "print", f"{domain}/ai.openclaw.sidecars"], timeout=30
+    )
+    assert sidecars.ok and "last exit code = 0" in sidecars.stdout, sidecars.describe()
+    for label in LAUNCHD_JOBS:
+        job = feature_host.run(["launchctl", "print", f"{domain}/{label}"], timeout=30)
+        assert job.ok, f"{label} is not loaded:\n{job.describe()}"
+    plist_dir = feature_host.home / "Library" / "LaunchAgents"
+    for label in ("ai.openclaw.gateway", *LAUNCHD_JOBS):
+        plist = plist_dir / f"{label}.plist"
+        assert plist.is_file(), f"{plist} was not rendered"
+        lint = feature_host.run(["plutil", "-lint", str(plist)], timeout=30)
+        assert lint.ok, lint.describe()
+
+
+def test_varlock_env_contract_is_valid(feature_host: FeatureHost) -> None:
+    check = feature_host.clawops("varlock-env", "--asset-root", ".", "check").require_ok()
+    payload = cast(dict[str, object], check.json())
+    assert payload["ok"] is True and payload["checkOnly"] is True, payload
+    assert payload["varlockValidated"] is True, payload
+    values = feature_host.env_values()
+    for key in ("OPENCLAW_GATEWAY_TOKEN", "LITELLM_MASTER_KEY", "NEO4J_PASSWORD"):
+        assert len(values.get(key, "")) >= 16, f"{key} was not generated by the env contract"
+    mode = feature_host.env_file().stat().st_mode & 0o777
+    assert mode == 0o600, f"{feature_host.env_file()} has mode {oct(mode)}"
+    reconfigure = feature_host.clawops(
+        "varlock-env", "--asset-root", ".", "configure", "--non-interactive"
+    ).require_ok()
+    assert cast(dict[str, object], reconfigure.json())["created"] is False
+
+
+def test_doctor_host_reports_toolchain(feature_host: FeatureHost) -> None:
+    outcome = feature_host.clawops("doctor-host", "--asset-root", ".", timeout=300).require_ok()
+    payload = cast(dict[str, object], outcome.json())
+    assert payload["ok"] is True, payload
+    assert DEFAULT_OPENCLAW_VERSION in str(payload["openclawVersion"]), payload
+    assert DEFAULT_ACPX_VERSION in str(payload["acpxVersion"]), payload
+    assert Path(str(payload["config"])).is_file(), payload
+
+
+def test_deep_doctor_passes_every_check(feature_host: FeatureHost) -> None:
+    outcome = feature_host.clawops("doctor", "--asset-root", ".", timeout=1800)
+    payload = cast(dict[str, object], outcome.json())
+    checks = cast(list[dict[str, object]], payload["checks"])
+    failed = {
+        str(check["name"]): str(check["message"])[:600] for check in checks if not check["ok"]
+    }
+    assert payload["status"] == "pass" and outcome.ok, json.dumps(failed, indent=2)
+
+
+def test_baseline_verify_passes_with_runtime_probes(feature_host: FeatureHost) -> None:
+    outcome = feature_host.clawops("baseline", "verify", timeout=3000)
+    assert outcome.ok, outcome.describe()
+    payload = cast(dict[str, object], outcome.json())
+    assert payload["ok"] is True and payload["verificationMode"] == "runtime", payload

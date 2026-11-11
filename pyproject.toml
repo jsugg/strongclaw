@@ -167,6 +167,7 @@ markers = [
   "integration: cross-module and service-shaped tests",
   "contract: repository and artifact contract checks",
   "e2e: black-box end-to-end orchestration tests",
+  "feature_verification: per-feature verification against a provisioned host (lane-only)",
   "devflow: production devflow coverage",
   "framework: explicit validation of the pytest framework itself",
   "test_profile: named infrastructure runtime profile declarations",

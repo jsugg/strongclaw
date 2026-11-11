@@ -1,0 +1,874 @@
+# StrongClaw end-to-end feature matrix.
+#
+# One entry per product feature: where it lives (call sites), the single test that verifies it,
+# and the lanes (provisioned CI hosts) it runs on; platforms are derived from the lanes.
+# `verification` says how deep the check goes:
+#   live        - real StrongClaw + real OpenClaw/acpx + real sidecars, no stand-ins
+#   fake-model  - live, with the local deterministic model server as the model provider
+#   stub        - a third-party endpoint (vendor CLI/adapter, messaging API) is stood in for
+# `status: unverifiable` features cannot be exercised without third-party live services; they
+# carry the reason and are reported UNVERIFIABLE, never PASS.
+# Contract: tests/suites/contracts/repo/test_feature_matrix_contract.py.
+schema_version: 1
+
+lanes:
+  linux-core:
+    platform: linux
+    profile: hypermemory
+    scenario: linux-features
+    activate_services: true
+    description: Default product profile with systemd user services, sidecars, and the gateway.
+  linux-lancedb:
+    platform: linux
+    profile: memory-lancedb-pro
+    scenario: linux-features
+    activate_services: true
+    description: Vendored memory-lancedb-pro profile with systemd services and sidecars.
+  linux-profiles:
+    platform: linux
+    profile: openclaw-default
+    scenario: linux-features-local
+    activate_services: false
+    description: Profile matrix plus CLI-only operator tools on a harness-managed gateway.
+  macos-launchd:
+    platform: macos
+    profile: openclaw-default
+    scenario: macos-features
+    activate_services: true
+    description: macOS bootstrap and launchd-supervised runtime.
+
+features:
+  # --- host lifecycle -------------------------------------------------------------------------
+  - id: bootstrap.host
+    category: host-lifecycle
+    title: clawops bootstrap installs the locked OpenClaw/ACPX toolchain, varlock and the venv
+    call_sites:
+      - src/clawops/strongclaw_bootstrap.py:576
+      - src/clawops/strongclaw_node_tools.py:715
+    lanes: [linux-core, macos-launchd]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_bootstrap_installs_the_locked_toolchain
+  - id: setup.guided
+    category: host-lifecycle
+    title: clawops setup (non-interactive) renders config, applies model auth, activates services
+    call_sites:
+      - src/clawops/setup_cli.py:310
+      - src/clawops/setup_cli.py:139
+    lanes: [linux-core, macos-launchd]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_guided_setup_completes_with_service_activation
+  - id: services.systemd
+    category: host-lifecycle
+    title: systemd user units and timers are installed, enabled and active on Linux
+    call_sites:
+      - src/clawops/strongclaw_services.py:51
+      - src/clawops/strongclaw_services.py:398
+      - platform/systemd/openclaw-gateway.service:16
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_systemd_user_units_are_installed_and_active
+  - id: services.launchd
+    category: host-lifecycle
+    title: launchd agents are bootstrapped and running on macOS
+    call_sites:
+      - src/clawops/strongclaw_services.py:27
+      - src/clawops/strongclaw_services.py:233
+      - platform/launchd/ai.openclaw.gateway.plist.template:7
+    lanes: [macos-launchd]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_launchd_agents_are_loaded_and_running
+  - id: varlock.env-contract
+    category: host-lifecycle
+    title: varlock-env configure/check generates and validates the operator env contract
+    call_sites:
+      - src/clawops/strongclaw_varlock_env.py:641
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_varlock_env_contract_is_valid
+  - id: doctor.host
+    category: host-lifecycle
+    title: clawops doctor-host validates the toolchain and the rendered config
+    call_sites:
+      - src/clawops/setup_cli.py:127
+    lanes: [linux-core, macos-launchd]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_doctor_host_reports_toolchain
+  - id: doctor.deep
+    category: host-lifecycle
+    title: clawops doctor runs every readiness check (model probe, audits, memory, sidecars)
+    call_sites:
+      - src/clawops/setup_cli.py:392
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_deep_doctor_passes_every_check
+  - id: baseline.verify
+    category: host-lifecycle
+    title: clawops baseline verify passes with runtime probes
+    call_sites:
+      - src/clawops/strongclaw_baseline.py:138
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_baseline_verify_passes_with_runtime_probes
+  - id: host.runtime-user-provisioning
+    category: host-lifecycle
+    title: Dedicated runtime-user provisioning per the setup runbooks
+    call_sites:
+      - SETUP_GUIDE.md:12
+    status: unverifiable
+    reason: Manual operator runbook (OS account creation and service-user SSH setup); StrongClaw ships no code path that performs it, so there is nothing to execute.
+
+  # --- model auth -----------------------------------------------------------------------------
+  - id: model-auth.agents-list
+    category: model-auth
+    title: openclaw agents list --json reports every configured agent
+    call_sites:
+      - src/clawops/strongclaw_model_auth.py:114
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_agents_list_matches_rendered_config
+  - id: model-auth.ensure
+    category: model-auth
+    title: clawops model-auth ensure applies the env-driven model chain to every agent
+    call_sites:
+      - src/clawops/strongclaw_model_auth.py:343
+      - src/clawops/strongclaw_model_auth.py:239
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_auth_ensure_applies_env_driven_chain
+  - id: model-auth.probe
+    category: model-auth
+    title: models status --check --probe reaches the provider for every agent
+    call_sites:
+      - src/clawops/strongclaw_model_auth.py:170
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_probe_reaches_the_provider
+  - id: model-auth.models-list
+    category: model-auth
+    title: openclaw models --agent X list --json reports an available model (fallback path)
+    call_sites:
+      - src/clawops/strongclaw_model_auth.py:141
+    lanes: [linux-profiles]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_models_list_reports_available_models
+  - id: model-auth.configure-wizard
+    category: model-auth
+    title: Interactive model wizard (openclaw configure --section model)
+    call_sites:
+      - src/clawops/strongclaw_model_auth.py:393
+    status: unverifiable
+    reason: Runs only on an interactive TTY and walks a vendor sign-in/provider picker; the non-interactive env-driven chain (model-auth.ensure) covers the same outcome.
+
+  # --- gateway --------------------------------------------------------------------------------
+  - id: gateway.status
+    category: gateway
+    title: openclaw gateway status --json reports a loopback RPC endpoint
+    call_sites:
+      - src/clawops/setup_cli.py:493
+      - src/clawops/strongclaw_ops.py:977
+    lanes: [linux-core, macos-launchd]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_gateway_status_reports_loopback_rpc
+  - id: gateway.agent-turn
+    category: gateway
+    title: The supervised gateway runs a full agent turn through the configured provider
+    call_sites:
+      - src/clawops/strongclaw_ops.py:977
+      - platform/systemd/openclaw-gateway.service:16
+    lanes: [linux-core, macos-launchd]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_gateway_runs_an_agent_turn_through_the_provider
+  - id: gateway.loopback-bind
+    category: gateway
+    title: The gateway listens on loopback only
+    call_sites:
+      - platform/configs/openclaw/00-baseline.json5:116
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_gateway_binds_only_loopback
+  - id: openclaw.doctor
+    category: gateway
+    title: openclaw doctor --non-interactive is clean on the rendered profile
+    call_sites:
+      - src/clawops/strongclaw_baseline.py:156
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_openclaw_doctor_is_clean
+  - id: security.audit
+    category: security
+    title: openclaw security audit --deep passes
+    call_sites:
+      - src/clawops/strongclaw_baseline.py:157
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_security_audit_passes
+  - id: secrets.audit
+    category: security
+    title: openclaw secrets audit --check passes
+    call_sites:
+      - src/clawops/strongclaw_baseline.py:158
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_secrets_audit_passes
+  - id: secrets.external-backends
+    category: security
+    title: Varlock secret backends other than local (1Password, AWS, Azure, Bitwarden, GCP, Infisical)
+    call_sites:
+      - platform/configs/varlock/.env.schema:15
+      - platform/docs/SECRETS_AND_ENV.md:22
+    status: unverifiable
+    reason: Each backend resolves secrets from a third-party vault account; no account or credentials exist in CI.
+
+  # --- memory: hypermemory --------------------------------------------------------------------
+  - id: profile.hypermemory
+    category: memory
+    title: hypermemory profile loads strongclaw-hypermemory and lossless-claw into their slots
+    call_sites:
+      - src/clawops/memory_profiles.py:23
+      - src/clawops/strongclaw_bootstrap.py:425
+      - platform/configs/openclaw/77-hypermemory.example.json5:12
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_profile_plugins_are_loaded
+  - id: memory.openclaw-status
+    category: memory
+    title: openclaw memory status --deep reports the active memory backend
+    call_sites:
+      - src/clawops/setup_cli.py:501
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_openclaw_memory_status_is_healthy
+  - id: memory.openclaw-search
+    category: memory
+    title: openclaw memory search returns corpus hits through the memory plugin
+    call_sites:
+      - src/clawops/setup_cli.py:510
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_openclaw_memory_search_returns_corpus_hits
+  - id: hypermemory.index-search
+    category: memory
+    title: hypermemory index + sparse/dense hybrid search over Qdrant with real embeddings route
+    call_sites:
+      - src/clawops/hypermemory/cli.py:37
+      - src/clawops/hypermemory/cli.py:40
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_index_and_hybrid_search
+  - id: hypermemory.verify
+    category: memory
+    title: hypermemory verify reports a consistent Qdrant index
+    call_sites:
+      - src/clawops/hypermemory/cli.py:31
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_verify_reports_consistent_index
+  - id: hypermemory.store-forget
+    category: memory
+    title: hypermemory store makes a fact searchable and forget removes it
+    call_sites:
+      - src/clawops/hypermemory/cli.py:85
+      - src/clawops/hypermemory/cli.py:125
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_store_search_and_forget
+  - id: hypermemory.maintenance
+    category: memory
+    title: hypermemory reflect/lifecycle/list-facts/flush-metadata run against the live index
+    call_sites:
+      - src/clawops/hypermemory/cli.py:108
+      - src/clawops/hypermemory/cli.py:174
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_maintenance_operations
+  - id: hypermemory.export-memory-pro
+    category: memory
+    title: hypermemory export-memory-pro writes a memory-pro import snapshot
+    call_sites:
+      - src/clawops/hypermemory/cli.py:195
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_exports_memory_pro_snapshot
+  - id: hypermemory.plugin-recall
+    category: memory
+    title: strongclaw-hypermemory autoRecall injects stored memory into gateway agent turns
+    call_sites:
+      - platform/plugins/strongclaw-hypermemory/index.js:884
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_plugin_recalls_memory_into_turns
+  - id: qdrant.storage-stamp
+    category: memory
+    title: sidecars up stamps Qdrant storage with the pinned release line (#237)
+    call_sites:
+      - src/clawops/qdrant_storage.py:278
+      - src/clawops/strongclaw_ops.py:677
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_qdrant_storage_stamp_tracks_pinned_release
+  - id: qdrant.reset-reindex
+    category: memory
+    title: A Qdrant release-line change resets storage and reindexes hypermemory (#237)
+    call_sites:
+      - src/clawops/qdrant_storage.py:318
+      - src/clawops/strongclaw_ops.py:710
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_qdrant_release_change_resets_storage_and_reindexes
+
+  # --- memory: memory-lancedb-pro -------------------------------------------------------------
+  - id: profile.memory-lancedb-pro
+    category: memory
+    title: memory-lancedb-pro profile installs the vendored plugin and loads it into the memory slot
+    call_sites:
+      - src/clawops/memory_profiles.py:41
+      - src/clawops/strongclaw_bootstrap.py:391
+      - platform/configs/openclaw/75-memory-lancedb-pro.local.json5:11
+    lanes: [linux-lancedb]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_lancedb_plugin_is_loaded_in_the_memory_slot
+  - id: memory.migrate-hypermemory-to-pro
+    category: memory
+    title: clawops memory migrate-hypermemory-to-pro exports a scope into memory-pro import JSON
+    call_sites:
+      - src/clawops/memory_tools.py:147
+    lanes: [linux-lancedb]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_migrate_hypermemory_exports_memory_pro_snapshot
+  - id: memory.import-pro-snapshot
+    category: memory
+    title: clawops memory import-pro-snapshot imports through openclaw memory-pro import
+    call_sites:
+      - src/clawops/memory_tools.py:174
+    lanes: [linux-lancedb]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_import_pro_snapshot_lands_in_lancedb
+  - id: memory.verify-pro-parity
+    category: memory
+    title: clawops memory verify-pro-parity compares hypermemory hits with live memory-pro search
+    call_sites:
+      - src/clawops/memory_tools.py:476
+    lanes: [linux-lancedb]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_verify_pro_parity_against_live_plugin
+  - id: lancedb.smart-extraction
+    category: memory
+    title: memory-lancedb-pro autoCapture runs smart extraction and embeddings after a turn
+    call_sites:
+      - platform/plugins/memory-lancedb-pro/index.ts:2725
+    lanes: [linux-lancedb]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_smart_extraction_calls_the_extraction_model
+  - id: lancedb.reflection-embedded-runner
+    category: memory
+    title: memory reflection runs through extensionAPI.js runEmbeddedPiAgent on session reset
+    call_sites:
+      - platform/plugins/memory-lancedb-pro/index.ts:399
+      - platform/plugins/memory-lancedb-pro/index.ts:1212
+      - platform/plugins/memory-lancedb-pro/index.ts:3252
+    lanes: [linux-lancedb]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_reflection_runs_through_the_embedded_runner
+
+  # --- setup profiles -------------------------------------------------------------------------
+  - id: profile.openclaw-default
+    category: profiles
+    title: openclaw-default profile renders, validates and boots the gateway with memory-core
+    call_sites:
+      - src/clawops/memory_profiles.py:30
+      - src/clawops/config_cli.py:86
+    lanes: [linux-profiles]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_openclaw_default_profile_boots_with_memory_core
+  - id: profile.openclaw-qmd
+    category: profiles
+    title: openclaw-qmd profile installs QMD and boots the gateway on the qmd memory backend
+    call_sites:
+      - src/clawops/memory_profiles.py:35
+      - src/clawops/strongclaw_bootstrap.py:342
+      - platform/configs/openclaw/40-qmd-context.json5:3
+    lanes: [linux-profiles]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_openclaw_qmd_profile_installs_and_uses_qmd
+  - id: profile.acp
+    category: profiles
+    title: acp profile registers the ACP worker agents and boots the gateway
+    call_sites:
+      - src/clawops/memory_profiles.py:48
+      - platform/configs/openclaw/20-acp-workers.json5:11
+    lanes: [linux-profiles]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_acp_profile_registers_acp_worker_agents
+  - id: profile.browser-lab
+    category: profiles
+    title: browser-lab profile renders the CDP browser profile and boots the gateway
+    call_sites:
+      - src/clawops/memory_profiles.py:55
+      - platform/configs/openclaw/60-browser-lab.json5:8
+    lanes: [linux-profiles]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_browser_lab_profile_points_at_the_cdp_endpoint
+
+  # --- ACP workers ----------------------------------------------------------------------------
+  - id: acp.worker-agent-turn
+    category: acp
+    title: An OpenClaw ACP worker agent (acp profile) runs a turn through OpenClaw's acpx backend
+    call_sites:
+      - platform/configs/openclaw/20-acp-workers.json5:11
+    lanes: [linux-profiles]
+    verification: stub
+    limitations: The codex adapter behind acpx is the ACP stub agent; a live vendor session is acp.vendor-live-sessions.
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_acp_worker_agent_runs_a_turn_through_acpx
+  - id: acp.openclaw-local
+    category: acp
+    title: acp-runner --backend openclaw --auth-mode local runs a live turn (acpx -> openclaw acp)
+    call_sites:
+      - src/clawops/acp_runner.py:394
+      - src/clawops/acpx_adapter.py:49
+      - src/clawops/backend_registry.py:109
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_openclaw_backend_runs_a_live_acp_turn
+  - id: acp.codex-api
+    category: acp
+    title: codex backend in api mode keeps OPENAI_API_KEY and acpx authenticates with it
+    call_sites:
+      - src/clawops/backend_registry.py:69
+      - src/clawops/credential_broker.py:160
+    lanes: [linux-core]
+    verification: stub
+    limitations: Real acpx; the codex-acp adapter is the ACP stub agent (same advertised auth methods).
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_codex_api_mode_passes_the_key_and_authenticates
+  - id: acp.codex-subscription
+    category: acp
+    title: codex backend in subscription mode strips API keys before dispatch
+    call_sites:
+      - src/clawops/backend_registry.py:69
+    lanes: [linux-core]
+    verification: stub
+    limitations: Vendor `codex login status` and the adapter are stubs.
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_codex_subscription_mode_strips_api_keys
+  - id: acp.claude-api
+    category: acp
+    title: claude backend in api mode passes ANTHROPIC_API_KEY to the agent
+    call_sites:
+      - src/clawops/backend_registry.py:82
+    lanes: [linux-core]
+    verification: stub
+    limitations: Real acpx; the claude-agent-acp adapter is the ACP stub agent.
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_claude_api_mode_passes_the_key
+  - id: acp.claude-subscription
+    category: acp
+    title: claude backend in subscription mode strips API keys before dispatch
+    call_sites:
+      - src/clawops/backend_registry.py:82
+    lanes: [linux-core]
+    verification: stub
+    limitations: Vendor `claude auth status` and the adapter are stubs.
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_claude_subscription_mode_strips_api_keys
+  - id: acp.claude-cloud-provider
+    category: acp
+    title: claude backend in cloud-provider mode keeps cloud credentials and strips the API key
+    call_sites:
+      - src/clawops/backend_registry.py:82
+    lanes: [linux-core]
+    verification: stub
+    limitations: Cloud credentials are presence-only markers; no cloud account is used.
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_claude_cloud_provider_mode_keeps_cloud_credentials
+  - id: acp.local-backends
+    category: acp
+    title: gemini/qwen/copilot/cursor local backends dispatch through acpx
+    call_sites:
+      - src/clawops/backend_registry.py:105
+    lanes: [linux-core]
+    verification: stub
+    limitations: The vendor CLIs' ACP servers are the ACP stub agent.
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_local_backends_dispatch_through_acpx
+  - id: acp.auth-policy
+    category: acp
+    title: acp-runner refuses unsupported and unready auth modes at preflight
+    call_sites:
+      - src/clawops/credential_broker.py:236
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_auth_policy_blocks_unsupported_and_unready_modes
+  - id: acp.credential-status
+    category: acp
+    title: clawops credential-status reports machine-readable readiness per auth mode
+    call_sites:
+      - src/clawops/credential_broker.py:292
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_acp.py::test_credential_status_reports_each_mode
+  - id: acp.vendor-live-sessions
+    category: acp
+    title: Live Codex/Claude/Gemini/Qwen/Copilot/Cursor coding sessions through acpx
+    call_sites:
+      - src/clawops/backend_registry.py:69
+      - src/clawops/backend_registry.py:82
+    status: unverifiable
+    reason: Requires signed-in vendor accounts or paid API keys for each coding agent; CI has none. Routing is covered at stub level by the acp.* features.
+
+  # --- sidecars and platform ------------------------------------------------------------------
+  - id: sidecars.postgres
+    category: sidecars
+    title: Postgres sidecar is up and serves the LiteLLM database
+    call_sites:
+      - platform/compose/docker-compose.aux-stack.yaml:2
+      - src/clawops/strongclaw_ops.py:495
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_postgres_sidecar_accepts_queries
+  - id: sidecars.litellm
+    category: sidecars
+    title: LiteLLM routes the hypermemory-embedding alias to its upstream
+    call_sites:
+      - platform/compose/docker-compose.aux-stack.yaml:25
+      - platform/configs/litellm/config.yaml:22
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_litellm_routes_embeddings_to_the_upstream
+  - id: sidecars.qdrant
+    category: sidecars
+    title: Qdrant sidecar creates collections, upserts and searches vectors
+    call_sites:
+      - platform/compose/docker-compose.aux-stack.yaml:90
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_qdrant_sidecar_round_trips_vectors
+  - id: sidecars.neo4j
+    category: sidecars
+    title: Neo4j sidecar accepts authenticated Cypher writes and reads
+    call_sites:
+      - platform/compose/docker-compose.aux-stack.yaml:111
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_neo4j_sidecar_round_trips_cypher
+  - id: observability.otel
+    category: observability
+    title: OTel collector accepts OTLP traces and exports Prometheus metrics; verify-platform observability
+    call_sites:
+      - platform/compose/docker-compose.aux-stack.yaml:69
+      - src/clawops/platform_verify.py:383
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_observability_pipeline_accepts_telemetry
+  - id: verify-platform.sidecars
+    category: sidecars
+    title: clawops verify-platform sidecars passes with runtime probes
+    call_sites:
+      - src/clawops/platform_verify.py:261
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_verify_platform_sidecars_runtime
+  - id: ops.status
+    category: sidecars
+    title: clawops ops status reports every required sidecar ready
+    call_sites:
+      - src/clawops/strongclaw_ops.py:1024
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_ops_status_reports_required_sidecars_ready
+  - id: ops.prune-qdrant-test-collections
+    category: sidecars
+    title: clawops ops prune-qdrant-test-collections removes prefixed collections (dry-run first)
+    call_sites:
+      - src/clawops/strongclaw_ops.py:1174
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_prune_qdrant_test_collections
+  - id: browser-lab.runtime
+    category: sidecars
+    title: Browser lab starts, exposes CDP on 9222 and the egress proxy on 3128, then stops
+    call_sites:
+      - src/clawops/strongclaw_ops.py:1004
+      - src/clawops/platform_verify.py:678
+      - platform/compose/docker-compose.browser-lab.yaml:12
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_browser_lab_starts_and_exposes_cdp
+  - id: ops.reset-compose-state
+    category: sidecars
+    title: clawops ops reset-compose-state clears one component's state directory
+    call_sites:
+      - src/clawops/strongclaw_ops.py:1114
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_reset_compose_state_clears_one_component
+  - id: sidecars.ollama-optional
+    category: sidecars
+    title: Optional Ollama compose stack serves the Ollama API on loopback
+    call_sites:
+      - platform/compose/docker-compose.ollama.optional.yaml:2
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_optional_ollama_compose_serves_the_api
+  - id: observability.langfuse-optional
+    category: observability
+    title: Optional Langfuse OTLP exporter stack
+    call_sites:
+      - platform/compose/docker-compose.langfuse.optional.yaml:2
+      - platform/docs/OBSERVABILITY.md:14
+    status: unverifiable
+    reason: The optional compose file only runs langfuse-web/worker and expects an operator-provided Postgres, Redis and ClickHouse (LANGFUSE_* URLs); StrongClaw ships none of them.
+
+  # --- recovery -------------------------------------------------------------------------------
+  - id: recovery.backup-create
+    category: recovery
+    title: recovery backup-create writes an archive through openclaw backup create
+    call_sites:
+      - src/clawops/strongclaw_recovery.py:144
+      - src/clawops/recovery/backends.py:49
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_backup_create_uses_the_openclaw_backend
+  - id: recovery.backup-verify
+    category: recovery
+    title: recovery backup-verify validates the latest archive with openclaw backup verify
+    call_sites:
+      - src/clawops/strongclaw_recovery.py:199
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_backup_verify_accepts_latest_archive
+  - id: recovery.restore
+    category: recovery
+    title: recovery restore extracts every archived file safely into a destination
+    call_sites:
+      - src/clawops/strongclaw_recovery.py:259
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_restore_extracts_openclaw_state
+  - id: recovery.prune-retention
+    category: recovery
+    title: recovery prune-retention deletes only archives past retention
+    call_sites:
+      - src/clawops/strongclaw_recovery.py:274
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_prune_retention_removes_only_stale_archives
+  - id: recovery.rotate-secrets
+    category: recovery
+    title: recovery rotate-secrets prints the rotation runbook steps
+    call_sites:
+      - src/clawops/strongclaw_recovery.py:302
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_rotate_secrets_guidance_lists_rotation_targets
+  - id: recovery.scheduled-jobs
+    category: recovery
+    title: The scheduled backup job (systemd timer / launchd agent) produces an archive
+    call_sites:
+      - platform/systemd/openclaw-backup-create.timer:5
+      - platform/launchd/ai.openclaw.backup-create.plist.template:7
+    lanes: [linux-core, macos-launchd]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_recovery.py::test_scheduled_backup_job_produces_an_archive
+
+  # --- context, workflows, channels -----------------------------------------------------------
+  - id: context.codebase-graph
+    category: context
+    title: context codebase index/query/pack at large scale writes the Neo4j graph
+    call_sites:
+      - src/clawops/context/codebase/service.py:1686
+      - src/clawops/context/codebase/service.py:3504
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_context_workflows.py::test_codebase_context_indexes_into_the_neo4j_graph
+  - id: workflow.daily-healthcheck
+    category: operator-tools
+    title: The shipped daily-healthcheck workflow runs openclaw doctor and security audit
+    call_sites:
+      - src/clawops/workflow_runner.py:1168
+      - platform/configs/workflows/daily_healthcheck.yaml:1
+    lanes: [linux-core]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_context_workflows.py::test_daily_healthcheck_workflow_runs_openclaw_checks
+  - id: channels.openclaw-config
+    category: channels
+    title: The channels overlay renders and validates under OpenClaw with Telegram and WhatsApp configured
+    call_sites:
+      - platform/configs/openclaw/30-channels.json5:12
+      - src/clawops/openclaw_config.py:338
+    lanes: [linux-profiles]
+    verification: stub
+    limitations: Telegram uses a placeholder bot token; no message reaches a messaging network.
+    test: tests/suites/e2e/feature_verification/test_context_workflows.py::test_channels_overlay_validates_under_openclaw
+  - id: channels.telegram-live
+    category: channels
+    title: Live Telegram bot messaging through the gateway
+    call_sites:
+      - platform/docs/CHANNELS.md:3
+    status: unverifiable
+    reason: Needs a real Telegram bot token and a Telegram account to message it; neither exists in CI.
+  - id: channels.whatsapp-live
+    category: channels
+    title: Live WhatsApp messaging through the gateway
+    call_sites:
+      - platform/docs/channels/whatsapp.md:1
+    status: unverifiable
+    reason: Needs a WhatsApp account paired by QR code on a real phone.
+  - id: ops.remote-operator-access
+    category: operator-tools
+    title: Remote operator access to the gateway over an SSH tunnel
+    call_sites:
+      - USAGE_GUIDE.md:65
+    status: unverifiable
+    reason: Operator procedure between two hosts; StrongClaw ships no code that opens the tunnel.
+
+  # --- operator tools and governance (CLI-only) -----------------------------------------------
+  - id: policy.evaluate
+    category: governance
+    title: Policy engine evaluates payloads against the shipped YAML rules
+    call_sites: [src/clawops/policy_engine.py:261, src/clawops/policy_engine.py:267]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_policy_evaluates_shipped_rules
+  - id: op-journal.lifecycle
+    category: governance
+    title: Operation journal records begin, transition, approval, and stuck listings
+    call_sites: [src/clawops/op_journal.py:1012, src/clawops/op_journal.py:1048]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_op_journal_tracks_operation_lifecycle
+  - id: approvals.review-queue
+    category: governance
+    title: Approval queue lists, approves, rejects, delegates, and ingests reviews
+    call_sites: [src/clawops/approvals.py:32, src/clawops/approvals.py:82]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_approvals_review_queue_resolves_operations
+  - id: skills.intake
+    category: governance
+    title: Skill intake scans, quarantines, promotes, and demotes bundles
+    call_sites: [src/clawops/skill_scanner.py:236, src/clawops/skill_scanner.py:298]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_skills_intake_moves_bundle_through_stages
+  - id: wrapper.webhook
+    category: governance
+    title: Webhook wrapper posts exactly once after journaled approval
+    call_sites: [src/clawops/wrappers/webhook.py:104, src/clawops/wrappers/webhook.py:119]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_webhook_wrapper_posts_once_after_approval
+  - id: wrapper.github
+    category: governance
+    title: GitHub wrapper dry run journals planned comment and label operations
+    call_sites: [src/clawops/wrappers/github.py:327, src/clawops/wrappers/github.py:359]
+    lanes: [linux-profiles]
+    verification: stub
+    limitations: Dry run only; executing against the live GitHub API needs a repo token.
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_github_wrapper_dry_run_plans_without_executing
+  - id: harness.regression-suites
+    category: operator-tools
+    title: YAML regression harness runs the shipped policy and security suites
+    call_sites: [src/clawops/harness.py:102, src/clawops/harness.py:110]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_harness_regression_suites_pass
+  - id: charts.render
+    category: operator-tools
+    title: Charts render harness results to a PNG
+    call_sites: [src/clawops/charts.py:26, src/clawops/charts.py:34]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_charts_render_harness_results
+  - id: merge-json.overlays
+    category: operator-tools
+    title: merge-json deep-merges JSON5 overlays onto a base document
+    call_sites: [src/clawops/json_merge.py:20, src/clawops/json_merge.py:29]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_merge_json_deep_merges_overlays
+  - id: allowlists.render
+    category: channels
+    title: Channel allowlists render a normalized channels fragment
+    call_sites: [src/clawops/allowlist_sync.py:59, src/clawops/allowlist_sync.py:67]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_allowlists_render_channel_fragment
+  - id: worktree.lifecycle
+    category: operator-tools
+    title: Managed git worktrees are created, listed, and pruned
+    call_sites: [src/clawops/repo_tools.py:272, src/clawops/repo_tools.py:298]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_worktree_lifecycle_creates_lists_and_prunes
+  - id: repo.doctor
+    category: operator-tools
+    title: Repo doctor validates the repo/upstream and repo/worktrees contract
+    call_sites: [src/clawops/repo_tools.py:267, src/clawops/repo_tools.py:286]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_repo_doctor_accepts_valid_layout
+  - id: workflow.code-review
+    category: operator-tools
+    title: Workflow runner executes the shipped code-review workflow and its dry run
+    call_sites: [src/clawops/workflow_runner.py:1158, src/clawops/workflow_runner.py:1168]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_workflow_code_review_records_step_results
+  - id: supply-chain.inventory
+    category: operator-tools
+    title: Supply-chain inventory lists pinned workflow actions and compose digests
+    call_sites: [src/clawops/supply_chain.py:550, src/clawops/supply_chain.py:592]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_supply_chain_inventory_lists_pins
+  - id: supply-chain.propose-refresh
+    category: operator-tools
+    title: Supply-chain propose-refresh dry run plans pin updates without side effects
+    call_sites: [src/clawops/supply_chain.py:565, src/clawops/supply_chain.py:423]
+    lanes: [linux-profiles]
+    verification: stub
+    limitations: Runs against a scratch repo with a docker shim; opening a real refresh PR needs repo write access.
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_supply_chain_propose_refresh_dry_run_plans_updates
+  - id: observability.structured-logs
+    category: observability
+    title: CLAWOPS_STRUCTURED_LOGS emits JSON event lines on stderr
+    call_sites: [src/clawops/observability.py:37, src/clawops/observability.py:61]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_structured_logs_emit_json_events
+  - id: baseline.harness-smoke
+    category: host-lifecycle
+    title: Baseline harness-smoke runs both regression suites into a runs dir
+    call_sites: [src/clawops/strongclaw_baseline.py:347, src/clawops/strongclaw_baseline.py:34]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_baseline_harness_smoke_writes_results
+  - id: channels.verify-platform
+    category: channels
+    title: verify-platform channels checks overlays, docs, and allowlist parity
+    call_sites: [src/clawops/platform_verify.py:751, src/clawops/platform_verify.py:528]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_verify_platform_channels_passes
+  - id: config.memory-profiles
+    category: profiles
+    title: config memory lists every managed memory profile
+    call_sites: [src/clawops/config_cli.py:84, src/clawops/config_cli.py:110]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_config_lists_managed_memory_profiles
+  - id: render.overlays
+    category: profiles
+    title: render-openclaw-config merges operator overlays and renders exec approvals
+    call_sites: [src/clawops/openclaw_config.py:386, src/clawops/openclaw_config.py:431]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_render_openclaw_config_merges_overlay
+  - id: services.render
+    category: host-lifecycle
+    title: services render materializes every systemd and launchd template
+    call_sites: [src/clawops/strongclaw_services.py:421, src/clawops/strongclaw_services.py:113]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_services_render_every_template
+  - id: devflow.plan-status-audit
+    category: devflow
+    title: devflow plans stages and roles; status/audit reject unknown run ids
+    call_sites: [src/clawops/devflow.py:651, src/clawops/devflow.py:671, src/clawops/devflow.py:705]
+    lanes: [linux-profiles]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_devflow_planning.py::test_devflow_plan_status_audit
