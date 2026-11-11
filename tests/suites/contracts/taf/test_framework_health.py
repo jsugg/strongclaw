@@ -15,6 +15,7 @@ _EXPECTED_MARKERS = {
     "contract",
     "devflow",
     "e2e",
+    "feature_verification",
     "framework",
     "hypermemory",
     "integration",

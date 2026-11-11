@@ -41,9 +41,13 @@ def test_recursive_fixture_plugin_registries_are_explicit() -> None:
         fixture_root
         / "__init__.py": (
             "tests.fixtures.core",
+            "tests.fixtures.feature_verification",
             "tests.fixtures.hypermemory",
             "tests.fixtures.platform",
         ),
+        fixture_root
+        / "feature_verification"
+        / "__init__.py": ("tests.fixtures.feature_verification.lane",),
         fixture_root
         / "core"
         / "__init__.py": (

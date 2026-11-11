@@ -14,7 +14,9 @@ for import_root in (SRC_ROOT, REPO_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
+from clawops.memory_profiles import MANAGED_MEMORY_PROFILE_IDS  # noqa: E402
 from tests.utils.helpers.fresh_host import (  # noqa: E402
+    SCENARIO_SPECS,
     FreshHostError,
     cleanup,
     collect_diagnostics,
@@ -44,13 +46,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prepare_parser.add_argument(
         "--scenario",
         required=True,
-        choices=("linux", "macos-sidecars", "macos-browser-lab"),
+        choices=tuple(SCENARIO_SPECS),
     )
     prepare_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     prepare_parser.add_argument(
         "--profile",
         default="openclaw-default",
-        choices=("openclaw-default", "hypermemory"),
+        choices=MANAGED_MEMORY_PROFILE_IDS,
     )
     prepare_parser.add_argument("--runner-temp", type=Path, required=True)
     prepare_parser.add_argument("--workspace", type=Path, default=REPO_ROOT)

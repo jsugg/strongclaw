@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
-ScenarioId = Literal["linux", "macos-sidecars", "macos-browser-lab"]
+ScenarioId = Literal[
+    "linux",
+    "macos-sidecars",
+    "macos-browser-lab",
+    "linux-features",
+    "linux-features-local",
+    "macos-features",
+]
 PlatformName = Literal["linux", "macos"]
 PhaseStatus = Literal["success", "failure", "skipped"]
 
@@ -40,6 +47,9 @@ class ScenarioSpec:
     verify_rendered_files: bool
     exercise_sidecars: bool
     exercise_browser_lab: bool
+    # Feature-verification lanes install into the runner's own HOME on Linux because the
+    # systemd user manager only reads user units from there.
+    use_host_home: bool = False
 
 
 @dataclass(slots=True)
@@ -90,6 +100,7 @@ class FreshHostContext:
     exercise_browser_lab: bool
     phase_names: list[str]
     compose_files: list[str]
+    use_host_home: bool = False
 
 
 @dataclass(slots=True)
@@ -175,5 +186,58 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
         verify_rendered_files=False,
         exercise_sidecars=False,
         exercise_browser_lab=True,
+    ),
+    "linux-features": ScenarioSpec(
+        scenario_id="linux-features",
+        platform="linux",
+        job_name="Linux Feature Verification",
+        compose_files=(
+            "platform/compose/docker-compose.aux-stack.yaml",
+            "platform/compose/docker-compose.browser-lab.yaml",
+        ),
+        compose_variant=None,
+        phase_names=("bootstrap", "setup"),
+        activate_services=True,
+        ensure_images=True,
+        normalize_machine_name=False,
+        verify_launchd=False,
+        verify_rendered_files=False,
+        exercise_sidecars=False,
+        exercise_browser_lab=False,
+        use_host_home=True,
+    ),
+    "linux-features-local": ScenarioSpec(
+        scenario_id="linux-features-local",
+        platform="linux",
+        job_name="Linux Feature Verification (no host services)",
+        compose_files=(
+            "platform/compose/docker-compose.aux-stack.yaml",
+            "platform/compose/docker-compose.browser-lab.yaml",
+        ),
+        compose_variant=None,
+        phase_names=("bootstrap", "setup"),
+        activate_services=False,
+        ensure_images=False,
+        normalize_machine_name=False,
+        verify_launchd=False,
+        verify_rendered_files=False,
+        exercise_sidecars=False,
+        exercise_browser_lab=False,
+        use_host_home=True,
+    ),
+    "macos-features": ScenarioSpec(
+        scenario_id="macos-features",
+        platform="macos",
+        job_name="macOS Feature Verification",
+        compose_files=("platform/compose/docker-compose.aux-stack.ci-hosted-macos.yaml",),
+        compose_variant="ci-hosted-macos",
+        phase_names=("normalize-machine-name", "bootstrap", "setup", "verify-launchd"),
+        activate_services=True,
+        ensure_images=True,
+        normalize_machine_name=True,
+        verify_launchd=True,
+        verify_rendered_files=False,
+        exercise_sidecars=False,
+        exercise_browser_lab=False,
     ),
 }
