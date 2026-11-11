@@ -25,6 +25,7 @@ from tests.utils.helpers._fresh_host.budget import (
     phase_deadline,
     record_job_budget,
     runtime_phase_deadline,
+    scenario_phase_deadline,
 )
 from tests.utils.helpers._fresh_host.models import FreshHostError
 from tests.utils.helpers.clock import FakeClock
@@ -300,3 +301,36 @@ def test_initialize_budget_cli_writes_env_once(tmp_path: Path, test_context: Tes
     )
     assert JobBudget.from_env(exported) is not None
     assert fresh_host_script.main([*argv[:2], "5", *argv[3:]]) == 1
+
+
+def test_scenario_phase_deadline_follows_the_scenario_step_timeout_when_the_job_has_room() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(600)
+
+    deadline = scenario_phase_deadline(budget, clock=clock)
+
+    assert deadline.remaining(clock) == budget.scenario_reserve_seconds
+    assert deadline.limited_by == "phase-cap"
+
+
+def test_scenario_phase_deadline_keeps_the_observer_reserve_when_the_scenario_starts_late() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    observer_limit = budget.deadline_epoch - budget.observer_reserve_seconds
+    clock.advance(observer_limit - clock.time() - 300)
+
+    deadline = scenario_phase_deadline(budget, clock=clock)
+
+    assert deadline.wall_deadline_epoch == observer_limit
+    assert deadline.remaining(clock) == 300
+    assert deadline.limited_by == "job-reserve"
+
+
+def test_scenario_phase_deadline_fails_fast_inside_the_observer_reserve() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(budget.deadline_epoch - budget.observer_reserve_seconds - clock.time())
+
+    with pytest.raises(BudgetExhaustedError, match="no scenario time remains"):
+        scenario_phase_deadline(budget, clock=clock)

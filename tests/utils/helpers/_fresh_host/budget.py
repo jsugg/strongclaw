@@ -45,6 +45,11 @@ RUNTIME_INITIAL_MIN_SECONDS: Final[int] = 60
 RUNTIME_PHASE_MIN_SECONDS: Final[int] = (
     RUNTIME_INITIAL_MIN_SECONDS + RUNTIME_RECOVERY_RESERVE_SECONDS
 )
+# A runtime lost mid-scenario gets the same OrbStack recovery slice as the runtime phase.
+SCENARIO_RECOVERY_CAP_SECONDS: Final[int] = RUNTIME_RECOVERY_RESERVE_SECONDS
+# Left after scenario recovery for the retried step and the phases after it. Hosted macOS
+# exercise-sidecars took up to 411s plus 41s of later phases (Nov 2026 CI); ~30% margin.
+SCENARIO_RETRY_RESERVE_SECONDS: Final[int] = 600
 # Never start a blocking command with less time than this left before its deadline.
 MIN_COMMAND_SECONDS: Final[float] = 1.0
 BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
@@ -275,20 +280,37 @@ def phase_deadline(
     The scenario and observer reserves are always later phases; *later_reserve_seconds*
     adds the minimum slices of any phase that runs between this one and the scenario.
     """
+    reserve_limit_epoch = (
+        None
+        if budget is None
+        else budget.deadline_epoch
+        - budget.scenario_reserve_seconds
+        - budget.observer_reserve_seconds
+        - later_reserve_seconds
+    )
+    return _bounded_deadline(
+        phase=phase,
+        phase_cap_seconds=phase_cap_seconds,
+        reserve_limit_epoch=reserve_limit_epoch,
+        clock=clock,
+    )
+
+
+def _bounded_deadline(
+    *,
+    phase: str,
+    phase_cap_seconds: int,
+    reserve_limit_epoch: float | None,
+    clock: Clock,
+) -> PhaseDeadline:
+    """Return min(now + phase cap, reserve limit); raise when that is already past."""
     now_wall = clock.time()
     now_monotonic = clock.monotonic()
     deadline = now_wall + phase_cap_seconds
     limited_by = PHASE_CAP
-    if budget is not None:
-        reserve_limit = (
-            budget.deadline_epoch
-            - budget.scenario_reserve_seconds
-            - budget.observer_reserve_seconds
-            - later_reserve_seconds
-        )
-        if reserve_limit < deadline:
-            deadline = reserve_limit
-            limited_by = JOB_RESERVE
+    if reserve_limit_epoch is not None and reserve_limit_epoch < deadline:
+        deadline = reserve_limit_epoch
+        limited_by = JOB_RESERVE
     if deadline <= now_wall:
         raise BudgetExhaustedError(
             f"no {phase} time remains before the later-phase reserves "
@@ -320,5 +342,19 @@ def image_phase_deadline(budget: JobBudget | None, *, clock: Clock = SYSTEM_CLOC
         budget,
         phase="image",
         phase_cap_seconds=IMAGE_PHASE_CAP_SECONDS,
+        clock=clock,
+    )
+
+
+def scenario_phase_deadline(budget: JobBudget, *, clock: Clock = SYSTEM_CLOCK) -> PhaseDeadline:
+    """Return min(now + scenario reserve, job deadline - observer reserve).
+
+    Call it when the scenario starts: the scenario step's timeout equals its reserve, and the
+    observers that upload evidence keep their reserve however late the scenario began.
+    """
+    return _bounded_deadline(
+        phase="scenario",
+        phase_cap_seconds=budget.scenario_reserve_seconds,
+        reserve_limit_epoch=budget.deadline_epoch - budget.observer_reserve_seconds,
         clock=clock,
     )

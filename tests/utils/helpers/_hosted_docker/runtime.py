@@ -4,6 +4,7 @@
 OrbStack recovery slice reserved up front so a slow gate can never starve it. Every probe,
 validation command, recovery command, backoff, and diagnostics collection is clipped to the
 time left through one injected clock, so the phase ends at its deadline with a report.
+`recover_lost_runtime` reuses the same recovery for a runtime lost mid-scenario.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from tests.utils.helpers._hosted_docker.diagnostics import collect_runtime_diagn
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_github_env, write_json
 from tests.utils.helpers._hosted_docker.models import (
     RuntimeInstallReport,
+    RuntimeLossReport,
     RuntimeRecoveryAttemptReport,
 )
 from tests.utils.helpers._hosted_docker.shell import (
@@ -226,6 +228,26 @@ def _classify_runtime_failure(
     if exception_reason is not None and exception_reason != "docker_not_ready":
         return exception_reason
 
+    try:
+        probe_reason = _probe_backend_failure(cwd=cwd, env=env, deadline=deadline, clock=clock)
+    except BudgetExhaustedError:
+        return exception_reason or "docker_not_ready"
+    if probe_reason is None:
+        return exception_reason or "runtime_tool_validation_failed"
+    return probe_reason
+
+
+def _probe_backend_failure(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    deadline: PhaseDeadline,
+    clock: Clock,
+) -> str | None:
+    """Return why a live probe cannot reach the Docker backend now; `None` when it answers.
+
+    Raises `BudgetExhaustedError` when *deadline* leaves no time to probe.
+    """
     docker_host = env.get("DOCKER_HOST") or os.environ.get("DOCKER_HOST", "")
     socket_path = _docker_socket_path(docker_host)
     if socket_path is not None and (not socket_path.exists() or not socket_path.is_socket()):
@@ -239,8 +261,6 @@ def _classify_runtime_failure(
             timeout_seconds=deadline.command_timeout(_READINESS_PROBE_TIMEOUT_SECONDS, clock),
             capture_output=True,
         )
-    except BudgetExhaustedError:
-        return exception_reason or "docker_not_ready"
     except subprocess.TimeoutExpired:
         return "docker_probe_timeout"
     except FileNotFoundError:
@@ -249,11 +269,13 @@ def _classify_runtime_failure(
         return _classify_failure_text(str(probe_exc)) or "docker_not_ready"
 
     if completed.returncode == 0:
-        return exception_reason or "runtime_tool_validation_failed"
+        return None
     probe_text = "\n".join(
-        chunk for chunk in (completed.stdout.strip(), completed.stderr.strip()) if chunk
+        chunk
+        for chunk in ((completed.stdout or "").strip(), (completed.stderr or "").strip())
+        if chunk
     )
-    return _classify_failure_text(probe_text) or exception_reason or "docker_not_ready"
+    return _classify_failure_text(probe_text) or "docker_not_ready"
 
 
 def _validate_runtime_ready(
@@ -369,17 +391,17 @@ def _recover_orbstack_runtime(
     trigger_reason: str,
     deadline: PhaseDeadline,
     clock: Clock,
+    recovery_root: Path,
 ) -> _RecoveryResult:
     """Split the recovery slice across bounded OrbStack recovery attempts.
 
     Each attempt gets an equal share of what is left; inside it, before and after
     diagnostics each get a fixed slice, and recovery commands, backoff, and the readiness
-    gate share the rest.
+    gate share the rest. Attempt evidence lands under *recovery_root*.
     """
     attempts: list[RuntimeRecoveryAttemptReport] = []
     last_readiness_reason: str | None = trigger_reason
     exhausted = False
-    recovery_root = Path(context.diagnostics_dir).resolve() / "runtime-recovery"
     attempt_total = len(_RECOVERY_BACKOFF_SECONDS)
 
     for attempt_number, backoff_seconds in enumerate(_RECOVERY_BACKOFF_SECONDS, start=1):
@@ -528,6 +550,7 @@ def _bring_up_runtime(
         trigger_reason=initial_reason,
         deadline=deadline,
         clock=clock,
+        recovery_root=Path(context.diagnostics_dir).resolve() / "runtime-recovery",
     )
     if recovery.recovered:
         return _RuntimeOutcome(None, None, None, recovery.attempts)
@@ -539,6 +562,72 @@ def _bring_up_runtime(
         "post_recovery_probe" if recovery.attempts else "initial_probe",
         last_reason,
         recovery.attempts,
+    )
+
+
+def _runtime_command_env(runtime_provider: str) -> dict[str, str]:
+    """Return the runner env for Docker probes and OrbStack commands.
+
+    It keeps the runner's own HOME: `orb` and the Docker CLI resolve their sockets and config
+    from it, unlike the scenario env, which points HOME at the isolated app home.
+    """
+    env = macos_env()
+    env["DOCKER_CONFIG"] = os.environ.get("DOCKER_CONFIG", str((Path.home() / ".docker").resolve()))
+    docker_host = os.environ.get("DOCKER_HOST", "")
+    # When OrbStack is started in the background its socket appears asynchronously.
+    # Fall back to OrbStack's canonical socket path if DOCKER_HOST is not yet set.
+    if not docker_host and runtime_provider == "orbstack":
+        docker_host = f"unix://{Path.home() / '.orbstack' / 'run' / 'docker.sock'}"
+    if docker_host:
+        env["DOCKER_HOST"] = docker_host
+    return env
+
+
+def recover_lost_runtime(
+    context: FreshHostContext,
+    *,
+    step: str,
+    deadline: PhaseDeadline,
+    clock: Clock = SYSTEM_CLOCK,
+) -> RuntimeLossReport | None:
+    """Recover a Docker runtime lost after the runtime phase, inside *deadline*.
+
+    A live probe decides whether a failed scenario step lost its runtime: `None` means the
+    backend answers, so the step failed for another reason. A recoverable loss on OrbStack
+    runs the runtime phase's recovery attempts, with their evidence under
+    `diagnostics/runtime-loss/<step>`. Raises `BudgetExhaustedError` when *deadline* leaves
+    no time to probe.
+    """
+    started_at = now_iso()
+    runtime_provider = context.runtime_provider or "orbstack"
+    repo_root = Path(context.repo_root).resolve()
+    env = _runtime_command_env(runtime_provider)
+    reason = _probe_backend_failure(cwd=repo_root, env=env, deadline=deadline, clock=clock)
+    if reason is None:
+        return None
+    log(f"Docker runtime lost during {step}: {reason}.")
+    recovery = _RecoveryResult(recovered=False, attempts=[], last_reason=reason, exhausted=False)
+    if runtime_provider == "orbstack" and reason in _RECOVERABLE_RUNTIME_REASONS:
+        recovery = _recover_orbstack_runtime(
+            context=context,
+            repo_root=repo_root,
+            env=env,
+            trigger_reason=reason,
+            deadline=deadline,
+            clock=clock,
+            recovery_root=Path(context.diagnostics_dir).resolve() / "runtime-loss" / step,
+        )
+    return RuntimeLossReport(
+        step=step,
+        trigger_reason=reason,
+        recovered=recovery.recovered,
+        exhausted=recovery.exhausted,
+        last_failure_reason=recovery.last_reason,
+        recovery_attempts=recovery.attempts,
+        deadline_epoch=deadline.wall_deadline_epoch,
+        deadline_limited_by=deadline.limited_by,
+        started_at=started_at,
+        finished_at=now_iso(),
     )
 
 
@@ -571,22 +660,12 @@ def wait_runtime_ready(
     host_memory_gib = (
         max(1, host_memory_bytes // 1073741824) if host_memory_bytes is not None else None
     )
-    docker_config = os.environ.get("DOCKER_CONFIG", str((Path.home() / ".docker").resolve()))
-    docker_host = os.environ.get("DOCKER_HOST", "")
-    env = macos_env()
-    env["DOCKER_CONFIG"] = docker_config
-    if docker_host:
-        env["DOCKER_HOST"] = docker_host
+    env = _runtime_command_env(runtime_provider)
+    docker_config = env["DOCKER_CONFIG"]
+    docker_host = env.get("DOCKER_HOST", "")
 
     started_at = now_iso()
     started = clock.monotonic()
-
-    # When OrbStack is started in the background its socket appears asynchronously.
-    # Fall back to OrbStack's canonical socket path if DOCKER_HOST is not yet set.
-    if not docker_host and runtime_provider == "orbstack":
-        orbstack_socket = Path.home() / ".orbstack" / "run" / "docker.sock"
-        docker_host = f"unix://{orbstack_socket}"
-        env["DOCKER_HOST"] = docker_host
 
     log(f"wait_runtime_ready: DOCKER_HOST={docker_host!r} DOCKER_CONFIG={docker_config!r}")
 

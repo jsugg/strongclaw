@@ -35,6 +35,15 @@ on:
         required: true
         type: boolean
         default: true
+      # Dispatch-only: callers through workflow_call cannot request a fault.
+      fault_injection:
+        description: CI-only fault drill for the macOS sidecars scenario; ignored on main.
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - orbstack-stop-during-sidecars
 
 concurrency:
   group: >-
@@ -57,3 +66,4 @@ jobs:
       docker_pull_parallelism: ${{ inputs.docker_pull_parallelism }}
       docker_pull_max_attempts: ${{ inputs.docker_pull_max_attempts }}
       enable_package_cache: ${{ inputs.enable_package_cache }}
+      fault_injection: ${{ github.event_name == 'workflow_dispatch' && inputs.fault_injection || '' }}
