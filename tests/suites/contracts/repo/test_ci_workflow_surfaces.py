@@ -187,7 +187,7 @@ def test_ci_gate_dependency_review_is_blocking_and_path_selected() -> None:
         for step in dependency_review_steps
     )
     assert any(
-        step.get("uses") == "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78"
+        step.get("uses") == "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2"
         for step in dependency_review_steps
     )
     assert any(

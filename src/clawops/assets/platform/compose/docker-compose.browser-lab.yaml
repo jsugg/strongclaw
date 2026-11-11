@@ -10,7 +10,7 @@ services:
       - no-new-privileges:true
 
   browserlab-playwright:
-    image: mcr.microsoft.com/playwright:v1.41.1-jammy@sha256:0f0547cc1492898e84a6fd0847bcfdde15e483b333a66e88b547c9ce15aea6c7
+    image: mcr.microsoft.com/playwright:v1.65.0-jammy@sha256:5a8620d70618963ec6628dd77cc25ec6a4b232e26c4a41241a8c1def04e2dc04
     depends_on:
       - browserlab-proxy
     environment:
