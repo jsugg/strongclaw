@@ -27,8 +27,10 @@ PROVIDER_ID: Final[str] = "featver"
 CHAT_MODEL: Final[str] = "featver-chat"
 FAKE_CHAT_MODEL_REF: Final[str] = f"{PROVIDER_ID}/{CHAT_MODEL}"
 PROVIDER_BASE_URL: Final[str] = "http://127.0.0.1:18000/v1"
-# OpenClaw's non-secret marker for keyless custom local providers (not flagged by audits).
-PROVIDER_API_KEY: Final[str] = "custom-local"
+# A known provider env-var name is OpenClaw's env marker: resolved from the environment at
+# runtime and never stored (or audited) as plaintext. The fake server accepts any value.
+PROVIDER_API_KEY_ENV: Final[str] = "VLLM_API_KEY"
+PROVIDER_API_KEY_VALUE: Final[str] = "featver-local"
 # LiteLLM reaches the fake server from its container through host-gateway.
 OPENAI_COMPATIBLE_EMBEDDING_MODEL: Final[str] = "openai/featver-embed"
 OPENAI_COMPATIBLE_EMBEDDING_API_BASE: Final[str] = "http://host.docker.internal:11434/v1"
@@ -36,6 +38,7 @@ OLLAMA_EMBEDDING_MODEL: Final[str] = "ollama/nomic-embed-text"
 OLLAMA_EMBEDDING_API_BASE: Final[str] = "http://host.docker.internal:11434"
 ENV_CONTRACT: Final[dict[str, str]] = {
     "OPENCLAW_DEFAULT_MODEL": FAKE_CHAT_MODEL_REF,
+    PROVIDER_API_KEY_ENV: PROVIDER_API_KEY_VALUE,
     "HYPERMEMORY_EMBEDDING_MODEL": OPENAI_COMPATIBLE_EMBEDDING_MODEL,
     "HYPERMEMORY_EMBEDDING_API_BASE": OPENAI_COMPATIBLE_EMBEDDING_API_BASE,
 }
@@ -52,7 +55,7 @@ def provider_entry() -> dict[str, object]:
     """Return the ``models.providers`` entry for the fake model server."""
     return {
         "baseUrl": PROVIDER_BASE_URL,
-        "apiKey": PROVIDER_API_KEY,
+        "apiKey": PROVIDER_API_KEY_ENV,
         "api": "openai-completions",
         "models": [
             {

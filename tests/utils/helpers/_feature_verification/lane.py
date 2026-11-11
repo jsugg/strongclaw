@@ -93,6 +93,8 @@ def run_lane(
             MANIFEST_ENV: str(manifest_file),
         }
     )
+    # fresh-host injects an embedding-model default; the lane reads it from the env contract.
+    env.pop("HYPERMEMORY_EMBEDDING_MODEL", None)
     if fake_model_dir is not None:
         env[FAKE_MODEL_DIR_ENV] = str(fake_model_dir)
     command = [

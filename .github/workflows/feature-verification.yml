@@ -2,6 +2,8 @@ name: Feature Verification
 
 # Verifies every feature in tests/feature_matrix.yaml against the OpenClaw/ACPX versions that
 # `clawops bootstrap` installs from platform/node-tools, on provisioned Linux and macOS hosts.
+# No setup-node: bootstrap provisions Node itself and installs the CLIs where the rendered
+# systemd/launchd units look for them, as on an operator host.
 on:
   workflow_dispatch:
     inputs:
@@ -77,10 +79,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "22.22.1"
-          package-manager-cache: false
       - name: Restore package download caches
         timeout-minutes: 5
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -182,10 +180,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "22.22.1"
-          package-manager-cache: false
       - name: Restore package download caches
         timeout-minutes: 5
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

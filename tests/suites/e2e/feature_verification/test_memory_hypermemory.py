@@ -201,25 +201,34 @@ def test_qdrant_release_change_resets_storage_and_reindexes(
     stamp_file = stamp_path(_compose_state_dir(feature_host))
     current = read_stamp(stamp_file)
     assert current is not None, f"no qdrant stamp at {stamp_file}"
-    write_stamp(
-        stamp_file,
-        StorageStamp(
-            release_line="0.0",
-            image="qdrant/qdrant:v0.0.0",
-            reindex_pending=False,
-            updated_at=current.updated_at,
-        ),
-    )
-    outcome = feature_host.clawops(
-        "ops", "--asset-root", ".", "sidecars", "up", "--json", timeout=1500
-    ).require_ok()
-    assert "Resetting qdrant storage" in outcome.stderr, outcome.describe()
-    command = cast(dict[str, object], cast(dict[str, object], outcome.json())["command"])
-    steps = {
-        str(cast(dict[str, object], step)["step"]) for step in cast(list[object], command["steps"])
-    }
-    assert {"reset-qdrant-storage", "reindex-hypermemory"} <= steps, steps
-    restored = read_stamp(stamp_file)
-    assert restored is not None and restored.release_line == current.release_line, restored
-    assert restored.reindex_pending is False, restored
-    assert int(cast(int, _status(feature_host)["vectorItems"])) > 0
+    reset_verified = False
+    try:
+        write_stamp(
+            stamp_file,
+            StorageStamp(
+                release_line="0.0",
+                image="qdrant/qdrant:v0.0.0",
+                reindex_pending=False,
+                updated_at=current.updated_at,
+            ),
+        )
+        outcome = feature_host.clawops(
+            "ops", "--asset-root", ".", "sidecars", "up", "--json", timeout=1500
+        ).require_ok()
+        assert "Resetting qdrant storage" in outcome.stderr, outcome.describe()
+        command = cast(dict[str, object], cast(dict[str, object], outcome.json())["command"])
+        steps = {
+            str(cast(dict[str, object], step)["step"])
+            for step in cast(list[object], command["steps"])
+        }
+        assert {"reset-qdrant-storage", "reindex-hypermemory"} <= steps, steps
+        restored = read_stamp(stamp_file)
+        assert restored is not None and restored.release_line == current.release_line, restored
+        assert restored.reindex_pending is False, restored
+        assert int(cast(int, _status(feature_host)["vectorItems"])) > 0
+        reset_verified = True
+    finally:
+        # A failed reset must not take Qdrant down for the features after this one.
+        if not reset_verified:
+            write_stamp(stamp_file, current)
+            feature_host.clawops("ops", "--asset-root", ".", "sidecars", "up", timeout=1500)
