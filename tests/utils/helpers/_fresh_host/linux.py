@@ -73,8 +73,9 @@ def linux_setup(context: FreshHostContext) -> list[str]:
         context.profile,
         "--non-interactive",
         "--no-verify",
-        "--no-activate-services",
     )
+    if not context.activate_services:
+        command.append("--no-activate-services")
     run_command(command, cwd=repo_root, env=phase_env(context))
     return command
 

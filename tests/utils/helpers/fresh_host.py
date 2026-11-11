@@ -8,6 +8,7 @@ from tests.utils.helpers._fresh_host.macos import (
 from tests.utils.helpers._fresh_host.models import (
     DEFAULT_DOCKER_PULL_MAX_ATTEMPTS,
     DEFAULT_DOCKER_PULL_PARALLELISM,
+    SCENARIO_SPECS,
     FreshHostContext,
     FreshHostError,
     FreshHostReport,
@@ -33,6 +34,7 @@ __all__ = [
     "PhaseResult",
     "PlatformName",
     "PhaseStatus",
+    "SCENARIO_SPECS",
     "ScenarioId",
     "ScenarioSpec",
     "_deactivate_macos_host_services",

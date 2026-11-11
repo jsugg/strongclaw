@@ -56,6 +56,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(pytest.mark.e2e)
         if "framework" in parts:
             item.add_marker(pytest.mark.framework)
+        if "feature_verification" in parts:
+            item.add_marker(pytest.mark.feature_verification)
         if "hypermemory" in parts:
             item.add_marker(pytest.mark.hypermemory)
         if rel_path_posix in _DEVFLOW_MARKED_FILES:

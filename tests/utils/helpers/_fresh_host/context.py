@@ -11,6 +11,7 @@ from tests.utils.helpers._fresh_host.models import (
     DEFAULT_DOCKER_PULL_PARALLELISM,
     FreshHostContext,
     FreshHostReport,
+    ScenarioSpec,
 )
 from tests.utils.helpers._fresh_host.storage import (
     load_context,
@@ -70,6 +71,15 @@ def _ensure_cache_dirs() -> None:
             Path(raw_path).expanduser().resolve().mkdir(parents=True, exist_ok=True)
 
 
+def _xdg_runtime_dir(spec: ScenarioSpec, *, tmp_root: Path) -> Path | None:
+    """Return the XDG runtime dir; host-home scenarios use the real user manager's."""
+    if spec.platform != "linux":
+        return None
+    if spec.use_host_home:
+        return Path(f"/run/user/{os.getuid()}")
+    return tmp_root / "xdg-runtime"
+
+
 def prepare_context(
     *,
     scenario_id: str,
@@ -84,8 +94,8 @@ def prepare_context(
     tmp_root = runner_temp / f"strongclaw-{spec.platform}-host"
     report_dir = runner_temp / "fresh-host-reports" / scenario_id
     context_dir = runner_temp / "fresh-host" / scenario_id
-    app_home = tmp_root / "home"
-    xdg_runtime_dir = tmp_root / "xdg-runtime" if spec.platform == "linux" else None
+    app_home = Path.home() if spec.use_host_home else tmp_root / "home"
+    xdg_runtime_dir = _xdg_runtime_dir(spec, tmp_root=tmp_root)
     diagnostics_dir = report_dir / "diagnostics"
     context_file = context_dir / "context.json"
     report_file = report_dir / "report.json"
@@ -127,6 +137,7 @@ def prepare_context(
         compose_files=[
             str((repo_root / relative_path).resolve()) for relative_path in spec.compose_files
         ],
+        use_host_home=spec.use_host_home,
     )
     report = FreshHostReport(
         scenario_id=context.scenario_id,
