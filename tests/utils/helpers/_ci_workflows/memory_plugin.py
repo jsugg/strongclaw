@@ -10,9 +10,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from clawops.platform_compat import DEFAULT_OPENCLAW_VERSION
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError, run_checked
 
-DEFAULT_OPENCLAW_PACKAGE_SPEC = "openclaw@2026.3.13"
+DEFAULT_OPENCLAW_PACKAGE_SPEC = f"openclaw@{DEFAULT_OPENCLAW_VERSION}"
 AWS_CREDENTIAL_ENV_VARS = (
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",

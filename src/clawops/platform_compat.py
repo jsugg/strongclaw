@@ -5,11 +5,63 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import pathlib
 import platform
+import re
 import sys
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Final, cast
 
-DEFAULT_OPENCLAW_VERSION = "2026.3.13"
-DEFAULT_ACPX_VERSION = "0.3.0"
+# Read from the packaged mirror so this module keeps working as a standalone script.
+NODE_TOOLS_MANIFEST_PATH: Final[pathlib.Path] = (
+    pathlib.Path(__file__).resolve().parent / "assets" / "platform" / "node-tools" / "package.json"
+)
+REQUIRED_NODE_TOOL_PACKAGES: Final[tuple[str, ...]] = ("openclaw", "acpx")
+_EXACT_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+_NPM_PACKAGE_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^(?:@[a-z0-9~-][a-z0-9._~-]*/)?[a-z0-9~-][a-z0-9._~-]*$"
+)
+
+
+def parse_node_tool_pins(payload: object, *, source: str) -> Mapping[str, str]:
+    """Validate a node-tools manifest payload and return its exact dependency pins."""
+    if not isinstance(payload, dict):
+        raise ValueError(f"{source}: manifest must be a JSON object")
+    dependencies = cast(dict[str, object], payload).get("dependencies")
+    if not isinstance(dependencies, dict) or not dependencies:
+        raise ValueError(f"{source}: manifest must declare a non-empty `dependencies` object")
+    pins: dict[str, str] = {}
+    for name, version in cast(dict[object, object], dependencies).items():
+        if not isinstance(name, str) or _NPM_PACKAGE_NAME_PATTERN.fullmatch(name) is None:
+            raise ValueError(f"{source}: invalid npm package name {name!r}")
+        if not isinstance(version, str) or _EXACT_VERSION_PATTERN.fullmatch(version) is None:
+            raise ValueError(
+                f"{source}: {name} must be pinned to an exact version, got {version!r}"
+            )
+        pins[name] = version
+    missing = [name for name in REQUIRED_NODE_TOOL_PACKAGES if name not in pins]
+    if missing:
+        raise ValueError(f"{source}: manifest is missing required packages: {', '.join(missing)}")
+    return MappingProxyType(pins)
+
+
+def load_node_tool_pins(
+    manifest_path: pathlib.Path = NODE_TOOLS_MANIFEST_PATH,
+) -> Mapping[str, str]:
+    """Load the exact OpenClaw/ACPX pins from the node-tools manifest."""
+    try:
+        payload: object = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as err:
+        raise ValueError(f"{manifest_path}: unreadable node-tools manifest: {err}") from err
+    return parse_node_tool_pins(payload, source=str(manifest_path))
+
+
+NODE_TOOL_PINS: Final[Mapping[str, str]] = load_node_tool_pins()
+DEFAULT_OPENCLAW_VERSION: Final[str] = NODE_TOOL_PINS["openclaw"]
+DEFAULT_ACPX_VERSION: Final[str] = NODE_TOOL_PINS["acpx"]
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
 DEFAULT_MANAGED_PROJECT_PYTHON_VERSION = "3.12"

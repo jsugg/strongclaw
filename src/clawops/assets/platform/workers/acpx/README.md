@@ -16,8 +16,9 @@ This directory contains the external coding worker plane.
 
 ## Install
 
+`clawops bootstrap` installs the pinned `acpx` CLI from `platform/node-tools/package-lock.json` and links it into npm's global bin directory. Then configure it:
+
 ```bash
-npm install -g acpx@0.3.0
 acpx config init
 cp platform/workers/acpx/global-config.example.json ~/.acpx/config.json
 cp platform/workers/acpx/project-config.example.json ~/Projects/strongclaw/repo/upstream/.acpxrc.json

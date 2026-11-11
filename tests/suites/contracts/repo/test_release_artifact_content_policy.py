@@ -11,6 +11,11 @@ from tests.utils.helpers.repo import REPO_ROOT
 
 MAX_RELEASE_ARTIFACT_SIZE_BYTES = 12_000_000
 FORBIDDEN_ARTIFACT_PATH_MARKERS: tuple[str, ...] = ("clawops/assets/platform/compose/state/",)
+# platform_compat reads the node-tools manifest at import time; a wheel without it is broken.
+REQUIRED_WHEEL_PATHS: tuple[str, ...] = (
+    "clawops/assets/platform/node-tools/package.json",
+    "clawops/assets/platform/node-tools/package-lock.json",
+)
 
 
 def _archive_paths(artifact_path: Path) -> list[str]:
@@ -37,6 +42,11 @@ def test_release_artifacts_enforce_size_and_forbidden_content_policy(tmp_path: P
     artifacts = sorted(path for path in dist_dir.iterdir() if path.is_file())
     assert any(path.suffix == ".whl" for path in artifacts)
     assert any(path.name.endswith(".tar.gz") for path in artifacts)
+
+    wheel_path = next(path for path in artifacts if path.suffix == ".whl")
+    wheel_members = set(_archive_paths(wheel_path))
+    for required_path in REQUIRED_WHEEL_PATHS:
+        assert required_path in wheel_members
 
     for artifact_path in artifacts:
         assert artifact_path.stat().st_size <= MAX_RELEASE_ARTIFACT_SIZE_BYTES
