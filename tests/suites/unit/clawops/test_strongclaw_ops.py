@@ -13,8 +13,9 @@ import pytest
 
 from clawops import strongclaw_ops
 from clawops.qdrant_storage import StorageDecision
-from clawops.strongclaw_runtime import CommandError
+from clawops.strongclaw_runtime import CommandError, DockerBackendLostError, DockerBackendProbe
 from tests.plugins.infrastructure.context import TestContext
+from tests.utils.helpers.clock import FakeClock
 from tests.utils.helpers.repo import REPO_ROOT
 
 
@@ -1153,6 +1154,7 @@ def test_wait_for_compose_service_retries_transient_status_errors(
         return None
 
     monkeypatch.setattr(strongclaw_ops.time, "sleep", _sleep_noop)
+    probes = _install_backend_probes(monkeypatch, _BACKEND_UP)
 
     cast(Any, strongclaw_ops)._wait_for_compose_service(
         execution,
@@ -1163,6 +1165,259 @@ def test_wait_for_compose_service_retries_transient_status_errors(
     )
 
     assert attempts["count"] == 2
+    assert probes.calls == 1
+
+
+_BACKEND_UP = DockerBackendProbe(reachable=True)
+_BACKEND_DOWN = DockerBackendProbe(
+    reachable=False, detail="`docker info` failed: Cannot connect to the Docker daemon"
+)
+_SOCKET_MISSING = DockerBackendProbe(
+    reachable=False, detail="Docker socket /tmp/orbstack/docker.sock is missing", definitive=True
+)
+
+
+class _BackendProbes:
+    """Answer every backend probe with one fixed result, recording the probed env."""
+
+    def __init__(self, probe: DockerBackendProbe) -> None:
+        self.probe = probe
+        self.calls = 0
+        self.envs: list[Mapping[str, str] | None] = []
+
+    def __call__(
+        self,
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: pathlib.Path | None = None,
+        timeout_seconds: int = 15,
+    ) -> DockerBackendProbe:
+        del cwd, timeout_seconds
+        self.calls += 1
+        self.envs.append(env)
+        return self.probe
+
+
+def _install_backend_probes(
+    monkeypatch: pytest.MonkeyPatch, probe: DockerBackendProbe
+) -> _BackendProbes:
+    probes = _BackendProbes(probe)
+    monkeypatch.setattr(strongclaw_ops, "probe_docker_backend", probes)
+    return probes
+
+
+def _wait_execution() -> object:
+    return cast(Any, strongclaw_ops)._ComposeExecution(
+        repo_root=REPO_ROOT,
+        compose_path=pathlib.Path("/tmp/compose.yaml"),
+        cwd=pathlib.Path("/tmp"),
+        env={"DOCKER_HOST": "unix:///tmp/orbstack/docker.sock"},
+    )
+
+
+def _failing_compose_statuses(_execution: object) -> dict[str, object]:
+    raise CommandError("failed to inspect sidecar services: Cannot connect to the Docker daemon")
+
+
+def _wait_for_litellm(timeout_seconds: int = 300) -> None:
+    cast(Any, strongclaw_ops)._wait_for_compose_service(
+        _wait_execution(),
+        service_name="litellm",
+        state="running",
+        health="healthy",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _record_events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    events: list[str] = []
+
+    def _emit_structured_log(event: str, payload: object) -> None:
+        del payload
+        events.append(event)
+
+    monkeypatch.setattr(strongclaw_ops, "emit_structured_log", _emit_structured_log)
+    return events
+
+
+def test_wait_for_compose_service_fails_fast_when_the_docker_socket_disappears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(strongclaw_ops, "time", clock)
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _failing_compose_statuses)
+    probes = _install_backend_probes(monkeypatch, _SOCKET_MISSING)
+    events = _record_events(monkeypatch)
+
+    with pytest.raises(DockerBackendLostError) as exc_info:
+        _wait_for_litellm()
+
+    message = str(exc_info.value)
+    assert message.startswith(
+        "Docker backend became unreachable while waiting for compose service 'litellm' to "
+        "reach running/healthy: Docker socket /tmp/orbstack/docker.sock is missing; "
+    )
+    assert "Cannot connect to the Docker daemon" in message
+    assert clock.sleeps == []
+    assert probes.envs == [{"DOCKER_HOST": "unix:///tmp/orbstack/docker.sock"}]
+    assert events == ["clawops.ops.sidecars.wait.start", "clawops.ops.sidecars.wait.backend_lost"]
+
+
+def test_wait_for_compose_service_fails_fast_after_consecutive_failed_docker_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    started = clock.monotonic()
+    monkeypatch.setattr(strongclaw_ops, "time", clock)
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _failing_compose_statuses)
+    probes = _install_backend_probes(monkeypatch, _BACKEND_DOWN)
+
+    with pytest.raises(DockerBackendLostError, match=r"\(3 failed probes in a row\)"):
+        _wait_for_litellm(timeout_seconds=300)
+
+    assert probes.calls == 3
+    assert clock.sleeps == [2.0, 2.0]
+    assert clock.monotonic() - started == pytest.approx(4.0)
+
+
+def test_wait_for_compose_service_keeps_waiting_for_a_slow_container_on_a_healthy_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    monkeypatch.setattr(strongclaw_ops, "time", clock)
+    probes = _install_backend_probes(monkeypatch, _BACKEND_DOWN)
+    polls = {"count": 0}
+
+    def _slow_litellm(_execution: object) -> dict[str, object]:
+        polls["count"] += 1
+        health = "healthy" if polls["count"] > 100 else "starting"
+        return {
+            "litellm": cast(Any, strongclaw_ops)._ComposeServiceStatus(
+                name="litellm", state="running", health=health
+            )
+        }
+
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _slow_litellm)
+
+    _wait_for_litellm(timeout_seconds=300)
+
+    assert polls["count"] == 101
+    assert clock.sleeps == [2.0] * 100
+    assert probes.calls == 0
+
+
+def test_wait_for_compose_service_still_times_out_while_the_backend_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    started = clock.monotonic()
+    monkeypatch.setattr(strongclaw_ops, "time", clock)
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _failing_compose_statuses)
+    probes = _install_backend_probes(monkeypatch, _BACKEND_UP)
+    events = _record_events(monkeypatch)
+
+    with pytest.raises(CommandError) as exc_info:
+        _wait_for_litellm(timeout_seconds=10)
+
+    assert not isinstance(exc_info.value, DockerBackendLostError)
+    assert str(exc_info.value).startswith(
+        "timed out waiting for compose service 'litellm' to reach running/healthy; "
+        "last observed service not listed in compose status; last status inspection error: "
+    )
+    assert clock.monotonic() - started == pytest.approx(10.0)
+    assert probes.calls == 6
+    assert events[-1] == "clawops.ops.sidecars.wait.timeout"
+
+
+def _stub_sidecars_up_with_postgres_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    postgres_error: CommandError,
+) -> tuple[pathlib.Path, list[tuple[str, ...]]]:
+    """Stub sidecars orchestration so the Postgres health wait raises *postgres_error*."""
+    compose_path = tmp_path / "compose.yaml"
+    compose_path.write_text("services: {}\n", encoding="utf-8")
+    inherited_calls: list[tuple[str, ...]] = []
+
+    def _compose_path_override(_repo_root: pathlib.Path, _compose_name: str) -> pathlib.Path:
+        return compose_path
+
+    def _profile_flags(_path: pathlib.Path) -> dict[str, bool | str]:
+        return {"usesQmd": True, "usesHypermemory": True, "source": "test"}
+
+    def _wait_for_compose_service(
+        _execution: object,
+        *,
+        service_name: str,
+        state: str,
+        health: str | None = None,
+        timeout_seconds: int,
+    ) -> None:
+        del state, health, timeout_seconds
+        if service_name == "postgres":
+            raise postgres_error
+
+    def _empty_compose_statuses(_execution: object) -> dict[str, object]:
+        return {}
+
+    def fake_run_command_inherited(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 1800,
+    ) -> int:
+        del cwd, env, timeout_seconds
+        inherited_calls.append(tuple(command))
+        return 0
+
+    monkeypatch.setattr(strongclaw_ops, "ensure_docker_backend_ready", lambda: None)
+    monkeypatch.setattr(strongclaw_ops, "_compose_path", _compose_path_override)
+    monkeypatch.setattr(strongclaw_ops, "_compose_env", _fixed_compose_env)
+    monkeypatch.setattr(strongclaw_ops, "_resolve_profile_dependency_flags", _profile_flags)
+    monkeypatch.setattr(strongclaw_ops, "_wait_for_compose_service", _wait_for_compose_service)
+    monkeypatch.setattr(strongclaw_ops, "_compose_service_statuses", _empty_compose_statuses)
+    monkeypatch.setattr(strongclaw_ops, "run_command_inherited", fake_run_command_inherited)
+    _stub_qdrant_storage(monkeypatch)
+    return compose_path, inherited_calls
+
+
+_POSTGRES_BACKEND_LOST = DockerBackendLostError(
+    "Docker backend became unreachable while waiting for compose service 'postgres'"
+)
+
+
+def test_sidecars_up_does_not_recreate_postgres_once_the_backend_is_lost(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    compose_path, inherited_calls = _stub_sidecars_up_with_postgres_wait(
+        monkeypatch, tmp_path, _POSTGRES_BACKEND_LOST
+    )
+
+    with pytest.raises(DockerBackendLostError, match="Docker backend became unreachable"):
+        strongclaw_ops.sidecars_up(REPO_ROOT, repo_local_state=False)
+
+    assert inherited_calls == [
+        ("docker", "compose", "-f", str(compose_path), "up", "-d", "postgres")
+    ]
+
+
+def test_sidecars_up_json_reports_backend_loss_during_the_postgres_wait(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    _, inherited_calls = _stub_sidecars_up_with_postgres_wait(
+        monkeypatch, tmp_path, _POSTGRES_BACKEND_LOST
+    )
+
+    payload = cast(Any, strongclaw_ops)._sidecars_up_report(
+        REPO_ROOT, repo_local_state=False, suppress_wait_failures=True
+    )
+
+    assert payload["ok"] is False
+    assert payload["failedService"] == "postgres"
+    assert payload["error"] == str(_POSTGRES_BACKEND_LOST)
+    assert payload["command"]["exitCode"] == 1
+    assert len(inherited_calls) == 1
 
 
 def test_gateway_start_uses_unbounded_subprocess_timeout(

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, Final, Literal, cast
 
@@ -1199,6 +1199,95 @@ def ensure_docker_backend_ready() -> None:
     raise CommandError(
         "Docker is installed but the backend is not reachable from this shell. " + " ".join(details)
     )
+
+
+DOCKER_BACKEND_PROBE_TIMEOUT_SECONDS: Final[int] = 15
+DOCKER_BACKEND_LOSS_PROBE_LIMIT: Final[int] = 3
+
+
+class DockerBackendLostError(CommandError):
+    """Raised when the Docker backend disappears while a command is waiting on it."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DockerBackendProbe:
+    """One live Docker backend probe; a `definitive` failure confirms loss without repeats."""
+
+    reachable: bool
+    detail: str = ""
+    definitive: bool = False
+
+
+def _docker_host_socket(docker_host: str) -> pathlib.Path | None:
+    """Return the Unix socket a `DOCKER_HOST` value points at, when it is one."""
+    if not docker_host.startswith("unix://"):
+        return None
+    return pathlib.Path(docker_host.removeprefix("unix://"))
+
+
+def probe_docker_backend(
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: pathlib.Path | None = None,
+    timeout_seconds: int = DOCKER_BACKEND_PROBE_TIMEOUT_SECONDS,
+) -> DockerBackendProbe:
+    """Probe the Docker backend *env* targets: its Unix socket first, then `docker info`."""
+    docker_host = (os.environ if env is None else env).get("DOCKER_HOST", "").strip()
+    socket_path = _docker_host_socket(docker_host)
+    if socket_path is not None and not socket_path.is_socket():
+        return DockerBackendProbe(
+            reachable=False, detail=f"Docker socket {socket_path} is missing", definitive=True
+        )
+    result = run_command(["docker", "info"], cwd=cwd, env=env, timeout_seconds=timeout_seconds)
+    if result.ok:
+        return DockerBackendProbe(reachable=True)
+    if result.timed_out:
+        return DockerBackendProbe(
+            reachable=False, detail=f"`docker info` timed out after {timeout_seconds}s"
+        )
+    # `docker info` prints client details to stdout even when the daemon is gone.
+    error = " ".join(result.stderr.split())
+    return DockerBackendProbe(
+        reachable=False,
+        detail=f"`docker info` failed: {error}" if error else "`docker info` failed",
+    )
+
+
+class DockerBackendWatch:
+    """Tell a lost Docker backend from a slow one across a status-polling loop.
+
+    Call `confirm_lost` after a status inspection fails and `reset` after one succeeds. A
+    missing socket confirms loss at once; otherwise *probe_limit* failed probes in a row do.
+    """
+
+    def __init__(
+        self,
+        probe: Callable[[], DockerBackendProbe],
+        *,
+        probe_limit: int = DOCKER_BACKEND_LOSS_PROBE_LIMIT,
+    ) -> None:
+        if probe_limit < 1:
+            raise ValueError("probe_limit must be positive")
+        self._probe = probe
+        self._probe_limit = probe_limit
+        self._failures = 0
+
+    def reset(self) -> None:
+        """Record that the backend answered, clearing the failure streak."""
+        self._failures = 0
+
+    def confirm_lost(self) -> str | None:
+        """Probe once; return why the backend is lost, or `None` while it may still answer."""
+        probe = self._probe()
+        if probe.reachable:
+            self._failures = 0
+            return None
+        self._failures += 1
+        if probe.definitive:
+            return probe.detail
+        if self._failures >= self._probe_limit:
+            return f"{probe.detail} ({self._failures} failed probes in a row)"
+        return None
 
 
 def repair_linux_runtime_user_docker_access(runtime_user: str) -> None:

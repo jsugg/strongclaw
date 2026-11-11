@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 
 from clawops.strongclaw_compose import compose_project_name
-from clawops.strongclaw_runtime import resolve_repo_local_compose_state_dir
+from clawops.strongclaw_runtime import DockerBackendProbe, resolve_repo_local_compose_state_dir
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers import fresh_host
@@ -22,6 +22,7 @@ from tests.utils.helpers._fresh_host import macos as fresh_host_macos
 from tests.utils.helpers._fresh_host import reporting as fresh_host_reporting
 from tests.utils.helpers._fresh_host import scenario as fresh_host_scenario
 from tests.utils.helpers._fresh_host import shell as fresh_host_shell
+from tests.utils.helpers.clock import FakeClock
 
 _parse_args = cast(
     Callable[[list[str] | None], argparse.Namespace],
@@ -2209,3 +2210,143 @@ def test_write_summary_marks_missing_child_durations_as_na(
     summary_text = summary_path.read_text(encoding="utf-8")
     assert "| Hosted runtime install | n/a |" in summary_text
     assert "| Hosted image ensure | n/a |" in summary_text
+
+
+_DAEMON_DOWN_STDERR = "Cannot connect to the Docker daemon at unix:///tmp/docker.sock."
+
+
+class _BackendProbes:
+    """Answer every backend probe with one fixed result."""
+
+    def __init__(self, probe: DockerBackendProbe) -> None:
+        self.probe = probe
+        self.calls = 0
+
+    def __call__(self, **kwargs: object) -> DockerBackendProbe:
+        del kwargs
+        self.calls += 1
+        return self.probe
+
+
+class _ComposePs:
+    """Scripted `docker compose ps` runs that record each per-poll timeout."""
+
+    def __init__(self, *outcomes: str | BaseException) -> None:
+        self._outcomes = list(outcomes)
+        self.timeouts: list[float | None] = []
+
+    def __call__(
+        self, args: list[str], *, timeout: float | None = None, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        self.timeouts.append(timeout)
+        outcome = self._outcomes.pop(0) if len(self._outcomes) > 1 else self._outcomes[0]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome == _DAEMON_DOWN_STDERR:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr=outcome)
+        return subprocess.CompletedProcess(args, 0, stdout=outcome, stderr="")
+
+
+def _sidecars_payload(litellm_health: str) -> str:
+    return json.dumps(
+        [
+            {"Service": "postgres", "State": "running", "Health": "healthy"},
+            {"Service": "litellm", "State": "running", "Health": litellm_health},
+            {"Service": "otel-collector", "State": "running"},
+            {"Service": "qdrant", "State": "running", "Health": "healthy"},
+        ]
+    )
+
+
+def _install_health_wait(
+    test_context: TestContext, compose_ps: _ComposePs, probe: DockerBackendProbe
+) -> tuple[FakeClock, _BackendProbes]:
+    clock = FakeClock()
+    probes = _BackendProbes(probe)
+    test_context.patch.patch_object(fresh_host_shell.subprocess, "run", new=compose_ps)
+    test_context.patch.patch_object(fresh_host_shell, "time", new=clock)
+    test_context.patch.patch_object(fresh_host_shell, "probe_docker_backend", new=probes)
+    return clock, probes
+
+
+def _verify_sidecars(tmp_path: Path, *, timeout_seconds: int = 300) -> None:
+    fresh_host_shell.verify_sidecar_services_running(
+        tmp_path / "compose.yaml",
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin"},
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def test_sidecar_health_wait_fails_fast_when_the_docker_socket_disappears(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    missing = DockerBackendProbe(
+        reachable=False, detail="Docker socket /tmp/docker.sock is missing", definitive=True
+    )
+    clock, probes = _install_health_wait(test_context, _ComposePs(_DAEMON_DOWN_STDERR), missing)
+
+    with pytest.raises(fresh_host.FreshHostError) as exc_info:
+        _verify_sidecars(tmp_path)
+
+    assert str(exc_info.value) == (
+        "Docker backend became unreachable while waiting for docker compose services: "
+        f"Docker socket /tmp/docker.sock is missing; last status error: {_DAEMON_DOWN_STDERR}"
+    )
+    assert clock.sleeps == []
+    assert probes.calls == 1
+
+
+def test_sidecar_health_wait_fails_fast_after_consecutive_failed_docker_probes(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    down = DockerBackendProbe(reachable=False, detail="`docker info` failed: EOF")
+    clock, probes = _install_health_wait(test_context, _ComposePs(_DAEMON_DOWN_STDERR), down)
+
+    with pytest.raises(fresh_host.FreshHostError, match=r"\(3 failed probes in a row\)"):
+        _verify_sidecars(tmp_path)
+
+    assert clock.sleeps == [2.0, 2.0]
+    assert probes.calls == 3
+
+
+def test_sidecar_health_wait_treats_a_hung_compose_ps_as_a_failed_poll(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    hung = subprocess.TimeoutExpired(cmd=["docker", "compose", "ps"], timeout=30)
+    missing = DockerBackendProbe(reachable=False, detail="socket gone", definitive=True)
+    compose_ps = _ComposePs(hung)
+    _install_health_wait(test_context, compose_ps, missing)
+
+    with pytest.raises(fresh_host.FreshHostError, match="docker compose ps timed out after 30s"):
+        _verify_sidecars(tmp_path, timeout_seconds=300)
+
+    assert compose_ps.timeouts == [30]
+
+
+def test_sidecar_health_wait_keeps_waiting_for_a_slow_container_on_a_healthy_backend(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    down = DockerBackendProbe(reachable=False, detail="never probed")
+    compose_ps = _ComposePs(*[_sidecars_payload("starting")] * 60, _sidecars_payload("healthy"))
+    clock, probes = _install_health_wait(test_context, compose_ps, down)
+
+    _verify_sidecars(tmp_path, timeout_seconds=300)
+
+    assert clock.sleeps == [2.0] * 60
+    assert probes.calls == 0
+    assert set(compose_ps.timeouts) == {30}
+
+
+def test_sidecar_health_wait_keeps_polling_failed_compose_ps_while_the_backend_answers(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    up = DockerBackendProbe(reachable=True)
+    compose_ps = _ComposePs(_DAEMON_DOWN_STDERR, _DAEMON_DOWN_STDERR, _sidecars_payload("healthy"))
+    clock, probes = _install_health_wait(test_context, compose_ps, up)
+
+    _verify_sidecars(tmp_path)
+
+    assert clock.sleeps == [2.0, 2.0]
+    assert probes.calls == 2

@@ -1016,13 +1016,14 @@ def _job_step(workflow_name: str, job_id: str, step_name: str) -> dict[str, obje
 
 
 def test_fault_injection_cannot_be_enabled_on_push_to_main() -> None:
-    """The fault drill reaches the scenario only from a manual dispatch off main."""
-    leaked_push_env = {
-        FAULT_INJECTION_ENV: next(iter(KNOWN_FAULTS)),
-        "GITHUB_EVENT_NAME": "push",
-        "GITHUB_REF": "refs/heads/main",
-    }
-    assert requested_fault(leaked_push_env) is None
+    """Every fault drill reaches the scenario only from a manual dispatch off main."""
+    for fault in sorted(KNOWN_FAULTS):
+        leaked_push_env = {
+            FAULT_INJECTION_ENV: fault,
+            "GITHUB_EVENT_NAME": "push",
+            "GITHUB_REF": "refs/heads/main",
+        }
+        assert requested_fault(leaked_push_env) is None, fault
 
     core_input = _as_str_object_dict(
         _workflow_trigger_inputs("fresh-host-core.yml", "workflow_call").get("fault_injection")

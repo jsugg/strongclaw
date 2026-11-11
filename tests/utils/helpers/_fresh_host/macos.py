@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.utils.helpers._fresh_host.faults import inject_sidecars_runtime_loss
+from tests.utils.helpers._fresh_host.faults import (
+    inject_sidecars_runtime_loss,
+    orbstack_stop_during_sidecars_health,
+)
 from tests.utils.helpers._fresh_host.linux import run_clawops_bootstrap
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.runtime_loss import (
@@ -295,16 +299,22 @@ def _run_repo_local_cycle(
         "down",
         "--repo-local-state",
     )
+    health_wait_fault: AbstractContextManager[None] = (
+        orbstack_stop_during_sidecars_health(context, compose_file=compose_file)
+        if component == "sidecars"
+        else nullcontext()
+    )
     # Hosted OrbStack can transiently lose its task-service connection while the
     # repo-local stack starts. Reconcile once after cleanup and a fresh backend probe.
-    run_command(
-        up_command,
-        cwd=repo_root,
-        env=env,
-        retries=1,
-        retry_on_exit_codes=RETRYABLE_REPO_LOCAL_UP_EXIT_CODES,
-        on_retry=lambda: _recover_repo_local_stack(down_command, cwd=repo_root, env=env),
-    )
+    with health_wait_fault:
+        run_command(
+            up_command,
+            cwd=repo_root,
+            env=env,
+            retries=1,
+            retry_on_exit_codes=RETRYABLE_REPO_LOCAL_UP_EXIT_CODES,
+            on_retry=lambda: _recover_repo_local_stack(down_command, cwd=repo_root, env=env),
+        )
     if component == "sidecars":
         verify_sidecar_services_running(
             compose_file,
