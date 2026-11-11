@@ -40,6 +40,9 @@ class BackendDefinition:
     supported_output_formats: tuple[RequestedOutputFormat, ...] = ("text", "json", "ndjson")
     default_output_format: RequestedOutputFormat = "text"
     compatibility_version: str | None = None
+    # The agent resolves StrongClaw secrets (e.g. the gateway token SecretRef) from the env
+    # contract, so the session must run under `varlock run`.
+    uses_env_contract: bool = False
 
     def supports_auth_mode(self, auth_mode: str) -> bool:
         """Return True when the backend supports *auth_mode*."""
@@ -106,7 +109,7 @@ BACKEND_REGISTRY: Final[dict[str, BackendDefinition]] = {
     "qwen": _local_backend("qwen"),
     "copilot": _local_backend("copilot"),
     "cursor": _local_backend("cursor"),
-    "openclaw": _local_backend("openclaw"),
+    "openclaw": dataclasses.replace(_local_backend("openclaw"), uses_env_contract=True),
 }
 
 

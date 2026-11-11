@@ -44,11 +44,13 @@ class AcpxInvocation:
     backend_profile: str | None = None
     config_path: pathlib.Path | None = None
     no_wait: bool = False
+    # Wrapper that runs acpx, and the agent it spawns, inside the operator env contract.
+    launcher: tuple[str, ...] = ()
 
     @property
     def command(self) -> list[str]:
         """Return the ACPX command line."""
-        command = ["acpx"]
+        command = [*self.launcher, "acpx"]
         if self.permissions_mode == "approve-all":
             command.append("--approve-all")
         elif self.permissions_mode == "approve-reads":

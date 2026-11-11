@@ -31,6 +31,8 @@ from clawops.orchestration import (
     build_lock_identity,
     build_session_identity,
 )
+from clawops.runtime_assets import resolve_asset_root
+from clawops.strongclaw_runtime import wrap_command_with_varlock
 
 
 class SessionLockError(RuntimeError):
@@ -238,6 +240,11 @@ def _build_invocation(
         output_format=spec.output_format,
         backend_profile=spec.backend_profile,
         config_path=spec.config_path,
+        launcher=(
+            tuple(wrap_command_with_varlock(resolve_asset_root(), []))
+            if definition.uses_env_contract
+            else ()
+        ),
     )
 
 

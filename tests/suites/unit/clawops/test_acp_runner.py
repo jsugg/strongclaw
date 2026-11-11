@@ -10,6 +10,7 @@ import json
 import pathlib
 import subprocess
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
 import pytest
@@ -352,3 +353,43 @@ def test_acp_runner_supports_non_git_local_dir_without_branch(
     assert summary["branch"] is None
     assert summary["role"] == "developer"
     assert summary["lane"] == "feature-a"
+
+
+def _invocation_spec(tmp_path: pathlib.Path) -> acp_runner.SessionSpec:
+    return cast(
+        acp_runner.SessionSpec,
+        SimpleNamespace(
+            prompt="Reply FV",
+            workspace=SimpleNamespace(working_directory=tmp_path),
+            timeout_seconds=60,
+            permissions_mode=None,
+            output_format="json",
+            backend_profile=None,
+            config_path=None,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected_prefix"),
+    [
+        ("openclaw", ["varlock", "run", "--path", "/env", "--", "acpx"]),
+        ("codex", ["acpx"]),
+    ],
+)
+def test_build_invocation_runs_env_contract_backends_under_varlock(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    expected_prefix: list[str],
+) -> None:
+    def _fake_wrap(_repo_root: pathlib.Path, command: list[str]) -> list[str]:
+        return ["varlock", "run", "--path", "/env", "--", *command]
+
+    monkeypatch.setattr(acp_runner, "wrap_command_with_varlock", _fake_wrap)
+    definition = acp_runner.resolve_backend(backend)
+
+    invocation = acp_runner._build_invocation(definition, _invocation_spec(tmp_path))
+
+    assert invocation.command[: len(expected_prefix)] == expected_prefix
+    assert invocation.command[-3:] == [backend, "exec", "Reply FV"]
