@@ -272,7 +272,22 @@ class StorageOperations:
     volume_exists: Callable[[str], bool]
     stop_service: Callable[[], None]
     remove_volume: Callable[[str], None]
+    # Empties the mounted storage from inside the qdrant image, as the user that wrote it.
+    clear_mounted_storage: Callable[[], None]
     log: Callable[[str], None]
+
+
+def _clear_bind_storage(storage_dir: pathlib.Path, *, operations: StorageOperations) -> None:
+    """Empty bind-mounted storage, even when the container user owns what qdrant wrote."""
+    try:
+        clear_directory(storage_dir)
+    except PermissionError:
+        # Rootful Docker writes the bind mount as the container's root user.
+        operations.clear_mounted_storage()
+        if any(storage_dir.iterdir()):
+            raise QdrantStorageError(
+                f"qdrant storage at {storage_dir} is still not empty after clearing it"
+            ) from None
 
 
 def prepare_storage(
@@ -304,7 +319,7 @@ def prepare_storage(
         operations.stop_service()
         write_stamp(stamp_file, reset_intent_stamp(stamp))
         if storage_dir is not None:
-            clear_directory(storage_dir)
+            _clear_bind_storage(storage_dir, operations=operations)
         elif volume_name is not None:
             operations.remove_volume(volume_name)
         write_stamp(stamp_file, new_stamp(target, image, reindex_pending=True))
