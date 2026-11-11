@@ -387,8 +387,19 @@ def _candidate_from_openclaw_item(
     *,
     fallback_score: int,
 ) -> CandidateMemory:
-    """Normalize one `openclaw memory-pro search` item."""
-    metadata_value = item.get("metadata")
+    """Normalize one `openclaw memory-pro search` item.
+
+    The plugin prints retrieval results (``{"entry": {...}, "score": ...}``) whose entry keeps
+    its metadata as a JSON string; flat records with mapping metadata are accepted too.
+    """
+    entry_value = item.get("entry")
+    record = cast(Mapping[str, object], entry_value) if isinstance(entry_value, Mapping) else item
+    metadata_value = record.get("metadata")
+    if isinstance(metadata_value, str):
+        try:
+            metadata_value = json.loads(metadata_value)
+        except json.JSONDecodeError:
+            metadata_value = None
     metadata = (
         cast(Mapping[str, object], metadata_value) if isinstance(metadata_value, Mapping) else None
     )
@@ -403,13 +414,13 @@ def _candidate_from_openclaw_item(
         if hypermemory is not None and isinstance(hypermemory.get("sourcePath"), str)
         else None
     )
-    text_value = item.get("text")
+    text_value = record.get("text")
     if not isinstance(text_value, str):
-        text_value = str(item.get("content", ""))
-    category_value = item.get("category")
+        text_value = str(record.get("content", ""))
+    category_value = record.get("category")
     raw_score = item.get("score")
     return _normalize_candidate(
-        identifier=str(item.get("id", "")),
+        identifier=str(record.get("id", "")),
         text=text_value,
         source_path=source_path,
         category=str(category_value) if category_value is not None else None,

@@ -352,11 +352,17 @@ def test_memory_verify_pro_parity_reads_openclaw_json_after_plugin_log_lines(
     workspace = build_workspace(tmp_path)
     config_path = workspace / "hypermemory.sqlite.yaml"
     write_hypermemory_config(workspace, config_path)
+    # The live plugin prints retrieval results with the entry metadata as a JSON string.
     search_output = [
         {
-            "id": "memory-1",
-            "text": "Prefer blue/green cutovers.",
-            "metadata": {"hypermemory": {"sourcePath": "MEMORY.md"}},
+            "entry": {
+                "id": "memory-1",
+                "text": "Prefer blue/green cutovers.",
+                "category": "fact",
+                "metadata": json.dumps({"hypermemory": {"sourcePath": "MEMORY.md"}}),
+            },
+            "score": 0.82,
+            "sources": {"fused": {"score": 0.82}},
         }
     ]
 
@@ -403,5 +409,8 @@ def test_memory_verify_pro_parity_reads_openclaw_json_after_plugin_log_lines(
     report = json.loads(capsys.readouterr().out)
     assert "errors" not in report, report
     assert report["mode"] == "openclaw_cli"
-    assert "MEMORY.md" in report["queries"][0]["overlapPaths"]
+    query = report["queries"][0]
+    assert "MEMORY.md" in query["overlapPaths"]
+    assert query["newResults"][0]["id"] == "memory-1"
+    assert query["newResults"][0]["text"] == "Prefer blue/green cutovers."
     assert exit_code == 0
