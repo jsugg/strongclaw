@@ -15,7 +15,6 @@ for import_root in (SRC_ROOT, REPO_ROOT):
 
 from tests.utils.helpers._ci_workflows.common import CiWorkflowError  # noqa: E402
 from tests.utils.helpers._ci_workflows.memory_plugin import (  # noqa: E402
-    DEFAULT_OPENCLAW_PACKAGE_SPEC,
     run_clawops_memory_migration,
     run_vendored_host_checks,
     wait_for_qdrant,
@@ -32,7 +31,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run vendored memory plugin host-functional checks.",
     )
     vendored_parser.add_argument("--repo-root", type=Path, default=REPO_ROOT)
-    vendored_parser.add_argument("--package-spec", default=DEFAULT_OPENCLAW_PACKAGE_SPEC)
 
     migration_parser = subparsers.add_parser(
         "run-clawops-memory-migration",
@@ -54,10 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     try:
         if args.command == "run-vendored-host-checks":
-            run_vendored_host_checks(
-                Path(args.repo_root).expanduser().resolve(),
-                package_spec=str(args.package_spec),
-            )
+            run_vendored_host_checks(Path(args.repo_root).expanduser().resolve())
             return 0
         if args.command == "run-clawops-memory-migration":
             run_clawops_memory_migration(

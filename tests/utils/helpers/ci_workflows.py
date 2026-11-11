@@ -11,7 +11,7 @@ from tests.utils.helpers._ci_workflows.compatibility import (
 )
 from tests.utils.helpers._ci_workflows.memory_plugin import (
     AWS_CREDENTIAL_ENV_VARS,
-    DEFAULT_OPENCLAW_PACKAGE_SPEC,
+    install_locked_node_tools,
     run_clawops_memory_migration,
     run_vendored_host_checks,
     wait_for_qdrant,
@@ -40,7 +40,6 @@ from tests.utils.helpers._ci_workflows.security import (
 __all__ = [
     "AWS_CREDENTIAL_ENV_VARS",
     "CiWorkflowError",
-    "DEFAULT_OPENCLAW_PACKAGE_SPEC",
     "SetupSmokePaths",
     "append_coverage_summary",
     "assert_hypermemory_config",
@@ -48,6 +47,7 @@ __all__ = [
     "assert_openclaw_profiles_render",
     "clean_artifact_directories",
     "enforce_coverage_thresholds",
+    "install_locked_node_tools",
     "install_gitleaks",
     "install_syft",
     "prepare_setup_smoke",
