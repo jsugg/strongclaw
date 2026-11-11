@@ -43,8 +43,11 @@ elif mode == "repeating":
         time.sleep(0.05)
 elif mode == "grandchild":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-    with open(os.environ["FAKE_DOCKER_PID_FILE"], "w") as handle:
+    pid_file = os.environ["FAKE_DOCKER_PID_FILE"]
+    with open(pid_file + ".tmp", "w") as handle:
         handle.write(str(child.pid))
+    # Publish atomically and before any output, so the file's presence means a complete pid.
+    os.replace(pid_file + ".tmp", pid_file)
     print(f"{layer}: Pulling fs layer", flush=True)
     time.sleep(60)
 elif mode == "missing":
@@ -62,6 +65,37 @@ def fake_docker(tmp_path: Path) -> Path:
 
 def _cli_client(script: Path, *, env: dict[str, str] | None = None) -> CliDockerPullClient:
     return CliDockerPullClient(command=(sys.executable, str(script)), env=env, poll_seconds=0.05)
+
+
+class _FileGatedClock:
+    """Monotonic time that stands still until *gate* exists or a real-time deadline passes.
+
+    The pull client's stall window starts with the pull, so a slow interpreter start under
+    load would otherwise be killed before the fake docker publishes its grandchild pid.
+    """
+
+    def __init__(self, gate: Path, *, max_wait_seconds: float) -> None:
+        self._gate = gate
+        self._give_up_at = time.monotonic() + max_wait_seconds
+        self._frozen_at = time.monotonic()
+        self._opened_at: float | None = None
+
+    def time(self) -> float:
+        """Return wall-clock seconds since the epoch."""
+        return time.time()
+
+    def monotonic(self) -> float:
+        """Return frozen time until the gate opens, then advance in real time."""
+        now = time.monotonic()
+        if self._opened_at is None:
+            if not self._gate.exists() and now < self._give_up_at:
+                return self._frozen_at
+            self._opened_at = now
+        return self._frozen_at + (now - self._opened_at)
+
+    def sleep(self, seconds: float) -> None:
+        """Block for *seconds*."""
+        time.sleep(seconds)
 
 
 def _process_gone(pid: int) -> bool:
@@ -105,10 +139,16 @@ def test_cli_client_kills_and_reaps_the_whole_process_group(
     fake_docker: Path, tmp_path: Path
 ) -> None:
     pid_file = tmp_path / "grandchild.pid"
-    client = _cli_client(fake_docker, env={"FAKE_DOCKER_PID_FILE": str(pid_file), "PATH": ""})
+    client = CliDockerPullClient(
+        command=(sys.executable, str(fake_docker)),
+        env={"FAKE_DOCKER_PID_FILE": str(pid_file), "PATH": ""},
+        clock=_FileGatedClock(pid_file, max_wait_seconds=10),
+        poll_seconds=0.05,
+    )
 
     outcome = client.pull("grandchild", timeout_seconds=20, stall_seconds=0.5)
 
+    assert pid_file.is_file(), "fake docker never published its grandchild pid within 10s"
     assert outcome.failure_class == "stalled"
     grandchild = int(pid_file.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 5
