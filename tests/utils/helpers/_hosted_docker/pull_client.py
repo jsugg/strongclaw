@@ -16,7 +16,6 @@ import os
 import pty
 import re
 import select
-import signal
 import struct
 import subprocess
 import termios
@@ -25,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Final, Literal, Protocol
 
 from tests.utils.helpers._fresh_host.budget import SYSTEM_CLOCK, Clock
+from tests.utils.helpers._hosted_docker.process import terminate_process_group
 
 type PullFailureClass = Literal[
     "stalled",
@@ -38,7 +38,6 @@ type PullFailureClass = Literal[
 
 STALL_TIMEOUT_SECONDS: Final[int] = 300
 _OUTPUT_TAIL_LINES: Final[int] = 60
-_TERMINATE_GRACE_SECONDS: Final[float] = 5.0
 _ANSI_ESCAPE: Final[re.Pattern[str]] = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _LAYER_LINE: Final[re.Pattern[str]] = re.compile(
     r"^(?P<layer>[0-9a-f]{12}): (?P<status>[A-Za-z][A-Za-z ]*?)"
@@ -254,7 +253,7 @@ class CliDockerPullClient:
                 elif now - last_progress >= stall_seconds:
                     terminated_as = "stalled"
                 if terminated_as is not None:
-                    _terminate_process_group(process)
+                    terminate_process_group(process)
                     break
         finally:
             os.close(master_fd)
@@ -307,17 +306,3 @@ class CliDockerPullClient:
             if line.strip():
                 tail.append(line.strip())
         return remainder, False, progressed
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    """Terminate, then kill, the pull's process group and reap the child."""
-    for sig, grace in ((signal.SIGTERM, _TERMINATE_GRACE_SECONDS), (signal.SIGKILL, None)):
-        try:
-            os.killpg(process.pid, sig)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=grace)
-            return
-        except subprocess.TimeoutExpired:
-            continue

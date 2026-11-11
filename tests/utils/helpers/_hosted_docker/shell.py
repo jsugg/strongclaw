@@ -4,15 +4,36 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
+from tests.utils.helpers._fresh_host.budget import (
+    MIN_COMMAND_SECONDS,
+    SYSTEM_CLOCK,
+    Clock,
+    PhaseDeadline,
+)
 from tests.utils.helpers._fresh_host.models import FreshHostError
 from tests.utils.helpers._hosted_docker.io import log
+from tests.utils.helpers._hosted_docker.process import (
+    TERMINATE_GRACE_SECONDS,
+    terminate_process_group,
+)
 
 DOCKER_READY_POLL_SECONDS: Final[int] = 2
+DOCKER_READY_PROBE_TIMEOUT_SECONDS: Final[int] = 30
+
+
+def _drain(process: subprocess.Popen[str]) -> tuple[str | None, str | None]:
+    """Collect what a terminated child wrote, without waiting on escaped grandchildren."""
+    try:
+        return process.communicate(timeout=TERMINATE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        return None, None
 
 
 def run_command(
@@ -20,20 +41,36 @@ def run_command(
     *,
     cwd: Path,
     env: dict[str, str],
-    timeout_seconds: int = 3600,
+    timeout_seconds: float = 3600,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one subprocess command with optional captured output."""
+    """Run one command in its own process group; on timeout, kill the whole group."""
     log("Running: " + " ".join(command))
-    return subprocess.run(
-        list(command),
+    argv = list(command)
+    pipe = subprocess.PIPE if capture_output else None
+    process = subprocess.Popen(
+        argv,
         cwd=cwd,
         env=env,
-        check=False,
-        capture_output=capture_output,
+        stdout=pipe,
+        stderr=pipe,
         text=True,
-        timeout=timeout_seconds,
+        start_new_session=True,
     )
+    stdout: str | None
+    stderr: str | None
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        stdout, stderr = _drain(process)
+        raise subprocess.TimeoutExpired(
+            argv, timeout_seconds, output=stdout, stderr=stderr
+        ) from None
+    except BaseException:
+        terminate_process_group(process)
+        raise
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
 def run_checked(
@@ -41,7 +78,7 @@ def run_checked(
     *,
     cwd: Path,
     env: dict[str, str],
-    timeout_seconds: int = 3600,
+    timeout_seconds: float = 3600,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run one subprocess command and raise on non-zero exit."""
@@ -64,57 +101,70 @@ def wait_for_docker_ready(
     *,
     cwd: Path,
     env: dict[str, str],
-    max_attempts: int = 60,
-    poll_seconds: int = DOCKER_READY_POLL_SECONDS,
-    probe_timeout_seconds: int = 30,
+    deadline: PhaseDeadline,
+    clock: Clock = SYSTEM_CLOCK,
+    poll_seconds: float = DOCKER_READY_POLL_SECONDS,
+    probe_timeout_seconds: float = DOCKER_READY_PROBE_TIMEOUT_SECONDS,
 ) -> None:
-    """Wait until the Docker daemon answers successfully."""
+    """Probe the Docker daemon until it answers or *deadline* passes.
+
+    Each probe and poll gap is clipped to the time left, so the wait ends at the deadline
+    however long individual probes hang. The error carries the last probe's output so the
+    caller can classify the failure without probing again.
+    """
     docker_host = env.get("DOCKER_HOST") or os.environ.get("DOCKER_HOST") or "(not set)"
     log(
-        f"Waiting for Docker — DOCKER_HOST={docker_host} (max {max_attempts} attempts, "
-        f"{poll_seconds}s between probes, {probe_timeout_seconds}s probe timeout)."
+        f"Waiting for Docker — DOCKER_HOST={docker_host} (up to "
+        f"{deadline.remaining(clock):.0f}s, {poll_seconds}s between probes, "
+        f"{probe_timeout_seconds}s probe timeout)."
     )
-    for attempt in range(1, max_attempts + 1):
-        if attempt == 1 or attempt % 10 == 0:
+    attempt = 0
+    last_failure = "no probe ran before the deadline"
+    while deadline.remaining(clock) >= MIN_COMMAND_SECONDS:
+        attempt += 1
+        verbose = attempt == 1 or attempt % 10 == 0
+        if verbose:
             socket_path = docker_host.removeprefix("unix://")
             socket_exists = (
                 Path(socket_path).exists() if docker_host.startswith("unix://") else None
             )
             log(
-                f"[attempt {attempt}/{max_attempts}] socket {socket_path}: "
-                f"{'EXISTS' if socket_exists else 'NOT FOUND'}."
+                f"[probe {attempt}, {deadline.remaining(clock):.0f}s left] socket "
+                f"{socket_path}: {'EXISTS' if socket_exists else 'NOT FOUND'}."
             )
+        probe_timeout = deadline.clip(probe_timeout_seconds, clock)
         try:
             ready = run_command(
                 ["docker", "info"],
                 cwd=cwd,
                 env=env,
-                timeout_seconds=probe_timeout_seconds,
+                timeout_seconds=probe_timeout,
                 capture_output=True,
             )
         except subprocess.TimeoutExpired:
-            log(
-                f"Docker readiness probe timed out after "
-                f"{probe_timeout_seconds}s (attempt {attempt}/{max_attempts})."
-            )
+            last_failure = f"docker info timed out after {probe_timeout:.0f}s"
+            log(f"Docker readiness probe {attempt} timed out after {probe_timeout:.0f}s.")
         except FileNotFoundError:
-            pass  # docker binary not yet in PATH; keep retrying
+            last_failure = "docker binary not yet on PATH"
         else:
             if ready.returncode == 0:
-                log(f"Docker ready after {attempt} attempt(s).")
+                log(f"Docker ready after {attempt} probe(s).")
                 return
-            if attempt == 1 or attempt % 10 == 0:
-                stderr_snippet = (ready.stderr or "").strip()[:400]
-                log(
-                    f"[attempt {attempt}/{max_attempts}] docker info rc={ready.returncode}: "
-                    f"{stderr_snippet or '(no output)'}"
-                )
-        if attempt < max_attempts:
-            time.sleep(poll_seconds)
-    raise FreshHostError("docker did not become ready")
+            last_failure = (
+                (ready.stderr or "").strip()[:400]
+                or (ready.stdout or "").strip()[:400]
+                or f"docker info exited {ready.returncode}"
+            )
+            if verbose:
+                log(f"[probe {attempt}] docker info rc={ready.returncode}: {last_failure}")
+        clock.sleep(deadline.clip(poll_seconds, clock))
+    raise FreshHostError(
+        f"docker did not become ready before the {deadline.limited_by} deadline "
+        f"({attempt} probe(s)); last: {last_failure}"
+    )
 
 
-def sysctl_int(name: str) -> int | None:
+def sysctl_int(name: str, *, timeout_seconds: float = 30) -> int | None:
     """Return one integer sysctl value when available."""
     try:
         completed = subprocess.run(
@@ -122,7 +172,7 @@ def sysctl_int(name: str) -> int | None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
