@@ -5,15 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
+from tests.utils.helpers._fresh_host.budget import RUNTIME_PHASE_MIN_SECONDS
+
 LOG_PREFIX: Final[str] = "[hosted-docker]"
 DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS: Final[int] = 1800
 PULL_HEARTBEAT_SECONDS: Final[int] = 30
 # Do not start a pull attempt, backoff, or recovery probe that cannot finish in budget.
 MIN_PULL_ATTEMPT_SECONDS: Final[int] = 60
-# One `wait_for_docker_ready` probe: 30s `docker info` timeout plus the 2s poll gap.
-READINESS_PROBE_SECONDS: Final[int] = 32
-MAX_RECOVERY_PROBES: Final[int] = 90
-BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
+# A runtime recovery between pull attempts gets the runtime phase's minimum layout: an
+# initial readiness window plus the reserved OrbStack recovery slice.
+PULL_RECOVERY_CAP_SECONDS: Final[int] = RUNTIME_PHASE_MIN_SECONDS
 # A stalled pull is retried at most this many times before it becomes terminal.
 MAX_STALL_RETRIES: Final[int] = 2
 # Backoff cap for generic pull failures (daemon hiccups, transient tooling errors).
@@ -102,6 +103,9 @@ class RuntimeInstallReport:
     recovery_attempts: list[RuntimeRecoveryAttemptReport] = field(
         default_factory=_empty_recovery_attempts
     )
+    last_failure_reason: str | None = None
+    deadline_epoch: float | None = None
+    deadline_limited_by: str | None = None
 
 
 @dataclass(slots=True)

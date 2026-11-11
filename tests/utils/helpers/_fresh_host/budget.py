@@ -31,9 +31,32 @@ _BUDGET_ENV_KEYS: Final[tuple[str, ...]] = (
 # Runner setup and checkout elapse before the budget is recorded; keep the deadline inside
 # the GitHub cap by that much.
 JOB_START_SKEW_SECONDS: Final[int] = 120
-PULL_PHASE_CAP_SECONDS: Final[int] = 1800
-# Time the pull helper needs after its deadline to terminate children and flush reports.
-PULL_PHASE_FLUSH_SECONDS: Final[int] = 120
+# Time a phase helper needs after its deadline to terminate children and flush reports; each
+# phase step's `timeout-minutes` backstop must cover its cap plus this margin.
+PHASE_FLUSH_SECONDS: Final[int] = 120
+IMAGE_PHASE_CAP_SECONDS: Final[int] = 1800
+# The runtime phase leaves at least this much for images. Hosted macOS image phases took up
+# to 1153s (Nov 2026 CI); the slice keeps a 25% margin over that.
+IMAGE_PHASE_MIN_SECONDS: Final[int] = 1440
+RUNTIME_PHASE_CAP_SECONDS: Final[int] = 600
+# Reserved up front for OrbStack recovery, so a slow initial readiness gate cannot starve it.
+RUNTIME_RECOVERY_RESERVE_SECONDS: Final[int] = 360
+RUNTIME_INITIAL_MIN_SECONDS: Final[int] = 60
+RUNTIME_PHASE_MIN_SECONDS: Final[int] = (
+    RUNTIME_INITIAL_MIN_SECONDS + RUNTIME_RECOVERY_RESERVE_SECONDS
+)
+# Never start a blocking command with less time than this left before its deadline.
+MIN_COMMAND_SECONDS: Final[float] = 1.0
+BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
+PHASE_CAP: Final[str] = "phase-cap"
+JOB_RESERVE: Final[str] = "job-reserve"
+
+
+class BudgetExhaustedError(FreshHostError):
+    """A phase or slice has no time left; the message starts with `budget_exhausted`."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(f"{BUDGET_EXHAUSTED}: {detail}")
 
 
 class Clock(Protocol):
@@ -187,38 +210,115 @@ class PhaseDeadline:
     monotonic_deadline: float
     limited_by: str
 
+    @classmethod
+    def after(
+        cls, seconds: float, *, clock: Clock = SYSTEM_CLOCK, limited_by: str = PHASE_CAP
+    ) -> PhaseDeadline:
+        """Return a deadline *seconds* from now."""
+        return cls(
+            wall_deadline_epoch=clock.time() + seconds,
+            monotonic_deadline=clock.monotonic() + seconds,
+            limited_by=limited_by,
+        )
+
     def remaining(self, clock: Clock) -> float:
         """Return the seconds left before the deadline, never negative."""
         return max(0.0, self.monotonic_deadline - clock.monotonic())
 
+    def clip(self, seconds: float, clock: Clock) -> float:
+        """Return *seconds* shortened to the time left before the deadline."""
+        return min(seconds, self.remaining(clock))
 
-def pull_phase_deadline(
+    def command_timeout(self, cap_seconds: float, clock: Clock) -> float:
+        """Return the timeout for one blocking command; raise when too little time is left."""
+        timeout = self.clip(cap_seconds, clock)
+        if timeout < MIN_COMMAND_SECONDS:
+            raise BudgetExhaustedError(f"{timeout:.1f}s left before the {self.limited_by} deadline")
+        return timeout
+
+    def slice(
+        self,
+        clock: Clock,
+        *,
+        cap_seconds: float | None = None,
+        reserve_seconds: float = 0.0,
+        limited_by: str | None = None,
+    ) -> PhaseDeadline:
+        """Return min(now + cap, this deadline - reserve); never later than this deadline.
+
+        *limited_by* labels the slice when its cap, not this deadline, is the bound.
+        """
+        end = self.monotonic_deadline - max(0.0, reserve_seconds)
+        label = self.limited_by
+        if cap_seconds is not None:
+            capped_end = clock.monotonic() + cap_seconds
+            if capped_end < end:
+                end = capped_end
+                label = limited_by or label
+        return PhaseDeadline(
+            wall_deadline_epoch=self.wall_deadline_epoch - (self.monotonic_deadline - end),
+            monotonic_deadline=end,
+            limited_by=label,
+        )
+
+
+def phase_deadline(
     budget: JobBudget | None,
     *,
+    phase: str,
+    phase_cap_seconds: int,
+    later_reserve_seconds: int = 0,
     clock: Clock = SYSTEM_CLOCK,
-    phase_cap_seconds: int = PULL_PHASE_CAP_SECONDS,
 ) -> PhaseDeadline:
-    """Return min(now + phase cap, job deadline - scenario reserve - observer reserve)."""
+    """Return min(now + phase cap, job deadline - reserves of every later phase).
+
+    The scenario and observer reserves are always later phases; *later_reserve_seconds*
+    adds the minimum slices of any phase that runs between this one and the scenario.
+    """
     now_wall = clock.time()
     now_monotonic = clock.monotonic()
     deadline = now_wall + phase_cap_seconds
-    limited_by = "phase-cap"
+    limited_by = PHASE_CAP
     if budget is not None:
         reserve_limit = (
             budget.deadline_epoch
             - budget.scenario_reserve_seconds
             - budget.observer_reserve_seconds
+            - later_reserve_seconds
         )
         if reserve_limit < deadline:
             deadline = reserve_limit
-            limited_by = "job-reserve"
+            limited_by = JOB_RESERVE
     if deadline <= now_wall:
-        raise FreshHostError(
-            "budget_exhausted: no image-pull time remains before the scenario and "
-            f"observer reserves (overdue by {now_wall - deadline:.0f}s)"
+        raise BudgetExhaustedError(
+            f"no {phase} time remains before the later-phase reserves "
+            f"(overdue by {now_wall - deadline:.0f}s)"
         )
     return PhaseDeadline(
         wall_deadline_epoch=deadline,
         monotonic_deadline=now_monotonic + (deadline - now_wall),
         limited_by=limited_by,
+    )
+
+
+def runtime_phase_deadline(
+    budget: JobBudget | None, *, clock: Clock = SYSTEM_CLOCK
+) -> PhaseDeadline:
+    """Return the runtime readiness deadline; it leaves the image phase its minimum slice."""
+    return phase_deadline(
+        budget,
+        phase="runtime",
+        phase_cap_seconds=RUNTIME_PHASE_CAP_SECONDS,
+        later_reserve_seconds=IMAGE_PHASE_MIN_SECONDS,
+        clock=clock,
+    )
+
+
+def image_phase_deadline(budget: JobBudget | None, *, clock: Clock = SYSTEM_CLOCK) -> PhaseDeadline:
+    """Return the image phase deadline; it gets whatever runtime left, up to its cap."""
+    return phase_deadline(
+        budget,
+        phase="image",
+        phase_cap_seconds=IMAGE_PHASE_CAP_SECONDS,
+        clock=clock,
     )

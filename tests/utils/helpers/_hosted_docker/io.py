@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,9 +21,14 @@ def now_iso() -> str:
 
 
 def write_json(payload: object, path: Path) -> None:
-    """Persist one JSON payload."""
+    """Persist one JSON payload atomically, so a killed step never leaves a torn report."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        staging.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 def write_github_env(assignments: dict[str, str], github_env_file: Path | None) -> None:

@@ -9,16 +9,22 @@ import pytest
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import fresh_host as fresh_host_script
 from tests.utils.helpers._fresh_host.budget import (
+    IMAGE_PHASE_CAP_SECONDS,
+    IMAGE_PHASE_MIN_SECONDS,
     JOB_DEADLINE_ENV,
     JOB_START_SKEW_SECONDS,
     JOB_STARTED_ENV,
     OBSERVER_RESERVE_ENV,
-    PULL_PHASE_CAP_SECONDS,
+    RUNTIME_PHASE_CAP_SECONDS,
     SCENARIO_RESERVE_ENV,
+    BudgetExhaustedError,
     JobBudget,
+    PhaseDeadline,
+    image_phase_deadline,
     initialize_job_budget,
-    pull_phase_deadline,
+    phase_deadline,
     record_job_budget,
+    runtime_phase_deadline,
 )
 from tests.utils.helpers._fresh_host.models import FreshHostError
 from tests.utils.helpers.clock import FakeClock
@@ -121,23 +127,23 @@ def test_job_budget_from_env_rejects_invalid_records(environ: dict[str, str], me
         JobBudget.from_env(environ)
 
 
-def test_pull_phase_deadline_uses_phase_cap_when_reserves_allow() -> None:
+def test_image_phase_deadline_uses_phase_cap_when_reserves_allow() -> None:
     clock = FakeClock()
     budget = _macos_budget(clock)
     clock.advance(4 * 60)
 
-    deadline = pull_phase_deadline(budget, clock=clock)
+    deadline = image_phase_deadline(budget, clock=clock)
 
     assert deadline.limited_by == "phase-cap"
-    assert deadline.remaining(clock) == PULL_PHASE_CAP_SECONDS
+    assert deadline.remaining(clock) == IMAGE_PHASE_CAP_SECONDS
 
 
-def test_pull_phase_deadline_protects_scenario_and_observer_reserves() -> None:
+def test_image_phase_deadline_protects_scenario_and_observer_reserves() -> None:
     clock = FakeClock()
     budget = _macos_budget(clock)
     clock.advance(20 * 60)
 
-    deadline = pull_phase_deadline(budget, clock=clock)
+    deadline = image_phase_deadline(budget, clock=clock)
 
     assert deadline.limited_by == "job-reserve"
     reserve_limit = budget.deadline_epoch - (35 + 15) * 60
@@ -145,27 +151,103 @@ def test_pull_phase_deadline_protects_scenario_and_observer_reserves() -> None:
     assert deadline.remaining(clock) == pytest.approx(reserve_limit - clock.wall)
 
 
-def test_pull_phase_deadline_fails_fast_once_reserves_are_reached() -> None:
+def test_image_phase_deadline_fails_fast_once_reserves_are_reached() -> None:
     clock = FakeClock()
     budget = _macos_budget(clock)
     clock.advance(40 * 60)
 
-    with pytest.raises(FreshHostError, match="^budget_exhausted"):
-        pull_phase_deadline(budget, clock=clock)
+    with pytest.raises(BudgetExhaustedError, match="^budget_exhausted"):
+        image_phase_deadline(budget, clock=clock)
 
 
-def test_pull_phase_deadline_without_budget_is_capped() -> None:
+def test_phase_deadline_without_budget_is_capped() -> None:
     clock = FakeClock()
 
-    deadline = pull_phase_deadline(None, clock=clock, phase_cap_seconds=90)
+    deadline = phase_deadline(None, phase="test", phase_cap_seconds=90, clock=clock)
 
     assert deadline.limited_by == "phase-cap"
     assert deadline.remaining(clock) == 90
 
 
+def test_runtime_phase_deadline_uses_its_cap_when_the_job_has_room() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(2 * 60)
+
+    deadline = runtime_phase_deadline(budget, clock=clock)
+
+    assert deadline.limited_by == "phase-cap"
+    assert deadline.remaining(clock) == RUNTIME_PHASE_CAP_SECONDS
+
+
+def test_runtime_phase_deadline_reserves_the_image_phase_minimum() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(5 * 60)
+
+    deadline = runtime_phase_deadline(budget, clock=clock)
+
+    assert deadline.limited_by == "job-reserve"
+    image_floor = budget.deadline_epoch - (35 + 15) * 60 - IMAGE_PHASE_MIN_SECONDS
+    assert deadline.wall_deadline_epoch == image_floor
+    assert deadline.remaining(clock) == pytest.approx(540)
+
+
+def test_runtime_phase_deadline_fails_fast_when_later_reserves_consume_the_budget() -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(15 * 60)
+
+    with pytest.raises(BudgetExhaustedError, match="^budget_exhausted: no runtime time"):
+        runtime_phase_deadline(budget, clock=clock)
+
+
+@pytest.mark.parametrize(
+    ("runtime_spend", "expected_image_seconds", "limited_by"),
+    [(1.0, IMAGE_PHASE_CAP_SECONDS, "phase-cap"), (None, IMAGE_PHASE_MIN_SECONDS, "job-reserve")],
+)
+def test_image_phase_consumes_what_the_runtime_phase_left(
+    runtime_spend: float | None, expected_image_seconds: int, limited_by: str
+) -> None:
+    clock = FakeClock()
+    budget = _macos_budget(clock)
+    clock.advance(5 * 60)
+    runtime = runtime_phase_deadline(budget, clock=clock)
+    clock.advance(runtime.remaining(clock) if runtime_spend is None else runtime_spend)
+
+    image = image_phase_deadline(budget, clock=clock)
+
+    assert image.limited_by == limited_by
+    assert image.remaining(clock) == pytest.approx(expected_image_seconds)
+
+
+def test_phase_deadline_slice_never_outlives_its_parent() -> None:
+    clock = FakeClock()
+    parent = PhaseDeadline.after(300, clock=clock, limited_by="job-reserve")
+
+    capped = parent.slice(clock, cap_seconds=100, limited_by="recovery-cap")
+    reserved = parent.slice(clock, cap_seconds=1000, reserve_seconds=60, limited_by="unused")
+    overdrawn = parent.slice(clock, reserve_seconds=400)
+
+    assert (capped.remaining(clock), capped.limited_by) == (100, "recovery-cap")
+    assert (reserved.remaining(clock), reserved.limited_by) == (240, "job-reserve")
+    assert reserved.wall_deadline_epoch == parent.wall_deadline_epoch - 60
+    assert overdrawn.remaining(clock) == 0.0
+
+
+def test_phase_deadline_command_timeout_refuses_to_start_without_time() -> None:
+    clock = FakeClock()
+    deadline = PhaseDeadline.after(30, clock=clock)
+
+    assert deadline.command_timeout(120, clock) == 30
+    clock.advance(29.5)
+    with pytest.raises(BudgetExhaustedError, match="^budget_exhausted"):
+        deadline.command_timeout(120, clock)
+
+
 def test_phase_deadline_follows_monotonic_time_after_wall_clock_jumps() -> None:
     clock = FakeClock()
-    deadline = pull_phase_deadline(None, clock=clock, phase_cap_seconds=300)
+    deadline = PhaseDeadline.after(300, clock=clock)
 
     clock.wall -= 3600
     clock.mono += 100

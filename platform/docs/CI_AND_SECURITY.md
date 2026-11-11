@@ -184,12 +184,16 @@ diagnostics, and summary generation to executable helper scripts under `tests/sc
 - Each fresh-host job records a non-resettable budget right after checkout
   (`fresh_host.py initialize-budget`): an absolute deadline inside the job's
   `timeout-minutes` cap, plus scenario and observer reserves that equal the
-  scenario step timeout and the summed observer step timeouts. Image pulls stop at
-  `min(now + 30m, job deadline - scenario reserve - observer reserve)`. Each pull
-  attempt, backoff, and recovery probe is clipped to that deadline, so a stalled
-  pull ends as `budget_exhausted` while there is still time for the scenario
-  verdict and the diagnostics upload. Every heavy and observer step also has its
-  own `timeout-minutes`.
+  scenario step timeout and the summed observer step timeouts. Each phase deadline is
+  `min(now + phase cap, job deadline - reserves of every later phase)`. The macOS
+  runtime gate stops at `min(now + 10m, job deadline - 24m image minimum - scenario
+  reserve - observer reserve)`, and reserves 6m of that for OrbStack recovery. Image
+  pulls then get whatever is left, up to 30m. Every probe, command, backoff,
+  recovery, and diagnostics collection is clipped to its deadline, and timed-out
+  commands are killed as a process group. A stalled phase therefore ends as
+  `budget_exhausted`, with its report written, while there is still time for the
+  scenario verdict and the diagnostics upload. Each step's `timeout-minutes` is only
+  a backstop: its phase cap plus a flush margin.
 - `ensure-images` owns the only retry loop. On macOS it restarts OrbStack in place
   after a daemon-connectivity failure, rather than rerunning the whole operation
   from the shell. It always writes `image-ensure-report.json`, and it appends

@@ -244,12 +244,12 @@ def test_ensure_images_fails_before_pulling_when_disk_is_insufficient(
 
     test_context.patch.patch_object(hosted_docker_images, "run_checked", new=fake_run_checked)
 
-    def no_local_images(images: list[str]) -> list[str]:
-        del images
+    def no_local_images(images: list[str], **kwargs: object) -> list[str]:
+        del images, kwargs
         return []
 
-    def fake_docker_root(*, cwd: Path, env: dict[str, str]) -> Path:
-        del cwd, env
+    def fake_docker_root(*, cwd: Path, env: dict[str, str], timeout_seconds: float) -> Path:
+        del cwd, env, timeout_seconds
         return tmp_path
 
     test_context.patch.patch_object(hosted_docker_images, "list_local_images", new=no_local_images)

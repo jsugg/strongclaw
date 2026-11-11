@@ -13,11 +13,13 @@ from typing import Final
 
 from clawops.strongclaw_runtime import load_env_assignments, varlock_local_env_file
 from tests.utils.helpers._fresh_host.budget import (
+    BUDGET_EXHAUSTED,
+    MIN_COMMAND_SECONDS,
     SYSTEM_CLOCK,
     Clock,
     JobBudget,
     PhaseDeadline,
-    pull_phase_deadline,
+    image_phase_deadline,
 )
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context
@@ -25,23 +27,23 @@ from tests.utils.helpers._hosted_docker.disk import (
     INSUFFICIENT_DISK,
     docker_root_dir,
     ensure_pull_capacity,
+    remove_with_sudo,
 )
 from tests.utils.helpers._hosted_docker.events import PullEventLog
 from tests.utils.helpers._hosted_docker.io import log, now_iso, write_json
 from tests.utils.helpers._hosted_docker.models import (
-    BUDGET_EXHAUSTED,
     DEFAULT_DOCKER_PULL_TIMEOUT_SECONDS,
-    MAX_RECOVERY_PROBES,
     MAX_STALL_RETRIES,
     MIN_PULL_ATTEMPT_SECONDS,
     PULL_HEARTBEAT_SECONDS,
+    PULL_RECOVERY_CAP_SECONDS,
     PULL_RETRY_BACKOFF_CAP_SECONDS,
-    READINESS_PROBE_SECONDS,
     REGISTRY_RETRY_BACKOFF_BASE_SECONDS,
     REGISTRY_RETRY_BACKOFF_CAP_SECONDS,
     ImageEnsureReport,
     PullAttemptRecord,
     PullReport,
+    RuntimeInstallReport,
 )
 from tests.utils.helpers._hosted_docker.pull_client import (
     RETRYABLE_FAILURE_CLASSES,
@@ -51,11 +53,27 @@ from tests.utils.helpers._hosted_docker.pull_client import (
     PullOutcome,
 )
 from tests.utils.helpers._hosted_docker.runtime import wait_runtime_ready
-from tests.utils.helpers._hosted_docker.shell import run_checked, wait_for_docker_ready
+from tests.utils.helpers._hosted_docker.shell import (
+    run_checked,
+    run_command,
+    wait_for_docker_ready,
+)
 
 COMPOSE_IMAGE_RESOLUTION_PLACEHOLDER: Final[str] = "compose-image-resolution-placeholder"
 PULL_EVENTS_FILE_NAME: Final[str] = "image-pull-events.jsonl"
 DISK_PREFLIGHT_FILE_NAME: Final[str] = "disk-preflight.json"
+COMPOSE_RESOLUTION_TIMEOUT_SECONDS: Final[int] = 120
+IMAGE_INSPECT_TIMEOUT_SECONDS: Final[int] = 60
+DOCKER_ROOT_PROBE_TIMEOUT_SECONDS: Final[int] = 60
+RUNNER_PATH_REMOVAL_TIMEOUT_SECONDS: Final[int] = 600
+_RECOVERY_CAP_LABEL: Final[str] = "recovery-cap"
+
+type RuntimeRecovery = Callable[[PhaseDeadline], object]
+
+
+def _command_timeout(cap_seconds: float, deadline: PhaseDeadline | None, clock: Clock) -> float:
+    """Clip one blocking command to the phase deadline, when there is one."""
+    return cap_seconds if deadline is None else deadline.command_timeout(cap_seconds, clock)
 
 
 def compose_probe_env(
@@ -83,7 +101,12 @@ def compose_probe_env(
 
 
 def resolve_compose_images(
-    compose_files: Sequence[Path], *, cwd: Path, env: dict[str, str]
+    compose_files: Sequence[Path],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    deadline: PhaseDeadline | None = None,
+    clock: Clock = SYSTEM_CLOCK,
 ) -> list[str]:
     """Resolve compose image references in first-seen order."""
     images: list[str] = []
@@ -94,7 +117,7 @@ def resolve_compose_images(
             cwd=cwd,
             env=env,
             capture_output=True,
-            timeout_seconds=120,
+            timeout_seconds=_command_timeout(COMPOSE_RESOLUTION_TIMEOUT_SECONDS, deadline, clock),
         )
         for raw_line in completed.stdout.splitlines():
             image = raw_line.strip()
@@ -106,16 +129,30 @@ def resolve_compose_images(
     return images
 
 
-def list_local_images(images: Sequence[str]) -> list[str]:
-    """Return the image refs already present in the local daemon."""
+def list_local_images(
+    images: Sequence[str],
+    *,
+    deadline: PhaseDeadline | None = None,
+    clock: Clock = SYSTEM_CLOCK,
+) -> list[str]:
+    """Return the image refs already present in the local daemon.
+
+    An inspect that outlives its clipped timeout counts as absent, so it is pulled or
+    reported missing instead of hanging the phase.
+    """
     present: list[str] = []
     for image in images:
-        result = subprocess.run(
-            ["docker", "image", "inspect", image],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = run_command(
+                ["docker", "image", "inspect", image],
+                cwd=Path.cwd(),
+                env=dict(os.environ),
+                timeout_seconds=_command_timeout(IMAGE_INSPECT_TIMEOUT_SECONDS, deadline, clock),
+                capture_output=True,
+            )
+        except subprocess.TimeoutExpired:
+            log(f"docker image inspect {image} timed out; treating it as absent.")
+            continue
         if result.returncode == 0:
             present.append(image)
     return present
@@ -142,12 +179,27 @@ def _attempt_timeout_seconds(
     return max(1, min(pull_timeout_seconds, int(deadline.remaining(clock))))
 
 
-def _recovery_probe_attempts(deadline: PhaseDeadline | None, clock: Clock) -> int:
-    """Return how many readiness probes fit in the remaining budget."""
+def _recovery_deadline(deadline: PhaseDeadline | None, clock: Clock) -> PhaseDeadline:
+    """Return the runtime recovery slice; it leaves room for one more pull attempt."""
     if deadline is None:
-        return MAX_RECOVERY_PROBES
-    fitting = int(deadline.remaining(clock) // READINESS_PROBE_SECONDS)
-    return max(1, min(MAX_RECOVERY_PROBES, fitting))
+        return PhaseDeadline.after(
+            PULL_RECOVERY_CAP_SECONDS, clock=clock, limited_by=_RECOVERY_CAP_LABEL
+        )
+    return deadline.slice(
+        clock,
+        cap_seconds=PULL_RECOVERY_CAP_SECONDS,
+        reserve_seconds=MIN_PULL_ATTEMPT_SECONDS,
+        limited_by=_RECOVERY_CAP_LABEL,
+    )
+
+
+def _orbstack_recovery(context_path: Path, clock: Clock) -> RuntimeRecovery:
+    """Return a runtime restart that stays inside the slice the pull loop hands it."""
+
+    def recover(recovery_deadline: PhaseDeadline) -> RuntimeInstallReport:
+        return wait_runtime_ready(context_path, deadline=recovery_deadline, clock=clock)
+
+    return recover
 
 
 def _budget_allows(deadline: PhaseDeadline | None, clock: Clock, *, spend: float = 0.0) -> bool:
@@ -187,7 +239,7 @@ def pull_images(
     deadline: PhaseDeadline | None = None,
     clock: Clock = SYSTEM_CLOCK,
     event_log: PullEventLog | None = None,
-    recover_runtime: Callable[[], object] | None = None,
+    recover_runtime: RuntimeRecovery | None = None,
     client: DockerPullClient | None = None,
     jitter: Callable[[float], float] = _full_jitter,
     stall_seconds: float = STALL_TIMEOUT_SECONDS,
@@ -317,16 +369,25 @@ def pull_images(
                 log("Detected transient registry connectivity failure; backing off before retry.")
             else:
                 log("Retrying image pull after failure; probing Docker runtime before retry.")
+            recovery_deadline = _recovery_deadline(deadline, clock)
+            if recovery_deadline.remaining(clock) < MIN_COMMAND_SECONDS:
+                budget_exhausted = True
+                break
             try:
                 if daemon_failure and recover_runtime is not None:
                     # A dead runtime needs a restart, not just a wait (OrbStack on macOS).
-                    emit("runtime_recovery", attempt=attempt_count)
-                    recover_runtime()
+                    emit(
+                        "runtime_recovery",
+                        attempt=attempt_count,
+                        remaining_seconds=round(recovery_deadline.remaining(clock), 1),
+                    )
+                    recover_runtime(recovery_deadline)
                 else:
                     wait_for_docker_ready(
                         cwd=recovery_cwd,
                         env=recovery_env,
-                        max_attempts=_recovery_probe_attempts(deadline, clock),
+                        deadline=recovery_deadline,
+                        clock=clock,
                     )
             except FreshHostError as exc:
                 log(f"Docker daemon recovery probe failed: {exc}")
@@ -397,16 +458,30 @@ def preflight_linux_disk(
     env: Mapping[str, str],
     missing_images: Sequence[str],
     event_log: PullEventLog,
+    deadline: PhaseDeadline,
+    clock: Clock = SYSTEM_CLOCK,
 ) -> str | None:
     """Assert Linux pull capacity before pulling; return the preflight report path."""
     if context.platform != "linux" or not missing_images:
         return None
     report_path = Path(context.report_dir).resolve() / DISK_PREFLIGHT_FILE_NAME
+
+    def remove_within_deadline(path: Path) -> None:
+        remove_with_sudo(
+            path,
+            timeout_seconds=deadline.command_timeout(RUNNER_PATH_REMOVAL_TIMEOUT_SECONDS, clock),
+        )
+
     try:
         report = ensure_pull_capacity(
-            docker_root=docker_root_dir(cwd=repo_root, env=env),
+            docker_root=docker_root_dir(
+                cwd=repo_root,
+                env=env,
+                timeout_seconds=deadline.command_timeout(DOCKER_ROOT_PROBE_TIMEOUT_SECONDS, clock),
+            ),
             missing_images=missing_images,
             report_path=report_path,
+            remover=remove_within_deadline,
         )
     except FreshHostError as exc:
         event_log.emit("disk_preflight", sufficient=False, error=str(exc))
@@ -479,7 +554,7 @@ def ensure_images(
         return persist(build_report(None, None))
 
     try:
-        deadline = pull_phase_deadline(
+        deadline = image_phase_deadline(
             JobBudget.from_env(os.environ if environ is None else environ), clock=clock
         )
         event_log = PullEventLog(events_path)
@@ -492,8 +567,10 @@ def ensure_images(
         env = compose_probe_env(
             context=context, repo_root=repo_root, compose_state_dir_name="compose-prepull"
         )
-        state["images"] = resolve_compose_images(compose_files, cwd=repo_root, env=env)
-        state["local_before"] = list_local_images(state["images"])
+        state["images"] = resolve_compose_images(
+            compose_files, cwd=repo_root, env=env, deadline=deadline, clock=clock
+        )
+        state["local_before"] = list_local_images(state["images"], deadline=deadline, clock=clock)
         state["missing_before_pull"] = [
             image for image in state["images"] if image not in state["local_before"]
         ]
@@ -503,6 +580,8 @@ def ensure_images(
             env=env,
             missing_images=state["missing_before_pull"],
             event_log=event_log,
+            deadline=deadline,
+            clock=clock,
         )
         if state["missing_before_pull"]:
             pull_report = pull_images(
@@ -515,12 +594,10 @@ def ensure_images(
                 clock=clock,
                 event_log=event_log,
                 recover_runtime=(
-                    (lambda: wait_runtime_ready(context_path))
-                    if context.platform == "macos"
-                    else None
+                    _orbstack_recovery(context_path, clock) if context.platform == "macos" else None
                 ),
             )
-        local_after_pull = list_local_images(state["images"])
+        local_after_pull = list_local_images(state["images"], deadline=deadline, clock=clock)
         state["missing_after_pull"] = [
             image for image in state["images"] if image not in local_after_pull
         ]
