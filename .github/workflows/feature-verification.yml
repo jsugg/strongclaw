@@ -53,18 +53,18 @@ jobs:
             scenario: linux-features
             # LiteLLM reaches the fake Ollama upstream from its container via host-gateway.
             fake_model_host: 0.0.0.0
-            fake_model_ports: --port 8000 --port 11434
+            fake_model_ports: --port 18000 --port 11434
           - lane: linux-lancedb
             profile: memory-lancedb-pro
             scenario: linux-features
             fake_model_host: 0.0.0.0
-            fake_model_ports: --port 8000 --port 11434
+            fake_model_ports: --port 18000 --port 11434
           - lane: linux-profiles
             profile: openclaw-default
             scenario: linux-features-local
             fake_model_host: 127.0.0.1
             # 11434 stays free for the optional Ollama compose stack this lane starts.
-            fake_model_ports: --port 8000
+            fake_model_ports: --port 18000
     env:
       FRESH_HOST_SELECTED_DOCKER_PULL_PARALLELISM: "2"
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: "5"
@@ -102,14 +102,20 @@ jobs:
       - name: Start the fake model provider
         timeout-minutes: 2
         run: ./tests/scripts/feature_verification.py start-fake-model --host "${{ matrix.fake_model_host }}" ${{ matrix.fake_model_ports }} --state-dir "${RUNNER_TEMP}/fake-model"
-      - name: Point the env contract at the fake model provider
-        run: ./tests/scripts/feature_verification.py configure-model-provider --context "${FRESH_HOST_CONTEXT}"
+      - name: Select the fake model provider in the env contract
+        run: ./tests/scripts/feature_verification.py seed-env-contract --context "${FRESH_HOST_CONTEXT}"
       # Bootstrap + setup are themselves verified features; a failure here is reported per
       # feature by the lane, which falls back to a harness gateway for the remaining features.
       - name: Bootstrap and set up the host
         continue-on-error: true
         timeout-minutes: 45
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      # The operator step after setup: declare the provider, then `clawops model-auth ensure`.
+      - name: Register the fake model provider
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 16
+        run: ./tests/scripts/feature_verification.py apply-model-provider --context "${FRESH_HOST_CONTEXT}"
       - name: Run lane features
         timeout-minutes: 60
         run: ./tests/scripts/feature_verification.py run-lane --context "${FRESH_HOST_CONTEXT}" --lane "${{ matrix.lane }}" --results "${FEATURE_RESULTS_DIR}/feature-results-${{ matrix.lane }}.json" --fake-model-dir "${RUNNER_TEMP}/fake-model"
@@ -209,14 +215,20 @@ jobs:
         run: ./tests/scripts/hosted_docker.py ensure-images --context "${FRESH_HOST_CONTEXT}"
       - name: Start the fake model provider
         timeout-minutes: 2
-        run: ./tests/scripts/feature_verification.py start-fake-model --host 127.0.0.1 --port 8000 --port 11434 --state-dir "${RUNNER_TEMP}/fake-model"
-      - name: Point the env contract at the fake model provider
-        run: ./tests/scripts/feature_verification.py configure-model-provider --context "${FRESH_HOST_CONTEXT}"
+        run: ./tests/scripts/feature_verification.py start-fake-model --host 127.0.0.1 --port 18000 --port 11434 --state-dir "${RUNNER_TEMP}/fake-model"
+      - name: Select the fake model provider in the env contract
+        run: ./tests/scripts/feature_verification.py seed-env-contract --context "${FRESH_HOST_CONTEXT}"
       # The scenario recovers a Docker runtime lost mid-run inside its own budget.
       - name: Bootstrap and set up the host
         continue-on-error: true
         timeout-minutes: 40
         run: ./tests/scripts/fresh_host.py run-scenario --context "${FRESH_HOST_CONTEXT}"
+      # The operator step after setup: declare the provider, then `clawops model-auth ensure`.
+      - name: Register the fake model provider
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 16
+        run: ./tests/scripts/feature_verification.py apply-model-provider --context "${FRESH_HOST_CONTEXT}"
       - name: Run lane features
         timeout-minutes: 35
         run: ./tests/scripts/feature_verification.py run-lane --context "${FRESH_HOST_CONTEXT}" --lane macos-launchd --results "${FEATURE_RESULTS_DIR}/feature-results-macos-launchd.json" --fake-model-dir "${RUNNER_TEMP}/fake-model"

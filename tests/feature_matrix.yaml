@@ -50,12 +50,12 @@ features:
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_bootstrap_installs_the_locked_toolchain
   - id: setup.guided
     category: host-lifecycle
-    title: clawops setup (non-interactive) renders config, applies model auth, activates services
+    title: clawops setup (non-interactive) renders the profile and activates the host services
     call_sites:
       - src/clawops/setup_cli.py:310
       - src/clawops/setup_cli.py:139
     lanes: [linux-core, macos-launchd]
-    verification: fake-model
+    verification: live
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_guided_setup_completes_with_service_activation
   - id: services.systemd
     category: host-lifecycle
@@ -872,3 +872,19 @@ features:
     lanes: [linux-profiles]
     verification: live
     test: tests/suites/e2e/feature_verification/test_devflow_planning.py::test_devflow_plan_status_audit
+  - id: devflow.run
+    category: devflow
+    title: devflow run dispatches the architect-to-lead stage workers and audits the run
+    call_sites: [src/clawops/devflow.py:657]
+    status: unverifiable
+    reason: Every stage dispatches a subscription-authenticated vendor coding agent (claude/codex) that must author the stage artifacts (design, tasks, tests, QA report); CI has no vendor accounts and a stub cannot author meaningful artifacts. Dispatch routing is covered by the acp.* features and planning by devflow.plan-status-audit.
+  - id: profile.bundled-provider-plugins
+    category: profiles
+    title: Memory-profile plugin allowlists keep OpenClaw's bundled ollama provider loadable
+    call_sites:
+      - platform/configs/openclaw/77-hypermemory.example.json5:3
+      - platform/configs/openclaw/75-memory-lancedb-pro.local.json5:3
+      - src/clawops/strongclaw_model_auth.py:232
+    lanes: [linux-core, linux-lancedb]
+    verification: live
+    test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_profile_allowlist_keeps_bundled_provider_plugins

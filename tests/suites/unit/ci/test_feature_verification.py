@@ -13,7 +13,6 @@ import pytest
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import linux as fresh_host_linux
-from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 from tests.utils.helpers.feature_verification import (
     ACP_STUB_REPLY_PREFIX,
     REPLY_PREFIX,
@@ -282,9 +281,8 @@ def test_feature_scenarios_install_into_the_runner_home(
     )
     assert Path(context.app_home) == Path.home()
     assert context.xdg_runtime_dir is not None and context.xdg_runtime_dir.startswith("/run/user/")
-    assert fresh_host_shell.phase_env(context)["OPENCLAW_MODEL_SETUP_MODE"] == "auto"
     reloaded = fresh_host.load_context(Path(context.context_path))
-    assert reloaded.use_host_home is True and reloaded.model_setup_mode == "auto"
+    assert reloaded.use_host_home is True
 
 
 def test_legacy_context_files_default_the_new_fields(
@@ -301,11 +299,11 @@ def test_legacy_context_files_default_the_new_fields(
         github_env_file=None,
     )
     payload = json.loads(Path(context.context_path).read_text(encoding="utf-8"))
-    del payload["model_setup_mode"], payload["use_host_home"]
+    del payload["use_host_home"]
     Path(context.context_path).write_text(json.dumps(payload), encoding="utf-8")
     reloaded = fresh_host.load_context(Path(context.context_path))
-    assert reloaded.model_setup_mode == "skip" and reloaded.use_host_home is False
-    assert fresh_host_shell.phase_env(reloaded)["OPENCLAW_MODEL_SETUP_MODE"] == "skip"
+    assert reloaded.use_host_home is False
+    assert Path(reloaded.app_home) == Path(context.tmp_root) / "home"
 
 
 @pytest.mark.parametrize(

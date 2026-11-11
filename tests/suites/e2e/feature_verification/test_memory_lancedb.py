@@ -95,7 +95,8 @@ def test_import_pro_snapshot_lands_in_lancedb(feature_host: FeatureHost) -> None
     assert token in search.stdout, f"memory-pro search cannot find the import\n{search.describe()}"
 
 
-def test_verify_pro_parity_against_live_plugin(feature_host: FeatureHost) -> None:
+def test_verify_pro_parity_against_live_plugin(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     token = f"FV-parity-{uuid.uuid4().hex[:10]}"
     snapshot, _ = _migrate(feature_host, token)
     feature_host.clawops(

@@ -137,7 +137,6 @@ def prepare_context(
         compose_files=[
             str((repo_root / relative_path).resolve()) for relative_path in spec.compose_files
         ],
-        model_setup_mode=spec.model_setup_mode,
         use_host_home=spec.use_host_home,
     )
     report = FreshHostReport(

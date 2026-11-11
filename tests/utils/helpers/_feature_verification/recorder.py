@@ -10,6 +10,7 @@ from typing import Final
 
 import pytest
 
+from clawops.strongclaw_runtime import varlock_local_env_file
 from tests.utils.helpers._feature_verification.envvars import (
     CONTEXT_ENV,
     LANE_ENV,
@@ -23,6 +24,7 @@ from tests.utils.helpers._feature_verification.manifest import (
     FeatureVerificationError,
     load_manifest,
 )
+from tests.utils.helpers._feature_verification.redaction import redact, secret_values
 from tests.utils.helpers._feature_verification.results import (
     MAX_MESSAGE_CHARS,
     FeatureResult,
@@ -140,6 +142,9 @@ class LaneRecorder:
                         message="test was scheduled on this lane but did not run",
                     )
                 )
+        secrets = secret_values(varlock_local_env_file(REPO_ROOT))
+        for result in results:
+            result.message = redact(result.message, secrets)
         lane_results = LaneResults(
             lane=self.lane_id,
             platform=lane.platform,

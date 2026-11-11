@@ -17,6 +17,7 @@ from tests.utils.helpers.feature_verification import (
     FeatureHost,
     GatewayController,
     LaneRecorder,
+    ensure_sidecars,
     is_feature_suite_item,
 )
 
@@ -80,6 +81,12 @@ def feature_host(request: pytest.FixtureRequest) -> FeatureHost:
                 else f"unavailable (exit {outcome.returncode})"
             )
     return host
+
+
+@pytest.fixture(scope="session")
+def sidecars(feature_host: FeatureHost) -> str:
+    """Return how the sidecar stack came up: by its service, or by the harness fallback."""
+    return ensure_sidecars(feature_host)
 
 
 @pytest.fixture(scope="session")

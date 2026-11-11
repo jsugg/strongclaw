@@ -40,13 +40,12 @@ from tests.utils.helpers._feature_verification.manifest import (
     load_manifest,
 )
 from tests.utils.helpers._feature_verification.processes import fetch_journal, load_state
+from tests.utils.helpers._feature_verification.redaction import redact, secret_values
 from tests.utils.helpers._fresh_host.models import FreshHostContext
 from tests.utils.helpers._fresh_host.storage import load_context
 
 _HARNESS_ENV_PREFIXES: Final[tuple[str, ...]] = ("FEATURE_VERIFICATION_", "PYTEST_")
 _FRAMEWORK_ENV_KEYS: Final[frozenset[str]] = frozenset({"TEST_ID", "RESOURCE_PREFIX", "WORKER_ID"})
-_SECRET_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"(TOKEN|KEY|PASSWORD|SECRET)")
-_MIN_REDACTED_LENGTH: Final[int] = 8
 _JSON_START: Final[re.Pattern[str]] = re.compile(r"(?m)^[ \t]*[\[{]")
 _OUTPUT_TAIL_CHARS: Final[int] = 3000
 
@@ -66,6 +65,26 @@ def extract_json(text: str) -> object:
             continue
         return cast(object, payload)
     raise AssertionError(f"no JSON document in command output: {text[-_OUTPUT_TAIL_CHARS:]!r}")
+
+
+def reply_texts(payload: object) -> list[str]:
+    """Collect every ``payloads[].text`` from an ``openclaw agent --json`` envelope."""
+    texts: list[str] = []
+    if isinstance(payload, dict):
+        mapping = cast(dict[str, object], payload)
+        for key, value in mapping.items():
+            if key == "payloads" and isinstance(value, list):
+                texts.extend(
+                    str(cast(dict[str, object], item).get("text"))
+                    for item in cast(list[object], value)
+                    if isinstance(item, dict) and cast(dict[str, object], item).get("text")
+                )
+            else:
+                texts.extend(reply_texts(value))
+    elif isinstance(payload, list):
+        for item in cast(list[object], payload):
+            texts.extend(reply_texts(item))
+    return texts
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +130,11 @@ class FeatureHost:
     """The provisioned host one feature-verification lane runs against."""
 
     lane: Lane
-    manifest: FeatureManifest
-    context: FreshHostContext
+    manifest: FeatureManifest = field(repr=False)
+    context: FreshHostContext = field(repr=False)
     work_dir: Path
     fake_model_dir: Path | None
-    _secrets: tuple[str, ...] = field(default_factory=tuple)
+    _secrets: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None) -> FeatureHost:
@@ -178,24 +197,11 @@ class FeatureHost:
         return load_env_assignments(self.env_file())
 
     def _refresh_secrets(self) -> None:
-        values = self.env_values() if self.env_file().is_file() else {}
-        self._secrets = tuple(
-            sorted(
-                {
-                    value
-                    for key, value in values.items()
-                    if _SECRET_KEY_PATTERN.search(key) and len(value) >= _MIN_REDACTED_LENGTH
-                },
-                key=len,
-                reverse=True,
-            )
-        )
+        self._secrets = secret_values(self.env_file())
 
     def redact(self, text: str) -> str:
         """Replace known secret values in *text*."""
-        for secret in self._secrets:
-            text = text.replace(secret, "[REDACTED]")
-        return text
+        return redact(text, self._secrets)
 
     def product_env(self, overrides: Mapping[str, str] | None = None) -> dict[str, str]:
         """Return the operator environment with harness variables removed."""
@@ -271,6 +277,19 @@ class FeatureHost:
     ) -> CommandOutcome:
         """Run ``openclaw`` exactly as StrongClaw does: inside ``varlock run``."""
         argv = wrap_command_with_varlock(self.repo_root, ["openclaw", *arguments])
+        return self.run(argv, cwd=cwd, timeout=timeout, env=env)
+
+    def clawops_managed(
+        self,
+        *arguments: str,
+        cwd: Path | None = None,
+        timeout: float = 300,
+        env: Mapping[str, str] | None = None,
+    ) -> CommandOutcome:
+        """Run ``clawops`` inside ``varlock run``, as StrongClaw's own runtime callers do."""
+        argv = wrap_command_with_varlock(
+            self.repo_root, [str(self.python), "-m", "clawops", *arguments]
+        )
         return self.run(argv, cwd=cwd, timeout=timeout, env=env)
 
     def fake_model_requests(self) -> list[dict[str, object]]:

@@ -28,7 +28,6 @@ from tests.utils.helpers._feature_verification.diagnostics import (  # noqa: E40
 from tests.utils.helpers._feature_verification.fake_model import FakeModelServer  # noqa: E402
 from tests.utils.helpers._feature_verification.lane import (  # noqa: E402
     LaneError,
-    configure_model_provider,
     enable_systemd_user_manager,
     run_lane,
 )
@@ -36,6 +35,11 @@ from tests.utils.helpers._feature_verification.processes import (  # noqa: E402
     FakeModelProcessError,
     start_detached,
     stop_detached,
+)
+from tests.utils.helpers._feature_verification.provider import (  # noqa: E402
+    ProviderError,
+    apply_model_provider,
+    seed_env_contract,
 )
 
 
@@ -60,9 +64,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     stop = subparsers.add_parser("stop-fake-model", help="Stop the detached fake model API.")
     stop.add_argument("--state-dir", type=Path, required=True)
 
+    seed = subparsers.add_parser(
+        "seed-env-contract",
+        help="Select the fake model provider in the operator env contract (before bootstrap).",
+    )
+    seed.add_argument("--context", type=Path, required=True)
+
     provider = subparsers.add_parser(
-        "configure-model-provider",
-        help="Point the operator env contract at the fake model server.",
+        "apply-model-provider",
+        help="Register the fake provider in the rendered config and run model-auth ensure.",
     )
     provider.add_argument("--context", type=Path, required=True)
 
@@ -87,6 +97,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _serve(host: str, ports: list[int]) -> int:
     """Serve until SIGTERM or SIGINT."""
+    print(f"starting fake model server on {host}:{ports}", flush=True)
     server = FakeModelServer(host=host, ports=ports)
     stopped = threading.Event()
 
@@ -121,9 +132,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "stop-fake-model":
             print(json.dumps({"stopped": stop_detached(_resolved(args.state_dir))}))
             return 0
-        if args.command == "configure-model-provider":
-            env_file = configure_model_provider(_resolved(args.context))
-            print(f"configured the fake model provider in {env_file}")
+        if args.command == "seed-env-contract":
+            print(
+                f"selected the fake model provider in {seed_env_contract(_resolved(args.context))}"
+            )
+            return 0
+        if args.command == "apply-model-provider":
+            print(json.dumps(apply_model_provider(_resolved(args.context)), indent=2))
             return 0
         if args.command == "enable-systemd-user":
             print(f"systemd user manager ready at {enable_systemd_user_manager()}")
@@ -145,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 context_file=_resolved(args.context), output_dir=_resolved(args.output_dir)
             )
             return 0
-    except (FakeModelProcessError, LaneError) as exc:
+    except (FakeModelProcessError, LaneError, ProviderError) as exc:
         print(f"feature-verification error: {exc}", file=sys.stderr)
         return 1
     raise AssertionError(f"Unhandled command: {args.command}")

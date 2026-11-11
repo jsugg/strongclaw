@@ -21,12 +21,15 @@ def _recovery(feature_host: FeatureHost, *arguments: str, timeout: float = 900) 
     )
 
 
-def _create_backup(feature_host: FeatureHost) -> dict[str, object]:
-    return cast(dict[str, object], _recovery(feature_host, "backup-create").require_ok().json())
+def _create_backup(feature_host: FeatureHost, *, allow_fallback: bool = True) -> dict[str, object]:
+    """Create an archive; dependent features accept the operator tar fallback so they verify
+    their own behaviour even when the OpenClaw-backed path is broken (recovery.backup-create)."""
+    arguments = ("backup-create", "--allow-fallback") if allow_fallback else ("backup-create",)
+    return cast(dict[str, object], _recovery(feature_host, *arguments).require_ok().json())
 
 
 def test_backup_create_uses_the_openclaw_backend(feature_host: FeatureHost) -> None:
-    payload = _create_backup(feature_host)
+    payload = _create_backup(feature_host, allow_fallback=False)
     assert payload["mode"] == "openclaw-cli", f"backup fell back to tar: {payload}"
     assert payload["fallback_used"] is False, payload
     archive = Path(str(payload["archive"]))

@@ -47,9 +47,8 @@ class ScenarioSpec:
     verify_rendered_files: bool
     exercise_sidecars: bool
     exercise_browser_lab: bool
-    # Feature-verification lanes run model auth for real and, on Linux, install into the
-    # runner's own HOME because the systemd user manager only reads units from there.
-    model_setup_mode: str = "skip"
+    # Feature-verification lanes install into the runner's own HOME on Linux because the
+    # systemd user manager only reads user units from there.
     use_host_home: bool = False
 
 
@@ -101,7 +100,6 @@ class FreshHostContext:
     exercise_browser_lab: bool
     phase_names: list[str]
     compose_files: list[str]
-    model_setup_mode: str = "skip"
     use_host_home: bool = False
 
 
@@ -206,7 +204,6 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
         verify_rendered_files=False,
         exercise_sidecars=False,
         exercise_browser_lab=False,
-        model_setup_mode="auto",
         use_host_home=True,
     ),
     "linux-features-local": ScenarioSpec(
@@ -226,7 +223,6 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
         verify_rendered_files=False,
         exercise_sidecars=False,
         exercise_browser_lab=False,
-        model_setup_mode="auto",
         use_host_home=True,
     ),
     "macos-features": ScenarioSpec(
@@ -243,6 +239,5 @@ SCENARIO_SPECS: Final[dict[ScenarioId, ScenarioSpec]] = {
         verify_rendered_files=False,
         exercise_sidecars=False,
         exercise_browser_lab=False,
-        model_setup_mode="auto",
     ),
 }

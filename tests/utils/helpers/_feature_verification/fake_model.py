@@ -1,7 +1,7 @@
 """Deterministic OpenAI- and Ollama-compatible model server for feature verification.
 
 The server stands in for every model provider the product talks to on a runner: the OpenClaw
-agent chain (``vllm/<model>`` through the OpenAI-compatible ``/v1`` API), the memory plugins'
+agent chain (an explicit OpenAI-compatible ``models.providers`` entry), the memory plugins'
 embedding and extraction endpoints, and the LiteLLM sidecar's Ollama upstream. Replies are
 canned, so assertions can rely on exact content, and every request is journaled so a test can
 prove the product actually reached the model rather than short-circuiting.

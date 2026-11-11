@@ -12,6 +12,7 @@ from tests.utils.helpers.feature_verification import (
     FeatureHost,
     GatewayController,
     gateway_status,
+    plugin_statuses,
 )
 
 TURN_TIMEOUT_SECONDS = 300
@@ -148,3 +149,12 @@ def test_security_audit_passes(feature_host: FeatureHost, gateway: GatewayContro
 
 def test_secrets_audit_passes(feature_host: FeatureHost) -> None:
     feature_host.openclaw("secrets", "audit", "--check", timeout=600).require_ok()
+
+
+def test_profile_allowlist_keeps_bundled_provider_plugins(feature_host: FeatureHost) -> None:
+    allow = cast(dict[str, object], feature_host.rendered_config()["plugins"]).get("allow")
+    statuses = plugin_statuses(feature_host)
+    # The documented local model path (OLLAMA_API_KEY) needs OpenClaw's bundled ollama provider.
+    assert (
+        statuses.get("ollama") == "loaded"
+    ), f"bundled provider plugin 'ollama' is {statuses.get('ollama')!r} under plugins.allow={allow}"

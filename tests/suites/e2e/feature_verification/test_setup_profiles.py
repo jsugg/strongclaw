@@ -12,11 +12,14 @@ import uuid
 from pathlib import Path
 from typing import Final, cast
 
+from clawops.strongclaw_runtime import resolve_openclaw_config_path
 from tests.utils.helpers.feature_verification import (
     ACP_STUB_REPLY_PREFIX,
     FeatureHost,
     GatewayController,
     plugin_statuses,
+    register_provider,
+    reply_texts,
 )
 
 ACP_WORKER_AGENTS: Final[tuple[str, ...]] = ("coder-acp-codex", "reviewer-acp-claude")
@@ -57,6 +60,8 @@ def _activate(feature_host: FeatureHost, gateway: GatewayController, profile: st
             .json()
         )
         assert cast(dict[str, object], payload).get("ok", True) is not False, payload
+    # Setup re-renders openclaw.json, so the operator re-declares the provider first.
+    register_provider(resolve_openclaw_config_path(feature_host.repo_root))
     feature_host.clawops("model-auth", "--asset-root", ".", "ensure", timeout=900).require_ok()
     feature_host.openclaw("config", "validate", timeout=120).require_ok()
     gateway.restart()
@@ -71,8 +76,9 @@ def test_openclaw_default_profile_boots_with_memory_core(
     feature_host: FeatureHost, gateway: GatewayController
 ) -> None:
     _activate(feature_host, gateway, "openclaw-default")
-    plugins = cast(dict[str, object], feature_host.rendered_config().get("plugins", {}))
-    assert "slots" not in plugins or "memory" not in cast(dict[str, object], plugins["slots"])
+    plugins = cast(dict[str, object], feature_host.rendered_config()["plugins"])
+    slots = cast(dict[str, object], plugins["slots"])
+    assert slots == {"contextEngine": "legacy", "memory": "memory-core"}, slots
     assert plugin_statuses(feature_host).get("memory-core") == "loaded"
     feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
 
@@ -140,9 +146,10 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
         "--json",
         timeout=300,
     )
-    assert (
-        outcome.ok and ACP_STUB_REPLY_PREFIX in outcome.stdout and token in outcome.stdout
-    ), outcome.describe()
+    replies = reply_texts(outcome.require_ok().json())
+    assert any(
+        ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies
+    ), f"the ACP worker did not answer through acpx; agent replies: {replies}"
 
 
 def test_browser_lab_profile_points_at_the_cdp_endpoint(

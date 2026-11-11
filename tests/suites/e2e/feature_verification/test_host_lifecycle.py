@@ -9,7 +9,7 @@ from typing import cast
 
 from clawops.platform_compat import DEFAULT_ACPX_VERSION, DEFAULT_OPENCLAW_VERSION
 from clawops.strongclaw_runtime import load_bootstrap_state
-from tests.utils.helpers.feature_verification import FeatureHost
+from tests.utils.helpers.feature_verification import FAKE_CHAT_MODEL_REF, FeatureHost
 from tests.utils.helpers.fresh_host import load_report
 
 SYSTEMD_PERSISTENT_UNITS = ("openclaw-gateway.service",)
@@ -54,7 +54,7 @@ def test_guided_setup_completes_with_service_activation(feature_host: FeatureHos
     agents = cast(dict[str, object], config["agents"])
     defaults = cast(dict[str, object], agents["defaults"])
     model = cast(dict[str, object], defaults["model"])
-    assert str(model["primary"]).startswith("vllm/"), model
+    assert model["primary"] == FAKE_CHAT_MODEL_REF, model
     feature_host.openclaw("config", "validate", timeout=120).require_ok()
 
 
@@ -122,7 +122,8 @@ def test_doctor_host_reports_toolchain(feature_host: FeatureHost) -> None:
     assert Path(str(payload["config"])).is_file(), payload
 
 
-def test_deep_doctor_passes_every_check(feature_host: FeatureHost) -> None:
+def test_deep_doctor_passes_every_check(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     outcome = feature_host.clawops("doctor", "--asset-root", ".", timeout=1800)
     payload = cast(dict[str, object], outcome.json())
     checks = cast(list[dict[str, object]], payload["checks"])
@@ -132,7 +133,10 @@ def test_deep_doctor_passes_every_check(feature_host: FeatureHost) -> None:
     assert payload["status"] == "pass" and outcome.ok, json.dumps(failed, indent=2)
 
 
-def test_baseline_verify_passes_with_runtime_probes(feature_host: FeatureHost) -> None:
+def test_baseline_verify_passes_with_runtime_probes(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     outcome = feature_host.clawops("baseline", "verify", timeout=3000)
     assert outcome.ok, outcome.describe()
     payload = cast(dict[str, object], outcome.json())

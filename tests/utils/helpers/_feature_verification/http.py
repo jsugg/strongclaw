@@ -23,6 +23,10 @@ class HttpResponse:
         return cast(object, json.loads(self.body)) if self.body else {}
 
 
+# Loopback probes must never route through system or environment proxies.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def basic_auth(user: str, password: str) -> dict[str, str]:
     """Return a basic-auth header."""
     token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
@@ -44,7 +48,7 @@ def http_request(
     for key, value in (headers or {}).items():
         request.add_header(key, value)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        with _OPENER.open(request, timeout=timeout) as response:
             return HttpResponse(int(response.status), response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return HttpResponse(int(exc.code), exc.read().decode("utf-8", errors="replace"))

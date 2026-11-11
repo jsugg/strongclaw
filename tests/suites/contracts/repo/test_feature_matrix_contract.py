@@ -123,7 +123,7 @@ def test_lanes_match_fresh_host_scenarios() -> None:
         assert spec is not None, f"lane {lane.lane_id} uses unknown scenario {lane.scenario}"
         assert spec.platform == lane.platform, lane
         assert spec.activate_services == lane.activate_services, lane
-        assert spec.model_setup_mode == "auto", lane
+        assert spec.use_host_home == (lane.platform == "linux"), lane
 
 
 def test_workflow_runs_every_lane_and_nothing_else() -> None:

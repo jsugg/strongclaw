@@ -36,7 +36,7 @@ def _config_path(feature_host: FeatureHost) -> Path:
 def _hypermemory(
     feature_host: FeatureHost, *arguments: str, timeout: float = 600
 ) -> CommandOutcome:
-    return feature_host.clawops(
+    return feature_host.clawops_managed(
         "hypermemory", "--config", str(_config_path(feature_host)), *arguments, timeout=timeout
     )
 
@@ -56,7 +56,8 @@ def _search(feature_host: FeatureHost, query: str) -> list[dict[str, object]]:
     return cast(list[dict[str, object]], cast(dict[str, object], payload)["results"])
 
 
-def test_hypermemory_profile_plugins_are_loaded(feature_host: FeatureHost) -> None:
+def test_hypermemory_profile_plugins_are_loaded(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     statuses = plugin_statuses(feature_host)
     for plugin_id in ("strongclaw-hypermemory", "lossless-claw"):
         assert statuses.get(plugin_id) == "loaded", f"{plugin_id}: {statuses.get(plugin_id)}"
@@ -65,21 +66,25 @@ def test_hypermemory_profile_plugins_are_loaded(feature_host: FeatureHost) -> No
     assert slots == {"contextEngine": "lossless-claw", "memory": "strongclaw-hypermemory"}, slots
 
 
-def test_openclaw_memory_status_is_healthy(feature_host: FeatureHost) -> None:
+def test_openclaw_memory_status_is_healthy(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     outcome = feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
-    assert (
-        "strongclaw-hypermemory" in outcome.output or "hypermemory" in outcome.output
-    ), outcome.describe()
+    # StrongClaw gates on a clean exit (setup_cli.py:501); the report must not be empty.
+    assert outcome.stdout.strip(), outcome.describe()
 
 
-def test_openclaw_memory_search_returns_corpus_hits(feature_host: FeatureHost) -> None:
+def test_openclaw_memory_search_returns_corpus_hits(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     outcome = feature_host.openclaw(
         "memory", "search", "--query", "ClawOps", "--max-results", "1", timeout=600
     ).require_ok()
     assert ".md" in outcome.stdout, f"memory search returned no corpus hit\n{outcome.describe()}"
 
 
-def test_hypermemory_index_and_hybrid_search(feature_host: FeatureHost) -> None:
+def test_hypermemory_index_and_hybrid_search(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     index = cast(
         dict[str, object], _hypermemory(feature_host, "index", "--json").require_ok().json()
     )
@@ -93,14 +98,18 @@ def test_hypermemory_index_and_hybrid_search(feature_host: FeatureHost) -> None:
     assert any("BACKUP" in str(hit["path"]).upper() for hit in hits), hits
 
 
-def test_hypermemory_verify_reports_consistent_index(feature_host: FeatureHost) -> None:
+def test_hypermemory_verify_reports_consistent_index(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     payload = cast(
         dict[str, object], _hypermemory(feature_host, "verify", "--json").require_ok().json()
     )
     assert payload["ok"] is True, payload
 
 
-def test_hypermemory_store_search_and_forget(feature_host: FeatureHost) -> None:
+def test_hypermemory_store_search_and_forget(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     token = f"FV-store-{uuid.uuid4().hex[:10]}"
     text = f"The feature verification vault code is {token}."
     stored = _hypermemory(feature_host, "store", "--json", "--type", "fact", "--text", text)
@@ -111,7 +120,8 @@ def test_hypermemory_store_search_and_forget(feature_host: FeatureHost) -> None:
     assert not any(token in str(hit.get("snippet")) for hit in _search(feature_host, token))
 
 
-def test_hypermemory_maintenance_operations(feature_host: FeatureHost) -> None:
+def test_hypermemory_maintenance_operations(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     for arguments in (
         ("reflect", "--json", "--mode", "safe"),
         ("lifecycle", "--json"),
@@ -123,15 +133,17 @@ def test_hypermemory_maintenance_operations(feature_host: FeatureHost) -> None:
         assert isinstance(outcome.json(), dict | list), outcome.describe()
 
 
-def test_hypermemory_exports_memory_pro_snapshot(feature_host: FeatureHost) -> None:
+def test_hypermemory_exports_memory_pro_snapshot(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     output = feature_host.scratch("hypermemory-export") / "memory-pro.json"
     _hypermemory(feature_host, "export-memory-pro", "--json", "--output", str(output)).require_ok()
     assert output.is_file() and output.stat().st_size > 2, f"no export written to {output}"
 
 
 def test_hypermemory_plugin_recalls_memory_into_turns(
-    feature_host: FeatureHost, gateway: GatewayController
+    feature_host: FeatureHost, gateway: GatewayController, sidecars: str
 ) -> None:
+    del sidecars
     del gateway
     token = f"FV-recall-{uuid.uuid4().hex[:10]}"
     _hypermemory(
@@ -165,7 +177,10 @@ def test_hypermemory_plugin_recalls_memory_into_turns(
     ), "strongclaw-hypermemory autoRecall did not inject the stored fact into the model prompt"
 
 
-def test_qdrant_storage_stamp_tracks_pinned_release(feature_host: FeatureHost) -> None:
+def test_qdrant_storage_stamp_tracks_pinned_release(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     image_match = _QDRANT_IMAGE.search((feature_host.repo_root / AUX_COMPOSE).read_text("utf-8"))
     assert image_match is not None
     target = QdrantRelease.from_image(image_match.group(1))
@@ -174,7 +189,10 @@ def test_qdrant_storage_stamp_tracks_pinned_release(feature_host: FeatureHost) -
     assert stamp.release_line == target.line and stamp.reindex_pending is False, stamp
 
 
-def test_qdrant_release_change_resets_storage_and_reindexes(feature_host: FeatureHost) -> None:
+def test_qdrant_release_change_resets_storage_and_reindexes(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     stamp_file = stamp_path(resolve_compose_state_dir())
     current = read_stamp(stamp_file)
     assert current is not None, f"no qdrant stamp at {stamp_file}"

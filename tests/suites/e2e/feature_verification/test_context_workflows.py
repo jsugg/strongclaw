@@ -35,17 +35,6 @@ def _sample_repo(feature_host: FeatureHost, marker: str) -> Path:
     return repo
 
 
-def _context_env(feature_host: FeatureHost) -> dict[str, str]:
-    values = feature_host.env_values()
-    keys = (
-        "NEO4J_USERNAME",
-        "NEO4J_PASSWORD",
-        "HYPERMEMORY_QDRANT_URL",
-        "HYPERMEMORY_EMBEDDING_MODEL",
-    )
-    return {key: values[key] for key in keys if values.get(key)}
-
-
 def _neo4j_node_count(feature_host: FeatureHost) -> int:
     values = feature_host.env_values()
     response = http_request(
@@ -61,21 +50,23 @@ def _neo4j_node_count(feature_host: FeatureHost) -> int:
     return int(cast(list[int], data[0]["row"])[0])
 
 
-def test_codebase_context_indexes_into_the_neo4j_graph(feature_host: FeatureHost) -> None:
+def test_codebase_context_indexes_into_the_neo4j_graph(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     marker = f"fv{uuid.uuid4().hex[:8]}"
     repo = _sample_repo(feature_host, marker)
-    env = _context_env(feature_host)
     common = ("--config", CONTEXT_CONFIG, "--repo", str(repo), "--scale", "large")
-    index = feature_host.clawops("context", "codebase", "index", *common, "--json", env=env)
+    index = feature_host.clawops_managed("context", "codebase", "index", *common, "--json")
     stats = cast(dict[str, object], index.require_ok().json())
     assert int(cast(int, stats["total_files"])) >= 2, stats
     assert _neo4j_node_count(feature_host) > 0, "large-scale indexing wrote nothing to neo4j"
-    query = feature_host.clawops(
-        "context", "codebase", "query", *common, "--query", "LedgerReconciler reconcile", env=env
+    query = feature_host.clawops_managed(
+        "context", "codebase", "query", *common, "--query", "LedgerReconciler reconcile"
     ).require_ok()
     assert "pkg/ledger.py" in query.stdout, query.describe()
     pack_path = feature_host.scratch("context-pack") / "pack.md"
-    feature_host.clawops(
+    feature_host.clawops_managed(
         "context",
         "codebase",
         "pack",
@@ -84,7 +75,6 @@ def test_codebase_context_indexes_into_the_neo4j_graph(feature_host: FeatureHost
         "reconcile",
         "--output",
         str(pack_path),
-        env=env,
     ).require_ok()
     assert "LedgerReconciler" in pack_path.read_text(encoding="utf-8")
 

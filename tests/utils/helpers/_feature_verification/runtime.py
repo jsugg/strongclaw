@@ -216,3 +216,27 @@ class GatewayController:
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait(timeout=_STOP_TIMEOUT_SECONDS)
+
+
+def sidecars_ready(host: FeatureHost) -> bool:
+    """Return whether ``clawops ops status`` reports every required sidecar ready."""
+    outcome = host.clawops("ops", "--asset-root", ".", "status", timeout=300)
+    try:
+        payload = outcome.json()
+    except AssertionError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    readiness = cast(dict[str, object], payload).get("readiness")
+    return (
+        isinstance(readiness, dict)
+        and cast(dict[str, object], readiness).get("requiredReady") is True
+    )
+
+
+def ensure_sidecars(host: FeatureHost) -> str:
+    """Bring the sidecar stack up with ``clawops ops sidecars up`` when no service did."""
+    if sidecars_ready(host):
+        return "ready"
+    host.clawops("ops", "--asset-root", ".", "sidecars", "up", timeout=1800).require_ok()
+    return "started-by-harness"

@@ -15,6 +15,7 @@ from tests.utils.helpers._feature_verification.host import (
     CommandOutcome,
     FeatureHost,
     extract_json,
+    reply_texts,
 )
 from tests.utils.helpers._feature_verification.http import (
     HttpResponse,
@@ -22,9 +23,7 @@ from tests.utils.helpers._feature_verification.http import (
     http_request,
 )
 from tests.utils.helpers._feature_verification.lane import (
-    FAKE_CHAT_MODEL_REF,
     LaneError,
-    configure_model_provider,
     enable_systemd_user_manager,
     run_lane,
 )
@@ -40,6 +39,13 @@ from tests.utils.helpers._feature_verification.processes import (
     start_detached,
     stop_detached,
 )
+from tests.utils.helpers._feature_verification.provider import (
+    FAKE_CHAT_MODEL_REF,
+    ProviderError,
+    apply_model_provider,
+    register_provider,
+    seed_env_contract,
+)
 from tests.utils.helpers._feature_verification.recorder import LaneRecorder, is_feature_suite_item
 from tests.utils.helpers._feature_verification.reporting import (
     build_report,
@@ -54,6 +60,7 @@ from tests.utils.helpers._feature_verification.results import (
 )
 from tests.utils.helpers._feature_verification.runtime import (
     GatewayController,
+    ensure_sidecars,
     gateway_rpc_ok,
     gateway_status,
     plugin_statuses,
@@ -80,24 +87,29 @@ __all__ = [
     "Lane",
     "LaneError",
     "LaneRecorder",
+    "ProviderError",
     "LaneResults",
     "basic_auth",
     "build_report",
     "canned_reply",
     "collect_lane_diagnostics",
-    "configure_model_provider",
+    "apply_model_provider",
     "deterministic_embedding",
     "enable_systemd_user_manager",
     "extract_json",
     "gateway_rpc_ok",
+    "ensure_sidecars",
     "gateway_status",
     "http_request",
     "is_feature_suite_item",
     "load_lane_results",
     "load_manifest",
     "plugin_statuses",
+    "register_provider",
     "render_markdown",
+    "reply_texts",
     "run_lane",
+    "seed_env_contract",
     "service_active",
     "start_detached",
     "stop_detached",

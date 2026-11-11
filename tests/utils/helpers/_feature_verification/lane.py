@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from typing import Final
 
-from clawops.strongclaw_runtime import set_env_assignment, varlock_local_env_file
 from tests.utils.helpers._feature_verification.envvars import (
     CONTEXT_ENV,
     FAKE_MODEL_DIR_ENV,
@@ -26,14 +25,6 @@ from tests.utils.helpers._fresh_host.shell import phase_env
 from tests.utils.helpers._fresh_host.storage import load_context
 
 FEATURE_SUITE_PATH: Final[str] = "tests/suites/e2e/feature_verification"
-FAKE_CHAT_MODEL_REF: Final[str] = "vllm/featver-chat"
-# vLLM is a keyless local provider; OpenClaw only needs a non-empty key to register it.
-FAKE_PROVIDER_ENV: Final[dict[str, str]] = {
-    "OPENCLAW_DEFAULT_MODEL": FAKE_CHAT_MODEL_REF,
-    "VLLM_API_KEY": "featver-local",
-    "HYPERMEMORY_EMBEDDING_MODEL": "ollama/nomic-embed-text",
-    "HYPERMEMORY_EMBEDDING_API_BASE": "http://host.docker.internal:11434",
-}
 DEFAULT_LANE_TIMEOUT_SECONDS: Final[int] = 3600
 
 
@@ -43,20 +34,6 @@ class LaneError(RuntimeError):
 
 LINGER_READY_TIMEOUT_SECONDS: Final[float] = 60.0
 _LINGER_POLL_SECONDS: Final[float] = 1.0
-
-
-def configure_model_provider(context_file: Path) -> Path:
-    """Point the operator env contract at the fake model server, as an operator edits it."""
-    context = load_context(context_file)
-    env = phase_env(context)
-    env_file = varlock_local_env_file(
-        Path(context.repo_root), home_dir=Path(context.app_home), environ=env
-    )
-    env_file.parent.mkdir(parents=True, exist_ok=True)
-    for key, value in FAKE_PROVIDER_ENV.items():
-        set_env_assignment(env_file, key, value)
-    env_file.chmod(0o600)
-    return env_file
 
 
 def enable_systemd_user_manager() -> Path:
@@ -107,6 +84,8 @@ def run_lane(
     env = phase_env(context)
     env.update(
         {
+            # Fresh-host setup skips model auth; the lane's own commands run it for real.
+            "OPENCLAW_MODEL_SETUP_MODE": "auto",
             LANE_ENV: lane_id,
             CONTEXT_ENV: str(context_file),
             RESULTS_ENV: str(results_path),

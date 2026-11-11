@@ -28,7 +28,8 @@ def _container(feature_host: FeatureHost, fragment: str) -> str:
     return names[0]
 
 
-def test_postgres_sidecar_accepts_queries(feature_host: FeatureHost) -> None:
+def test_postgres_sidecar_accepts_queries(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     container = _container(feature_host, "postgres")
     outcome = feature_host.run(
         [
@@ -48,7 +49,10 @@ def test_postgres_sidecar_accepts_queries(feature_host: FeatureHost) -> None:
     assert int(outcome.stdout.strip()) > 0, outcome.describe()
 
 
-def test_litellm_routes_embeddings_to_the_upstream(feature_host: FeatureHost) -> None:
+def test_litellm_routes_embeddings_to_the_upstream(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     assert http_request("GET", f"{LITELLM}/health/liveliness").status == 200
     token = f"FV-litellm-{uuid.uuid4().hex[:10]}"
     started = time.time()
@@ -71,7 +75,8 @@ def test_litellm_routes_embeddings_to_the_upstream(feature_host: FeatureHost) ->
     assert upstream, "litellm answered without calling the configured embedding upstream"
 
 
-def test_qdrant_sidecar_round_trips_vectors(feature_host: FeatureHost) -> None:
+def test_qdrant_sidecar_round_trips_vectors(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     del feature_host
     collection = f"featver-{uuid.uuid4().hex[:8]}"
     assert http_request("GET", f"{QDRANT}/healthz").status == 200
@@ -99,7 +104,8 @@ def test_qdrant_sidecar_round_trips_vectors(feature_host: FeatureHost) -> None:
         http_request("DELETE", f"{QDRANT}/collections/{collection}")
 
 
-def test_neo4j_sidecar_round_trips_cypher(feature_host: FeatureHost) -> None:
+def test_neo4j_sidecar_round_trips_cypher(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     values = feature_host.env_values()
     marker = f"fv-{uuid.uuid4().hex[:8]}"
     response = http_request(
@@ -126,7 +132,8 @@ def test_neo4j_sidecar_round_trips_cypher(feature_host: FeatureHost) -> None:
     assert len(results) == 2, payload
 
 
-def test_observability_pipeline_accepts_telemetry(feature_host: FeatureHost) -> None:
+def test_observability_pipeline_accepts_telemetry(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     feature_host.clawops("verify-platform", "observability", "--asset-root", ".").require_ok()
     trace = {
         "resourceSpans": [
@@ -157,13 +164,17 @@ def test_observability_pipeline_accepts_telemetry(feature_host: FeatureHost) -> 
     assert metrics.status == 200 and metrics.body.strip(), "otel prometheus exporter is silent"
 
 
-def test_verify_platform_sidecars_runtime(feature_host: FeatureHost) -> None:
+def test_verify_platform_sidecars_runtime(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     outcome = feature_host.clawops("verify-platform", "sidecars", "--asset-root", ".", timeout=300)
     payload = cast(dict[str, object], outcome.json())
     assert outcome.ok and payload["ok"] is True, outcome.describe()
 
 
-def test_ops_status_reports_required_sidecars_ready(feature_host: FeatureHost) -> None:
+def test_ops_status_reports_required_sidecars_ready(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
     payload = cast(
         dict[str, object],
         feature_host.clawops("ops", "--asset-root", ".", "status", timeout=300).require_ok().json(),
@@ -175,7 +186,8 @@ def test_ops_status_reports_required_sidecars_ready(feature_host: FeatureHost) -
         assert cast(dict[str, object], services[name])["state"] == "running", services
 
 
-def test_prune_qdrant_test_collections(feature_host: FeatureHost) -> None:
+def test_prune_qdrant_test_collections(feature_host: FeatureHost, sidecars: str) -> None:
+    del sidecars
     collection = f"{QDRANT_TEST_PREFIX}featver-{uuid.uuid4().hex[:8]}"
     created = http_request(
         "PUT",

@@ -190,9 +190,6 @@ def load_context(path: Path) -> FreshHostContext:
         compose_files=list(
             as_string_list(payload.get("compose_files"), path="context.compose_files")
         ),
-        model_setup_mode=as_string(
-            payload.get("model_setup_mode", "skip"), path="context.model_setup_mode"
-        ),
         use_host_home=as_bool(payload.get("use_host_home", False), path="context.use_host_home"),
     )
 
