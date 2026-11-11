@@ -41,6 +41,8 @@ from tests.utils.helpers._feature_verification.processes import (
 )
 from tests.utils.helpers._feature_verification.provider import (
     FAKE_CHAT_MODEL_REF,
+    OLLAMA_EMBEDDING_API_BASE,
+    OLLAMA_EMBEDDING_MODEL,
     ProviderError,
     apply_model_provider,
     register_provider,
@@ -72,6 +74,8 @@ __all__ = [
     "ACP_STUB_REPLY_PREFIX",
     "CHAT_MODEL_ID",
     "FAKE_CHAT_MODEL_REF",
+    "OLLAMA_EMBEDDING_API_BASE",
+    "OLLAMA_EMBEDDING_MODEL",
     "REPLY_PREFIX",
     "UNVERIFIABLE_SKIP_PREFIX",
     "CommandOutcome",

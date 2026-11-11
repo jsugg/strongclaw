@@ -132,7 +132,7 @@ features:
     call_sites:
       - src/clawops/strongclaw_model_auth.py:343
       - src/clawops/strongclaw_model_auth.py:239
-    lanes: [linux-core]
+    lanes: [linux-core, macos-launchd]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_auth_ensure_applies_env_driven_chain
   - id: model-auth.probe
@@ -528,6 +528,15 @@ features:
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_sidecars.py::test_litellm_routes_embeddings_to_the_upstream
+  - id: sidecars.litellm-ollama-embeddings
+    category: sidecars
+    title: LiteLLM serves the default Ollama embedding lane that varlock-env configure selects
+    call_sites:
+      - src/clawops/strongclaw_varlock_env.py:571
+      - platform/configs/litellm/config.yaml:22
+    lanes: [linux-core]
+    verification: fake-model
+    test: tests/suites/e2e/feature_verification/test_sidecars.py::test_litellm_serves_the_default_ollama_embedding_lane
   - id: sidecars.qdrant
     category: sidecars
     title: Qdrant sidecar creates collections, upserts and searches vectors

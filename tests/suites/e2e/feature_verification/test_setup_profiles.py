@@ -147,9 +147,10 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
         timeout=300,
     )
     replies = reply_texts(outcome.require_ok().json())
-    assert any(
-        ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies
-    ), f"the ACP worker did not answer through acpx; agent replies: {replies}"
+    assert any(ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies), (
+        f"the ACP worker did not answer through acpx (bundled acpx plugin: "
+        f"{plugin_statuses(feature_host).get('acpx')!r}); agent replies: {replies}"
+    )
 
 
 def test_browser_lab_profile_points_at_the_cdp_endpoint(

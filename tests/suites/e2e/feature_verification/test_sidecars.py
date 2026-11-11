@@ -6,7 +6,10 @@ import time
 import uuid
 from typing import cast
 
+from clawops.strongclaw_runtime import set_env_assignment
 from tests.utils.helpers.feature_verification import (
+    OLLAMA_EMBEDDING_API_BASE,
+    OLLAMA_EMBEDDING_MODEL,
     FeatureHost,
     basic_auth,
     http_request,
@@ -49,30 +52,64 @@ def test_postgres_sidecar_accepts_queries(feature_host: FeatureHost, sidecars: s
     assert int(outcome.stdout.strip()) > 0, outcome.describe()
 
 
-def test_litellm_routes_embeddings_to_the_upstream(
-    feature_host: FeatureHost, sidecars: str
-) -> None:
-    del sidecars
-    assert http_request("GET", f"{LITELLM}/health/liveliness").status == 200
-    token = f"FV-litellm-{uuid.uuid4().hex[:10]}"
+def _embed_through_litellm(feature_host: FeatureHost, *, upstream_path: str) -> None:
+    """Embed through the hypermemory-embedding alias and prove LiteLLM called its upstream."""
+    assert http_request("GET", f"{LITELLM}/health/liveliness", timeout=10).status == 200
     started = time.time()
     response = http_request(
         "POST",
         f"{LITELLM}/v1/embeddings",
-        body={"model": "hypermemory-embedding", "input": [token]},
+        body={"model": "hypermemory-embedding", "input": [f"FV-litellm-{uuid.uuid4().hex[:10]}"]},
         headers={"Authorization": f"Bearer {feature_host.env_values()['LITELLM_MASTER_KEY']}"},
         timeout=120,
     )
-    assert response.status == 200, response.body[:2000]
+    assert response.status == 200, feature_host.redact(response.body[:2000])
     data = cast(list[dict[str, object]], cast(dict[str, object], response.json())["data"])
     assert data and len(cast(list[float], data[0]["embedding"])) > 0, response.body[:500]
     upstream = [
         request
         for request in feature_host.fake_model_requests()
         if float(cast(float, request.get("at", 0.0))) >= started
-        and str(request.get("path", "")).startswith("/api/embed")
+        and str(request.get("path", "")).startswith(upstream_path)
     ]
-    assert upstream, "litellm answered without calling the configured embedding upstream"
+    assert upstream, f"litellm answered without calling its {upstream_path} upstream"
+
+
+def _wait_for_litellm(timeout: float = 240.0) -> None:
+    deadline = time.monotonic() + timeout
+    while http_request("GET", f"{LITELLM}/health/liveliness", timeout=10).status != 200:
+        assert time.monotonic() < deadline, "litellm did not come back after recreation"
+        time.sleep(3)
+
+
+def test_litellm_routes_embeddings_to_the_upstream(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
+    _embed_through_litellm(feature_host, upstream_path="/v1/embeddings")
+
+
+def test_litellm_serves_the_default_ollama_embedding_lane(
+    feature_host: FeatureHost, sidecars: str
+) -> None:
+    del sidecars
+    env_file = feature_host.env_file()
+    configured = feature_host.env_values()
+    keys = ("HYPERMEMORY_EMBEDDING_MODEL", "HYPERMEMORY_EMBEDDING_API_BASE")
+    # The lane `clawops varlock-env configure` selects when a local Ollama has the model.
+    for key, value in zip(keys, (OLLAMA_EMBEDDING_MODEL, OLLAMA_EMBEDDING_API_BASE), strict=True):
+        set_env_assignment(env_file, key, value)
+    try:
+        feature_host.clawops(
+            "ops", "--asset-root", ".", "sidecars", "up", timeout=1500
+        ).require_ok()
+        _wait_for_litellm()
+        _embed_through_litellm(feature_host, upstream_path="/api/embed")
+    finally:
+        for key in keys:
+            set_env_assignment(env_file, key, configured.get(key, ""))
+        feature_host.clawops("ops", "--asset-root", ".", "sidecars", "up", timeout=1500)
+        _wait_for_litellm()
 
 
 def test_qdrant_sidecar_round_trips_vectors(feature_host: FeatureHost, sidecars: str) -> None:
@@ -160,8 +197,39 @@ def test_observability_pipeline_accepts_telemetry(feature_host: FeatureHost, sid
     }
     accepted = http_request("POST", f"{OTLP_HTTP}/v1/traces", body=trace)
     assert accepted.status == 200, accepted.body
+    metric_name = f"featver_probe_{uuid.uuid4().hex[:8]}"
+    gauge = {
+        "resourceMetrics": [
+            {
+                "resource": {
+                    "attributes": [{"key": "service.name", "value": {"stringValue": "featver"}}]
+                },
+                "scopeMetrics": [
+                    {
+                        "metrics": [
+                            {
+                                "name": metric_name,
+                                "gauge": {
+                                    "dataPoints": [
+                                        {"asDouble": 1.0, "timeUnixNano": str(time.time_ns())}
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    assert http_request("POST", f"{OTLP_HTTP}/v1/metrics", body=gauge).status == 200
+    deadline = time.monotonic() + 60
     metrics = http_request("GET", OTEL_METRICS)
-    assert metrics.status == 200 and metrics.body.strip(), "otel prometheus exporter is silent"
+    while metric_name not in metrics.body and time.monotonic() < deadline:
+        time.sleep(2)
+        metrics = http_request("GET", OTEL_METRICS)
+    assert (
+        metric_name in metrics.body
+    ), f"OTLP metric never reached the exporter: {metrics.body[:500]}"
 
 
 def test_verify_platform_sidecars_runtime(feature_host: FeatureHost, sidecars: str) -> None:

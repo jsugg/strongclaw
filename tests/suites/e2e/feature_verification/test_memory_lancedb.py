@@ -20,6 +20,13 @@ from tests.utils.helpers.feature_verification import (
 PLUGIN_ID = "memory-lancedb-pro"
 SCOPE = "project:featver"
 STRATEGY_KEY = f"plugins.entries.{PLUGIN_ID}.config.sessionStrategy"
+MAIN_SESSION_KEY = "agent:admin:main"
+EXTRACTION_TURNS = (
+    "Remember that I prefer feature verification reports rendered as tables.",
+    "I always run the lancedb lane on Ubuntu runners.",
+    "My preferred review cadence for this project is weekly on Mondays.",
+    "Our team name for the verification effort is Project Lighthouse.",
+)
 REFLECTION_TIMEOUT_SECONDS = 240.0
 _POLL_SECONDS = 3.0
 
@@ -124,17 +131,19 @@ def test_smart_extraction_calls_the_extraction_model(
 ) -> None:
     del gateway
     started = time.time()
-    feature_host.openclaw(
-        "agent",
-        "--agent",
-        "admin",
-        "--session-id",
-        f"featver-extract-{uuid.uuid4().hex[:8]}",
-        "--message",
-        "Remember that I prefer feature verification reports in tables.",
-        "--json",
-        timeout=300,
-    ).require_ok()
+    session_id = f"featver-extract-{uuid.uuid4().hex[:8]}"
+    for message in EXTRACTION_TURNS:
+        feature_host.openclaw(
+            "agent",
+            "--agent",
+            "admin",
+            "--session-id",
+            session_id,
+            "--message",
+            message,
+            "--json",
+            timeout=300,
+        ).require_ok()
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         requests = [
@@ -150,23 +159,6 @@ def test_smart_extraction_calls_the_extraction_model(
             return
         time.sleep(_POLL_SECONDS)
     raise AssertionError("autoCapture smart extraction never called the extraction model")
-
-
-def _session_key(feature_host: FeatureHost, session_id: str) -> str:
-    payload = (
-        feature_host.openclaw("sessions", "--agent", "admin", "--json", timeout=120)
-        .require_ok()
-        .json()
-    )
-    raw_sessions = cast(
-        list[object],
-        payload if isinstance(payload, list) else cast(dict[str, object], payload).get("sessions"),
-    )
-    for raw in raw_sessions or []:
-        entry = cast(dict[str, object], raw)
-        if entry.get("sessionId") == session_id or session_id in str(entry.get("key", "")):
-            return str(entry["key"])
-    raise AssertionError(f"session {session_id} not found in {json.dumps(payload)[:2000]}")
 
 
 def _reflection_files(feature_host: FeatureHost) -> list[Path]:
@@ -199,7 +191,7 @@ def test_reflection_runs_through_the_embedded_runner(
             timeout=300,
         ).require_ok()
         started = time.time()
-        params = json.dumps({"key": _session_key(feature_host, session_id), "reason": "new"})
+        params = json.dumps({"key": MAIN_SESSION_KEY, "reason": "new"})
         feature_host.openclaw(
             "gateway", "call", "sessions.reset", "--params", params, "--json", timeout=300
         ).require_ok()

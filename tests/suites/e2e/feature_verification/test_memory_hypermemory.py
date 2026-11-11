@@ -11,7 +11,6 @@ from typing import cast
 from clawops.qdrant_storage import QdrantRelease, StorageStamp, read_stamp, stamp_path, write_stamp
 from clawops.strongclaw_runtime import (
     rendered_openclaw_hypermemory_config_path,
-    resolve_compose_state_dir,
     resolve_openclaw_config_path,
 )
 from tests.utils.helpers.feature_verification import (
@@ -39,6 +38,11 @@ def _hypermemory(
     return feature_host.clawops_managed(
         "hypermemory", "--config", str(_config_path(feature_host)), *arguments, timeout=timeout
     )
+
+
+def _compose_state_dir(feature_host: FeatureHost) -> Path:
+    payload = feature_host.clawops("ops", "--asset-root", ".", "status").require_ok().json()
+    return Path(str(cast(dict[str, object], payload)["composeStateDir"]))
 
 
 def _status(feature_host: FeatureHost) -> dict[str, object]:
@@ -184,8 +188,9 @@ def test_qdrant_storage_stamp_tracks_pinned_release(
     image_match = _QDRANT_IMAGE.search((feature_host.repo_root / AUX_COMPOSE).read_text("utf-8"))
     assert image_match is not None
     target = QdrantRelease.from_image(image_match.group(1))
-    stamp = read_stamp(stamp_path(resolve_compose_state_dir()))
-    assert stamp is not None, f"no qdrant stamp under {resolve_compose_state_dir()}"
+    state_dir = _compose_state_dir(feature_host)
+    stamp = read_stamp(stamp_path(state_dir))
+    assert stamp is not None, f"no qdrant stamp under {state_dir}"
     assert stamp.release_line == target.line and stamp.reindex_pending is False, stamp
 
 
@@ -193,7 +198,7 @@ def test_qdrant_release_change_resets_storage_and_reindexes(
     feature_host: FeatureHost, sidecars: str
 ) -> None:
     del sidecars
-    stamp_file = stamp_path(resolve_compose_state_dir())
+    stamp_file = stamp_path(_compose_state_dir(feature_host))
     current = read_stamp(stamp_file)
     assert current is not None, f"no qdrant stamp at {stamp_file}"
     write_stamp(

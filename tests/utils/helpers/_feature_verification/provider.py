@@ -27,12 +27,17 @@ PROVIDER_ID: Final[str] = "featver"
 CHAT_MODEL: Final[str] = "featver-chat"
 FAKE_CHAT_MODEL_REF: Final[str] = f"{PROVIDER_ID}/{CHAT_MODEL}"
 PROVIDER_BASE_URL: Final[str] = "http://127.0.0.1:18000/v1"
-# Not a credential: the fake server accepts any key; OpenClaw only needs one to be present.
-PROVIDER_API_KEY: Final[str] = "featver-local"
+# OpenClaw's non-secret marker for keyless custom local providers (not flagged by audits).
+PROVIDER_API_KEY: Final[str] = "custom-local"
+# LiteLLM reaches the fake server from its container through host-gateway.
+OPENAI_COMPATIBLE_EMBEDDING_MODEL: Final[str] = "openai/featver-embed"
+OPENAI_COMPATIBLE_EMBEDDING_API_BASE: Final[str] = "http://host.docker.internal:11434/v1"
+OLLAMA_EMBEDDING_MODEL: Final[str] = "ollama/nomic-embed-text"
+OLLAMA_EMBEDDING_API_BASE: Final[str] = "http://host.docker.internal:11434"
 ENV_CONTRACT: Final[dict[str, str]] = {
     "OPENCLAW_DEFAULT_MODEL": FAKE_CHAT_MODEL_REF,
-    "HYPERMEMORY_EMBEDDING_MODEL": "ollama/nomic-embed-text",
-    "HYPERMEMORY_EMBEDDING_API_BASE": "http://host.docker.internal:11434",
+    "HYPERMEMORY_EMBEDDING_MODEL": OPENAI_COMPATIBLE_EMBEDDING_MODEL,
+    "HYPERMEMORY_EMBEDDING_API_BASE": OPENAI_COMPATIBLE_EMBEDDING_API_BASE,
 }
 MODEL_AUTH_TIMEOUT_SECONDS: Final[int] = 900
 SYSTEMD_GATEWAY_UNIT: Final[str] = "openclaw-gateway.service"
@@ -129,5 +134,6 @@ def apply_model_provider(context_file: Path) -> dict[str, object]:
         "config": str(config_path),
         "modelAuthExitCode": ensure.returncode,
         "modelAuthOutput": ensure.stdout[-2000:],
+        "modelAuthErrors": ensure.stderr[-4000:],
         "gateway": _restart_supervised_gateway(context.platform, env),
     }

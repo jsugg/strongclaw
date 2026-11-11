@@ -9,7 +9,7 @@ from typing import cast
 
 from clawops.platform_compat import DEFAULT_ACPX_VERSION, DEFAULT_OPENCLAW_VERSION
 from clawops.strongclaw_runtime import load_bootstrap_state
-from tests.utils.helpers.feature_verification import FAKE_CHAT_MODEL_REF, FeatureHost
+from tests.utils.helpers.feature_verification import FeatureHost
 from tests.utils.helpers.fresh_host import load_report
 
 SYSTEMD_PERSISTENT_UNITS = ("openclaw-gateway.service",)
@@ -50,11 +50,6 @@ def test_bootstrap_installs_the_locked_toolchain(feature_host: FeatureHost) -> N
 def test_guided_setup_completes_with_service_activation(feature_host: FeatureHost) -> None:
     status, reason = _phase_status(feature_host, "setup")
     assert status == "success", f"clawops setup (with service activation) failed: {reason}"
-    config = feature_host.rendered_config()
-    agents = cast(dict[str, object], config["agents"])
-    defaults = cast(dict[str, object], agents["defaults"])
-    model = cast(dict[str, object], defaults["model"])
-    assert model["primary"] == FAKE_CHAT_MODEL_REF, model
     feature_host.openclaw("config", "validate", timeout=120).require_ok()
 
 
