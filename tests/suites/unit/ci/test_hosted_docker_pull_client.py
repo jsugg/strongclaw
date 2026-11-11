@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.helpers import hosted_docker
-from tests.utils.helpers._fresh_host.budget import pull_phase_deadline
+from tests.utils.helpers._fresh_host.budget import PhaseDeadline
 from tests.utils.helpers._hosted_docker.events import PullEventLog, read_events
 from tests.utils.helpers._hosted_docker.models import MAX_STALL_RETRIES
 from tests.utils.helpers._hosted_docker.pull_client import (
@@ -265,7 +265,7 @@ def test_pull_images_retries_transient_failures_with_jittered_backoff() -> None:
 
 def test_pull_images_never_starts_queued_pulls_after_the_budget_is_gone(tmp_path: Path) -> None:
     clock = FakeClock()
-    deadline = pull_phase_deadline(None, clock=clock, phase_cap_seconds=300)
+    deadline = PhaseDeadline.after(300, clock=clock)
     client = _ScriptedClient(
         {"first:1": [None], "second:1": [None]},
         on_pull=lambda image: clock.advance(290),

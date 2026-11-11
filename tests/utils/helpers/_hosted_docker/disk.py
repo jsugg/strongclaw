@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -86,7 +87,7 @@ def probe_disk(path: Path) -> DiskUsage:
     return DiskUsage(total=usage.total, used=usage.used, free=usage.free)
 
 
-def remove_with_sudo(path: Path) -> None:
+def remove_with_sudo(path: Path, *, timeout_seconds: float = 600) -> None:
     """Remove one allowlisted runner path; hosted runners grant passwordless sudo."""
     if path not in EXPENDABLE_RUNNER_PATHS:
         raise FreshHostError(f"refusing to remove non-allowlisted path {path}")
@@ -94,7 +95,7 @@ def remove_with_sudo(path: Path) -> None:
         ["sudo", "-n", "rm", "-rf", "--", str(path)],
         cwd=Path("/"),
         env=dict(os.environ),
-        timeout_seconds=600,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -130,7 +131,7 @@ def estimate_required_bytes(missing_images: Sequence[str]) -> tuple[int, dict[st
     return required, by_image
 
 
-def docker_root_dir(*, cwd: Path, env: Mapping[str, str]) -> Path:
+def docker_root_dir(*, cwd: Path, env: Mapping[str, str], timeout_seconds: float = 60) -> Path:
     """Return the daemon's Docker root directory, defaulting to the standard Linux path."""
     try:
         completed = run_checked(
@@ -138,9 +139,9 @@ def docker_root_dir(*, cwd: Path, env: Mapping[str, str]) -> Path:
             cwd=cwd,
             env=dict(env),
             capture_output=True,
-            timeout_seconds=60,
+            timeout_seconds=timeout_seconds,
         )
-    except FreshHostError:
+    except (FreshHostError, subprocess.TimeoutExpired):
         return DEFAULT_DOCKER_ROOT
     root = completed.stdout.strip()
     return Path(root) if root else DEFAULT_DOCKER_ROOT

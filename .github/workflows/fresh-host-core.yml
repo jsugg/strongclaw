@@ -195,10 +195,11 @@ jobs:
           --github-env-file "${GITHUB_ENV}"
       - name: Preview macOS fresh-host context
         run: ./tests/scripts/fresh_host.py preview-context --context "${FRESH_HOST_CONTEXT}" --summary-file "${GITHUB_STEP_SUMMARY}"
-      # Must outlast the helper's readiness gate plus its OrbStack restart path; a shorter
-      # cap kills the step before recovery starts (see the contract test).
+      # Backstop only: the helper ends at its own deadline, min(now + 10m, job deadline - image,
+      # scenario, and observer reserves), with recovery reserved inside it. The cap covers the
+      # 10m phase cap plus the flush margin (see the contract test).
       - name: Wait for hosted macOS Docker runtime
-        timeout-minutes: 25
+        timeout-minutes: 12
         run: >-
           ./tests/scripts/hosted_docker.py wait-runtime-ready
           --context "${FRESH_HOST_CONTEXT}"

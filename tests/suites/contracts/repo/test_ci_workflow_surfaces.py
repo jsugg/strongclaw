@@ -12,11 +12,14 @@ import pytest
 import yaml
 
 from tests.utils.helpers._fresh_host.budget import (
+    IMAGE_PHASE_CAP_SECONDS,
+    IMAGE_PHASE_MIN_SECONDS,
     JOB_START_SKEW_SECONDS,
-    PULL_PHASE_CAP_SECONDS,
-    PULL_PHASE_FLUSH_SECONDS,
+    PHASE_FLUSH_SECONDS,
+    RUNTIME_PHASE_CAP_SECONDS,
+    RUNTIME_PHASE_MIN_SECONDS,
 )
-from tests.utils.helpers._hosted_docker.runtime import runtime_recovery_nominal_seconds
+from tests.utils.helpers._hosted_docker.diagnostics import DIAGNOSTICS_COLLECTION_CAP_SECONDS
 from tests.utils.helpers.repo import REPO_ROOT
 
 _PYTHON_SCRIPT_INVOCATION_PATTERN = re.compile(
@@ -530,11 +533,22 @@ def test_fresh_host_core_budget_reserves_match_step_timeouts(job_id: str) -> Non
     assert job["timeout-minutes"] == job_minutes
     assert _step_timeout(steps[scenario_index]) == scenario_reserve
     assert sum(_step_timeout(step) for step in observers) == observer_reserve
-    assert _step_timeout(ensure_step) * 60 >= PULL_PHASE_CAP_SECONDS + PULL_PHASE_FLUSH_SECONDS
+    # Step timeouts are backstops: each covers its helper's phase cap plus the flush margin.
+    assert _step_timeout(ensure_step) * 60 >= IMAGE_PHASE_CAP_SECONDS + PHASE_FLUSH_SECONDS
     assert (
         _step_timeout(ensure_step) * 60
         + (scenario_reserve + observer_reserve) * 60
         + JOB_START_SKEW_SECONDS
+        <= job_minutes * 60
+    )
+    # The phase deadlines share one chain; the minimum slices of every pre-scenario phase
+    # must fit inside the job budget next to the later reserves.
+    has_runtime_phase = any("hosted_docker.py wait-runtime-ready" in run for run in runs)
+    pre_scenario_floor = IMAGE_PHASE_MIN_SECONDS + (
+        RUNTIME_PHASE_MIN_SECONDS if has_runtime_phase else 0
+    )
+    assert (
+        JOB_START_SKEW_SECONDS + pre_scenario_floor + (scenario_reserve + observer_reserve) * 60
         <= job_minutes * 60
     )
     # One helper-owned retry loop; a shell-level rerun would double the worst case.
@@ -550,15 +564,44 @@ def test_fresh_host_core_budget_reserves_match_step_timeouts(job_id: str) -> Non
             _step_timeout(step)
 
 
-def test_macos_runtime_wait_step_outlasts_the_helper_recovery_path() -> None:
-    """The step cap must not preempt the helper's own OrbStack recovery."""
+def test_macos_runtime_and_diagnostics_steps_backstop_their_helper_deadlines() -> None:
+    """YAML caps must outlast the helpers' own deadlines, so the helper fails first, with evidence."""
     job = cast(dict[str, object], _workflow_jobs("fresh-host-core.yml")["macos-fresh-host"])
     steps = cast(list[dict[str, object]], job["steps"])
-    wait_step = next(
-        step for step in steps if "hosted_docker.py wait-runtime-ready" in str(step.get("run", ""))
+    runs = [str(step.get("run", "")) for step in steps]
+    wait_index = next(
+        i for i, run in enumerate(runs) if "hosted_docker.py wait-runtime-ready" in run
+    )
+    ensure_index = next(i for i, run in enumerate(runs) if "hosted_docker.py ensure-images" in run)
+    diagnostics_step = next(
+        step
+        for step, run in zip(steps, runs, strict=True)
+        if "hosted_docker.py collect-diagnostics" in run
     )
 
-    assert _step_timeout(wait_step) * 60 >= runtime_recovery_nominal_seconds() + 120
+    # The runtime deadline reserves the image phase's minimum, so it must run first.
+    assert wait_index < ensure_index
+    assert _step_timeout(steps[wait_index]) * 60 >= RUNTIME_PHASE_CAP_SECONDS + PHASE_FLUSH_SECONDS
+    assert (
+        _step_timeout(diagnostics_step) * 60
+        >= DIAGNOSTICS_COLLECTION_CAP_SECONDS + PHASE_FLUSH_SECONDS
+    )
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_id"),
+    [("e2e-acceptance.yml", "fresh-host"), ("release.yml", "release-fresh-host-acceptance")],
+)
+def test_fresh_host_callers_inherit_the_bounded_core_workflow(
+    workflow_name: str, job_id: str
+) -> None:
+    """Callers reuse the budgeted core workflow instead of running hosted-docker steps themselves."""
+    jobs = _workflow_jobs(workflow_name)
+
+    assert (
+        cast(dict[str, object], jobs[job_id])["uses"] == "./.github/workflows/fresh-host-core.yml"
+    )
+    assert "hosted_docker.py" not in _workflow_text(workflow_name)
 
 
 def test_fresh_host_core_linux_job_honors_pull_tuning_inputs() -> None:

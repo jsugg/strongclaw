@@ -1,4 +1,10 @@
-"""Hosted macOS runtime installation helpers."""
+"""Hosted macOS runtime installation helpers.
+
+`wait_runtime_ready` runs inside one phase deadline: an initial readiness window, then an
+OrbStack recovery slice reserved up front so a slow gate can never starve it. Every probe,
+validation command, recovery command, backoff, and diagnostics collection is clipped to the
+time left through one injected clock, so the phase ends at its deadline with a report.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +12,23 @@ import hashlib
 import os
 import subprocess
 import sys
-import time
-from dataclasses import asdict
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Final
 
+from tests.utils.helpers._fresh_host.budget import (
+    BUDGET_EXHAUSTED,
+    MIN_COMMAND_SECONDS,
+    RUNTIME_PHASE_MIN_SECONDS,
+    RUNTIME_RECOVERY_RESERVE_SECONDS,
+    SYSTEM_CLOCK,
+    BudgetExhaustedError,
+    Clock,
+    JobBudget,
+    PhaseDeadline,
+    runtime_phase_deadline,
+)
 from tests.utils.helpers._fresh_host.models import FreshHostContext, FreshHostError
 from tests.utils.helpers._fresh_host.storage import load_context, load_report, write_report
 from tests.utils.helpers._hosted_docker.diagnostics import collect_runtime_diagnostics_for_context
@@ -19,7 +38,6 @@ from tests.utils.helpers._hosted_docker.models import (
     RuntimeRecoveryAttemptReport,
 )
 from tests.utils.helpers._hosted_docker.shell import (
-    DOCKER_READY_POLL_SECONDS,
     macos_env,
     run_checked,
     run_command,
@@ -27,36 +45,21 @@ from tests.utils.helpers._hosted_docker.shell import (
     wait_for_docker_ready,
 )
 
-_INITIAL_DOCKER_READY_ATTEMPTS = 300
-_POST_RECOVERY_DOCKER_READY_ATTEMPTS = 90
-_RECOVERY_BACKOFF_SECONDS = (5, 15)
-_RECOVERY_COMMAND_TIMEOUT_SECONDS = 120
-_READINESS_PROBE_TIMEOUT_SECONDS = 15
-
-
-def runtime_recovery_nominal_seconds() -> int:
-    """Return how long the readiness gate plus every OrbStack recovery attempt nominally takes.
-
-    Workflow step timeouts around `wait-runtime-ready` must exceed this, or the step is
-    killed before recovery runs. Probes are assumed to fail fast, so this is a floor.
-    """
-    initial = _INITIAL_DOCKER_READY_ATTEMPTS * DOCKER_READY_POLL_SECONDS
-    recovery = sum(
-        backoff
-        + _RECOVERY_COMMAND_TIMEOUT_SECONDS
-        + _POST_RECOVERY_DOCKER_READY_ATTEMPTS * DOCKER_READY_POLL_SECONDS
-        for backoff in _RECOVERY_BACKOFF_SECONDS
-    )
-    return initial + recovery
-
-
-_RECOVERABLE_RUNTIME_REASONS = {
-    "docker_not_ready",
-    "docker_probe_timeout",
-    "docker_socket_eof",
-    "orbstack_socket_missing",
-}
-_RUNTIME_VALIDATION_COMMANDS = (
+# One backoff per recovery attempt; the tuple length caps how many attempts share the slice.
+_RECOVERY_BACKOFF_SECONDS: Final[tuple[int, ...]] = (5, 15)
+_RECOVERY_COMMAND_TIMEOUT_SECONDS: Final[int] = 120
+_RECOVERY_DIAGNOSTICS_SLICE_SECONDS: Final[int] = 30
+_VALIDATION_COMMAND_TIMEOUT_SECONDS: Final[int] = 120
+_READINESS_PROBE_TIMEOUT_SECONDS: Final[int] = 15
+_RECOVERABLE_RUNTIME_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        "docker_not_ready",
+        "docker_probe_timeout",
+        "docker_socket_eof",
+        "orbstack_socket_missing",
+    }
+)
+_RUNTIME_VALIDATION_COMMANDS: Final[tuple[list[str], ...]] = (
     ["docker", "version"],
     ["docker", "compose", "version"],
     ["docker", "info"],
@@ -205,8 +208,15 @@ def _classify_failure_text(text: str) -> str | None:
     return None
 
 
-def _classify_runtime_failure(*, cwd: Path, env: dict[str, str], exc: BaseException) -> str:
-    """Return a structured runtime failure reason."""
+def _classify_runtime_failure(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    exc: BaseException,
+    deadline: PhaseDeadline,
+    clock: Clock,
+) -> str:
+    """Return a structured runtime failure reason; any follow-up probe stays inside *deadline*."""
     if isinstance(exc, subprocess.TimeoutExpired):
         return "docker_probe_timeout"
     if isinstance(exc, FileNotFoundError):
@@ -226,9 +236,11 @@ def _classify_runtime_failure(*, cwd: Path, env: dict[str, str], exc: BaseExcept
             ["docker", "info"],
             cwd=cwd,
             env=env,
-            timeout_seconds=_READINESS_PROBE_TIMEOUT_SECONDS,
+            timeout_seconds=deadline.command_timeout(_READINESS_PROBE_TIMEOUT_SECONDS, clock),
             capture_output=True,
         )
+    except BudgetExhaustedError:
+        return exception_reason or "docker_not_ready"
     except subprocess.TimeoutExpired:
         return "docker_probe_timeout"
     except FileNotFoundError:
@@ -248,12 +260,18 @@ def _validate_runtime_ready(
     *,
     cwd: Path,
     env: dict[str, str],
-    max_attempts: int,
+    deadline: PhaseDeadline,
+    clock: Clock,
 ) -> None:
-    """Verify Docker readiness and required CLI tooling."""
-    wait_for_docker_ready(cwd=cwd, env=env, max_attempts=max_attempts)
+    """Verify Docker readiness and required CLI tooling before *deadline*."""
+    wait_for_docker_ready(cwd=cwd, env=env, deadline=deadline, clock=clock)
     for command in _RUNTIME_VALIDATION_COMMANDS:
-        run_checked(command, cwd=cwd, env=env, timeout_seconds=120)
+        run_checked(
+            command,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=deadline.command_timeout(_VALIDATION_COMMAND_TIMEOUT_SECONDS, clock),
+        )
 
 
 def _write_recovery_command_output(
@@ -286,8 +304,10 @@ def _run_recovery_commands(
     env: dict[str, str],
     trigger_reason: str,
     output_path: Path,
+    deadline: PhaseDeadline,
+    clock: Clock,
 ) -> tuple[list[list[str]], int | None, bool]:
-    """Run bounded OrbStack recovery commands and capture their output."""
+    """Run OrbStack recovery commands inside *deadline* and capture their output."""
     primary_command = (
         ["orb", "start"]
         if trigger_reason == "orbstack_socket_missing"
@@ -303,10 +323,10 @@ def _run_recovery_commands(
                 command,
                 cwd=cwd,
                 env=env,
-                timeout_seconds=_RECOVERY_COMMAND_TIMEOUT_SECONDS,
+                timeout_seconds=deadline.command_timeout(_RECOVERY_COMMAND_TIMEOUT_SECONDS, clock),
                 capture_output=True,
             )
-        except subprocess.TimeoutExpired as exc:
+        except (BudgetExhaustedError, subprocess.TimeoutExpired) as exc:
             timed_out = True
             _write_recovery_command_output(output_path=output_path, command=command, exc=exc)
             exit_code = None
@@ -331,51 +351,95 @@ def _run_recovery_commands(
     return commands, exit_code, timed_out
 
 
+@dataclass(slots=True)
+class _RecoveryResult:
+    """Outcome of the OrbStack recovery slice."""
+
+    recovered: bool
+    attempts: list[RuntimeRecoveryAttemptReport]
+    last_reason: str | None
+    exhausted: bool
+
+
 def _recover_orbstack_runtime(
     *,
     context: FreshHostContext,
     repo_root: Path,
     env: dict[str, str],
     trigger_reason: str,
-) -> tuple[bool, list[RuntimeRecoveryAttemptReport], str | None]:
-    """Attempt bounded OrbStack recovery and return structured attempt reports."""
+    deadline: PhaseDeadline,
+    clock: Clock,
+) -> _RecoveryResult:
+    """Split the recovery slice across bounded OrbStack recovery attempts.
+
+    Each attempt gets an equal share of what is left; inside it, before and after
+    diagnostics each get a fixed slice, and recovery commands, backoff, and the readiness
+    gate share the rest.
+    """
     attempts: list[RuntimeRecoveryAttemptReport] = []
     last_readiness_reason: str | None = trigger_reason
+    exhausted = False
     recovery_root = Path(context.diagnostics_dir).resolve() / "runtime-recovery"
+    attempt_total = len(_RECOVERY_BACKOFF_SECONDS)
 
     for attempt_number, backoff_seconds in enumerate(_RECOVERY_BACKOFF_SECONDS, start=1):
+        remaining = deadline.remaining(clock)
+        if remaining < MIN_COMMAND_SECONDS:
+            exhausted = True
+            break
+        attempt_deadline = deadline.slice(
+            clock,
+            cap_seconds=remaining / (attempt_total - attempt_number + 1),
+            limited_by="recovery-attempt",
+        )
         attempt_root = recovery_root / f"attempt-{attempt_number:02d}"
         before_dir = attempt_root / "before"
         after_dir = attempt_root / "after"
         output_path = attempt_root / "recovery-command.txt"
         started_at = now_iso()
         log(
-            "OrbStack recovery attempt "
-            f"{attempt_number}/{len(_RECOVERY_BACKOFF_SECONDS)} "
-            f"triggered by {last_readiness_reason or trigger_reason}."
+            f"OrbStack recovery attempt {attempt_number}/{attempt_total} triggered by "
+            f"{last_readiness_reason or trigger_reason}; "
+            f"{attempt_deadline.remaining(clock):.0f}s slice."
         )
-        collect_runtime_diagnostics_for_context(context, before_dir, env=env)
+        collect_runtime_diagnostics_for_context(
+            context,
+            before_dir,
+            env=env,
+            deadline=_diagnostics_slice(attempt_deadline, clock),
+            clock=clock,
+        )
+        work_deadline = attempt_deadline.slice(
+            clock, reserve_seconds=_RECOVERY_DIAGNOSTICS_SLICE_SECONDS
+        )
         commands, exit_code, timed_out = _run_recovery_commands(
             cwd=repo_root,
             env=env,
             trigger_reason=last_readiness_reason or trigger_reason,
             output_path=output_path,
+            deadline=work_deadline,
+            clock=clock,
         )
-        time.sleep(backoff_seconds)
+        clock.sleep(work_deadline.clip(backoff_seconds, clock))
         try:
-            _validate_runtime_ready(
-                cwd=repo_root,
-                env=env,
-                max_attempts=_POST_RECOVERY_DOCKER_READY_ATTEMPTS,
-            )
+            _validate_runtime_ready(cwd=repo_root, env=env, deadline=work_deadline, clock=clock)
         except Exception as exc:  # noqa: BLE001
-            last_readiness_reason = _classify_runtime_failure(cwd=repo_root, env=env, exc=exc)
+            exhausted = work_deadline.remaining(clock) < MIN_COMMAND_SECONDS
+            last_readiness_reason = _classify_runtime_failure(
+                cwd=repo_root, env=env, exc=exc, deadline=attempt_deadline, clock=clock
+            )
             status = "failure"
         else:
+            exhausted = False
             last_readiness_reason = None
             status = "success"
-        collect_runtime_diagnostics_for_context(context, after_dir, env=env)
-        finished_at = now_iso()
+        collect_runtime_diagnostics_for_context(
+            context,
+            after_dir,
+            env=env,
+            deadline=_diagnostics_slice(attempt_deadline, clock),
+            clock=clock,
+        )
         attempts.append(
             RuntimeRecoveryAttemptReport(
                 attempt=attempt_number,
@@ -389,22 +453,108 @@ def _recover_orbstack_runtime(
                 after_diagnostics_dir=str(after_dir),
                 recovery_output_path=str(output_path),
                 started_at=started_at,
-                finished_at=finished_at,
+                finished_at=now_iso(),
             )
         )
         if status == "success":
-            return True, attempts, None
+            return _RecoveryResult(
+                recovered=True, attempts=attempts, last_reason=None, exhausted=False
+            )
 
-    return False, attempts, last_readiness_reason
+    return _RecoveryResult(
+        recovered=False,
+        attempts=attempts,
+        last_reason=last_readiness_reason,
+        exhausted=exhausted,
+    )
+
+
+def _diagnostics_slice(deadline: PhaseDeadline, clock: Clock) -> PhaseDeadline:
+    """Return the fixed diagnostics slice at the start of *deadline*."""
+    return deadline.slice(
+        clock, cap_seconds=_RECOVERY_DIAGNOSTICS_SLICE_SECONDS, limited_by="diagnostics-slice"
+    )
+
+
+def _initial_window(deadline: PhaseDeadline, clock: Clock) -> PhaseDeadline:
+    """Return the initial readiness window, leaving the recovery reserve after it.
+
+    A phase shorter than its minimum shrinks both parts proportionally, so recovery still
+    gets its share of whatever time the job budget left.
+    """
+    scale = min(1.0, deadline.remaining(clock) / RUNTIME_PHASE_MIN_SECONDS)
+    return deadline.slice(clock, reserve_seconds=RUNTIME_RECOVERY_RESERVE_SECONDS * scale)
+
+
+@dataclass(slots=True)
+class _RuntimeOutcome:
+    """Classified result of the runtime phase."""
+
+    failure_reason: str | None
+    failure_phase: str | None
+    last_failure_reason: str | None
+    recovery_attempts: list[RuntimeRecoveryAttemptReport]
+
+
+def _bring_up_runtime(
+    *,
+    context: FreshHostContext,
+    repo_root: Path,
+    env: dict[str, str],
+    runtime_provider: str,
+    deadline: PhaseDeadline,
+    clock: Clock,
+) -> _RuntimeOutcome:
+    """Run the initial readiness window, then OrbStack recovery, inside *deadline*."""
+    try:
+        _validate_runtime_ready(
+            cwd=repo_root, env=env, deadline=_initial_window(deadline, clock), clock=clock
+        )
+    except Exception as exc:  # noqa: BLE001
+        initial_reason = _classify_runtime_failure(
+            cwd=repo_root, env=env, exc=exc, deadline=deadline, clock=clock
+        )
+    else:
+        return _RuntimeOutcome(None, None, None, [])
+
+    log(f"Initial hosted Docker runtime health gate failed: {initial_reason}.")
+    if runtime_provider != "orbstack" or initial_reason not in _RECOVERABLE_RUNTIME_REASONS:
+        return _RuntimeOutcome(initial_reason, "initial_probe", initial_reason, [])
+
+    recovery = _recover_orbstack_runtime(
+        context=context,
+        repo_root=repo_root,
+        env=env,
+        trigger_reason=initial_reason,
+        deadline=deadline,
+        clock=clock,
+    )
+    if recovery.recovered:
+        return _RuntimeOutcome(None, None, None, recovery.attempts)
+    last_reason = recovery.last_reason or initial_reason
+    failure_reason = BUDGET_EXHAUSTED if recovery.exhausted else "orbstack_recovery_failed"
+    log(f"OrbStack recovery ended with {failure_reason}; last reason: {last_reason}.")
+    return _RuntimeOutcome(
+        failure_reason,
+        "post_recovery_probe" if recovery.attempts else "initial_probe",
+        last_reason,
+        recovery.attempts,
+    )
 
 
 def wait_runtime_ready(
-    context_path: Path, *, github_env_file: Path | None = None
+    context_path: Path,
+    *,
+    github_env_file: Path | None = None,
+    deadline: PhaseDeadline | None = None,
+    environ: Mapping[str, str] | None = None,
+    clock: Clock = SYSTEM_CLOCK,
 ) -> RuntimeInstallReport:
     """Verify the OrbStack Docker runtime is ready and write the install report.
 
-    Call this after the OrbStack setup action has run. The function runs a short
-    connectivity check and writes the :class:`RuntimeInstallReport` for the scenario.
+    Call this after the OrbStack setup action has run. *deadline* defaults to the runtime
+    phase of the recorded job budget; the image phase passes a slice of its own deadline
+    when it restarts the runtime, so recovery there cannot reset the budget.
     """
     context = load_context(context_path)
     if context.platform != "macos":
@@ -428,11 +578,8 @@ def wait_runtime_ready(
     if docker_host:
         env["DOCKER_HOST"] = docker_host
 
-    failure_phase: str | None = None
-    failure_reason: str | None = None
-    recovery_attempts: list[RuntimeRecoveryAttemptReport] = []
     started_at = now_iso()
-    started = time.monotonic()
+    started = clock.monotonic()
 
     # When OrbStack is started in the background its socket appears asynchronously.
     # Fall back to OrbStack's canonical socket path if DOCKER_HOST is not yet set.
@@ -443,34 +590,30 @@ def wait_runtime_ready(
 
     log(f"wait_runtime_ready: DOCKER_HOST={docker_host!r} DOCKER_CONFIG={docker_config!r}")
 
-    try:
-        _validate_runtime_ready(
-            cwd=repo_root,
-            env=env,
-            max_attempts=_INITIAL_DOCKER_READY_ATTEMPTS,
-        )
-    except Exception as exc:  # noqa: BLE001
-        initial_reason = _classify_runtime_failure(cwd=repo_root, env=env, exc=exc)
-        log(f"Initial hosted Docker runtime health gate failed: {initial_reason}.")
-        if runtime_provider == "orbstack" and initial_reason in _RECOVERABLE_RUNTIME_REASONS:
-            recovered, recovery_attempts, last_readiness_reason = _recover_orbstack_runtime(
-                context=context,
-                repo_root=repo_root,
-                env=env,
-                trigger_reason=initial_reason,
+    phase_error: BudgetExhaustedError | None = None
+    phase = deadline
+    if phase is None:
+        try:
+            phase = runtime_phase_deadline(
+                JobBudget.from_env(os.environ if environ is None else environ), clock=clock
             )
-            if not recovered:
-                failure_reason = "orbstack_recovery_failed"
-                failure_phase = "post_recovery_probe"
-                if last_readiness_reason:
-                    log(f"OrbStack recovery exhausted; last reason: {last_readiness_reason}.")
-        else:
-            failure_reason = initial_reason
-            failure_phase = "initial_probe"
+        except BudgetExhaustedError as exc:
+            phase_error = exc
+    if phase is None:
+        log(f"Runtime phase cannot start: {phase_error}.")
+        outcome = _RuntimeOutcome(BUDGET_EXHAUSTED, "phase_start", None, [])
+    else:
+        log(f"Runtime phase: {phase.remaining(clock):.0f}s, limited by {phase.limited_by}.")
+        outcome = _bring_up_runtime(
+            context=context,
+            repo_root=repo_root,
+            env=env,
+            runtime_provider=runtime_provider,
+            deadline=phase,
+            clock=clock,
+        )
 
     finished_at = now_iso()
-    duration_seconds = round(time.monotonic() - started, 3)
-
     report = RuntimeInstallReport(
         runtime_provider=runtime_provider,
         arch=arch,
@@ -479,20 +622,23 @@ def wait_runtime_ready(
         docker_host=docker_host or None,
         docker_config=docker_config,
         installed_tools=["orbstack", "docker", "docker-compose"],
-        failure_reason=failure_reason,
+        failure_reason=outcome.failure_reason,
         started_at=started_at,
         finished_at=finished_at,
-        duration_seconds=duration_seconds,
+        duration_seconds=round(clock.monotonic() - started, 3),
         created_at=finished_at,
-        failure_phase=failure_phase,
-        recovery_attempt_count=len(recovery_attempts),
-        recovery_attempts=recovery_attempts,
+        failure_phase=outcome.failure_phase,
+        recovery_attempt_count=len(outcome.recovery_attempts),
+        recovery_attempts=outcome.recovery_attempts,
+        last_failure_reason=outcome.last_failure_reason,
+        deadline_epoch=None if phase is None else phase.wall_deadline_epoch,
+        deadline_limited_by=None if phase is None else phase.limited_by,
     )
     write_json(asdict(report), report_path)
     main_report = load_report(Path(context.report_path).resolve())
     main_report.runtime_provider = runtime_provider
-    if failure_reason is not None:
-        main_report.failure_reason = failure_reason
+    if outcome.failure_reason is not None:
+        main_report.failure_reason = outcome.failure_reason
         main_report.status = "failure"
     write_report(main_report, Path(context.report_path).resolve())
     github_env_vars: dict[str, str] = {
@@ -505,8 +651,29 @@ def wait_runtime_ready(
     if docker_host:
         github_env_vars["DOCKER_HOST"] = docker_host
     write_github_env(github_env_vars, github_env_file)
-    if failure_reason is not None:
-        if recovery_attempts and recovery_attempts[-1].readiness_reason:
-            raise FreshHostError(f"{failure_reason}: {recovery_attempts[-1].readiness_reason}")
-        raise FreshHostError(failure_reason)
+    _raise_for_failure(outcome, phase=phase, phase_error=phase_error)
     return report
+
+
+def _raise_for_failure(
+    outcome: _RuntimeOutcome,
+    *,
+    phase: PhaseDeadline | None,
+    phase_error: BudgetExhaustedError | None,
+) -> None:
+    """Raise the classified runtime failure, if any, after its evidence is written."""
+    if phase_error is not None:
+        raise phase_error
+    if outcome.failure_reason is None:
+        return
+    if outcome.failure_reason == BUDGET_EXHAUSTED:
+        limited_by = "unknown" if phase is None else phase.limited_by
+        raise BudgetExhaustedError(
+            f"runtime phase ({limited_by}) ended before Docker was ready; "
+            f"last reason: {outcome.last_failure_reason}"
+        )
+    if outcome.recovery_attempts and outcome.recovery_attempts[-1].readiness_reason:
+        raise FreshHostError(
+            f"{outcome.failure_reason}: {outcome.recovery_attempts[-1].readiness_reason}"
+        )
+    raise FreshHostError(outcome.failure_reason)
