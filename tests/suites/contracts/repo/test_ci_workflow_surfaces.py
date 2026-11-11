@@ -658,12 +658,82 @@ def test_fresh_host_core_workflow_preserves_cache_restore_surface() -> None:
     assert "FRESH_HOST_CACHE_ROOT" in text
     assert "UV_CACHE_DIR" in text
     assert "npm_config_cache" in text
-    assert "npm_config_prefer_offline" in text
+    assert "npm_config_prefer_offline" not in text
     assert "Restore package download caches" in text
     assert '--github-env-file "${GITHUB_ENV}"' in text
     assert f"actions/cache/restore@{_CACHE_ACTION_NODE24_SHA}" in text
     assert "actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809" not in text
     assert "package-manager-cache: false" in text
+
+
+_FRESH_HOST_PACKAGE_CACHE_KEY = (
+    "fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', "
+    "'platform/node-tools/package-lock.json', "
+    "'platform/plugins/memory-lancedb-pro/package-lock.json') }}"
+)
+
+
+def _fresh_host_package_cache_steps(workflow_name: str) -> list[dict[str, object]]:
+    """Return every actions/cache step that touches the fresh-host package cache."""
+    cache_steps: list[dict[str, object]] = []
+    for raw_job in _workflow_jobs(workflow_name).values():
+        job = _as_str_object_dict(raw_job)
+        assert job is not None
+        for raw_step in cast(list[object], job.get("steps", [])):
+            step = _as_str_object_dict(raw_step)
+            if step is None or not str(step.get("uses", "")).startswith("actions/cache/"):
+                continue
+            inputs = _as_str_object_dict(step.get("with"))
+            if inputs is not None and str(inputs.get("key", "")).startswith("fresh-host-packages-"):
+                cache_steps.append(step)
+    return cache_steps
+
+
+def test_no_workflow_lets_npm_trust_stale_cached_registry_metadata() -> None:
+    """prefer-offline skips packument revalidation, which turned a stale cache into ETARGET."""
+    for workflow_path in (REPO_ROOT / ".github" / "workflows").glob("*.yml"):
+        text = workflow_path.read_text(encoding="utf-8")
+        assert "prefer_offline" not in text and "prefer-offline" not in text, workflow_path.name
+
+
+@pytest.mark.parametrize("workflow_name", ["fresh-host-core.yml", "fresh-host-cache-warm.yml"])
+def test_fresh_host_package_cache_is_keyed_on_the_locks_without_fallbacks(
+    workflow_name: str,
+) -> None:
+    """Exact lock-keyed caches only: a fallback restore would resurrect stale content."""
+    cache_steps = _fresh_host_package_cache_steps(workflow_name)
+
+    assert cache_steps, workflow_name
+    for step in cache_steps:
+        inputs = _as_str_object_dict(step.get("with"))
+        assert inputs is not None
+        assert inputs["key"] == _FRESH_HOST_PACKAGE_CACHE_KEY
+        assert "restore-keys" not in inputs
+
+
+def test_fresh_host_cache_warm_only_saves_freshly_warmed_caches() -> None:
+    """The warmer probes the exact key and, on a miss, warms and saves from an empty cache."""
+    for raw_job in _workflow_jobs("fresh-host-cache-warm.yml").values():
+        job = _as_str_object_dict(raw_job)
+        assert job is not None
+        steps = [
+            step
+            for raw_step in cast(list[object], job.get("steps", []))
+            if (step := _as_str_object_dict(raw_step)) is not None
+        ]
+        restore = next(
+            step for step in steps if str(step.get("uses", "")).startswith("actions/cache/restore")
+        )
+        restore_inputs = _as_str_object_dict(restore.get("with"))
+        assert restore_inputs is not None
+        assert restore_inputs.get("lookup-only") is True
+        miss = f"steps.{restore['id']}.outputs.cache-hit != 'true'"
+        warm = next(step for step in steps if "warm-packages" in str(step.get("run", "")))
+        save = next(
+            step for step in steps if str(step.get("uses", "")).startswith("actions/cache/save")
+        )
+        assert miss in str(warm.get("if"))
+        assert miss in str(save.get("if"))
 
 
 def test_cache_restore_and_save_share_one_pinned_release() -> None:

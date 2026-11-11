@@ -14,7 +14,7 @@ _SEMVER_COOLDOWN_ECOSYSTEMS = frozenset({"uv"})
 
 
 def test_dependabot_tracks_runtime_update_surfaces() -> None:
-    """Dependabot should watch Python, Actions, and shipped compose image surfaces."""
+    """Dependabot should watch Python, Actions, compose images, and the node-tools lock."""
     payload = cast(
         dict[str, Any],
         yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")),
@@ -32,6 +32,11 @@ def test_dependabot_tracks_runtime_update_surfaces() -> None:
     assert by_ecosystem["docker-compose"]["groups"]["runtime-compose-images"]["group-by"] == (
         "dependency-name"
     )
+    assert by_ecosystem["npm"]["directories"] == [
+        "/platform/node-tools",
+        "/src/clawops/assets/platform/node-tools",
+    ]
+    assert by_ecosystem["npm"]["groups"]["node-tools"]["group-by"] == "dependency-name"
 
 
 def test_dependabot_limits_solo_maintainer_pr_noise() -> None:
