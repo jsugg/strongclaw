@@ -251,7 +251,8 @@ async function main() {
     const validateOutput = await runOpenClaw(profile, ["config", "validate"]);
     assert.match(validateOutput, /Config valid/);
 
-    const infoOutput = await runOpenClaw(profile, ["plugins", "info", "memory-lancedb-pro"]);
+    // OpenClaw 2026.5+ only lists runtime registrations (CLI commands) when asked to load them.
+    const infoOutput = await runOpenClaw(profile, ["plugins", "info", "memory-lancedb-pro", "--runtime"]);
     assert.match(infoOutput, /Status:\s+loaded/);
     assert.match(infoOutput, /CLI commands:\s+memory-pro/);
 

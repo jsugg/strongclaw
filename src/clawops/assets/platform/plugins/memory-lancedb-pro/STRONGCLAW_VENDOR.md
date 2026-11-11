@@ -34,6 +34,8 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
   dependencies there instead of nesting them under the package as `npm install -g` did.
 - `openclaw.plugin.json` declares `contracts.tools`. OpenClaw 2026.5+ discovers plugin tools
   from that manifest list and drops `api.registerTool(...)` registrations it does not name.
+- `test/openclaw-host-functional.mjs` runs `plugins info --runtime`: OpenClaw 2026.5+ lists runtime
+  registrations such as the `memory-pro` CLI command only when the runtime is loaded.
 
 ## Review notes
 
