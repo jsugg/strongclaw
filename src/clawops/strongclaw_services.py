@@ -48,8 +48,13 @@ LAUNCHD_GATEWAY_TIMEOUT_SECONDS: Final[int] = 30
 LAUNCHD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 1800
 LAUNCHD_ONESHOT_MAX_ATTEMPTS: Final[int] = 2
 LAUNCHD_ONESHOT_RETRY_DELAY_SECONDS: Final[int] = 2
+SYSTEMD_SIDECARS_UNIT: Final[str] = "openclaw-sidecars.service"
+SYSTEMD_SIDECARS_TIMEOUT_ENV_VAR: Final[str] = "STRONGCLAW_SYSTEMD_SIDECARS_TIMEOUT_SECONDS"
+SYSTEMD_ENABLE_TIMEOUT_SECONDS: Final[int] = 60
+# `enable --now` on the oneshot sidecars unit blocks until `sidecars up` reports healthy.
+SYSTEMD_SIDECARS_TIMEOUT_SECONDS: Final[int] = 1800
 SYSTEMD_ACTIVATE_UNITS: Final[tuple[str, ...]] = (
-    "openclaw-sidecars.service",
+    SYSTEMD_SIDECARS_UNIT,
     "openclaw-gateway.service",
     "openclaw-backup-create.timer",
     "openclaw-backup-verify.timer",
@@ -184,8 +189,8 @@ def _launchd_field(launchctl_output: str, field_name: str) -> str:
     return ""
 
 
-def _launchd_timeout_seconds(env_var: str, default: int) -> int:
-    """Resolve one positive launchd timeout from the environment."""
+def _env_timeout_seconds(env_var: str, default: int) -> int:
+    """Resolve one positive service-activation timeout from the environment."""
     raw_value = os.environ.get(env_var, "").strip()
     if not raw_value:
         return default
@@ -290,11 +295,11 @@ def activate_services(
     if manager == "launchd":
         output_dir = pathlib.Path(str(render_payload["outputDir"]))
         domain = _launchd_domain()
-        gateway_timeout_seconds = _launchd_timeout_seconds(
+        gateway_timeout_seconds = _env_timeout_seconds(
             LAUNCHD_GATEWAY_TIMEOUT_ENV_VAR,
             LAUNCHD_GATEWAY_TIMEOUT_SECONDS,
         )
-        sidecars_timeout_seconds = _launchd_timeout_seconds(
+        sidecars_timeout_seconds = _env_timeout_seconds(
             LAUNCHD_SIDECARS_TIMEOUT_ENV_VAR,
             LAUNCHD_SIDECARS_TIMEOUT_SECONDS,
         )
@@ -385,6 +390,10 @@ def activate_services(
             or "systemctl daemon-reload failed"
         )
         raise RuntimeError(detail)
+    sidecars_timeout_seconds = _env_timeout_seconds(
+        SYSTEMD_SIDECARS_TIMEOUT_ENV_VAR,
+        SYSTEMD_SIDECARS_TIMEOUT_SECONDS,
+    )
     for unit in SYSTEMD_ACTIVATE_UNITS:
         emit_structured_log(
             "clawops.services.activate",
@@ -394,10 +403,17 @@ def activate_services(
                 "unit": unit,
             },
         )
+        timeout_seconds = (
+            sidecars_timeout_seconds
+            if unit == SYSTEMD_SIDECARS_UNIT
+            else SYSTEMD_ENABLE_TIMEOUT_SECONDS
+        )
         enable_result = run_command(
             ["systemctl", "--user", "enable", "--now", unit],
-            timeout_seconds=60,
+            timeout_seconds=timeout_seconds,
         )
+        if enable_result.timed_out:
+            raise RuntimeError(f"Timed out after {timeout_seconds}s starting {unit}.")
         if not enable_result.ok:
             detail = (
                 enable_result.stderr.strip()

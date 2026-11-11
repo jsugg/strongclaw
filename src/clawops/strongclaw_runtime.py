@@ -250,6 +250,15 @@ def _command_display(command: Sequence[str]) -> str:
     return shlex.join(command)
 
 
+def _timeout_output_text(output: str | bytes | None) -> str:
+    """Return partial output captured before a timeout, which Python hands back as bytes."""
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
 def run_command(
     command: Sequence[str],
     *,
@@ -280,8 +289,8 @@ def run_command(
         result = ExecResult(
             argv=argv,
             returncode=None,
-            stdout="" if exc.stdout is None else str(exc.stdout),
-            stderr="" if exc.stderr is None else str(exc.stderr),
+            stdout=_timeout_output_text(exc.stdout),
+            stderr=_timeout_output_text(exc.stderr),
             duration_ms=int((time.perf_counter() - start) * 1000),
             timed_out=True,
         )
