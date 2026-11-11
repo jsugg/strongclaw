@@ -102,6 +102,7 @@ def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None
     config = _base_config(
         entries={
             "codex": {"enabled": False},
+            "zai": {"enabled": False, "config": {"region": "intl"}},
             "diagnostics-otel": {"enabled": True, "config": {"x": 1}},
         }
     )
@@ -110,6 +111,7 @@ def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None
 
     assert plugins["entries"] == {
         "acpx": {"enabled": False},
+        "zai": {"config": {"region": "intl"}},
         "diagnostics-otel": {"enabled": True, "config": {"x": 1}},
     }
 
@@ -131,6 +133,46 @@ def test_service_plugins_load_only_when_configured(
 
     assert plugin_id in cast(list[str], plugins["allow"])
     assert plugin_id not in cast(dict[str, object], plugins["entries"])
+
+
+def test_reattach_keeps_operator_disables_and_allowlisted_plugins() -> None:
+    """Render followed by model-auth must not undo operator choices that the config allows."""
+    config = _base_config(allow=["x", "acpx"], entries={"moonshot": {"enabled": False}})
+
+    once = attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES)
+    twice = _plugins(attach_first_party_plugins(once, node_modules_dir=_NODE_MODULES))
+
+    assert twice["entries"] == {
+        "moonshot": {"enabled": False},
+        "diagnostics-otel": {"enabled": False},
+    }
+    assert "acpx" in cast(list[str], twice["allow"])
+
+
+def test_plugin_that_stops_being_required_is_disabled_on_the_next_attach() -> None:
+    """Dropping the GPT runtime pin (API-key route) turns its runtime plugin off again."""
+    config = attach_first_party_plugins(_base_config(), node_modules_dir=_NODE_MODULES)
+    assert "codex" not in cast(dict[str, object], _plugins(config)["entries"])
+    defaults = cast(dict[str, dict[str, object]], config["agents"])["defaults"]
+    defaults["models"] = {"openai/gpt-5.4": {}}
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["entries"])["codex"] == {"enabled": False}
+
+
+@pytest.mark.parametrize(
+    ("plugins", "message"),
+    [
+        ({"load": "not-an-object"}, "`load` must be an object"),
+        ({"load": {"paths": "/one/path"}}, "`paths` must be a list"),
+        ({"entries": ["acpx"]}, "`entries` must be an object"),
+    ],
+)
+def test_attach_rejects_malformed_plugin_sections(plugins: dict[str, object], message: str) -> None:
+    """Operator data of the wrong shape fails loudly instead of being silently replaced."""
+    with pytest.raises(TypeError, match=message):
+        attach_first_party_plugins(_base_config(**plugins), node_modules_dir=_NODE_MODULES)
 
 
 def test_attach_is_idempotent_and_respects_disabled_plugins() -> None:

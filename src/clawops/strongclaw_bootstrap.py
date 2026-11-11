@@ -201,6 +201,21 @@ def _node_satisfies_minimum() -> bool:
     return result.ok
 
 
+def _node_runtime_description() -> str:
+    """Describe the Node.js that PATH resolves, for floor errors (it may not be Homebrew's)."""
+    node_command = _resolve_node_command()
+    if node_command is None:
+        return "no node on PATH"
+    result = run_command([node_command, "--version"], timeout_seconds=10)
+    version = result.stdout.strip() if result.ok else "unknown version"
+    return f"{version} at {shutil.which(node_command) or node_command}"
+
+
+def _node_floor_error() -> CommandError:
+    """Return the error raised when no supported Node.js could be provisioned."""
+    return CommandError(f"{_NODE_REQUIREMENT} is required (found {_node_runtime_description()})")
+
+
 def _brew_formula_installed(formula_name: str) -> bool:
     """Return whether Homebrew already manages *formula_name*."""
     return run_command(["brew", "list", "--versions", formula_name], timeout_seconds=60).ok
@@ -216,7 +231,7 @@ def _ensure_node_runtime_darwin() -> None:
     else:
         _ensure_brew_formula("node")
     if not _node_satisfies_minimum():
-        raise CommandError(f"{_NODE_REQUIREMENT} is required")
+        raise _node_floor_error()
 
 
 def _ensure_node_runtime_linux() -> None:
@@ -236,7 +251,7 @@ def _ensure_node_runtime_linux() -> None:
         timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
     )
     if not _node_satisfies_minimum():
-        raise CommandError(f"{_NODE_REQUIREMENT} is required")
+        raise _node_floor_error()
 
 
 def resolve_uv_binary(*, home_dir: pathlib.Path | None = None) -> pathlib.Path | None:

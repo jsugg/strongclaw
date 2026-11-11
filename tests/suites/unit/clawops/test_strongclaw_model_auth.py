@@ -610,6 +610,14 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
         "resolve_openclaw_config_path",
         new=_resolve_openclaw_config_path,
     )
+    node_tools_dir = tmp_path / "data" / "node-tools"
+
+    def _strongclaw_node_tools_dir() -> pathlib.Path:
+        return node_tools_dir
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth, "strongclaw_node_tools_dir", new=_strongclaw_node_tools_dir
+    )
     apply_model_chain = cast(
         Callable[[pathlib.Path, list[str]], None],
         vars(strongclaw_model_auth)["_apply_model_chain"],
@@ -628,4 +636,6 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
     assert "github-copilot/gpt-4o" not in defaults["models"]
     assert ("codex" in plugins["allow"]) is (expected_runtime is not None)
     assert {"zai", "openai", "strongclaw-hypermemory"} <= set(plugins["allow"])
-    assert any(path.endswith("/@openclaw/zai-provider") for path in plugins["load"]["paths"])
+    assert (node_tools_dir / "node_modules" / "@openclaw" / "zai-provider").as_posix() in plugins[
+        "load"
+    ]["paths"]

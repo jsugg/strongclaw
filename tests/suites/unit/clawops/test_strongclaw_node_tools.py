@@ -571,6 +571,10 @@ def test_publish_node_tools_link_is_idempotent_and_refuses_foreign_paths(
     assert os.readlink(link) == str(layout.current_link)
     assert publish_node_tools_link(layout, home_dir=home_dir) == link
     link.unlink()
+    os.symlink(tmp_path / "old-prefix" / "lib" / "strongclaw-node-tools" / "current", link)
+    publish_node_tools_link(layout, home_dir=home_dir)
+    assert os.readlink(link) == str(layout.current_link)
+    link.unlink()
     link.mkdir()
     with pytest.raises(NodeToolsError, match="not a symlink"):
         publish_node_tools_link(layout, home_dir=home_dir)
@@ -637,10 +641,11 @@ def test_bundle_rejects_non_reproducible_locks(
     [
         ("node_modules/acpx/node_modules/bundled-dep", True),
         ("node_modules/acpx/node_modules/bundled-dep/node_modules/nested-dep", True),
+        ("node_modules/acpx/node_modules/@scope/bundled-dep", True),
         ("node_modules/orphan/node_modules/bundled-dep", False),
         ("node_modules/bundled-dep", False),
     ],
-    ids=["bundled-by-pin", "nested-bundle", "missing-bundler", "no-bundler"],
+    ids=["bundled-by-pin", "nested-bundle", "scoped-bundle", "missing-bundler", "no-bundler"],
 )
 def test_bundle_accepts_in_bundle_entries_only_under_a_locked_bundler(
     tmp_path: pathlib.Path, bundled_key: str, valid: bool

@@ -257,9 +257,12 @@ def _canonical_model_ref(model_ref: str) -> tuple[str, bool]:
 
 def _set_codex_runtime(model_settings: dict[str, object], *, enabled: bool) -> None:
     """Pin or clear the Codex agent runtime for one per-model settings entry."""
-    runtime = _mapping_or_none(model_settings.get("agentRuntime"))
+    runtime = _mutable_mapping_or_none(model_settings.get("agentRuntime"))
     if enabled:
-        model_settings["agentRuntime"] = {"id": CODEX_AGENT_RUNTIME_ID}
+        if runtime is None:
+            model_settings["agentRuntime"] = {"id": CODEX_AGENT_RUNTIME_ID}
+        else:
+            runtime["id"] = CODEX_AGENT_RUNTIME_ID
     elif runtime is not None and runtime.get("id") == CODEX_AGENT_RUNTIME_ID:
         del model_settings["agentRuntime"]
 

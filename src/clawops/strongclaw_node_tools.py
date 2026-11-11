@@ -770,7 +770,10 @@ def publish_node_tools_link(
     if link.is_symlink() and os.readlink(link) == target:
         return link
     if link.exists() and not link.is_symlink():
-        raise NodeToolsError(f"refusing to replace {link}: it is not a symlink")
+        raise NodeToolsError(
+            f"refusing to replace {link}: it is not a symlink. "
+            "Remove it, then re-run `clawops bootstrap`."
+        )
     link.parent.mkdir(parents=True, exist_ok=True)
     LocalPrefixWriter().replace_symlink(link, target)
     return link

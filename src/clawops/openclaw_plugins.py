@@ -143,6 +143,8 @@ def _child_object(parent: JsonObject, key: str) -> JsonObject:
     value = parent.get(key)
     if isinstance(value, dict):
         return cast(JsonObject, value)
+    if value is not None:
+        raise TypeError(f"OpenClaw config `{key}` must be an object, got {type(value).__name__}")
     child: JsonObject = {}
     parent[key] = child
     return child
@@ -153,6 +155,8 @@ def _string_list(parent: JsonObject, key: str) -> list[object]:
     value = parent.get(key)
     if isinstance(value, list):
         return cast(list[object], value)
+    if value is not None:
+        raise TypeError(f"OpenClaw config `{key}` must be a list, got {type(value).__name__}")
     created: list[object] = []
     parent[key] = created
     return created
@@ -168,8 +172,8 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
     """Load every locked first-party plugin from *node_modules_dir* and enable the needed ones.
 
     Each plugin is made discoverable so OpenClaw never installs it from npm. A plugin the config
-    uses is enabled (usage overrides a stale `enabled: false`); an unused runtime, channel, or
-    service plugin is disabled unless the operator already configured it. With a restrictive
+    requires is enabled, even over a stale `enabled: false`. An unused runtime or service plugin
+    is disabled unless the operator configured or allowlisted it. With a restrictive
     `plugins.allow`, the enabled plugins plus the bundled providers the agents use are
     allowlisted, and bundled discovery keeps OpenClaw's pre-2026.5 compatibility mode.
     """
@@ -182,15 +186,20 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
     entries = _child_object(plugins, "entries")
     for plugin in FIRST_PARTY_PLUGINS:
         _append_unique(load_paths, (node_modules_dir / plugin.package).as_posix())
-        used = (allowlist is not None and plugin.plugin_id in allowlist) or plugin.is_required(
-            config
-        )
-        if used and _mapping(entries.get(plugin.plugin_id)).get("enabled") is False:
-            del entries[plugin.plugin_id]
-        if used or plugin.always_enabled:
+        required = plugin.is_required(config)
+        entry = entries.get(plugin.plugin_id)
+        settings = cast(JsonObject, entry) if isinstance(entry, dict) else None
+        # A config that routes work through a plugin cannot also keep it disabled.
+        if required and settings is not None and settings.get("enabled") is False:
+            del settings["enabled"]
+            if not settings:
+                del entries[plugin.plugin_id]
+        if required or plugin.always_enabled:
             if allowlist is not None:
                 _append_unique(allowlist, plugin.plugin_id)
-        elif plugin.plugin_id not in entries:
+        elif plugin.plugin_id not in entries and (
+            allowlist is None or plugin.plugin_id not in allowlist
+        ):
             entries[plugin.plugin_id] = {"enabled": False}
     if allowlist is not None:
         for provider_id in sorted(configured_model_providers(config) & BUNDLED_PROVIDER_PLUGIN_IDS):

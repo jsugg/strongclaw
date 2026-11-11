@@ -280,13 +280,16 @@ def test_ensure_node_runtime_darwin_upgrades_or_installs_brew_node(
 def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
     test_context: TestContext,
 ) -> None:
-    """Bootstrap fails loudly with the current floor when brew cannot satisfy it."""
+    """Bootstrap names the floor and the shadowing node PATH resolves when brew cannot help."""
 
     def _node_satisfies_minimum() -> bool:
         return False
 
+    def _resolve_node_command() -> str:
+        return "node"
+
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
-        return SimpleNamespace(ok=True)
+        return SimpleNamespace(ok=True, stdout="v22.16.0\n" if command[-1] == "--version" else "")
 
     def fake_stream_checked(command: list[str], **_: object) -> None:
         return None
@@ -299,7 +302,14 @@ def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
         strongclaw_bootstrap, "_stream_checked", new=fake_stream_checked
     )
 
-    with pytest.raises(strongclaw_bootstrap.CommandError, match=r"node >= 22\.19 is required"):
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_resolve_node_command", new=_resolve_node_command
+    )
+
+    with pytest.raises(
+        strongclaw_bootstrap.CommandError,
+        match=r"node >= 22\.19 is required \(found v22\.16\.0 at ",
+    ):
         strongclaw_bootstrap._ensure_node_runtime_darwin()
 
 
