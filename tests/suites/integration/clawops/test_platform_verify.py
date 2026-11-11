@@ -332,8 +332,8 @@ def test_repo_aux_stack_neo4j_auth_uses_shared_varlock_credentials() -> None:
         "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use clawops varlock-env configure}"
     )
     expected_image = (
-        "neo4j:5.26.23-community@"
-        "sha256:40bf5ae9282213087e4d6036aab3ec443fe9c974d3dd4f14a11892c63157238f"
+        "neo4j:5.26.31-community@"
+        "sha256:c7d25c0eeebfe125718d58b72ed5d663c85d0479047733845eb2237c67ce8069"
     )
 
     for compose_path in compose_paths:

@@ -441,74 +441,76 @@ class WorkflowRunner:
             )
         config_path = self._resolve_step_path(step["config"], field_name="context_pack.config")
         repo_path = self._resolve_step_path(step["repo"], field_name="context_pack.repo")
-        service = create_context_service(
+        with create_context_service(
             provider=provider,
             config_path=config_path,
             repo=repo_path,
             scale=scale,
-        )
-        service.index()
-        if bool(step.get("envelope", False)):
-            project = ProjectDescriptor.resolve(repo_path)
-            workspace_kind = "git_clone" if (repo_path / ".git").exists() else "local_dir"
-            workspace = WorkspaceDescriptor.resolve(project, kind=workspace_kind, path=repo_path)
-            output_dir = (
-                None
+        ) as service:
+            service.index()
+            if bool(step.get("envelope", False)):
+                project = ProjectDescriptor.resolve(repo_path)
+                workspace_kind = "git_clone" if (repo_path / ".git").exists() else "local_dir"
+                workspace = WorkspaceDescriptor.resolve(
+                    project, kind=workspace_kind, path=repo_path
+                )
+                output_dir = (
+                    None
+                    if step.get("output") is None
+                    else self._resolve_step_path(step["output"], field_name="context_pack.output")
+                )
+                builder = ContextEnvelopeBuilder(
+                    service,
+                    project=project,
+                    workspace=workspace,
+                    lane=str(step.get("lane", "default")),
+                    role=str(step.get("role", "developer")),
+                    backend=str(step.get("backend", "codex")),
+                    provider=provider,
+                    scale=scale,
+                )
+                envelope = builder.build(
+                    query=as_string(step["query"], path="context_pack.query"),
+                    limit=as_int(step.get("limit", 8), path="context_pack.limit"),
+                    ttl_seconds=as_int(
+                        step.get("ttl_seconds", 900),
+                        path="context_pack.ttl_seconds",
+                    ),
+                    output_dir=output_dir,
+                )
+                validate_context_envelope(envelope, service=service, workspace=workspace)
+                return self._store_step_result(
+                    step_name=str(step["name"]),
+                    ok=True,
+                    message=f"context envelope -> {envelope.manifest_path}",
+                    details={
+                        "provider": provider,
+                        "scale": scale,
+                        "context_manifest": str(envelope.manifest_path),
+                        "context_body": str(envelope.body_path),
+                        "reused": envelope.reused,
+                    },
+                )
+            output_path = (
+                _default_context_pack_output(base_dir=self.base_dir, step_name=str(step["name"]))
                 if step.get("output") is None
                 else self._resolve_step_path(step["output"], field_name="context_pack.output")
             )
-            builder = ContextEnvelopeBuilder(
-                service,
-                project=project,
-                workspace=workspace,
-                lane=str(step.get("lane", "default")),
-                role=str(step.get("role", "developer")),
-                backend=str(step.get("backend", "codex")),
-                provider=provider,
-                scale=scale,
-            )
-            envelope = builder.build(
-                query=as_string(step["query"], path="context_pack.query"),
+            output = service.pack(
+                as_string(step["query"], path="context_pack.query"),
                 limit=as_int(step.get("limit", 8), path="context_pack.limit"),
-                ttl_seconds=as_int(
-                    step.get("ttl_seconds", 900),
-                    path="context_pack.ttl_seconds",
-                ),
-                output_dir=output_dir,
             )
-            validate_context_envelope(envelope, service=service, workspace=workspace)
+            write_text(output_path, output)
             return self._store_step_result(
                 step_name=str(step["name"]),
                 ok=True,
-                message=f"context envelope -> {envelope.manifest_path}",
+                message=f"context packed -> {output_path}",
                 details={
                     "provider": provider,
                     "scale": scale,
-                    "context_manifest": str(envelope.manifest_path),
-                    "context_body": str(envelope.body_path),
-                    "reused": envelope.reused,
+                    "output_path": str(output_path),
                 },
             )
-        output_path = (
-            _default_context_pack_output(base_dir=self.base_dir, step_name=str(step["name"]))
-            if step.get("output") is None
-            else self._resolve_step_path(step["output"], field_name="context_pack.output")
-        )
-        output = service.pack(
-            as_string(step["query"], path="context_pack.query"),
-            limit=as_int(step.get("limit", 8), path="context_pack.limit"),
-        )
-        write_text(output_path, output)
-        return self._store_step_result(
-            step_name=str(step["name"]),
-            ok=True,
-            message=f"context packed -> {output_path}",
-            details={
-                "provider": provider,
-                "scale": scale,
-                "output_path": str(output_path),
-            },
-        )
 
     def _workspace_prepare_step(self, step: Mapping[str, object]) -> StepResult:
         """Resolve and persist one workspace descriptor."""
@@ -605,33 +607,33 @@ class WorkflowRunner:
         context_manifest: str | None = None
         context_body: str | None = None
         if task.context_request is not None:
-            service = create_context_service(
+            with create_context_service(
                 provider=task.context_request.provider,
                 config_path=task.context_request.config_path,
                 repo=task.workspace.working_directory,
                 scale=task.context_request.scale,
-            )
-            builder = ContextEnvelopeBuilder(
-                service,
-                project=task.project,
-                workspace=task.workspace,
-                lane=task.lane,
-                role=task.role,
-                backend=task.backend,
-                provider=task.context_request.provider,
-                scale=task.context_request.scale,
-            )
-            envelope = builder.build(
-                query=task.context_request.query,
-                limit=task.context_request.limit,
-                ttl_seconds=task.context_request.ttl_seconds,
-                prior_artifacts=task.context_request.prior_artifacts,
-            )
-            validate_context_envelope(envelope, service=service, workspace=task.workspace)
-            context_manifest = str(envelope.manifest_path)
-            context_body = str(envelope.body_path)
-            details["context_manifest"] = context_manifest
-            details["context_body"] = context_body
+            ) as service:
+                builder = ContextEnvelopeBuilder(
+                    service,
+                    project=task.project,
+                    workspace=task.workspace,
+                    lane=task.lane,
+                    role=task.role,
+                    backend=task.backend,
+                    provider=task.context_request.provider,
+                    scale=task.context_request.scale,
+                )
+                envelope = builder.build(
+                    query=task.context_request.query,
+                    limit=task.context_request.limit,
+                    ttl_seconds=task.context_request.ttl_seconds,
+                    prior_artifacts=task.context_request.prior_artifacts,
+                )
+                validate_context_envelope(envelope, service=service, workspace=task.workspace)
+                context_manifest = str(envelope.manifest_path)
+                context_body = str(envelope.body_path)
+                details["context_manifest"] = context_manifest
+                details["context_body"] = context_body
 
         state_dir = (
             scoped_state_dir(task.workspace.working_directory, category="acp-sessions")
