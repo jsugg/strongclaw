@@ -11,6 +11,10 @@ import pytest
 
 from clawops import platform_compat
 from clawops.strongclaw_node_tools import NODE_TOOLS_ASSET_DIR, load_node_tools_bundle
+from tests.utils.helpers.ci_node_installs import (
+    find_floating_node_commands,
+    find_floating_node_installs,
+)
 from tests.utils.helpers.node_tools import find_version_mentions
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -88,3 +92,38 @@ def test_node_tools_bundle_ships_in_package_data() -> None:
     package_data = pyproject["tool"]["setuptools"]["package-data"]["clawops.assets"]
 
     assert "platform/node-tools/*" in package_data
+
+
+@pytest.mark.parametrize(
+    ("command", "floating"),
+    [
+        ("npm install --prefix /tmp/x --no-fund openclaw@2026.3.13", True),
+        ("npm --prefix /tmp/x i -g acpx", True),
+        ("npm install --prefix <expr> --no-fund --no-audit <expr>", True),
+        ("npx -y openclaw@2026.3.13 --version", True),
+        ("npm exec --package=acpx@0.3.0 -- acpx --help", True),
+        ("echo ready && npm add left-pad", True),
+        ("npm ci --omit=dev --no-audit --no-fund", False),
+        ("npm --prefix platform/plugins/strongclaw-hypermemory run test:openclaw-host", False),
+        ("npm install --package-lock-only --ignore-scripts", False),
+        ("npm run install-deps", False),
+        ("npx tsc --noEmit", False),
+        ("pnpm install openclaw", False),
+    ],
+)
+def test_floating_node_command_detector(command: str, floating: bool) -> None:
+    """The detector flags resolving installs and OpenClaw/ACPX npx runs, not locked commands."""
+    assert bool(find_floating_node_commands(command)) is floating
+
+
+def test_ci_never_installs_node_packages_outside_a_lock() -> None:
+    """CI installs OpenClaw/ACPX only via `npm ci` of a committed lock, never a floating install."""
+    findings = [
+        f"{finding.path}: {finding.command}" for finding in find_floating_node_installs(REPO_ROOT)
+    ]
+
+    assert findings == [], (
+        "install from platform/node-tools with `npm ci` "
+        "(tests/utils/helpers/_ci_workflows/memory_plugin.install_locked_node_tools): "
+        + ", ".join(findings)
+    )

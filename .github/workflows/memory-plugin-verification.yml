@@ -40,7 +40,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          cache-dependency-path: platform/plugins/memory-lancedb-pro/package-lock.json
+          cache-dependency-path: |
+            platform/node-tools/package-lock.json
+            platform/plugins/memory-lancedb-pro/package-lock.json
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
@@ -51,7 +53,7 @@ jobs:
       - run: uv sync --locked
       - run: PYTHONPATH=src uv run python -m clawops config --asset-root . memory --set-profile memory-lancedb-pro --output "$RUNNER_TEMP/openclaw.json"
       - run: python3 ./tests/scripts/memory_plugin_verification.py run-clawops-memory-migration --repo-root . --runner-temp "$RUNNER_TEMP"
-      - run: python3 ./tests/scripts/memory_plugin_verification.py run-vendored-host-checks --repo-root . --package-spec "openclaw@2026.3.13"
+      - run: python3 ./tests/scripts/memory_plugin_verification.py run-vendored-host-checks --repo-root .
   verify-hypermemory-qdrant:
     name: Run Hypermemory Qdrant Checks
     runs-on: ubuntu-latest
