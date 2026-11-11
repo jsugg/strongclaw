@@ -15,7 +15,7 @@ def test_warm_packages_uses_bootstrap_installers(
     test_context: TestContext,
     tmp_path: Path,
 ) -> None:
-    """Package warming should reuse the StrongClaw bootstrap installers."""
+    """Package warming should reuse the bootstrap installers and prefetch the node-tools lock."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     home_dir = tmp_path / "home"
@@ -31,6 +31,10 @@ def test_warm_packages_uses_bootstrap_installers(
     def _install_memory_plugin_asset(resolved_repo_root: Path) -> None:
         seen_calls.append(("npm", resolved_repo_root, None))
 
+    def _prefetch_node_tools_packages(*, repo_root: Path | None = None) -> None:
+        assert repo_root is not None
+        seen_calls.append(("node-tools", repo_root, None))
+
     test_context.patch.patch_object(
         fresh_host_cache_script,
         "uv_sync_managed_environment",
@@ -41,12 +45,18 @@ def test_warm_packages_uses_bootstrap_installers(
         "install_memory_plugin_asset",
         new=_install_memory_plugin_asset,
     )
+    test_context.patch.patch_object(
+        fresh_host_cache_script,
+        "prefetch_node_tools_packages",
+        new=_prefetch_node_tools_packages,
+    )
 
     fresh_host_cache_script.warm_packages(repo_root, home_dir=home_dir)
 
     assert seen_calls == [
         ("uv", repo_root.resolve(), home_dir.resolve()),
         ("npm", repo_root.resolve(), None),
+        ("node-tools", repo_root.resolve(), None),
     ]
 
 

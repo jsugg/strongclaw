@@ -25,7 +25,6 @@ env:
   FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm
-  npm_config_prefer_offline: "true"
 
 jobs:
   linux-fresh-host:
@@ -62,9 +61,7 @@ jobs:
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
-          restore-keys: |
-            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
       - name: Prepare Linux fresh-host context
         run: ./tests/scripts/fresh_host.py prepare-context --scenario linux --profile "${{ matrix.profile }}" --repo-root . --runner-temp "${RUNNER_TEMP}" --workspace "${GITHUB_WORKSPACE}" --github-env-file "${GITHUB_ENV}"
       - name: Preview Linux fresh-host context
@@ -174,9 +171,7 @@ jobs:
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
-          restore-keys: |
-            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
       - name: Save OrbStack DMG cache
         if: steps.orbstack_dmg_cache.outputs.cache-hit != 'true'
         timeout-minutes: 5

@@ -21,11 +21,10 @@ from clawops.runtime_assets import (
     resolve_managed_plugin_dir,
     resolve_runtime_layout,
 )
+from clawops.strongclaw_node_tools import ensure_node_tools_installed
 from clawops.strongclaw_runtime import (
-    DEFAULT_ACPX_VERSION,
     DEFAULT_LOSSLESS_CLAW_REF,
     DEFAULT_LOSSLESS_CLAW_REPO,
-    DEFAULT_OPENCLAW_VERSION,
     DEFAULT_QMD_VERSION,
     DEFAULT_UV_VERSION,
     DEFAULT_VARLOCK_VERSION,
@@ -56,8 +55,6 @@ EXPECTED_QMD_BIN = pathlib.Path.home() / ".bun" / "bin" / "qmd"
 DEFAULT_QMD_PACKAGE = f"@tobilu/qmd@{DEFAULT_QMD_VERSION}"
 _UV_SYNC_MAX_ATTEMPTS = 3
 _UV_SYNC_RETRY_DELAY_SECONDS = 5
-_NPM_GLOBAL_INSTALL_MAX_ATTEMPTS = 2
-_NPM_GLOBAL_INSTALL_RETRY_DELAY_SECONDS = 15
 # apt's default per-download timeout is effectively unbounded on CI runners, and the
 # regional `azure.archive.ubuntu.com` mirror is frequently unreachable there. Bound the
 # acquire window and cap each phase so a flaky mirror fails fast instead of stalling.
@@ -139,26 +136,6 @@ def _stream_checked(
     )
     if returncode != 0:
         raise CommandError(f"command failed with exit code {returncode}: {' '.join(command)}")
-
-
-def install_global_node_tools(command: list[str]) -> None:
-    """Install pinned global npm tools with one registry/cache recovery attempt."""
-    for attempt in range(1, _NPM_GLOBAL_INSTALL_MAX_ATTEMPTS + 1):
-        try:
-            _stream_checked(command, timeout_seconds=3600)
-            return
-        except CommandError as err:
-            if attempt == _NPM_GLOBAL_INSTALL_MAX_ATTEMPTS:
-                raise
-            print(
-                f"npm global tool install failed; cleaning npm cache before retry: {err}",
-                file=sys.stderr,
-            )
-            cache_clean_command = ["npm", "cache", "clean", "--force"]
-            if command and command[0] == "sudo":
-                cache_clean_command.insert(0, "sudo")
-            _stream_checked(cache_clean_command, timeout_seconds=300)
-            time.sleep(_NPM_GLOBAL_INSTALL_RETRY_DELAY_SECONDS)
 
 
 def _ensure_brew_formula(formula_name: str) -> None:
@@ -644,16 +621,8 @@ def bootstrap_host(
     uv_sync_managed_environment(repo_root, home_dir=home_dir)
     install_profile_assets(repo_root, profile=profile, home_dir=home_dir)
 
-    npm_install_command = [
-        "npm",
-        "install",
-        "-g",
-        f"openclaw@{DEFAULT_OPENCLAW_VERSION}",
-        f"acpx@{DEFAULT_ACPX_VERSION}",
-    ]
-    if normalized_host_os == "Linux":
-        npm_install_command.insert(0, "sudo")
-    install_global_node_tools(npm_install_command)
+    # Linux keeps the historical `sudo npm install -g` privilege rule for the global prefix.
+    ensure_node_tools_installed(repo_root=repo_root, use_sudo=normalized_host_os == "Linux")
 
     ensure_common_state_roots(home_dir=home_dir)
     _render_post_bootstrap_config(repo_root, profile=profile, home_dir=home_dir)

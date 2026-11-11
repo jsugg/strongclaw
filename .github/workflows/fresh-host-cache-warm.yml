@@ -11,7 +11,6 @@ env:
   FRESH_HOST_CACHE_ROOT: ${{ github.workspace }}/.github-cache
   UV_CACHE_DIR: ${{ github.workspace }}/.github-cache/uv
   npm_config_cache: ${{ github.workspace }}/.github-cache/npm
-  npm_config_prefer_offline: "true"
 
 jobs:
   linux-package-cache:
@@ -30,13 +29,15 @@ jobs:
         id: linux_package_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          # Exact-key probe only: a miss warms from an empty cache, so no stale fallback
+          # content (e.g. old registry metadata) is ever re-saved under a new key.
+          lookup-only: true
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
-          restore-keys: |
-            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
       - name: Warm Linux fresh-host package cache
+        if: ${{ steps.linux_package_cache.outputs.cache-hit != 'true' }}
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - if: ${{ success() && steps.linux_package_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -44,7 +45,7 @@ jobs:
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
 
   macos-package-cache:
     name: Warm macOS Fresh Host Package Cache
@@ -62,13 +63,15 @@ jobs:
         id: macos_package_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          # Exact-key probe only: a miss warms from an empty cache, so no stale fallback
+          # content (e.g. old registry metadata) is ever re-saved under a new key.
+          lookup-only: true
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
-          restore-keys: |
-            fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
       - name: Warm macOS fresh-host package cache
+        if: ${{ steps.macos_package_cache.outputs.cache-hit != 'true' }}
         run: ./tests/scripts/fresh_host_cache.py warm-packages --repo-root . --home-dir "${RUNNER_TEMP}/strongclaw-cache-home"
       - if: ${{ success() && steps.macos_package_cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -76,4 +79,4 @@ jobs:
           path: |
             .github-cache/npm
             .github-cache/uv
-          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'src/clawops/strongclaw_bootstrap.py', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}
+          key: fresh-host-packages-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock', 'platform/node-tools/package-lock.json', 'platform/plugins/memory-lancedb-pro/package-lock.json') }}

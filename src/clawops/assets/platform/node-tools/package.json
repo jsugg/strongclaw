@@ -1,0 +1,10 @@
+{
+  "name": "strongclaw-node-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned OpenClaw and ACPX CLIs installed by clawops bootstrap.",
+  "dependencies": {
+    "acpx": "0.3.0",
+    "openclaw": "2026.3.13"
+  }
+}

@@ -64,6 +64,7 @@ include-package-data = true
   "platform/docs/**/*",
   "platform/examples/**/*",
   "platform/launchd/**/*",
+  "platform/node-tools/*",
   "platform/plugins/**/*",
   "platform/skills/**/*",
   "platform/systemd/**/*",

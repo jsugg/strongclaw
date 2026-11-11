@@ -64,3 +64,27 @@ updates:
     # whole file; one window must therefore cover majors, so keep the 14-day major floor.
     cooldown:
       default-days: 14
+
+  # Exact OpenClaw/ACPX pins plus their locked tree; the Python version constants derive
+  # from this manifest. Docs and env templates that quote the versions are rewritten by
+  # tests/scripts/update_node_tools_lock.py, and a contract test fails until they match.
+  - package-ecosystem: "npm"
+    directories:
+      - "/platform/node-tools"
+      - "/src/clawops/assets/platform/node-tools"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:30"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 2
+    groups:
+      # One PR per dependency across both directories keeps the packaged mirror identical.
+      node-tools:
+        patterns:
+          - "*"
+        group-by: "dependency-name"
+    # semver-* cooldown keys are unproven for this ecosystem here (see the docker-compose
+    # note above), so one 14-day window covers every update type.
+    cooldown:
+      default-days: 14

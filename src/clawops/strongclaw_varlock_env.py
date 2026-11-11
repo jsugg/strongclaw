@@ -11,6 +11,7 @@ import sys
 from typing import Final, cast
 
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
+from clawops.platform_compat import DEFAULT_OPENCLAW_VERSION
 from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
     CommandError,
@@ -168,7 +169,7 @@ def _ensure_required_defaults(
     updated = 0
     required_defaults = {
         "APP_ENV": "local",
-        "OPENCLAW_VERSION": os.environ.get("OPENCLAW_VERSION", "2026.3.13"),
+        "OPENCLAW_VERSION": os.environ.get("OPENCLAW_VERSION", DEFAULT_OPENCLAW_VERSION),
         "VARLOCK_SECRET_BACKEND": "local",
         "OPENCLAW_CONTROL_USER": values.get("OPENCLAW_CONTROL_USER", "openclawsvc")
         or "openclawsvc",
