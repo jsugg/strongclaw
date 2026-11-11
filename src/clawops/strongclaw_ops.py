@@ -30,8 +30,11 @@ from clawops.strongclaw_compose import compose_project_name, resolve_compose_fil
 from clawops.strongclaw_runtime import (
     VARLOCK_ENV_MODE_MANAGED,
     CommandError,
+    DockerBackendLostError,
+    DockerBackendWatch,
     ensure_docker_backend_ready,
     load_env_assignments,
+    probe_docker_backend,
     rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_uses_hypermemory,
     rendered_openclaw_uses_qmd,
@@ -346,7 +349,11 @@ def _wait_for_compose_service(
     health: str | None = None,
     timeout_seconds: int,
 ) -> None:
-    """Wait for one compose service to reach the requested state."""
+    """Wait for one compose service to reach the requested state.
+
+    A failed status inspection probes the Docker backend; once it is confirmed lost the wait
+    raises `DockerBackendLostError` instead of polling out the rest of *timeout_seconds*.
+    """
     started_at = time.monotonic()
     target = state if health is None else f"{state}/{health}"
     emit_structured_log(
@@ -360,12 +367,31 @@ def _wait_for_compose_service(
     deadline = time.monotonic() + timeout_seconds
     last_status: _ComposeServiceStatus | None = None
     last_error: CommandError | None = None
+    backend = DockerBackendWatch(lambda: probe_docker_backend(env=execution.env, cwd=execution.cwd))
     while True:
         try:
             last_status = _compose_service_statuses(execution).get(service_name)
             last_error = None
+            backend.reset()
         except CommandError as exc:
             last_error = exc
+            lost_detail = backend.confirm_lost()
+            if lost_detail is not None:
+                emit_structured_log(
+                    "clawops.ops.sidecars.wait.backend_lost",
+                    {
+                        "service": service_name,
+                        "target": target,
+                        "detail": lost_detail,
+                        "elapsed_ms": int((time.monotonic() - started_at) * 1000),
+                        "statusInspectionError": str(exc),
+                    },
+                )
+                raise DockerBackendLostError(
+                    f"Docker backend became unreachable while waiting for compose service "
+                    f"'{service_name}' to reach {target}: {lost_detail}; last status inspection "
+                    f"error: {exc}. Restart the Docker runtime, then rerun the operation."
+                ) from exc
             if time.monotonic() >= deadline:
                 break
             time.sleep(COMPOSE_POLL_INTERVAL_SECONDS)
@@ -762,6 +788,19 @@ def _sidecars_up_report(
             state="running",
             health="healthy",
             timeout_seconds=POSTGRES_HEALTH_TIMEOUT_SECONDS,
+        )
+    except DockerBackendLostError as exc:
+        # Recreating Postgres cannot help once the backend itself is gone.
+        if not suppress_wait_failures:
+            raise
+        return _sidecars_report_payload(
+            execution,
+            profile_flags=profile_flags,
+            targets=targets,
+            command_steps=command_steps,
+            command_exit_code=1,
+            error=str(exc),
+            failed_service=POSTGRES_SERVICE_NAME,
         )
     except CommandError as exc:
         postgres_wait_error = exc

@@ -44,6 +44,7 @@ on:
         options:
           - none
           - orbstack-stop-during-sidecars
+          - orbstack-stop-during-sidecars-health
 
 concurrency:
   group: >-

@@ -40,10 +40,13 @@ Those signals reuse the shared ClawOps telemetry path instead of adding a separa
 - `clawops.ops.sidecars.wait.start`
 - `clawops.ops.sidecars.wait.ready`
 - `clawops.ops.sidecars.wait.timeout`
+- `clawops.ops.sidecars.wait.backend_lost`
 - `clawops.ops.sidecars.ready`
 - `clawops.ops.sidecars.status`
 
 Wait-timeout events include `service`, `target`, `observed`, and `timeout_seconds` so failed dependencies can be diagnosed without replaying the command interactively.
+
+A wait whose `docker compose ps` fails probes the Docker backend. When the backend socket is gone, or `docker info` fails three probes in a row, the wait stops early with `wait.backend_lost` (`service`, `target`, `detail`, `elapsed_ms`) instead of polling out its timeout.
 
 ## Host Service Activation Events
 

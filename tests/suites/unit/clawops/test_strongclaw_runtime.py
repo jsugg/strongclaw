@@ -589,3 +589,120 @@ def test_profile_requirement_helpers_include_non_managed_runtime_profiles() -> N
     assert runtime.profile_requires_qmd("acp") is True
     assert runtime.profile_requires_lossless_claw("acp") is False
     assert runtime.profile_requires_hypermemory_backend("acp") is False
+
+
+def _docker_info_result(
+    returncode: int | None, *, stderr: str = "", timed_out: bool = False
+) -> ExecResult:
+    return ExecResult(("docker", "info"), returncode, "Client: ...", stderr, 3, timed_out=timed_out)
+
+
+def test_probe_docker_backend_reports_a_missing_socket_without_running_docker(
+    tmp_path: pathlib.Path, test_context: TestContext
+) -> None:
+    def _unexpected_run_command(*args: object, **kwargs: object) -> ExecResult:
+        raise AssertionError((args, kwargs))
+
+    test_context.patch.patch_object(runtime, "run_command", new=_unexpected_run_command)
+    socket_path = tmp_path / "docker.sock"
+
+    probe = runtime.probe_docker_backend(env={"DOCKER_HOST": f"unix://{socket_path}"})
+
+    assert probe == runtime.DockerBackendProbe(
+        reachable=False, detail=f"Docker socket {socket_path} is missing", definitive=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (_docker_info_result(0), runtime.DockerBackendProbe(reachable=True)),
+        (
+            _docker_info_result(1, stderr="Cannot connect to the Docker daemon.\n  Is it up?"),
+            runtime.DockerBackendProbe(
+                reachable=False,
+                detail="`docker info` failed: Cannot connect to the Docker daemon. Is it up?",
+            ),
+        ),
+        (
+            _docker_info_result(None, timed_out=True),
+            runtime.DockerBackendProbe(reachable=False, detail="`docker info` timed out after 15s"),
+        ),
+        (
+            _docker_info_result(1),
+            runtime.DockerBackendProbe(reachable=False, detail="`docker info` failed"),
+        ),
+    ],
+)
+def test_probe_docker_backend_classifies_docker_info(
+    result: ExecResult, expected: runtime.DockerBackendProbe, test_context: TestContext
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def _fake_run_command(argv: list[str], **kwargs: object) -> ExecResult:
+        calls.append((list(argv), kwargs))
+        return result
+
+    test_context.patch.patch_object(runtime, "run_command", new=_fake_run_command)
+    env = {"DOCKER_HOST": "tcp://127.0.0.1:2375"}
+
+    assert runtime.probe_docker_backend(env=env, cwd=pathlib.Path("/tmp")) == expected
+    assert calls == [
+        (["docker", "info"], {"cwd": pathlib.Path("/tmp"), "env": env, "timeout_seconds": 15})
+    ]
+
+
+class _ScriptedProbe:
+    """Return scripted probe results in order, counting calls."""
+
+    def __init__(self, *probes: runtime.DockerBackendProbe) -> None:
+        self._probes = list(probes)
+        self.calls = 0
+
+    def __call__(self) -> runtime.DockerBackendProbe:
+        self.calls += 1
+        return self._probes.pop(0)
+
+
+_BACKEND_DOWN = runtime.DockerBackendProbe(reachable=False, detail="`docker info` failed: EOF")
+_BACKEND_UP = runtime.DockerBackendProbe(reachable=True)
+
+
+def test_docker_backend_watch_confirms_loss_after_consecutive_failures() -> None:
+    watch = runtime.DockerBackendWatch(_ScriptedProbe(*[_BACKEND_DOWN] * 3))
+
+    assert [watch.confirm_lost() for _ in range(3)] == [
+        None,
+        None,
+        "`docker info` failed: EOF (3 failed probes in a row)",
+    ]
+
+
+def test_docker_backend_watch_restarts_the_streak_when_the_backend_answers() -> None:
+    probe = _ScriptedProbe(_BACKEND_DOWN, _BACKEND_DOWN, _BACKEND_UP, _BACKEND_DOWN, _BACKEND_DOWN)
+    watch = runtime.DockerBackendWatch(probe, probe_limit=3)
+
+    assert [watch.confirm_lost() for _ in range(5)] == [None] * 5
+
+
+def test_docker_backend_watch_reset_clears_the_failure_streak() -> None:
+    watch = runtime.DockerBackendWatch(_ScriptedProbe(*[_BACKEND_DOWN] * 3), probe_limit=2)
+
+    assert watch.confirm_lost() is None
+    watch.reset()
+    assert watch.confirm_lost() is None
+    assert watch.confirm_lost() == "`docker info` failed: EOF (2 failed probes in a row)"
+
+
+def test_docker_backend_watch_confirms_a_definitive_failure_at_once() -> None:
+    missing = runtime.DockerBackendProbe(
+        reachable=False, detail="Docker socket /tmp/docker.sock is missing", definitive=True
+    )
+    watch = runtime.DockerBackendWatch(_ScriptedProbe(missing))
+
+    assert watch.confirm_lost() == "Docker socket /tmp/docker.sock is missing"
+
+
+def test_docker_backend_watch_rejects_a_non_positive_probe_limit() -> None:
+    with pytest.raises(ValueError, match="probe_limit must be positive"):
+        runtime.DockerBackendWatch(_ScriptedProbe(), probe_limit=0)

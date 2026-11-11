@@ -9,11 +9,13 @@ from typing import cast
 
 import pytest
 
+from clawops.strongclaw_runtime import DockerBackendProbe
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers import fresh_host
 from tests.utils.helpers._fresh_host import faults as fresh_host_faults
 from tests.utils.helpers._fresh_host import macos as fresh_host_macos
 from tests.utils.helpers._fresh_host import runtime_loss
+from tests.utils.helpers._fresh_host import shell as fresh_host_shell
 from tests.utils.helpers._fresh_host.budget import (
     SCENARIO_RECOVERY_CAP_SECONDS,
     SCENARIO_RETRY_RESERVE_SECONDS,
@@ -515,3 +517,57 @@ def test_macos_sidecars_phase_recovers_from_an_injected_orbstack_stop(
         Path(context.diagnostics_dir) / "fault-injection" / "orbstack-stop-during-sidecars.json"
     )
     assert marker.is_file()
+
+
+def test_backend_lost_inside_a_health_wait_fails_fast_into_recovery_and_one_retry(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    clock = FakeClock()
+    context = _context(tmp_path, test_context)
+    orbstack = _FakeOrbStack(clock, up=False)
+    _install(test_context, orbstack, tmp_path)
+    test_context.patch.patch_object(fresh_host_shell, "time", new=clock)
+
+    def fake_compose_service_entries(
+        compose_file: Path, **kwargs: object
+    ) -> dict[str, dict[str, object]]:
+        del compose_file, kwargs
+        if not orbstack.up:
+            raise fresh_host_shell.ComposeStatusCommandError(_EOF_STDERR)
+        return {
+            name: {"Service": name, "State": "running", "Health": "healthy"}
+            for name in fresh_host_shell.SIDECAR_EXPECTED_SERVICES
+        }
+
+    def fake_probe_docker_backend(**kwargs: object) -> DockerBackendProbe:
+        del kwargs
+        return DockerBackendProbe(reachable=orbstack.up, detail="`docker info` failed: EOF")
+
+    test_context.patch.patch_object(
+        fresh_host_shell, "compose_service_entries", new=fake_compose_service_entries
+    )
+    test_context.patch.patch_object(
+        fresh_host_shell, "probe_docker_backend", new=fake_probe_docker_backend
+    )
+    wait_seconds: list[float] = []
+
+    def health_wait() -> list[str]:
+        started = clock.monotonic()
+        try:
+            fresh_host_shell.verify_sidecar_services_running(
+                tmp_path / "compose.yaml", cwd=tmp_path, env={}, timeout_seconds=300
+            )
+        finally:
+            wait_seconds.append(clock.monotonic() - started)
+        return ["verify", "ok"]
+
+    result = runtime_loss.run_with_runtime_recovery(
+        context, step=_STEP, window=_window(context, clock), action=health_wait
+    )
+
+    assert result == ["verify", "ok"]
+    assert wait_seconds[0] == pytest.approx(4.0)
+    assert len(wait_seconds) == 2
+    report = _loss_report(context)
+    assert report["recovered"] is True
+    assert report["trigger_reason"] == "docker_socket_eof"
