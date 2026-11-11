@@ -28,8 +28,10 @@ CHAT_MODEL: Final[str] = "featver-chat"
 FAKE_CHAT_MODEL_REF: Final[str] = f"{PROVIDER_ID}/{CHAT_MODEL}"
 PROVIDER_BASE_URL: Final[str] = "http://127.0.0.1:18000/v1"
 # An env SecretRef is the shape ``openclaw secrets audit`` accepts: a bare env-var name in
-# openclaw.json is audited as a plaintext secret. The fake server accepts any value.
-PROVIDER_API_KEY_ENV: Final[str] = "VLLM_API_KEY"
+# openclaw.json is audited as a plaintext secret. The fake server accepts any value. The name
+# must not be a provider's own key variable: VLLM_API_KEY makes OpenClaw's bundled vLLM provider
+# probe a vLLM server on every model-catalog load.
+PROVIDER_API_KEY_ENV: Final[str] = "FEATVER_PROVIDER_API_KEY"
 PROVIDER_API_KEY_REF: Final[dict[str, str]] = {
     "source": "env",
     "provider": "default",

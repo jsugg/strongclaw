@@ -188,7 +188,7 @@ def test_register_provider_stores_the_api_key_as_an_env_secret_ref(tmp_path: Pat
     assert providers["featver"]["apiKey"] == {
         "source": "env",
         "provider": "default",
-        "id": "VLLM_API_KEY",
+        "id": "FEATVER_PROVIDER_API_KEY",
     }
 
 
