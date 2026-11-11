@@ -152,6 +152,8 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
         strongclaw_baseline, "run_harness_smoke", new=_run_harness_smoke
     )
 
+    # An operator's XDG dirs must not leak in, nor be replaced by one shared isolated tree.
+    test_context.env.set("XDG_STATE_HOME", str(tmp_path / "operator-state"))
     payload = strongclaw_baseline.verify_baseline(repo_root, runs_dir=tmp_path / "runs")
 
     pytest_command = next(command for command in commands if "pytest" in command)
@@ -167,8 +169,10 @@ def test_verify_baseline_uses_uv_dependency_group_for_repo_tests(
     )
     assert captured_env is not None
     assert pathlib.Path(captured_env["HOME"]).parent == repo_root / ".tmp"
-    assert captured_env["XDG_CONFIG_HOME"] == f"{captured_env['HOME']}/.config"
     for isolated_key in (
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
         "VARLOCK_LOCAL_ENV_FILE",
         "VARLOCK_ENV_DIR",
         "STRONGCLAW_RUNTIME_ROOT",
