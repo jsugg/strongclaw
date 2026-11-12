@@ -45,7 +45,9 @@ def create_backup_execution(
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     archive_path = backup_root / f"openclaw-{stamp}.tar.gz"
     archive_tmp_path = backup_root / f".{archive_path.name}.tmp"
-    openclaw_backend = OpenClawBackupBackend(which=which, run_command=run_command)
+    openclaw_backend = OpenClawBackupBackend(
+        which=which, run_command=run_command, state_dir=openclaw_state_root
+    )
     fallback_reason: str | None = None
     if openclaw_backend.is_available():
         safe_unlink(archive_tmp_path)
