@@ -266,9 +266,69 @@ def restore_backup(
     verified_path = verify_backup(archive_path, home_dir=home_dir)
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(verified_path, "r:gz") as archive:
-        safe_members = _validated_archive_members(archive, destination=destination)
+        manifest = _openclaw_archive_manifest(archive)
+        members = (
+            archive.getmembers()
+            if manifest is None
+            else _home_relative_payload_members(archive, manifest, home_dir=home_dir)
+        )
+        safe_members = _validated_archive_members(members, destination=destination)
         archive.extractall(destination, members=safe_members, filter="data")
     return destination
+
+
+def _openclaw_archive_manifest(archive: tarfile.TarFile) -> dict[str, object] | None:
+    """Return the manifest of an `openclaw backup create` archive, or None for a tar fallback."""
+    for member in archive.getmembers():
+        parts = pathlib.PurePosixPath(member.name).parts
+        if not (member.isfile() and len(parts) == 2 and parts[1] == "manifest.json"):
+            continue
+        handle = archive.extractfile(member)
+        if handle is None:
+            continue
+        try:
+            payload = json.load(handle)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(payload, dict)
+            and cast(dict[str, object], payload).get("archiveRoot") == parts[0]
+            and isinstance(cast(dict[str, object], payload).get("assets"), list)
+        ):
+            return cast(dict[str, object], payload)
+    return None
+
+
+def _home_relative_payload_members(
+    archive: tarfile.TarFile, manifest: dict[str, object], *, home_dir: pathlib.Path | None
+) -> list[tarfile.TarInfo]:
+    """Rename OpenClaw payload members to the home-relative layout of StrongClaw archives.
+
+    OpenClaw stores each asset under `<root>/payload/posix/<absolute source path>`; a restore
+    lays it out relative to the backed-up home, the way the tar fallback archives it.
+    """
+    home = resolve_home_dir(home_dir).resolve()
+    prefixes: list[tuple[str, pathlib.PurePosixPath]] = []
+    for raw_asset in cast(list[object], manifest["assets"]):
+        if not isinstance(raw_asset, dict):
+            raise CommandError("OpenClaw backup manifest has a malformed asset entry")
+        asset = cast(dict[str, object], raw_asset)
+        source = pathlib.Path(str(asset.get("sourcePath", ""))).resolve()
+        if not source.is_relative_to(home):
+            raise CommandError(f"backup asset {source} lies outside the home directory {home}")
+        prefixes.append(
+            (str(asset.get("archivePath", "")), pathlib.PurePosixPath(source.relative_to(home)))
+        )
+    renamed: list[tarfile.TarInfo] = []
+    for member in archive.getmembers():
+        for prefix, relative in prefixes:
+            if member.name != prefix and not member.name.startswith(f"{prefix}/"):
+                continue
+            remainder = member.name[len(prefix) :].lstrip("/")
+            member.name = (relative / remainder).as_posix() if remainder else relative.as_posix()
+            renamed.append(member)
+            break
+    return renamed
 
 
 def prune_retention(
@@ -313,12 +373,12 @@ def rotation_guidance() -> dict[str, object]:
 
 
 def _validated_archive_members(
-    archive: tarfile.TarFile, *, destination: pathlib.Path
+    members: list[tarfile.TarInfo], *, destination: pathlib.Path
 ) -> list[tarfile.TarInfo]:
     """Reject unsafe archive members before extraction."""
     destination_root = destination.resolve()
     safe_members: list[tarfile.TarInfo] = []
-    for member in archive.getmembers():
+    for member in members:
         member_path = pathlib.PurePosixPath(member.name)
         if member_path.is_absolute():
             raise CommandError(f"unsafe backup archive member uses an absolute path: {member.name}")
