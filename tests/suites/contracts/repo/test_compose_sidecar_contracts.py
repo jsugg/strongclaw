@@ -62,8 +62,8 @@ def test_browser_lab_playwright_service_serves_cdp_on_its_published_port() -> No
     worker_dir = REPO_ROOT / "platform" / "workers" / "browser-lab"
     launcher = worker_dir / "start-cdp.sh"
     script = launcher.read_text(encoding="utf-8")
-    assert "--remote-debugging-port=9222" in script
-    assert "--remote-debugging-address=0.0.0.0" in script
+    assert "readonly cdp_port=9222" in script
+    assert '.listen(listenPort, "0.0.0.0")' in script
     assert "--proxy-server=" in script
     for path_name in (
         "docker-compose.browser-lab.yaml",
