@@ -132,7 +132,13 @@ def test_baseline_verify_passes_with_runtime_probes(
     feature_host: FeatureHost, sidecars: str
 ) -> None:
     del sidecars
-    outcome = feature_host.clawops("baseline", "verify", timeout=3000)
+    # The default gate includes browser-lab (SETUP_GUIDE.md), so run it the way an operator
+    # who uses browser-lab would: with the lab up.
+    feature_host.clawops("ops", "--asset-root", ".", "browser-lab", "up", timeout=900).require_ok()
+    try:
+        outcome = feature_host.clawops("baseline", "verify", timeout=3000)
+    finally:
+        feature_host.clawops("ops", "--asset-root", ".", "browser-lab", "down", timeout=600)
     assert outcome.ok, outcome.describe()
     payload = cast(dict[str, object], outcome.json())
     assert payload["ok"] is True and payload["verificationMode"] == "runtime", payload
