@@ -925,6 +925,21 @@ def load_openclaw_config(config_path: pathlib.Path) -> dict[str, Any]:
     return cast(dict[str, Any], payload)
 
 
+def openclaw_default_agent_id(config: Mapping[str, Any]) -> str:
+    """Return OpenClaw's default agent: the `default` entry, else the first, else `main`."""
+    agents = _nested_mapping(config, "agents")
+    entries = agents.get("list") if agents is not None else None
+    candidates = [
+        cast(Mapping[str, Any], entry)
+        for entry in (cast(list[object], entries) if isinstance(entries, list) else [])
+        if isinstance(entry, Mapping) and isinstance(cast(Mapping[str, Any], entry).get("id"), str)
+    ]
+    chosen = next((entry for entry in candidates if entry.get("default") is True), None)
+    if chosen is None and candidates:
+        chosen = candidates[0]
+    return str(chosen["id"]).strip().lower() if chosen is not None else "main"
+
+
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
     """Return a nested mapping value when present."""
     value = payload.get(key)

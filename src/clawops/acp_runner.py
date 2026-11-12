@@ -34,7 +34,12 @@ from clawops.orchestration import (
     build_session_identity,
 )
 from clawops.runtime_assets import resolve_asset_root
-from clawops.strongclaw_runtime import wrap_command_with_varlock
+from clawops.strongclaw_runtime import (
+    load_openclaw_config,
+    openclaw_default_agent_id,
+    resolve_openclaw_config_path,
+    wrap_command_with_varlock,
+)
 
 GATEWAY_BRIDGE_SESSION_PREFIX: Final[str] = "clawops"
 
@@ -252,12 +257,23 @@ def _build_invocation(
         agent_command=(
             None
             if definition.gateway_bridge_command is None
-            else (
-                f"{definition.gateway_bridge_command} --session "
-                f"{GATEWAY_BRIDGE_SESSION_PREFIX}:{uuid.uuid4().hex}"
-            )
+            else f"{definition.gateway_bridge_command} --session {_gateway_bridge_session_key()}"
         ),
     )
+
+
+def _gateway_bridge_session_key() -> str:
+    """Return a fresh, fully qualified gateway session key for one bridged ACP session.
+
+    The bridge matches gateway events against the key verbatim, so it must already be in the
+    canonical `agent:<id>:...` form the gateway reports, and must stay out of the `acp:` space.
+    """
+    try:
+        config = load_openclaw_config(resolve_openclaw_config_path(resolve_asset_root()))
+    except (OSError, ValueError, TypeError):
+        config = {}
+    agent_id = openclaw_default_agent_id(config)
+    return f"agent:{agent_id}:{GATEWAY_BRIDGE_SESSION_PREFIX}:{uuid.uuid4().hex}"
 
 
 def _preflight_errors(

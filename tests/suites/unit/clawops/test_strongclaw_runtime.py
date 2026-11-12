@@ -725,3 +725,18 @@ def test_run_command_decodes_output_captured_before_a_timeout(test_context: Test
     assert result.timed_out is True
     assert result.stdout == "partial → out"
     assert result.stderr == "Created symlink"
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"agents": {"list": [{"id": "reader"}, {"id": "admin", "default": True}]}}, "admin"),
+        ({"agents": {"list": [{"id": "Reader"}, {"id": "admin"}]}}, "reader"),
+        ({"agents": {"list": [{"name": "unnamed"}]}}, "main"),
+        ({}, "main"),
+    ],
+)
+def test_openclaw_default_agent_id_follows_openclaw_resolution(
+    config: dict[str, object], expected: str
+) -> None:
+    assert runtime.openclaw_default_agent_id(config) == expected

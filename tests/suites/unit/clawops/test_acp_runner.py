@@ -391,6 +391,16 @@ def test_build_invocation_bridges_openclaw_under_varlock_with_its_own_session(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(acp_runner, "wrap_command_with_varlock", _fake_wrap)
+    config_path = tmp_path / "openclaw.json"
+    config_path.write_text(
+        json.dumps({"agents": {"list": [{"id": "reader"}, {"id": "Admin", "default": True}]}}),
+        encoding="utf-8",
+    )
+
+    def _config_path(_asset_root: pathlib.Path) -> pathlib.Path:
+        return config_path
+
+    monkeypatch.setattr(acp_runner, "resolve_openclaw_config_path", _config_path)
     definition = acp_runner.resolve_backend("openclaw")
 
     first = acp_runner._build_invocation(definition, _invocation_spec(tmp_path)).command
@@ -399,6 +409,7 @@ def test_build_invocation_bridges_openclaw_under_varlock_with_its_own_session(
     assert first[:6] == ["varlock", "run", "--path", "/env", "--", "acpx"]
     agent_index = first.index("--agent")
     # OpenClaw treats `acp:`-prefixed keys as ACP-runtime sessions that need spawn metadata.
-    assert first[agent_index + 1].startswith("openclaw acp --session clawops:")
+    # The bridge matches gateway events verbatim, so the key is already in canonical form.
+    assert first[agent_index + 1].startswith("openclaw acp --session agent:admin:clawops:")
     assert first[agent_index + 2 :] == ["exec", "Reply FV"]
     assert first[agent_index + 1] != second[second.index("--agent") + 1]
