@@ -177,19 +177,35 @@ def test_extract_json_skips_leading_noise() -> None:
         extract_json("no json at all")
 
 
-def test_register_provider_stores_the_api_key_as_an_env_secret_ref(tmp_path: Path) -> None:
+def test_register_provider_stores_the_api_key_behind_a_file_secret_ref(tmp_path: Path) -> None:
     config = tmp_path / "openclaw.json"
-    config.write_text(json.dumps({"models": {"providers": {"other": {"api": "x"}}}}), "utf-8")
+    config.write_text(
+        json.dumps(
+            {
+                "models": {"providers": {"other": {"api": "x"}}},
+                "secrets": {"providers": {"default": {"source": "env"}}},
+            }
+        ),
+        "utf-8",
+    )
 
     register_provider(config)
 
-    providers = json.loads(config.read_text(encoding="utf-8"))["models"]["providers"]
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    providers = payload["models"]["providers"]
     assert providers["other"] == {"api": "x"}
     assert providers["featver"]["apiKey"] == {
-        "source": "env",
-        "provider": "default",
-        "id": "FEATVER_PROVIDER_API_KEY",
+        "source": "file",
+        "provider": "featver",
+        "id": "value",
     }
+    secret_file = tmp_path / "featver-provider.key"
+    assert payload["secrets"]["providers"] == {
+        "default": {"source": "env"},
+        "featver": {"source": "file", "path": str(secret_file), "mode": "singleValue"},
+    }
+    assert secret_file.read_text(encoding="utf-8") == "featver-local"
+    assert secret_file.stat().st_mode & 0o777 == 0o600
 
 
 def test_load_manifest_accepts_valid_matrix_and_derives_platforms(tmp_path: Path) -> None:
