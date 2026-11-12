@@ -7,9 +7,11 @@ import dataclasses
 import fcntl
 import pathlib
 import shutil
+import uuid
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from typing import Final
 
 from clawops.acpx_adapter import (
     AcpxAdapter,
@@ -33,6 +35,8 @@ from clawops.orchestration import (
 )
 from clawops.runtime_assets import resolve_asset_root
 from clawops.strongclaw_runtime import wrap_command_with_varlock
+
+GATEWAY_BRIDGE_SESSION_PREFIX: Final[str] = "clawops"
 
 
 class SessionLockError(RuntimeError):
@@ -244,6 +248,14 @@ def _build_invocation(
             tuple(wrap_command_with_varlock(resolve_asset_root(), []))
             if definition.uses_env_contract
             else ()
+        ),
+        agent_command=(
+            None
+            if definition.gateway_bridge_command is None
+            else (
+                f"{definition.gateway_bridge_command} --session "
+                f"{GATEWAY_BRIDGE_SESSION_PREFIX}:{uuid.uuid4().hex}"
+            )
         ),
     )
 

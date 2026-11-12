@@ -370,26 +370,35 @@ def _invocation_spec(tmp_path: pathlib.Path) -> acp_runner.SessionSpec:
     )
 
 
-@pytest.mark.parametrize(
-    ("backend", "expected_prefix"),
-    [
-        ("openclaw", ["varlock", "run", "--path", "/env", "--", "acpx"]),
-        ("codex", ["acpx"]),
-    ],
-)
-def test_build_invocation_runs_env_contract_backends_under_varlock(
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-    backend: str,
-    expected_prefix: list[str],
+def _fake_wrap(_repo_root: pathlib.Path, command: list[str]) -> list[str]:
+    return ["varlock", "run", "--path", "/env", "--", *command]
+
+
+def test_build_invocation_runs_vendor_backends_directly(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _fake_wrap(_repo_root: pathlib.Path, command: list[str]) -> list[str]:
-        return ["varlock", "run", "--path", "/env", "--", *command]
-
     monkeypatch.setattr(acp_runner, "wrap_command_with_varlock", _fake_wrap)
-    definition = acp_runner.resolve_backend(backend)
 
-    invocation = acp_runner._build_invocation(definition, _invocation_spec(tmp_path))
+    invocation = acp_runner._build_invocation(
+        acp_runner.resolve_backend("codex"), _invocation_spec(tmp_path)
+    )
 
-    assert invocation.command[: len(expected_prefix)] == expected_prefix
-    assert invocation.command[-3:] == [backend, "exec", "Reply FV"]
+    assert invocation.command[0] == "acpx"
+    assert invocation.command[-3:] == ["codex", "exec", "Reply FV"]
+
+
+def test_build_invocation_bridges_openclaw_under_varlock_with_its_own_session(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(acp_runner, "wrap_command_with_varlock", _fake_wrap)
+    definition = acp_runner.resolve_backend("openclaw")
+
+    first = acp_runner._build_invocation(definition, _invocation_spec(tmp_path)).command
+    second = acp_runner._build_invocation(definition, _invocation_spec(tmp_path)).command
+
+    assert first[:6] == ["varlock", "run", "--path", "/env", "--", "acpx"]
+    agent_index = first.index("--agent")
+    # OpenClaw treats `acp:`-prefixed keys as ACP-runtime sessions that need spawn metadata.
+    assert first[agent_index + 1].startswith("openclaw acp --session clawops:")
+    assert first[agent_index + 2 :] == ["exec", "Reply FV"]
+    assert first[agent_index + 1] != second[second.index("--agent") + 1]

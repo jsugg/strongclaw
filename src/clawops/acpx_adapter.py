@@ -46,6 +46,8 @@ class AcpxInvocation:
     no_wait: bool = False
     # Wrapper that runs acpx, and the agent it spawns, inside the operator env contract.
     launcher: tuple[str, ...] = ()
+    # Raw ACP agent command that replaces the agent's registry entry (acpx `--agent`).
+    agent_command: str | None = None
 
     @property
     def command(self) -> list[str]:
@@ -63,7 +65,10 @@ class AcpxInvocation:
             command.extend(["--format", "json", "--json-strict"])
         if self.backend_profile is not None:
             command.extend(["--model", self.backend_profile])
-        command.extend([self.agent_name, "exec"])
+        if self.agent_command is not None:
+            command.extend(["--agent", self.agent_command, "exec"])
+        else:
+            command.extend([self.agent_name, "exec"])
         if self.no_wait:
             command.append("--no-wait")
         command.append(self.prompt)
