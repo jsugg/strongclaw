@@ -25,6 +25,7 @@ from tests.utils.helpers.feature_verification import (
     extract_json,
     load_lane_results,
     load_manifest,
+    register_provider,
     render_markdown,
 )
 from tests.utils.helpers.repo import REPO_ROOT
@@ -111,8 +112,9 @@ def test_fake_model_server_serves_openai_and_ollama_shapes() -> None:
         assert f"{REPLY_PREFIX} FV-5678" in stream and stream.rstrip().endswith("data: [DONE]")
         embeddings = json.loads(_post("/v1/embeddings", {"input": ["a", "b"], "dimensions": 8}))
         assert [len(item["embedding"]) for item in embeddings["data"]] == [8, 8]
-        ollama = json.loads(_post("/api/embed", {"input": ["a"], "dimensions": 4}))
-        assert len(ollama["embeddings"][0]) == 4
+        ollama = json.loads(_post("/api/embed", {"input": ["a b", "c"], "dimensions": 4}))
+        assert [len(vector) for vector in ollama["embeddings"]] == [4, 4]
+        assert ollama["prompt_eval_count"] == 3
         with urllib.request.urlopen(
             f"{base}/__featver/requests", timeout=5
         ) as response:  # noqa: S310
@@ -173,6 +175,37 @@ def test_extract_json_skips_leading_noise() -> None:
     assert extract_json('warning: banner\n{"ok": true}\ntrailer') == {"ok": True}
     with pytest.raises(AssertionError):
         extract_json("no json at all")
+
+
+def test_register_provider_stores_the_api_key_behind_a_file_secret_ref(tmp_path: Path) -> None:
+    config = tmp_path / "openclaw.json"
+    config.write_text(
+        json.dumps(
+            {
+                "models": {"providers": {"other": {"api": "x"}}},
+                "secrets": {"providers": {"default": {"source": "env"}}},
+            }
+        ),
+        "utf-8",
+    )
+
+    register_provider(config)
+
+    payload = json.loads(config.read_text(encoding="utf-8"))
+    providers = payload["models"]["providers"]
+    assert providers["other"] == {"api": "x"}
+    assert providers["featver"]["apiKey"] == {
+        "source": "file",
+        "provider": "featver",
+        "id": "value",
+    }
+    secret_file = tmp_path / "featver-provider.key"
+    assert payload["secrets"]["providers"] == {
+        "default": {"source": "env"},
+        "featver": {"source": "file", "path": str(secret_file), "mode": "singleValue"},
+    }
+    assert secret_file.read_text(encoding="utf-8") == "featver-local"
+    assert secret_file.stat().st_mode & 0o777 == 0o600
 
 
 def test_load_manifest_accepts_valid_matrix_and_derives_platforms(tmp_path: Path) -> None:

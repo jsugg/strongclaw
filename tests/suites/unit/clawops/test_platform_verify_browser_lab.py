@@ -1,13 +1,17 @@
 """Unit tests for platform verification targets."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import json
 import pathlib
+from collections.abc import Callable
 
 import pytest
 
 from clawops import platform_verify
+from clawops.process_runner import CommandResult
 from tests.plugins.infrastructure.context import TestContext
 
 
@@ -107,3 +111,63 @@ def test_main_dispatches_browser_lab_target(
     assert captured == {"compose": compose_path, "skip_runtime": True}
     assert payload["name"] == "browser-lab"
     assert payload["ok"] is True
+
+
+def _listener_tool(tool: str, stdout: str) -> Callable[..., CommandResult]:
+    """Fake run_command where only ``tool`` is available and prints ``stdout``."""
+
+    def _run(command: list[str], **_kwargs: object) -> CommandResult:
+        ok = command[0] == tool
+        return CommandResult(
+            returncode=0 if ok else 1, stdout=stdout if ok else "", stderr="", duration_ms=1
+        )
+
+    return _run
+
+
+@pytest.mark.parametrize(
+    ("tool", "stdout"),
+    [
+        ("lsof", "p4242\nf7\nn127.0.0.1:5432\nf8\nn[::1]:5432\n"),
+        ("ss", "LISTEN 0      4096       127.0.0.1:5432       0.0.0.0:*\n"),
+        (
+            "netstat",
+            "tcp        0      0 127.0.0.1:5432          0.0.0.0:*               LISTEN\n"
+            "tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN\n",
+        ),
+        ("netstat", "tcp4       0      0  127.0.0.1.5432         *.*                    LISTEN\n"),
+    ],
+)
+def test_loopback_probe_reads_the_local_address_of_each_listener(
+    test_context: TestContext, tool: str, stdout: str
+) -> None:
+    test_context.patch.patch_object(
+        platform_verify, "run_command", new=_listener_tool(tool, stdout)
+    )
+
+    check = platform_verify._check_loopback_ports([5432])
+
+    assert check.ok is True, check.message
+
+
+@pytest.mark.parametrize(
+    ("tool", "stdout"),
+    [
+        ("lsof", "p4242\nf7\nn*:5432\n"),
+        ("ss", "LISTEN 0      4096         0.0.0.0:5432       0.0.0.0:*\n"),
+        ("ss", "LISTEN 0      4096            [::]:5432          [::]:*\n"),
+        ("netstat", "tcp        0      0 0.0.0.0:5432            0.0.0.0:*               LISTEN\n"),
+        ("netstat", "tcp46      0      0  *.5432                 *.*                    LISTEN\n"),
+    ],
+)
+def test_loopback_probe_flags_wildcard_listeners(
+    test_context: TestContext, tool: str, stdout: str
+) -> None:
+    test_context.patch.patch_object(
+        platform_verify, "run_command", new=_listener_tool(tool, stdout)
+    )
+
+    check = platform_verify._check_loopback_ports([5432])
+
+    assert check.ok is False
+    assert "port 5432" in check.message

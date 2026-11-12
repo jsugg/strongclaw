@@ -342,3 +342,75 @@ def test_memory_import_pro_snapshot_fails_fast_when_memory_pro_is_unavailable(
     assert summary["ok"] is False
     assert summary["capabilityError"] == "openclaw binary does not support `memory-pro import`"
     assert recorded == [["/opt/openclaw/bin/openclaw", "memory-pro", "import", "--help"]]
+
+
+def test_memory_verify_pro_parity_reads_openclaw_json_after_plugin_log_lines(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+    # The live plugin prints retrieval results with the entry metadata as a JSON string.
+    search_output = [
+        {
+            "entry": {
+                "id": "memory-1",
+                "text": "Prefer blue/green cutovers.",
+                "category": "fact",
+                "metadata": json.dumps({"hypermemory": {"sourcePath": "MEMORY.md"}}),
+            },
+            "score": 0.82,
+            "sources": {"fused": {"score": 0.82}},
+        }
+    ]
+
+    def _fake_run_command(
+        command: list[str],
+        *,
+        cwd: pathlib.Path | str | None = None,
+        env: dict[str, str] | None = None,
+        timeout_seconds: int = 30,
+        shell: bool = False,
+    ) -> CommandResult:
+        assert command[:3] == ["openclaw", "memory-pro", "search"]
+        return CommandResult(
+            returncode=0,
+            stdout="[plugins] [lcm] Plugin loaded (enabled=true)\n"
+            + json.dumps(search_output, indent=2)
+            + "\n",
+            stderr="",
+            duration_ms=4,
+        )
+
+    def _fake_which(_name: str) -> str:
+        return "/usr/bin/openclaw"
+
+    monkeypatch.setattr("clawops.memory_tools.shutil.which", _fake_which)
+    monkeypatch.setattr("clawops.memory_tools.run_command", _fake_run_command)
+
+    exit_code = memory_main(
+        [
+            "verify-pro-parity",
+            "--config",
+            str(config_path),
+            "--scope",
+            "project:strongclaw",
+            "--mode",
+            "openclaw",
+            "--query",
+            "blue/green cutovers",
+            "--report",
+            str(workspace / "parity.json"),
+        ]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert "errors" not in report, report
+    assert report["mode"] == "openclaw_cli"
+    query = report["queries"][0]
+    assert "MEMORY.md" in query["overlapPaths"]
+    assert query["newResults"][0]["id"] == "memory-1"
+    assert query["newResults"][0]["text"] == "Prefer blue/green cutovers."
+    assert exit_code == 0

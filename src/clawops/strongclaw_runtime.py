@@ -250,6 +250,15 @@ def _command_display(command: Sequence[str]) -> str:
     return shlex.join(command)
 
 
+def _timeout_output_text(output: str | bytes | None) -> str:
+    """Return partial output captured before a timeout, which Python hands back as bytes."""
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
 def run_command(
     command: Sequence[str],
     *,
@@ -280,8 +289,8 @@ def run_command(
         result = ExecResult(
             argv=argv,
             returncode=None,
-            stdout="" if exc.stdout is None else str(exc.stdout),
-            stderr="" if exc.stderr is None else str(exc.stderr),
+            stdout=_timeout_output_text(exc.stdout),
+            stderr=_timeout_output_text(exc.stderr),
             duration_ms=int((time.perf_counter() - start) * 1000),
             timed_out=True,
         )
@@ -914,6 +923,21 @@ def load_openclaw_config(config_path: pathlib.Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise TypeError(f"expected a mapping in {config_path}")
     return cast(dict[str, Any], payload)
+
+
+def openclaw_default_agent_id(config: Mapping[str, Any]) -> str:
+    """Return OpenClaw's default agent: the `default` entry, else the first, else `main`."""
+    agents = _nested_mapping(config, "agents")
+    entries = agents.get("list") if agents is not None else None
+    candidates = [
+        cast(Mapping[str, Any], entry)
+        for entry in (cast(list[object], entries) if isinstance(entries, list) else [])
+        if isinstance(entry, Mapping) and isinstance(cast(Mapping[str, Any], entry).get("id"), str)
+    ]
+    chosen = next((entry for entry in candidates if entry.get("default") is True), None)
+    if chosen is None and candidates:
+        chosen = candidates[0]
+    return str(chosen["id"]).strip().lower() if chosen is not None else "main"
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:

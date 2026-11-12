@@ -56,3 +56,23 @@ def test_otel_collector_keeps_secret_redaction_on_the_trace_pipeline() -> None:
                 match = _CONTEXT_PATH.search(statement)
                 assert match is not None, statement
                 assert match["path"] == f"{context}.attributes", statement
+
+
+def test_browser_lab_playwright_service_serves_cdp_on_its_published_port() -> None:
+    worker_dir = REPO_ROOT / "platform" / "workers" / "browser-lab"
+    launcher = worker_dir / "start-cdp.sh"
+    script = launcher.read_text(encoding="utf-8")
+    assert "readonly cdp_port=9222" in script
+    assert '.listen(listenPort, "0.0.0.0")' in script
+    assert "--proxy-server=" in script
+    for path_name in (
+        "docker-compose.browser-lab.yaml",
+        "docker-compose.browser-lab.ci-hosted-macos.yaml",
+    ):
+        services = cast(dict[str, dict[str, Any]], _yaml(path_name)["services"])
+        playwright = services["browserlab-playwright"]
+        assert playwright["command"] == ["bash", "/workspace/browser-lab/start-cdp.sh"], path_name
+        assert "127.0.0.1:9222:9222" in playwright["ports"], path_name
+        assert (
+            "../workers/browser-lab:/workspace/browser-lab:ro" in playwright["volumes"]
+        ), path_name

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 from collections.abc import Callable
 from typing import Protocol
@@ -33,9 +34,16 @@ class OpenClawBackupBackend:
 
     name = "openclaw-cli"
 
-    def __init__(self, *, which: WhichFunc, run_command: RunCommandFunc) -> None:
+    def __init__(
+        self,
+        *,
+        which: WhichFunc,
+        run_command: RunCommandFunc,
+        state_dir: pathlib.Path | None = None,
+    ) -> None:
         self._which = which
         self._run_command = run_command
+        self._state_dir = state_dir
 
     def is_available(self) -> bool:
         """Return whether the OpenClaw executable is available."""
@@ -46,13 +54,24 @@ class OpenClawBackupBackend:
     ) -> tuple[bool, str | None, dict[str, object] | None]:
         """Create one archive through OpenClaw."""
         result = self._run_command(
-            ["openclaw", "backup", "create", str(archive_tmp_path)],
+            ["openclaw", "backup", "create", "--output", str(archive_tmp_path)],
+            env=self._environment(),
             timeout_seconds=600,
         )
         if result.ok:
             return True, None, None
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw backup create failed"
         return False, detail, None
+
+    def _environment(self) -> dict[str, str] | None:
+        """Point OpenClaw at the planned state root instead of the caller's own home."""
+        if self._state_dir is None:
+            return None
+        return {
+            **os.environ,
+            "OPENCLAW_STATE_DIR": str(self._state_dir),
+            "OPENCLAW_CONFIG_PATH": str(self._state_dir / "openclaw.json"),
+        }
 
 
 class TarBackupBackend:

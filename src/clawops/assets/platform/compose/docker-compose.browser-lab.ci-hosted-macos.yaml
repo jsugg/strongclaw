@@ -19,7 +19,7 @@ services:
       HTTP_PROXY: http://browserlab-proxy:3128
       HTTPS_PROXY: http://browserlab-proxy:3128
       NO_PROXY: localhost,127.0.0.1,browserlab-proxy
-    command: ["bash", "-lc", "sleep infinity"]
+    command: ["bash", "/workspace/browser-lab/start-cdp.sh"]
     shm_size: "1gb"
     ports:
       - "127.0.0.1:9222:9222"

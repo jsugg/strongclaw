@@ -17,7 +17,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from types import TracebackType
-from typing import TYPE_CHECKING, Literal, LiteralString, Protocol, cast
+from typing import TYPE_CHECKING, Final, Literal, LiteralString, Protocol, cast
 from urllib.parse import urlparse
 
 import requests
@@ -1008,7 +1008,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
     path,
     content,
     symbols,
-    content='',
     tokenize='porter unicode61'
 );
 
@@ -1034,7 +1033,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     symbol,
     scope_chain,
-    content='',
     tokenize='porter unicode61'
 );
 
@@ -1076,6 +1074,18 @@ CREATE TABLE IF NOT EXISTS hybrid_pending_deletions (
 
 MIGRATION_COLUMNS = {
     "size_bytes": "INTEGER NOT NULL DEFAULT 0",
+}
+
+# Older databases created these FTS tables contentless; each maps to its repopulating insert.
+FTS_TABLE_REBUILDS: Final[dict[str, str]] = {
+    "files_fts": (
+        "INSERT INTO files_fts(path, content, symbols) SELECT path, content, symbols FROM files"
+    ),
+    "chunks_fts": (
+        "INSERT INTO chunks_fts(chunk_id, path, content, symbol, scope_chain) "
+        "SELECT chunk_id, path, content, COALESCE(symbol, ''), COALESCE(scope_chain, '') "
+        "FROM chunks"
+    ),
 }
 
 
@@ -1649,7 +1659,29 @@ class CodebaseContextService:
             if column in columns:
                 continue
             conn.execute(f"ALTER TABLE files ADD COLUMN {column} {definition}")
+        self._rebuild_contentless_fts(conn)
         conn.commit()
+
+    @staticmethod
+    def _rebuild_contentless_fts(conn: sqlite3.Connection) -> None:
+        """Recreate contentless FTS tables, whose NULL columns never join back to their rows."""
+        stale = [
+            table
+            for table in FTS_TABLE_REBUILDS
+            if "content=''"
+            in str(
+                conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+                ).fetchone()["sql"]
+            )
+        ]
+        if not stale:
+            return
+        for table in stale:
+            conn.execute(f"DROP TABLE {table}")
+        conn.executescript(SCHEMA)
+        for table in stale:
+            conn.execute(FTS_TABLE_REBUILDS[table])
 
     def _hybrid_requested(self) -> bool:
         """Return whether the current scale and config request hybrid retrieval."""
@@ -2638,10 +2670,12 @@ class CodebaseContextService:
             try:
                 rows = conn.execute(
                     """
-                    SELECT chunk_id, path, content, symbol, start_line, end_line, kind
+                    SELECT c.chunk_id, c.path, c.content, c.symbol, c.start_line, c.end_line,
+                           c.kind
                     FROM chunks_fts
-                    JOIN chunks USING(chunk_id)
+                    JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
                     WHERE chunks_fts MATCH ?
+                    ORDER BY chunks_fts.rank
                     LIMIT ?
                     """,
                     (query, limit),

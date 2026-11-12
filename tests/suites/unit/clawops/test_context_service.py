@@ -10,6 +10,7 @@ import pytest
 
 from clawops.common import write_yaml
 from clawops.context.codebase.service import load_config, service_from_config
+from clawops.context.contracts import ContextScale
 
 
 def test_index_and_query(tmp_path: pathlib.Path) -> None:
@@ -381,3 +382,59 @@ def test_pack_lists_affected_files_when_git_diff_is_present(
 
     assert "## Active diff" in pack
     assert "- affected_files: app.py, docs/note.md" in pack
+
+
+def _ledger_repo(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "ledger.py").write_text(
+        '"""Ledger module."""\n\n\n'
+        "class LedgerReconciler:\n"
+        "    def reconcile(self, entries: list[int]) -> int:\n"
+        "        return sum(entries)\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "context.yaml"
+    write_yaml(config_path, {"index": {"db_path": ".clawops/context.sqlite"}})
+    return repo, config_path
+
+
+@pytest.mark.parametrize("scale", ["small", "medium"])
+def test_query_matches_terms_that_are_not_adjacent(
+    tmp_path: pathlib.Path, scale: ContextScale
+) -> None:
+    repo, config_path = _ledger_repo(tmp_path)
+    service = service_from_config(config_path, repo, scale=scale)
+    service.index()
+
+    hits = service.query("LedgerReconciler reconcile", limit=3)
+
+    assert [hit.path for hit in hits] == ["pkg/ledger.py"]
+
+
+def test_contentless_fts_tables_are_rebuilt_from_indexed_rows(tmp_path: pathlib.Path) -> None:
+    repo, config_path = _ledger_repo(tmp_path)
+    service_from_config(config_path, repo, scale="medium").index()
+    db_path = repo / ".clawops" / "context.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript("""
+            DROP TABLE files_fts;
+            DROP TABLE chunks_fts;
+            CREATE VIRTUAL TABLE files_fts USING fts5(
+                path, content, symbols, content='', tokenize='porter unicode61'
+            );
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                chunk_id, path, content, symbol, scope_chain, content='',
+                tokenize='porter unicode61'
+            );
+            """)
+
+    service = service_from_config(config_path, repo, scale="medium")
+    hits = service.query("LedgerReconciler reconcile", limit=3)
+
+    assert [hit.path for hit in hits] == ["pkg/ledger.py"]
+    with sqlite3.connect(db_path) as conn:
+        ddl = [
+            row[0] for row in conn.execute("SELECT sql FROM sqlite_master WHERE sql LIKE '%fts5%'")
+        ]
+    assert len(ddl) == 2 and not any("content=''" in sql for sql in ddl)

@@ -27,9 +27,17 @@ PROVIDER_ID: Final[str] = "featver"
 CHAT_MODEL: Final[str] = "featver-chat"
 FAKE_CHAT_MODEL_REF: Final[str] = f"{PROVIDER_ID}/{CHAT_MODEL}"
 PROVIDER_BASE_URL: Final[str] = "http://127.0.0.1:18000/v1"
-# A known provider env-var name is OpenClaw's env marker: resolved from the environment at
-# runtime and never stored (or audited) as plaintext. The fake server accepts any value.
-PROVIDER_API_KEY_ENV: Final[str] = "VLLM_API_KEY"
+# The key is a file-backed SecretRef. `openclaw secrets audit` reports a bare key in
+# openclaw.json as plaintext, and an env SecretRef lands in models.json as the env-var name, which
+# the audit accepts only for provider-owned variables; those (VLLM_API_KEY, OLLAMA_API_KEY, ...)
+# also switch on that provider's discovery. The fake server accepts any value.
+PROVIDER_SECRET_PROVIDER: Final[str] = "featver"
+PROVIDER_SECRET_FILE_NAME: Final[str] = "featver-provider.key"
+PROVIDER_API_KEY_REF: Final[dict[str, str]] = {
+    "source": "file",
+    "provider": PROVIDER_SECRET_PROVIDER,
+    "id": "value",
+}
 PROVIDER_API_KEY_VALUE: Final[str] = "featver-local"
 # LiteLLM reaches the fake server from its container through host-gateway.
 OPENAI_COMPATIBLE_EMBEDDING_MODEL: Final[str] = "openai/featver-embed"
@@ -38,7 +46,6 @@ OLLAMA_EMBEDDING_MODEL: Final[str] = "ollama/nomic-embed-text"
 OLLAMA_EMBEDDING_API_BASE: Final[str] = "http://host.docker.internal:11434"
 ENV_CONTRACT: Final[dict[str, str]] = {
     "OPENCLAW_DEFAULT_MODEL": FAKE_CHAT_MODEL_REF,
-    PROVIDER_API_KEY_ENV: PROVIDER_API_KEY_VALUE,
     "HYPERMEMORY_EMBEDDING_MODEL": OPENAI_COMPATIBLE_EMBEDDING_MODEL,
     "HYPERMEMORY_EMBEDDING_API_BASE": OPENAI_COMPATIBLE_EMBEDDING_API_BASE,
 }
@@ -55,7 +62,7 @@ def provider_entry() -> dict[str, object]:
     """Return the ``models.providers`` entry for the fake model server."""
     return {
         "baseUrl": PROVIDER_BASE_URL,
-        "apiKey": PROVIDER_API_KEY_ENV,
+        "apiKey": dict(PROVIDER_API_KEY_REF),
         "api": "openai-completions",
         "models": [
             {
@@ -96,6 +103,20 @@ def register_provider(config_path: Path) -> None:
     if not isinstance(providers, dict):
         raise ProviderError(f"{config_path}: `models.providers` is not a mapping")
     cast(dict[str, object], providers)[PROVIDER_ID] = provider_entry()
+    secret_file = config_path.parent / PROVIDER_SECRET_FILE_NAME
+    secret_file.write_text(PROVIDER_API_KEY_VALUE, encoding="utf-8")
+    secret_file.chmod(0o600)
+    secrets = payload.setdefault("secrets", {})
+    if not isinstance(secrets, dict):
+        raise ProviderError(f"{config_path}: `secrets` is not a mapping")
+    secret_providers = cast(dict[str, object], secrets).setdefault("providers", {})
+    if not isinstance(secret_providers, dict):
+        raise ProviderError(f"{config_path}: `secrets.providers` is not a mapping")
+    cast(dict[str, object], secret_providers)[PROVIDER_SECRET_PROVIDER] = {
+        "source": "file",
+        "path": str(secret_file),
+        "mode": "singleValue",
+    }
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

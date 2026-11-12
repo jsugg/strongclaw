@@ -13,6 +13,8 @@ from clawops.app_paths import strongclaw_lossless_claw_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
+from clawops.openclaw_plugins import attach_bundled_plugins
+from clawops.platform_compat import DEFAULT_ACPX_VERSION
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_runtime import managed_python
 
@@ -371,7 +373,10 @@ def render_openclaw_profile(
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
-    return cast(dict[str, Any], merged)
+    return cast(
+        dict[str, Any],
+        attach_bundled_plugins(cast(dict[str, object], merged), acpx_version=DEFAULT_ACPX_VERSION),
+    )
 
 
 def build_profile_help() -> str:

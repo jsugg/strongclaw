@@ -472,6 +472,7 @@ def test_activate_services_enables_systemd_units_in_declared_order(
         "renderedFiles": [],
     }
     observed_commands: list[tuple[str, ...]] = []
+    observed_timeouts: dict[str, int] = {}
     observed_events: list[tuple[str, dict[str, object]]] = []
 
     def _render_service_files(*args: object, **kwargs: object) -> dict[str, object]:
@@ -479,8 +480,8 @@ def test_activate_services_enables_systemd_units_in_declared_order(
         return payload
 
     def _run_command(command: list[str], *, timeout_seconds: int = 30) -> ExecResult:
-        del timeout_seconds
         observed_commands.append(tuple(command))
+        observed_timeouts[command[-1]] = timeout_seconds
         return ExecResult(
             argv=tuple(command),
             returncode=0,
@@ -525,6 +526,9 @@ def test_activate_services_enables_systemd_units_in_declared_order(
         ("systemctl", "--user", "enable", "--now", "openclaw-backup-verify.timer"),
         ("systemctl", "--user", "enable", "--now", "openclaw-maintenance.timer"),
     ]
+    # Starting the oneshot sidecars unit waits for the whole stack to become healthy.
+    assert observed_timeouts["openclaw-sidecars.service"] == 1800
+    assert observed_timeouts["openclaw-gateway.service"] == 60
     assert observed_events[0] == (
         "clawops.services.activate",
         {"service_manager": "systemd", "step": "daemon_reload"},
@@ -544,7 +548,35 @@ def test_launchd_timeout_override_rejects_invalid_values(test_context: TestConte
     with pytest.raises(RuntimeError, match="must be a positive integer"):
         launchd_timeout_seconds = cast(
             _LaunchdTimeoutSeconds,
-            cast(Any, strongclaw_services)._launchd_timeout_seconds,
+            cast(Any, strongclaw_services)._env_timeout_seconds,
         )
         assert callable(launchd_timeout_seconds)
         launchd_timeout_seconds("TEST_TIMEOUT", 30)
+
+
+def test_activate_services_reports_a_systemd_start_timeout(test_context: TestContext) -> None:
+    def _run_command(command: list[str], *, timeout_seconds: int = 30) -> ExecResult:
+        return ExecResult(
+            argv=tuple(command),
+            returncode=None if "enable" in command else 0,
+            stdout="",
+            stderr="Created symlink default.target.wants/openclaw-sidecars.service",
+            duration_ms=timeout_seconds * 1000,
+            timed_out="enable" in command,
+        )
+
+    def _render_service_files(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return {"serviceManager": "systemd", "outputDir": "/tmp/units"}
+
+    test_context.patch.patch_object(
+        strongclaw_services, "render_service_files", new=_render_service_files
+    )
+    test_context.patch.patch_object(
+        strongclaw_services, "ensure_docker_backend_ready", new=lambda: None
+    )
+    test_context.patch.patch_object(strongclaw_services, "run_command", new=_run_command)
+    test_context.env.set("STRONGCLAW_SYSTEMD_SIDECARS_TIMEOUT_SECONDS", "90")
+
+    with pytest.raises(RuntimeError, match=r"Timed out after 90s starting openclaw-sidecars"):
+        strongclaw_services.activate_services(pathlib.Path("/repo"), service_manager="systemd")

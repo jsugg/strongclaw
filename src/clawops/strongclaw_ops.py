@@ -18,6 +18,7 @@ from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argume
 from clawops.observability import emit_structured_log
 from clawops.qdrant_storage import (
     QDRANT_SERVICE_NAME,
+    QDRANT_STORAGE_TARGET,
     QdrantStorageError,
     StorageDecision,
     StorageOperations,
@@ -694,6 +695,23 @@ def _prepare_qdrant_storage(execution: _ComposeExecution) -> StorageDecision:
         ),
         remove_volume=lambda name: _checked_docker(
             execution, ["docker", "volume", "rm", name], what="removing the qdrant volume"
+        ),
+        clear_mounted_storage=lambda: _checked_docker(
+            execution,
+            execution.command(
+                "run",
+                "--rm",
+                "--no-deps",
+                "-T",
+                "--entrypoint",
+                "find",
+                QDRANT_SERVICE_NAME,
+                QDRANT_STORAGE_TARGET,
+                "-mindepth",
+                "1",
+                "-delete",
+            ),
+            what="clearing qdrant storage from its container",
         ),
         log=_log_qdrant_storage,
     )

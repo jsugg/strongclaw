@@ -21,6 +21,9 @@
           "autoRecall": false,
           "captureAssistant": false,
           "smartExtraction": true,
+          // The vendored release counts only the user messages new since the previous turn, so a
+          // gateway conversation (one new message per turn) never reaches the upstream default of 4.
+          "extractMinMessages": 1,
           "llm": {
             "apiKey": "ollama",
             "model": "qwen2.5:7b",

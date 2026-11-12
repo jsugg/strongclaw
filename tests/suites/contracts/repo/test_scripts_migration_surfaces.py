@@ -151,3 +151,14 @@ def test_operator_docs_use_uv_default_dev_group() -> None:
     ):
         text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "--extra dev" not in text, relative_path
+
+
+def test_systemd_user_units_only_hard_require_units_they_ship_with() -> None:
+    """User units cannot see system units, so a hard dependency on one never resolves."""
+    systemd_dir = REPO_ROOT / "platform" / "systemd"
+    shipped = {unit.name for unit in systemd_dir.iterdir()}
+    for unit in sorted(systemd_dir.glob("*.service")):
+        for line in unit.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() in {"Requires", "Requisite", "BindsTo"}:
+                assert set(value.split()) <= shipped, f"{unit.name}: {line}"
