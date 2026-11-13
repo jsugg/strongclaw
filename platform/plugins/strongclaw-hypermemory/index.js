@@ -164,6 +164,7 @@ function resolvePluginConfig(rawConfig) {
     command,
     configPath,
     autoRecall: input.autoRecall === true,
+    recallRerank: input.recallRerank === true,
     autoReflect: input.autoReflect === true,
     autoCapture: input.autoCapture === true,
     recallMaxResults:
@@ -399,6 +400,11 @@ function splitFeedbackIds(entries, responseText) {
   return { confirmed, badRecall };
 }
 
+// Operator `openclaw memory ...` commands are not bound to a prompt-time budget: an explicit
+// search keeps the semantic rerank, whose cold cross-encoder load can exceed `shortTimeoutMs` on
+// CPU hosts. They run on the long budget instead of the agent-turn read budget.
+const OPERATOR_CLI_RUN_OPTIONS = Object.freeze({ captureJson: false, timeoutClass: "long" });
+
 function registerMemoryCli(program, runClawops) {
   const memory = program.command("memory").description("Use StrongClaw hypermemory.");
   memory
@@ -409,9 +415,7 @@ function registerMemoryCli(program, runClawops) {
     // the hypermemory status already reports backend health, so --deep adds nothing.
     .option("--deep", "Accepted for `openclaw memory status --deep`; same report.")
     .action(async (opts) => {
-      await runClawops(["status", ...(opts.json ? ["--json"] : [])], {
-        captureJson: false,
-      });
+      await runClawops(["status", ...(opts.json ? ["--json"] : [])], OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -419,9 +423,7 @@ function registerMemoryCli(program, runClawops) {
     .description("Rebuild the StrongClaw hypermemory index.")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
-      await runClawops(["index", ...(opts.json ? ["--json"] : [])], {
-        captureJson: false,
-      });
+      await runClawops(["index", ...(opts.json ? ["--json"] : [])], OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -472,7 +474,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -492,7 +494,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -518,7 +520,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -537,7 +539,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -547,9 +549,7 @@ function registerMemoryCli(program, runClawops) {
     .option("--json", "Print JSON.")
     .action(async (opts) => {
       const args = ["reflect", "--mode", String(opts.mode ?? "safe"), ...(opts.json ? ["--json"] : [])];
-      await runClawops(args, {
-        captureJson: false,
-      });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -577,7 +577,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -597,8 +597,26 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
+}
+
+// Auto-recall runs on every prompt inside the short timeout, so it skips the cross-encoder
+// rerank (a cold model load per CLI call) unless `recallRerank` opts back in. Explicit
+// `memory_search` calls keep the configured rerank.
+function buildRecallSearchArgs(pluginConfig, prompt) {
+  const args = [
+    "search",
+    "--json",
+    "--query",
+    prompt,
+    "--max-results",
+    String(pluginConfig.recallMaxResults),
+  ];
+  if (!pluginConfig.recallRerank) {
+    args.push("--no-rerank");
+  }
+  return args;
 }
 
 const strongclawHypermemoryPlugin = {
@@ -617,6 +635,7 @@ const strongclawHypermemoryPlugin = {
         items: { type: "string" },
       },
       autoRecall: { type: "boolean" },
+      recallRerank: { type: "boolean" },
       autoReflect: { type: "boolean" },
       autoCapture: { type: "boolean" },
       captureMinMessages: { type: "number", minimum: 1, maximum: 20 },
@@ -891,14 +910,7 @@ const strongclawHypermemoryPlugin = {
           return;
         }
         try {
-          const payload = await runClawops([
-            "search",
-            "--json",
-            "--query",
-            prompt,
-            "--max-results",
-            String(pluginConfig.recallMaxResults),
-          ]);
+          const payload = await runClawops(buildRecallSearchArgs(pluginConfig, prompt));
           const results = Array.isArray(payload?.results) ? payload.results : [];
           if (results.length === 0) {
             return;

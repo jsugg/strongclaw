@@ -74,6 +74,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Include soft-invalidated rows for audit-oriented searches.",
     )
+    search_parser.add_argument(
+        "--no-rerank",
+        dest="rerank",
+        action="store_false",
+        help="Skip the semantic rerank stage (latency-bound callers such as auto-recall).",
+    )
     search_parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
     get_parser = subparsers.add_parser("get", help="Read a canonical memory or corpus file.")
@@ -239,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
             sparse_candidate_pool=args.sparse_candidate_pool,
             fusion=args.fusion,
             include_invalidated=bool(args.include_invalidated),
+            rerank=bool(args.rerank),
         )
         payload = {
             "results": [hit.to_dict() for hit in hits],

@@ -29,6 +29,9 @@
       "autoRecall": {
         "type": "boolean"
       },
+      "recallRerank": {
+        "type": "boolean"
+      },
       "autoReflect": {
         "type": "boolean"
       },

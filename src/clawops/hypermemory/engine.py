@@ -224,6 +224,7 @@ class HypermemoryEngine:
         sparse_candidate_pool: int | None = None,
         fusion: FusionMode | None = None,
         include_invalidated: bool = False,
+        rerank: bool = True,
     ) -> list[SearchHit]:
         """Search the derived store through the dual-lane retrieval planner."""
         return self.query.search(
@@ -239,6 +240,7 @@ class HypermemoryEngine:
             sparse_candidate_pool=sparse_candidate_pool,
             fusion=fusion,
             include_invalidated=include_invalidated,
+            rerank=rerank,
         )
 
     def verify(self) -> VerifyResult:
