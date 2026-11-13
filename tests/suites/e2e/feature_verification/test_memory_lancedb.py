@@ -20,7 +20,6 @@ from tests.utils.helpers.feature_verification import (
 PLUGIN_ID = "memory-lancedb-pro"
 SCOPE = "project:featver"
 STRATEGY_KEY = f"plugins.entries.{PLUGIN_ID}.config.sessionStrategy"
-MAIN_SESSION_KEY = "agent:admin:main"
 EXTRACTION_TURNS = (
     "Remember that I prefer feature verification reports rendered as tables.",
     "I always run the lancedb lane on Ubuntu runners.",
@@ -178,20 +177,22 @@ def test_reflection_runs_through_the_embedded_runner(
     feature_host.openclaw("config", "set", STRATEGY_KEY, "memoryReflection").require_ok()
     try:
         gateway.restart()
-        session_id = f"featver-reflect-{uuid.uuid4().hex[:8]}"
+        # The turn and the reset must address one session: OpenClaw 2026.6 keys a `--session-id`
+        # run as `agent:<id>:explicit:<id>`, never `agent:<id>:main`.
+        session_key = f"agent:admin:featver-reflect-{uuid.uuid4().hex[:8]}"
         feature_host.openclaw(
             "agent",
             "--agent",
             "admin",
-            "--session-id",
-            session_id,
+            "--session-key",
+            session_key,
             "--message",
             "We decided feature verification must use the real runtime.",
             "--json",
             timeout=300,
         ).require_ok()
         started = time.time()
-        params = json.dumps({"key": MAIN_SESSION_KEY, "reason": "new"})
+        params = json.dumps({"key": session_key, "reason": "new"})
         feature_host.openclaw(
             "gateway", "call", "sessions.reset", "--params", params, "--json", timeout=300
         ).require_ok()
