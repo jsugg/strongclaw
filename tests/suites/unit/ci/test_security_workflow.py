@@ -318,7 +318,7 @@ def test_run_recovery_smoke_executes_cli_and_fallback_modes_when_openclaw_availa
     def fake_restore_backup(target: Path, *, destination: Path, home_dir: Path) -> Path:
         del home_dir, target
         seen_openclaw_resolution.append(security_helpers.recovery_helpers.shutil.which("openclaw"))
-        marker = destination / ".openclaw" / "logs" / "smoke.log"
+        marker = destination / ".openclaw" / security_helpers.RECOVERY_SMOKE_MARKER
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("restored\n", encoding="utf-8")
         return destination

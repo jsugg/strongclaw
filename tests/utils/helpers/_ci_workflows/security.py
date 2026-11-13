@@ -65,6 +65,8 @@ _CRITICAL_REVIEW_PATH_PATTERNS: Final[tuple[str, ...]] = (
     "platform/plugins/**/package-lock.json",
 )
 _CHANNELS_RUNTIME_TOKEN_ENV_FALLBACK: Final[str] = "STRONGCLAW_CHANNELS_RUNTIME_TELEGRAM_BOT_TOKEN"
+# Lives in the state root, not `.openclaw/logs`: `openclaw backup create` skips rolling logs.
+RECOVERY_SMOKE_MARKER: Final[str] = "recovery-smoke-marker.txt"
 
 
 def append_coverage_summary(coverage_file: Path, summary_file: Path) -> None:
@@ -702,7 +704,7 @@ def _run_recovery_cycle(
     """Run one backup/verify/restore cycle and assert marker restoration."""
     home_dir = resolved_tmp_root / f"recovery-home-{mode_label}"
     state_dir = home_dir / ".openclaw"
-    marker_path = state_dir / "logs" / "smoke.log"
+    marker_path = state_dir / RECOVERY_SMOKE_MARKER
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.write_text(f"recovery smoke marker ({mode_label})\n", encoding="utf-8")
     (state_dir / "settings.json").write_text('{"ok":true}\n', encoding="utf-8")
@@ -716,7 +718,7 @@ def _run_recovery_cycle(
         restore_destination = resolved_tmp_root / f"recovery-restore-{mode_label}"
         restore_backup(verified_archive, destination=restore_destination, home_dir=home_dir)
 
-    restored_marker = restore_destination / ".openclaw" / "logs" / "smoke.log"
+    restored_marker = restore_destination / ".openclaw" / RECOVERY_SMOKE_MARKER
     if not restored_marker.exists():
         raise CiWorkflowError(
             f"recovery smoke failed in mode={mode_label}: restored marker missing"

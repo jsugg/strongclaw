@@ -171,13 +171,15 @@ def test_hypermemory_plugin_recalls_memory_into_turns(
         "--json",
         timeout=300,
     ).require_ok()
-    prompts = [
-        str(request.get("prompt", ""))
+    # OpenClaw prepends recall context to the current user turn. The journal's `prompt` excerpt
+    # starts with the system prompt, which on 2026.6 alone outgrows the excerpt.
+    turns = [
+        str(request.get("latestUser", ""))
         for request in feature_host.fake_model_requests()
         if float(cast(float, request.get("at", 0.0))) >= started
     ]
     assert any(
-        token in prompt for prompt in prompts
+        token in turn for turn in turns
     ), "strongclaw-hypermemory autoRecall did not inject the stored fact into the model prompt"
 
 
