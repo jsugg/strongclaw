@@ -14,6 +14,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import cast
 
+from clawops.app_paths import openclaw_scoped_compose_state_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.observability import emit_structured_log
 from clawops.qdrant_storage import (
@@ -125,7 +126,38 @@ def _compose_state_dir(repo_root: pathlib.Path, *, repo_local_state: bool) -> pa
     explicit = os.environ.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip()
     if explicit:
         return pathlib.Path(explicit).expanduser().resolve()
-    return resolve_openclaw_state_dir(repo_root) / "compose"
+    return openclaw_scoped_compose_state_dir(resolve_openclaw_state_dir(repo_root))
+
+
+def _adopt_legacy_compose_state(legacy_dir: pathlib.Path, state_dir: pathlib.Path) -> pathlib.Path:
+    """Move compose state out of the OpenClaw state root where earlier releases kept it.
+
+    A rename keeps the inodes running containers have bind-mounted, so live sidecars keep their
+    data and pick up the new path on their next start. When the move is impossible (another
+    filesystem), the legacy location stays in use.
+    """
+    if not legacy_dir.is_dir() or state_dir.exists():
+        return state_dir
+    state_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        legacy_dir.rename(state_dir)
+    except OSError as exc:
+        print(
+            f"[clawops] Keeping compose state at {legacy_dir}: moving it to {state_dir} failed "
+            f"({exc}); openclaw backup cannot archive the OpenClaw state root while it holds "
+            "sidecar data.",
+            file=sys.stderr,
+            flush=True,
+        )
+        emit_structured_log(
+            "clawops.ops.compose_state.migration_failed",
+            {"from": str(legacy_dir), "to": str(state_dir), "error": str(exc)},
+        )
+        return legacy_dir
+    emit_structured_log(
+        "clawops.ops.compose_state.migrated", {"from": str(legacy_dir), "to": str(state_dir)}
+    )
+    return state_dir
 
 
 def _compose_env(
@@ -159,6 +191,8 @@ def _compose_env(
     openclaw_state_dir = resolve_openclaw_state_dir(repo_root, environ=env)
     openclaw_config_path = resolve_openclaw_config_path(repo_root, environ=env)
     state_dir = _compose_state_dir(repo_root, repo_local_state=repo_local_state)
+    if not repo_local_state and not os.environ.get("STRONGCLAW_COMPOSE_STATE_DIR", "").strip():
+        state_dir = _adopt_legacy_compose_state(openclaw_state_dir / "compose", state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     env["OPENCLAW_HOME"] = str(layout.openclaw_home)
     env["OPENCLAW_STATE_DIR"] = str(openclaw_state_dir)
