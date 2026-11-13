@@ -36,6 +36,10 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
   from that manifest list and drops `api.registerTool(...)` registrations it does not name.
 - `test/openclaw-host-functional.mjs` runs `plugins info --runtime`: OpenClaw 2026.5+ lists runtime
   registrations such as the `memory-pro` CLI command only when the runtime is loaded.
+- `cli.ts` writes `--json` documents (`list`, `search`, `stats`) with `process.stdout.write`.
+  OpenClaw 2026.5+ routes plugin `console.log` output to stderr while a command runs in `--json`
+  mode, which left `memory-pro search --json` with nothing but log lines on stdout. The host test
+  now reads `--json` results from stdout alone instead of merging both streams.
 
 ## Review notes
 

@@ -140,7 +140,8 @@ function runOpenClaw(profile, args, options = {}) {
         reject(new Error(`openclaw ${args.join(" ")} failed with code ${code ?? "unknown"}\n${combined}`));
         return;
       }
-      resolve(combined);
+      // `--json` output is a stdout contract; diagnostics may go to stderr.
+      resolve(args.includes("--json") ? stdout.trim() : combined);
     });
   });
 }
