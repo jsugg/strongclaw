@@ -28,6 +28,7 @@ fresh_host:
   - "platform/compose/**"
   - "platform/configs/**"
   - "platform/launchd/**"
+  - "platform/node-tools/**"
   - "platform/plugins/**"
   - "src/clawops/assets/platform/plugins/**"
   - "tests/scripts/fresh_host.py"

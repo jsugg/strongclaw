@@ -27,6 +27,7 @@ from tests.utils.helpers.feature_verification import (
     load_manifest,
     register_provider,
     render_markdown,
+    system_prompt_tokens,
 )
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -66,6 +67,20 @@ def _write_manifest(tmp_path: Path, features: str = _VALID_FEATURES) -> Path:
 def test_canned_reply_echoes_tokens_from_the_latest_user_turn() -> None:
     assert canned_reply("ctx", "please answer FV-abc123 now") == f"{REPLY_PREFIX} FV-abc123"
     assert canned_reply("ctx", "no token here") == f"{REPLY_PREFIX} acknowledged"
+
+
+def test_system_prompt_tokens_come_from_system_and_developer_messages_only() -> None:
+    """Plugin-injected system context is journaled by its FV- tokens, user text is not."""
+    payload: dict[str, object] = {
+        "messages": [
+            {"role": "system", "content": "base FV-sys-0001 FV-sys-0001"},
+            {"role": "developer", "content": [{"type": "text", "text": "ctx FV-dev-0002"}]},
+            {"role": "user", "content": "question FV-user-0003"},
+        ]
+    }
+
+    assert system_prompt_tokens(payload) == ["FV-sys-0001", "FV-dev-0002"]
+    assert system_prompt_tokens({"system": "ollama FV-oll-0004", "messages": []}) == ["FV-oll-0004"]
 
 
 def test_canned_reply_answers_reflection_and_extraction_prompts() -> None:

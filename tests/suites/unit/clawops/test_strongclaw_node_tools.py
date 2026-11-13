@@ -11,6 +11,8 @@ from collections.abc import Sequence
 import pytest
 
 from clawops import strongclaw_node_tools as node_tools
+from clawops.app_paths import strongclaw_node_tools_dir
+from clawops.platform_compat import DEFAULT_OPENCLAW_VERSION
 from clawops.strongclaw_node_tools import (
     LocalPrefixWriter,
     NodeToolsBundle,
@@ -22,6 +24,7 @@ from clawops.strongclaw_node_tools import (
     is_transient_npm_failure,
     load_node_tools_bundle,
     npm_ci_retry_delay_seconds,
+    publish_node_tools_link,
     resolve_npm_global_prefix,
     run_npm_ci,
 )
@@ -65,7 +68,7 @@ for name, version in lock["packages"][""]["dependencies"].items():
             f"export async function runEmbeddedPiAgent() {{ return '{version}'; }}\\n",
             encoding="utf-8",
         )
-    for bin_name, relative in lock["packages"]["node_modules/" + name]["bin"].items():
+    for bin_name, relative in lock["packages"]["node_modules/" + name].get("bin", {}).items():
         target = package_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(f"#!/bin/sh\\necho '{name} {reported or version}'\\n", encoding="utf-8")
@@ -151,10 +154,12 @@ def _write_bundle(
     *,
     openclaw: str = "2026.3.13",
     acpx: str = "0.3.0",
+    plugins: dict[str, str] | None = None,
 ) -> NodeToolsBundle:
     """Write a minimal valid manifest plus lock and return the loaded bundle."""
     asset_dir.mkdir(parents=True, exist_ok=True)
-    dependencies = {"acpx": acpx, "openclaw": openclaw}
+    plugin_pins = plugins or {}
+    dependencies = {**plugin_pins, "acpx": acpx, "openclaw": openclaw}
     manifest = {"name": "strongclaw-node-tools", "private": True, "dependencies": dependencies}
     lock = {
         "name": "strongclaw-node-tools",
@@ -166,6 +171,14 @@ def _write_bundle(
             "node_modules/openclaw": _lock_entry(
                 "openclaw", openclaw, {"openclaw": "openclaw.mjs"}
             ),
+            **{
+                f"node_modules/{name}": {
+                    "version": version,
+                    "resolved": f"https://registry.npmjs.org/{name}/-/plugin-{version}.tgz",
+                    "integrity": _INTEGRITY,
+                }
+                for name, version in plugin_pins.items()
+            },
             "node_modules/libsignal": {
                 "version": "2.0.1",
                 "resolved": "git+ssh://git@github.com/whiskeysockets/libsignal-node.git#"
@@ -510,19 +523,67 @@ def test_sudo_mode_keeps_the_historical_privilege_rule(
 
 
 def test_ensure_node_tools_installed_uses_the_committed_lock(
-    test_context: TestContext, fake_npm: _FakeNpm, capsys: pytest.CaptureFixture[str]
+    test_context: TestContext,
+    fake_npm: _FakeNpm,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The bootstrap entrypoint installs the repo lock under `npm prefix -g`."""
+    """The bootstrap entrypoint installs the repo lock and publishes the per-user link."""
     # Hide host-installed openclaw/acpx so the PATH report is about the fresh install only.
     test_context.env.set("PATH", os.pathsep.join((str(fake_npm.bin_dir), "/usr/bin", "/bin")))
-    result = ensure_node_tools_installed(repo_root=REPO_ROOT, use_sudo=False)
+    home_dir = tmp_path / "home"
+    result = ensure_node_tools_installed(repo_root=REPO_ROOT, use_sudo=False, home_dir=home_dir)
     bundle = load_node_tools_bundle(REPO_ROOT / "platform" / "node-tools")
+    layout = NodeToolsLayout(fake_npm.prefix)
+    user_link = strongclaw_node_tools_dir(home_dir=home_dir)
 
     assert result.prefix == fake_npm.prefix
-    assert result.release_dir == NodeToolsLayout(fake_npm.prefix).release_dir(bundle.digest)
+    assert result.release_dir == layout.release_dir(bundle.digest)
     assert {path.name for path in result.bin_paths} == {"openclaw", "acpx"}
-    assert _run_bin(fake_npm.prefix, "openclaw") == "openclaw 2026.3.13"
+    assert _run_bin(fake_npm.prefix, "openclaw") == f"openclaw {DEFAULT_OPENCLAW_VERSION}"
+    assert os.readlink(user_link) == str(layout.current_link)
+    for package in bundle.packages:
+        installed = user_link / "node_modules" / package.name / "package.json"
+        assert json.loads(installed.read_text(encoding="utf-8"))["version"] == package.version
     assert "is not on PATH" in capsys.readouterr().err
+
+
+def test_plugin_pins_stay_inside_the_release_tree(
+    fake_npm: _FakeNpm, tmp_path: pathlib.Path
+) -> None:
+    """Bin-less plugin pins get neither global bins nor legacy `lib/node_modules` links."""
+    bundle = _write_bundle(tmp_path / "assets", plugins={"@openclaw/zai-provider": "2026.3.13"})
+    layout = NodeToolsLayout(fake_npm.prefix)
+
+    _install(bundle, fake_npm.prefix)
+
+    plugin = next(package for package in bundle.packages if package.name.startswith("@"))
+    assert (plugin.bins, plugin.is_cli) == ((), False)
+    assert [package.name for package in bundle.cli_packages] == ["acpx", "openclaw"]
+    assert sorted(path.name for path in layout.bin_dir.iterdir()) == ["acpx", "openclaw"]
+    assert not layout.compat_package_link(plugin.name).exists()
+    assert (layout.current_link / "node_modules" / plugin.name / "package.json").is_file()
+
+
+def test_publish_node_tools_link_is_idempotent_and_refuses_foreign_paths(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The per-user link follows `current`; a real directory in its place is never clobbered."""
+    layout = NodeToolsLayout(tmp_path / "prefix")
+    home_dir = tmp_path / "home"
+
+    link = publish_node_tools_link(layout, home_dir=home_dir)
+
+    assert os.readlink(link) == str(layout.current_link)
+    assert publish_node_tools_link(layout, home_dir=home_dir) == link
+    link.unlink()
+    os.symlink(tmp_path / "old-prefix" / "lib" / "strongclaw-node-tools" / "current", link)
+    publish_node_tools_link(layout, home_dir=home_dir)
+    assert os.readlink(link) == str(layout.current_link)
+    link.unlink()
+    link.mkdir()
+    with pytest.raises(NodeToolsError, match="not a symlink"):
+        publish_node_tools_link(layout, home_dir=home_dir)
 
 
 def test_path_shadowing_is_reported(
@@ -579,6 +640,41 @@ def test_bundle_rejects_non_reproducible_locks(
 
     with pytest.raises(NodeToolsError, match=message):
         load_node_tools_bundle(asset_dir)
+
+
+@pytest.mark.parametrize(
+    ("bundled_key", "valid"),
+    [
+        ("node_modules/acpx/node_modules/bundled-dep", True),
+        ("node_modules/acpx/node_modules/bundled-dep/node_modules/nested-dep", True),
+        ("node_modules/acpx/node_modules/@scope/bundled-dep", True),
+        ("node_modules/orphan/node_modules/bundled-dep", False),
+        ("node_modules/bundled-dep", False),
+    ],
+    ids=["bundled-by-pin", "nested-bundle", "scoped-bundle", "missing-bundler", "no-bundler"],
+)
+def test_bundle_accepts_in_bundle_entries_only_under_a_locked_bundler(
+    tmp_path: pathlib.Path, bundled_key: str, valid: bool
+) -> None:
+    """`inBundle` entries ship inside their bundler's verified tarball, so they need no own pin."""
+    asset_dir = tmp_path / "assets"
+    _write_bundle(asset_dir)
+    lock_path = asset_dir / "package-lock.json"
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    parent_key = bundled_key.rsplit("/node_modules/", 1)[0]
+    if parent_key.count("/node_modules/") == 1 and parent_key.startswith("node_modules/acpx/"):
+        lock["packages"][parent_key] = {"version": "1.0.0", "inBundle": True}
+    lock["packages"][bundled_key] = {"version": "1.0.0", "inBundle": True}
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    if valid:
+        assert {package.name for package in load_node_tools_bundle(asset_dir).packages} == {
+            "acpx",
+            "openclaw",
+        }
+    else:
+        with pytest.raises(NodeToolsError, match="bundled by a package missing from the lock"):
+            load_node_tools_bundle(asset_dir)
 
 
 def test_bundle_rejects_range_pins(tmp_path: pathlib.Path) -> None:

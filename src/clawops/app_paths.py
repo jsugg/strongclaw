@@ -263,6 +263,16 @@ def strongclaw_qmd_install_dir(
     return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "qmd"
 
 
+def strongclaw_node_tools_dir(
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the per-user link to the active locked OpenClaw/ACPX node-tools release."""
+    return strongclaw_data_dir(home_dir=home_dir, environ=environ, os_name=os_name) / "node-tools"
+
+
 def strongclaw_workspace_dir(
     *,
     home_dir: pathlib.Path | None = None,

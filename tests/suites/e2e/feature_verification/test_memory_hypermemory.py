@@ -171,14 +171,16 @@ def test_hypermemory_plugin_recalls_memory_into_turns(
         "--json",
         timeout=300,
     ).require_ok()
-    prompts = [
-        str(request.get("prompt", ""))
+    # Recall rides the turn's plugin-injected system context (lossless-claw rebuilds the user
+    # turn and drops `prependContext`), so check the system tokens the journal records.
+    system_tokens = [
+        cast(list[str], request.get("systemTokens", []))
         for request in feature_host.fake_model_requests()
         if float(cast(float, request.get("at", 0.0))) >= started
     ]
     assert any(
-        token in prompt for prompt in prompts
-    ), "strongclaw-hypermemory autoRecall did not inject the stored fact into the model prompt"
+        token in tokens for tokens in system_tokens
+    ), "strongclaw-hypermemory autoRecall did not inject the stored fact into the system context"
 
 
 def test_qdrant_storage_stamp_tracks_pinned_release(

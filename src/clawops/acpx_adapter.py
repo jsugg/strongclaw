@@ -5,13 +5,24 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
-from typing import Literal, cast
+from typing import Final, Literal, cast
 
 from clawops.process_runner import CommandResult, run_command
+
+ACPX_AUTH_ENV_PREFIX: Final[str] = "ACPX_AUTH_"
 
 type AcpxPermissionMode = Literal["approve-all", "approve-reads", "deny-all"]
 type RequestedOutputFormat = Literal["text", "json", "ndjson"]
 type ParsedOutputFormat = Literal["text", "json", "ndjson"]
+
+
+def acpx_auth_env_key(env_key: str) -> str:
+    """Return the explicit ACPX auth grant that selects the auth method named like *env_key*.
+
+    ACPX 0.6+ only picks an ACP auth method from `ACPX_AUTH_<METHOD_ID>` variables (or config
+    `auth`); before that, a bare provider variable whose name matched the method id sufficed.
+    """
+    return f"{ACPX_AUTH_ENV_PREFIX}{env_key}"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

@@ -83,6 +83,28 @@ def _messages_text(payload: JsonObject) -> tuple[str, str]:
     return "\n".join(all_parts), latest_user
 
 
+SYSTEM_ROLES: Final[frozenset[str]] = frozenset({"system", "developer"})
+
+
+def system_prompt_tokens(payload: JsonObject) -> list[str]:
+    """Return the FV- tokens in a chat payload's system/developer messages, in order, unique.
+
+    The journal keeps only bounded prompt excerpts, and the system prompt alone outgrows them,
+    so plugin-injected system context is recorded by the tokens it carries.
+    """
+    messages = payload.get("messages")
+    texts: list[str] = []
+    if isinstance(messages, list):
+        for raw_message in cast(Sequence[object], messages):
+            message = _as_object(raw_message)
+            if message.get("role") in SYSTEM_ROLES:
+                texts.append(_content_text(message.get("content")))
+    system = payload.get("system")
+    if isinstance(system, str):
+        texts.append(system)
+    return list(dict.fromkeys(ECHO_TOKEN_PATTERN.findall("\n".join(texts))))
+
+
 def _is_reflection_prompt(text: str) -> bool:
     """Return whether *text* is the memory-lancedb-pro reflection prompt."""
     return "## Invariants" in text and "## Derived" in text
@@ -218,6 +240,7 @@ class FakeModelHandler(BaseHTTPRequestHandler):
                 "model": payload.get("model"),
                 "stream": bool(payload.get("stream")),
                 "latestUser": latest_user[:_PROMPT_EXCERPT_CHARS],
+                "systemTokens": system_prompt_tokens(payload),
                 "prompt": all_text[:_PROMPT_EXCERPT_CHARS],
                 "reply": reply,
             }

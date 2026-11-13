@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import pathlib
 import textwrap
+from typing import Any
 
 import pytest
 
-from clawops.hypermemory import load_config, main
+from clawops.hypermemory import HypermemoryEngine, load_config, main
+from clawops.hypermemory.models import SearchHit
 from tests.plugins.infrastructure.context import TestContext
 from tests.utils.helpers.hypermemory import build_workspace, write_hypermemory_config
 
@@ -188,3 +190,33 @@ def test_hypermemory_cli_export_memory_pro_writes_import_json(
     )
     assert payload["scope"] == "project:strongclaw"
     assert payload["memories"]
+
+
+@pytest.mark.parametrize(("flags", "expected_rerank"), [((), True), (("--no-rerank",), False)])
+def test_hypermemory_cli_search_forwards_the_rerank_choice(
+    tmp_path: pathlib.Path,
+    test_context: TestContext,
+    capsys: pytest.CaptureFixture[str],
+    flags: tuple[str, ...],
+    expected_rerank: bool,
+) -> None:
+    """`search --no-rerank` reaches the engine; plain `search` keeps rerank on."""
+    workspace = build_workspace(tmp_path)
+    config_path = workspace / "hypermemory.sqlite.yaml"
+    write_hypermemory_config(workspace, config_path)
+    seen: list[bool] = []
+    original_search = HypermemoryEngine.search
+
+    def recording_search(self: HypermemoryEngine, query: str, **kwargs: Any) -> list[SearchHit]:
+        seen.append(bool(kwargs["rerank"]))
+        return original_search(self, query, **kwargs)
+
+    test_context.patch.patch_object(HypermemoryEngine, "search", new=recording_search)
+
+    exit_code = main(
+        ["--config", str(config_path), "search", "--query", "deployment playbook", *flags, "--json"]
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["results"]
+    assert seen == [expected_rerank]

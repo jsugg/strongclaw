@@ -1,4 +1,4 @@
-"""Unit tests for keeping OpenClaw bundled plugins enabled in rendered configs."""
+"""Unit coverage for wiring locked first-party OpenClaw plugins into rendered configs."""
 
 from __future__ import annotations
 
@@ -8,124 +8,247 @@ from typing import cast
 import pytest
 
 from clawops.openclaw_config import render_openclaw_profile
-from clawops.openclaw_plugins import attach_bundled_plugins, uses_acpx_backend
-from clawops.platform_compat import DEFAULT_ACPX_VERSION
+from clawops.openclaw_plugins import (
+    FIRST_PARTY_PLUGINS,
+    attach_first_party_plugins,
+    configured_model_providers,
+    required_openclaw_installs,
+)
+from clawops.platform_compat import NODE_TOOL_PINS
 from tests.utils.helpers.repo import REPO_ROOT
 
-type JsonObject = dict[str, object]
+_NODE_MODULES = pathlib.Path("/opt/strongclaw/node-tools/node_modules")
+_ALL_PATHS = [
+    (_NODE_MODULES / plugin.package).as_posix()
+    for plugin in FIRST_PARTY_PLUGINS
+    if not plugin.openclaw_installed
+]
+_ACPX = next(plugin for plugin in FIRST_PARTY_PLUGINS if plugin.plugin_id == "acpx")
 
 
-def _plugins(config: JsonObject) -> JsonObject:
-    return cast(JsonObject, config["plugins"])
+def _plugins(config: dict[str, object]) -> dict[str, object]:
+    return cast(dict[str, object], config["plugins"])
 
 
-def _acp_agent(backend: str) -> JsonObject:
-    return {"id": "coder", "runtime": {"type": "acp", "acp": {"backend": backend}}}
-
-
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        ({"agents": {"list": [_acp_agent("acpx")]}}, True),
-        ({"acp": {"backend": "acpx"}}, True),
-        ({"agents": {"list": [_acp_agent("other")]}}, False),
-        ({"agents": {"list": [{"id": "admin"}]}}, False),
-        ({}, False),
-    ],
-)
-def test_uses_acpx_backend_detects_runtime_and_agent_backends(
-    config: JsonObject, expected: bool
-) -> None:
-    assert uses_acpx_backend(config) is expected
-
-
-def test_attach_enables_acpx_on_the_locked_cli_for_acpx_agents() -> None:
-    config: JsonObject = {
-        "agents": {"list": [_acp_agent("acpx")]},
-        "plugins": {"entries": {"acpx": {"enabled": False}}},
+def _base_config(**plugins: object) -> dict[str, object]:
+    return {
+        "agents": {
+            "defaults": {
+                "model": {"primary": "openai/gpt-5.4", "fallbacks": ["zai/glm-5"]},
+                "models": {"openai/gpt-5.4": {"agentRuntime": {"id": "codex"}}},
+            },
+            "list": [{"id": "admin"}],
+        },
+        "plugins": dict(plugins),
     }
 
-    attach_bundled_plugins(config, acpx_version="9.9.9")
 
-    assert config["plugins"] == {
-        "entries": {
-            "acpx": {"enabled": True, "config": {"command": "acpx", "expectedVersion": "9.9.9"}}
+def test_configured_model_providers_cover_defaults_agents_and_model_maps() -> None:
+    """Every place an agent can pick a model contributes its provider."""
+    config: dict[str, object] = {
+        "agents": {
+            "defaults": {"model": "openai/gpt-5.4", "models": {"anthropic/claude-x": {}}},
+            "list": [
+                {"id": "a", "model": {"primary": "zai/glm-5", "fallbacks": ["moonshot/kimi"]}},
+                {"id": "b", "models": {"github-copilot/gpt-5.5": {}}},
+            ],
         }
     }
 
-
-def test_attach_keeps_operator_acpx_settings() -> None:
-    config: JsonObject = {
-        "acp": {"backend": "acpx"},
-        "plugins": {"entries": {"acpx": {"config": {"command": "/opt/acpx", "cwd": "/w"}}}},
-    }
-
-    attach_bundled_plugins(config, acpx_version="9.9.9")
-
-    acpx = cast(JsonObject, cast(JsonObject, _plugins(config)["entries"])["acpx"])
-    assert acpx["config"] == {
-        "command": "/opt/acpx",
-        "cwd": "/w",
-        "expectedVersion": "9.9.9",
+    assert configured_model_providers(config) == {
+        "openai",
+        "anthropic",
+        "zai",
+        "moonshot",
+        "github-copilot",
     }
 
 
-def test_attach_leaves_acpx_alone_when_nothing_uses_it() -> None:
-    config: JsonObject = {"agents": {"list": [{"id": "admin"}]}}
+def test_unrestricted_allowlist_loads_all_and_disables_unused_runtimes() -> None:
+    """Every locked plugin is discoverable; unused runtime/service plugins stay off."""
+    config = attach_first_party_plugins(_base_config(allow=[]), node_modules_dir=_NODE_MODULES)
+    plugins = _plugins(config)
 
-    attach_bundled_plugins(config, acpx_version="9.9.9")
+    assert cast(dict[str, object], plugins["load"])["paths"] == _ALL_PATHS
+    assert plugins["allow"] == []
+    assert plugins["entries"] == {
+        "acpx": {"enabled": False},
+        "diagnostics-otel": {"enabled": False},
+    }
+    assert "bundledDiscovery" not in plugins
 
-    assert config["plugins"] == {}
+
+def test_restrictive_allowlist_names_needed_plugins_and_bundled_providers() -> None:
+    """A memory-only allowlist keeps the runtimes the agents use and every documented provider."""
+    config = _base_config(allow=["strongclaw-hypermemory"], load={"paths": ["/x/hypermemory"]})
+    agents = cast(dict[str, object], config["agents"])
+    agents["list"] = [
+        {
+            "id": "worker",
+            "model": {"primary": "github-copilot/gpt-5.5"},
+            "runtime": {"type": "acp", "acp": {"backend": "acpx"}},
+        }
+    ]
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["load"])["paths"] == ["/x/hypermemory", *_ALL_PATHS]
+    assert plugins["allow"] == [
+        "strongclaw-hypermemory",
+        "acpx",
+        "codex",
+        "moonshot",
+        "zai",
+        "anthropic",
+        "github-copilot",
+        "ollama",
+        "openai",
+        "openrouter",
+    ]
+    assert plugins["entries"] == {
+        "acpx": {"enabled": True},
+        "diagnostics-otel": {"enabled": False},
+    }
+    assert plugins["bundledDiscovery"] == "compat"
 
 
-def test_attach_extends_a_restrictive_allowlist_with_required_and_provider_plugins() -> None:
-    config: JsonObject = {
-        "agents": {"list": [_acp_agent("acpx")]},
-        "plugins": {"allow": ["memory-lancedb-pro", "ollama"]},
+def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None:
+    """Re-attaching after a config change re-enables a now-used plugin only."""
+    config = _base_config(
+        entries={
+            "codex": {"enabled": False},
+            "zai": {"enabled": False, "config": {"region": "intl"}},
+            "diagnostics-otel": {"enabled": True, "config": {"x": 1}},
+        }
+    )
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert plugins["entries"] == {
+        "acpx": {"enabled": False},
+        "zai": {"config": {"region": "intl"}},
+        "diagnostics-otel": {"enabled": True, "config": {"x": 1}},
     }
 
-    attach_bundled_plugins(config, acpx_version="9.9.9")
 
-    assert _plugins(config)["allow"] == ["memory-lancedb-pro", "ollama", "acpx"]
+@pytest.mark.parametrize(
+    ("overlay", "plugin_id", "entry"),
+    [
+        ({"diagnostics": {"otel": {"enabled": True}}}, "diagnostics-otel", None),
+        # The installed ACP runtime registers its backend only when explicitly enabled.
+        ({"acp": {"backend": "acpx"}}, "acpx", {"enabled": True}),
+    ],
+)
+def test_service_plugins_load_only_when_configured(
+    overlay: dict[str, object], plugin_id: str, entry: dict[str, object] | None
+) -> None:
+    """Runtime and service plugins are enabled exactly when their feature is configured."""
+    config = {**_base_config(allow=["memory-core"]), **overlay}
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert plugin_id in cast(list[str], plugins["allow"])
+    assert cast(dict[str, object], plugins["entries"]).get(plugin_id) == entry
 
 
-def test_attach_does_not_create_an_allowlist() -> None:
-    config: JsonObject = {"plugins": {"allow": []}}
+def test_reattach_keeps_operator_disables_and_allowlisted_plugins() -> None:
+    """Render followed by model-auth must not undo operator choices that the config allows."""
+    config = _base_config(allow=["x", "acpx"], entries={"moonshot": {"enabled": False}})
 
-    attach_bundled_plugins(config, acpx_version="9.9.9")
+    once = attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES)
+    twice = _plugins(attach_first_party_plugins(once, node_modules_dir=_NODE_MODULES))
 
-    assert config["plugins"] == {"allow": []}
-
-
-def test_attach_respects_globally_disabled_plugins() -> None:
-    config: JsonObject = {"agents": {"list": [_acp_agent("acpx")]}, "plugins": {"enabled": False}}
-
-    attach_bundled_plugins(config, acpx_version="9.9.9")
-
-    assert config["plugins"] == {"enabled": False}
+    assert twice["entries"] == {
+        "moonshot": {"enabled": False},
+        "diagnostics-otel": {"enabled": False},
+    }
+    assert "acpx" in cast(list[str], twice["allow"])
 
 
-@pytest.mark.parametrize("profile_name", ["hypermemory", "memory-lancedb-pro"])
-def test_restrictive_memory_profiles_keep_the_bundled_ollama_provider(profile_name: str) -> None:
-    rendered = render_openclaw_profile(
+def test_plugin_that_stops_being_required_is_disabled_on_the_next_attach() -> None:
+    """Dropping the GPT runtime pin (API-key route) turns its runtime plugin off again."""
+    config = attach_first_party_plugins(_base_config(), node_modules_dir=_NODE_MODULES)
+    assert "codex" not in cast(dict[str, object], _plugins(config)["entries"])
+    defaults = cast(dict[str, dict[str, object]], config["agents"])["defaults"]
+    defaults["models"] = {"openai/gpt-5.4": {}}
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["entries"])["codex"] == {"enabled": False}
+
+
+@pytest.mark.parametrize(
+    ("plugins", "message"),
+    [
+        ({"load": "not-an-object"}, "`load` must be an object"),
+        ({"load": {"paths": "/one/path"}}, "`paths` must be a list"),
+        ({"entries": ["acpx"]}, "`entries` must be an object"),
+    ],
+)
+def test_attach_rejects_malformed_plugin_sections(plugins: dict[str, object], message: str) -> None:
+    """Operator data of the wrong shape fails loudly instead of being silently replaced."""
+    with pytest.raises(TypeError, match=message):
+        attach_first_party_plugins(_base_config(**plugins), node_modules_dir=_NODE_MODULES)
+
+
+def test_attach_is_idempotent_and_respects_disabled_plugins() -> None:
+    """Rendering twice changes nothing, and `plugins.enabled: false` is left alone."""
+    once = attach_first_party_plugins(_base_config(allow=["x"]), node_modules_dir=_NODE_MODULES)
+    snapshot = repr(once)
+
+    assert repr(attach_first_party_plugins(once, node_modules_dir=_NODE_MODULES)) == snapshot
+    disabled = _base_config(enabled=False)
+    assert attach_first_party_plugins(disabled, node_modules_dir=_NODE_MODULES) == _base_config(
+        enabled=False
+    )
+
+
+def _render(profile_name: str) -> dict[str, object]:
+    return render_openclaw_profile(
         profile_name=profile_name,
         repo_root=REPO_ROOT,
         home_dir=pathlib.Path.home(),
         user_timezone="UTC",
     )
 
-    assert "ollama" in rendered["plugins"]["allow"]
+
+@pytest.mark.parametrize("profile_name", ["hypermemory", "memory-lancedb-pro"])
+def test_restrictive_memory_profiles_keep_the_bundled_ollama_provider(profile_name: str) -> None:
+    """The memory profiles' allowlist keeps the provider behind OLLAMA_API_KEY."""
+    allow = cast(list[object], _plugins(_render(profile_name))["allow"])
+
+    assert "ollama" in allow
 
 
-def test_acp_profile_enables_the_bundled_acpx_runtime() -> None:
-    rendered = render_openclaw_profile(
-        profile_name="acp",
-        repo_root=REPO_ROOT,
-        home_dir=pathlib.Path.home(),
-        user_timezone="UTC",
-    )
+def test_acp_profile_requires_the_trusted_acpx_install() -> None:
+    """The acp profile enables acpx from OpenClaw's trusted install, never from a load path.
 
-    assert rendered["plugins"]["entries"]["acpx"] == {
-        "enabled": True,
-        "config": {"command": "acpx", "expectedVersion": DEFAULT_ACPX_VERSION},
-    }
+    OpenClaw 2026.6 refuses ACP session state to an untrusted (load-path) acpx, and the
+    plugin's config schema rejects unknown keys, so no `command` pin is rendered either.
+    """
+    rendered = _render("acp")
+    plugins = _plugins(rendered)
+    load_paths = cast(list[str], cast(dict[str, object], plugins["load"])["paths"])
+    entry = cast(dict[str, object], cast(dict[str, object], plugins["entries"])["acpx"])
+
+    assert not any(path.endswith("/@openclaw/acpx") for path in load_paths)
+    assert entry["enabled"] is True
+    assert "command" not in cast(dict[str, object], entry.get("config", {}))
+    assert required_openclaw_installs(rendered) == (_ACPX,)
+    assert _ACPX.npm_spec == f"npm:@openclaw/acpx@{NODE_TOOL_PINS['@openclaw/acpx']}"
+
+
+def test_profiles_without_acp_need_no_trusted_install() -> None:
+    """Only a config that routes work through acpx asks OpenClaw to install it."""
+    assert required_openclaw_installs(_render("hypermemory")) == ()
+    assert required_openclaw_installs(_base_config(enabled=False)) == ()
+
+
+def test_reattach_drops_a_stale_locked_acpx_load_path() -> None:
+    """A load-path acpx left by an older render would shadow the trusted install."""
+    stale = (_NODE_MODULES / "@openclaw/acpx").as_posix()
+    config = _base_config(load={"paths": [stale, "/x/hypermemory", stale]})
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["load"])["paths"] == ["/x/hypermemory", *_ALL_PATHS]

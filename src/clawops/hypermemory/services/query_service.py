@@ -195,8 +195,13 @@ class QueryService:
         sparse_candidate_pool: int | None = None,
         fusion: FusionMode | None = None,
         include_invalidated: bool = False,
+        rerank: bool = True,
     ) -> list[SearchHit]:
-        """Search the derived store through the dual-lane retrieval planner."""
+        """Search the derived store through the dual-lane retrieval planner.
+
+        ``rerank=False`` skips the semantic rerank stage, so latency-bound callers such as
+        prompt-time auto-recall never load the cross-encoder.
+        """
         if auto_index and self.is_dirty():
             self._deps.reindex()
         limit = max_results if max_results is not None else self._config.default_max_results
@@ -225,6 +230,7 @@ class QueryService:
                 "scope": scope,
                 "max_results": limit,
                 "include_explain": include_explain,
+                "rerank": rerank,
             },
         ) as span:
             try:
@@ -323,7 +329,7 @@ class QueryService:
                         dense_candidates=dense_candidates,
                         sparse_candidates=sparse_candidates,
                         active_backend=resolved_backend,
-                        rerank_scorer=self._rerank_scorer,
+                        rerank_scorer=self._rerank_scorer if rerank else None,
                         rerank_candidate_pool=hybrid_config.rerank_candidate_pool,
                         include_explain=include_explain,
                     )

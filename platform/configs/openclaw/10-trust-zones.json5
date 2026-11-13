@@ -36,7 +36,7 @@
         "id": "reader",
         "model": {
           "fallbacks": [
-            "github-copilot/gpt-4o"
+            "github-copilot/gpt-5.5"
           ],
           "primary": "zai/glm-5"
         },
@@ -80,9 +80,16 @@
         "id": "coder",
         "model": {
           "fallbacks": [
-            "github-copilot/gpt-4o"
+            "github-copilot/gpt-5.5"
           ],
-          "primary": "openai-codex/gpt-5.4"
+          "primary": "openai/gpt-5.4"
+        },
+        "models": {
+          "openai/gpt-5.4": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
         },
         "name": "Coder",
         "sandbox": {
@@ -128,9 +135,16 @@
         "model": {
           "fallbacks": [
             "zai/glm-5",
-            "openai-codex/gpt-5.4"
+            "openai/gpt-5.4"
           ],
-          "primary": "github-copilot/gpt-4o"
+          "primary": "github-copilot/gpt-5.5"
+        },
+        "models": {
+          "openai/gpt-5.4": {
+            "agentRuntime": {
+              "id": "codex"
+            }
+          }
         },
         "name": "Reviewer",
         "sandbox": {
@@ -175,7 +189,7 @@
         "id": "messaging",
         "model": {
           "fallbacks": [
-            "github-copilot/gpt-4o"
+            "github-copilot/gpt-5.5"
           ],
           "primary": "zai/glm-5"
         },
@@ -230,7 +244,7 @@
   ],
   "tools": {
     "byProvider": {
-      "github-copilot/gpt-4o": {
+      "github-copilot/gpt-5.5": {
         "deny": [
           "group:runtime",
           "send",

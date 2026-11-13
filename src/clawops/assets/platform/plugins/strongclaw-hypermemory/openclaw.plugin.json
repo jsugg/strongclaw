@@ -1,6 +1,17 @@
 {
   "id": "strongclaw-hypermemory",
   "kind": "memory",
+  "contracts": {
+    "tools": [
+      "memory_search",
+      "memory_get",
+      "memory_store",
+      "memory_update",
+      "memory_reflect",
+      "memory_forget",
+      "memory_list_facts"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -16,6 +27,9 @@
         }
       },
       "autoRecall": {
+        "type": "boolean"
+      },
+      "recallRerank": {
         "type": "boolean"
       },
       "autoReflect": {

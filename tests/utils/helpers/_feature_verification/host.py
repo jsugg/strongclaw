@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, cast
 
+from clawops.app_paths import strongclaw_node_tools_dir
 from clawops.strongclaw_runtime import (
     load_env_assignments,
     load_openclaw_config,
@@ -48,6 +49,7 @@ _HARNESS_ENV_PREFIXES: Final[tuple[str, ...]] = ("FEATURE_VERIFICATION_", "PYTES
 _FRAMEWORK_ENV_KEYS: Final[frozenset[str]] = frozenset({"TEST_ID", "RESOURCE_PREFIX", "WORKER_ID"})
 _JSON_START: Final[re.Pattern[str]] = re.compile(r"(?m)^[ \t]*[\[{]")
 _OUTPUT_TAIL_CHARS: Final[int] = 3000
+_GATEWAY_ADMIN_CALL_SCRIPT: Final[Path] = Path(__file__).with_name("gateway_admin_call.mjs")
 
 
 def default_manifest_path(repo_root: Path) -> Path:
@@ -278,6 +280,35 @@ class FeatureHost:
         """Run ``openclaw`` exactly as StrongClaw does: inside ``varlock run``."""
         argv = wrap_command_with_varlock(self.repo_root, ["openclaw", *arguments])
         return self.run(argv, cwd=cwd, timeout=timeout, env=env)
+
+    def gateway_admin_call(
+        self, method: str, params: Mapping[str, object], *, timeout: float = 120
+    ) -> CommandOutcome:
+        """Call one Gateway method as an operator.admin client, inside ``varlock run``.
+
+        The client keeps its own device identity under the lane's work dir, so it pairs as a
+        separate operator device on its first loopback connect, the way an operator's console
+        does, instead of asking to upgrade the CLI device's scopes.
+        """
+        identity_dir = self.work_dir / "gateway-admin-client"
+        identity_dir.mkdir(parents=True, exist_ok=True)
+        openclaw_package = strongclaw_node_tools_dir(home_dir=self.home) / "node_modules/openclaw"
+        argv = wrap_command_with_varlock(
+            self.repo_root,
+            [
+                "node",
+                str(_GATEWAY_ADMIN_CALL_SCRIPT),
+                str(openclaw_package),
+                method,
+                json.dumps(dict(params)),
+                str(int(timeout * 1000)),
+            ],
+        )
+        overrides = {
+            "OPENCLAW_STATE_DIR": str(identity_dir),
+            "OPENCLAW_CONFIG_PATH": str(resolve_openclaw_config_path(self.repo_root)),
+        }
+        return self.run(argv, timeout=timeout + 30, env=overrides)
 
     def clawops_managed(
         self,

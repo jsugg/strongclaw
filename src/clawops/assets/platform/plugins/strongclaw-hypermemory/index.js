@@ -164,6 +164,7 @@ function resolvePluginConfig(rawConfig) {
     command,
     configPath,
     autoRecall: input.autoRecall === true,
+    recallRerank: input.recallRerank === true,
     autoReflect: input.autoReflect === true,
     autoCapture: input.autoCapture === true,
     recallMaxResults:
@@ -299,6 +300,17 @@ function buildDisabledSearchResult(error) {
   };
 }
 
+// Upper bound on the recall block injected into each turn's system context.
+const RECALL_CONTEXT_MAX_CHARS = 2000;
+const RECALL_CONTEXT_TRUNCATION_MARK = "\n- [recall truncated]";
+
+function capRecallContext(text, maxChars = RECALL_CONTEXT_MAX_CHARS) {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return text.slice(0, maxChars - RECALL_CONTEXT_TRUNCATION_MARK.length) + RECALL_CONTEXT_TRUNCATION_MARK;
+}
+
 function formatRecallContext(results) {
   const lines = ["Relevant StrongClaw hypermemory context:"];
   for (const entry of results) {
@@ -399,16 +411,22 @@ function splitFeedbackIds(entries, responseText) {
   return { confirmed, badRecall };
 }
 
+// Operator `openclaw memory ...` commands are not bound to a prompt-time budget: an explicit
+// search keeps the semantic rerank, whose cold cross-encoder load can exceed `shortTimeoutMs` on
+// CPU hosts. They run on the long budget instead of the agent-turn read budget.
+const OPERATOR_CLI_RUN_OPTIONS = Object.freeze({ captureJson: false, timeoutClass: "long" });
+
 function registerMemoryCli(program, runClawops) {
   const memory = program.command("memory").description("Use StrongClaw hypermemory.");
   memory
     .command("status")
     .description("Show StrongClaw hypermemory status.")
     .option("--json", "Print JSON.")
+    // OpenClaw 2026.5+ routes `openclaw memory status --deep` to the memory-slot plugin's CLI;
+    // the hypermemory status already reports backend health, so --deep adds nothing.
+    .option("--deep", "Accepted for `openclaw memory status --deep`; same report.")
     .action(async (opts) => {
-      await runClawops(["status", ...(opts.json ? ["--json"] : [])], {
-        captureJson: false,
-      });
+      await runClawops(["status", ...(opts.json ? ["--json"] : [])], OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -416,9 +434,7 @@ function registerMemoryCli(program, runClawops) {
     .description("Rebuild the StrongClaw hypermemory index.")
     .option("--json", "Print JSON.")
     .action(async (opts) => {
-      await runClawops(["index", ...(opts.json ? ["--json"] : [])], {
-        captureJson: false,
-      });
+      await runClawops(["index", ...(opts.json ? ["--json"] : [])], OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -469,7 +485,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -489,7 +505,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -515,7 +531,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -534,7 +550,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -544,9 +560,7 @@ function registerMemoryCli(program, runClawops) {
     .option("--json", "Print JSON.")
     .action(async (opts) => {
       const args = ["reflect", "--mode", String(opts.mode ?? "safe"), ...(opts.json ? ["--json"] : [])];
-      await runClawops(args, {
-        captureJson: false,
-      });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -574,7 +588,7 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 
   memory
@@ -594,9 +608,29 @@ function registerMemoryCli(program, runClawops) {
       if (opts.json) {
         args.push("--json");
       }
-      await runClawops(args, { captureJson: false });
+      await runClawops(args, OPERATOR_CLI_RUN_OPTIONS);
     });
 }
+
+// Auto-recall runs on every prompt inside the short timeout, so it skips the cross-encoder
+// rerank (a cold model load per CLI call) unless `recallRerank` opts back in. Explicit
+// `memory_search` calls keep the configured rerank.
+function buildRecallSearchArgs(pluginConfig, prompt) {
+  const args = [
+    "search",
+    "--json",
+    "--query",
+    prompt,
+    "--max-results",
+    String(pluginConfig.recallMaxResults),
+  ];
+  if (!pluginConfig.recallRerank) {
+    args.push("--no-rerank");
+  }
+  return args;
+}
+
+export { RECALL_CONTEXT_MAX_CHARS };
 
 const strongclawHypermemoryPlugin = {
   id: "strongclaw-hypermemory",
@@ -614,6 +648,7 @@ const strongclawHypermemoryPlugin = {
         items: { type: "string" },
       },
       autoRecall: { type: "boolean" },
+      recallRerank: { type: "boolean" },
       autoReflect: { type: "boolean" },
       autoCapture: { type: "boolean" },
       captureMinMessages: { type: "number", minimum: 1, maximum: 20 },
@@ -888,14 +923,7 @@ const strongclawHypermemoryPlugin = {
           return;
         }
         try {
-          const payload = await runClawops([
-            "search",
-            "--json",
-            "--query",
-            prompt,
-            "--max-results",
-            String(pluginConfig.recallMaxResults),
-          ]);
+          const payload = await runClawops(buildRecallSearchArgs(pluginConfig, prompt));
           const results = Array.isArray(payload?.results) ? payload.results : [];
           if (results.length === 0) {
             return;
@@ -911,8 +939,16 @@ const strongclawHypermemoryPlugin = {
               JSON.stringify(injectedIds),
             ], { ensureReady });
           }
+          // Upstream (docs/concepts/agent-loop.md) reserves system-context fields for stable
+          // guidance and recommends `prependContext` for per-turn dynamic text. Recall uses
+          // `appendSystemContext` anyway: lossless-claw, the hypermemory profile's context
+          // engine, rebuilds the turn from its own store and drops `prependContext` on
+          // OpenClaw 2026.6. Appending keeps the stable system prefix cacheable; the block holds
+          // only the recall results and is capped at RECALL_CONTEXT_MAX_CHARS.
           return {
-            prependContext: formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
+            appendSystemContext: capRecallContext(
+              formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
+            ),
           };
         } catch (error) {
           api.logger.warn(`strongclaw-hypermemory recall failed: ${String(error)}`);

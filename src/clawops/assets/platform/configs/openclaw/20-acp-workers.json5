@@ -90,7 +90,38 @@
           "profile": "minimal"
         },
         "workspace": "__UPSTREAM_REPO_ROOT__"
+      },
+      // The only unsandboxed agent. OpenClaw refuses ACP spawns from sandboxed sessions, so ACP
+      // workers start from here, and only through the operator.admin `/acp spawn` command.
+      // `allow` names a tool that `deny: ["*"]` removes: with no callable tools left, OpenClaw
+      // stops every ordinary turn before it reaches the model. It is never the default agent,
+      // never a binding target, and no agent may spawn it (platform/docs/ACP_WORKERS.md).
+      {
+        "agentDir": "~/.openclaw/agents/acp-dispatch/agent",
+        "id": "acp-dispatch",
+        "name": "ACP Dispatcher",
+        "sandbox": {
+          "mode": "off"
+        },
+        "tools": {
+          "allow": [
+            "session_status"
+          ],
+          "deny": [
+            "*"
+          ],
+          "profile": "minimal"
+        },
+        "workspace": "~/.openclaw/workspace/acp-dispatch"
       }
     ]
-  }
+  },
+  // `/acp spawn` targets ACP harness ids; only the two worker harnesses are allowed.
+  "acp": {
+    "allowedAgents": [
+      "codex",
+      "claude"
+    ]
+  },
+  "bindings": []
 }

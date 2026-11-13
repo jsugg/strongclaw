@@ -140,7 +140,8 @@ function runOpenClaw(profile, args, options = {}) {
         reject(new Error(`openclaw ${args.join(" ")} failed with code ${code ?? "unknown"}\n${combined}`));
         return;
       }
-      resolve(combined);
+      // `--json` output is a stdout contract; diagnostics may go to stderr.
+      resolve(args.includes("--json") ? stdout.trim() : combined);
     });
   });
 }
@@ -251,7 +252,8 @@ async function main() {
     const validateOutput = await runOpenClaw(profile, ["config", "validate"]);
     assert.match(validateOutput, /Config valid/);
 
-    const infoOutput = await runOpenClaw(profile, ["plugins", "info", "memory-lancedb-pro"]);
+    // OpenClaw 2026.5+ only lists runtime registrations (CLI commands) when asked to load them.
+    const infoOutput = await runOpenClaw(profile, ["plugins", "info", "memory-lancedb-pro", "--runtime"]);
     assert.match(infoOutput, /Status:\s+loaded/);
     assert.match(infoOutput, /CLI commands:\s+memory-pro/);
 

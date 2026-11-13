@@ -9,6 +9,7 @@ import os
 from collections.abc import Mapping
 from typing import Final, Literal, cast
 
+from clawops.acpx_adapter import acpx_auth_env_key
 from clawops.backend_registry import BackendDefinition, resolve_backend
 from clawops.common import dump_json
 from clawops.orchestration import AUTH_MODES, AuthMode
@@ -63,6 +64,8 @@ class CredentialStatus:
     removed_env_keys: tuple[str, ...]
     readiness_command: tuple[str, ...] | None = None
     metadata: Mapping[str, object] = dataclasses.field(default_factory=_empty_metadata)
+    # Provider credentials re-exported as explicit ACPX auth grants (see acpx_auth_env_key).
+    auth_grant_env_keys: tuple[str, ...] = ()
 
     @property
     def ready(self) -> bool:
@@ -74,10 +77,14 @@ class CredentialStatus:
         return dataclasses.replace(self, state=state, message=message)
 
     def sanitized_env(self, environ: Mapping[str, str] | None = None) -> dict[str, str]:
-        """Return an environment with conflicting auth variables removed."""
+        """Return the dispatch environment: conflicting auth removed, API keys granted to ACPX."""
         base_env = dict(os.environ if environ is None else environ)
         for key in self.removed_env_keys:
             base_env.pop(key, None)
+        for key in self.auth_grant_env_keys:
+            value = base_env.get(key)
+            if value:
+                base_env.setdefault(acpx_auth_env_key(key), value)
         return base_env
 
     def to_dict(self) -> dict[str, object]:
@@ -89,6 +96,7 @@ class CredentialStatus:
             "source_class": self.source_class,
             "message": self.message,
             "removed_env_keys": list(self.removed_env_keys),
+            "auth_grant_env_keys": list(self.auth_grant_env_keys),
             "readiness_command": list(self.readiness_command) if self.readiness_command else None,
             "metadata": dict(self.metadata),
         }
@@ -153,8 +161,9 @@ def _probe_command(command: tuple[str, ...]) -> tuple[CredentialState, str, Mapp
 
 
 def _sanitize_env_keys(definition: BackendDefinition, auth_mode: AuthMode) -> tuple[str, ...]:
-    """Return the env keys that must be removed before dispatch."""
-    return tuple(sorted(set(definition.sanitized_env_by_mode.get(auth_mode, ()))))
+    """Return the env keys, plus their ACPX auth grants, to remove before dispatch."""
+    keys = set(definition.sanitized_env_by_mode.get(auth_mode, ()))
+    return tuple(sorted(keys | {acpx_auth_env_key(key) for key in keys}))
 
 
 def _probe_selected_mode(
@@ -190,6 +199,7 @@ def _probe_selected_mode(
             message=message,
             removed_env_keys=removed_env_keys,
             metadata={"present_env_keys": present_keys},
+            auth_grant_env_keys=tuple(present_keys),
         )
     if auth_mode == "cloud-provider":
         present_keys = [key for key in definition.cloud_env_vars if environ.get(key)]

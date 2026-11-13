@@ -231,9 +231,86 @@ def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext)
         [
             "nodejs",
             "-e",
-            "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 16) ? 0 : 1);",
+            "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1);",
         ]
     ]
+
+
+@pytest.mark.parametrize(
+    ("brew_has_node", "expected_command"),
+    [
+        (True, ["brew", "upgrade", "node"]),
+        (False, ["brew", "install", "node"]),
+    ],
+    ids=["outdated-brew-node-upgrades", "missing-node-installs"],
+)
+def test_ensure_node_runtime_darwin_upgrades_or_installs_brew_node(
+    test_context: TestContext,
+    brew_has_node: bool,
+    expected_command: list[str],
+) -> None:
+    """A too-old Homebrew node is upgraded in place; a missing one is installed."""
+
+    checks = iter([False, True])
+    brew_commands: list[list[str]] = []
+
+    def _node_satisfies_minimum() -> bool:
+        return next(checks)
+
+    def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
+        assert command == ["brew", "list", "--versions", "node"]
+        return SimpleNamespace(ok=brew_has_node)
+
+    def fake_stream_checked(command: list[str], **_: object) -> None:
+        brew_commands.append(command)
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_node_satisfies_minimum", new=_node_satisfies_minimum
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_stream_checked", new=fake_stream_checked
+    )
+
+    strongclaw_bootstrap._ensure_node_runtime_darwin()
+
+    assert brew_commands == [expected_command]
+
+
+def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
+    test_context: TestContext,
+) -> None:
+    """Bootstrap names the floor and the shadowing node PATH resolves when brew cannot help."""
+
+    def _node_satisfies_minimum() -> bool:
+        return False
+
+    def _resolve_node_command() -> str:
+        return "node"
+
+    def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
+        return SimpleNamespace(ok=True, stdout="v22.16.0\n" if command[-1] == "--version" else "")
+
+    def fake_stream_checked(command: list[str], **_: object) -> None:
+        return None
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_node_satisfies_minimum", new=_node_satisfies_minimum
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_stream_checked", new=fake_stream_checked
+    )
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_resolve_node_command", new=_resolve_node_command
+    )
+
+    with pytest.raises(
+        strongclaw_bootstrap.CommandError,
+        match=r"node >= 22\.19 is required \(found v22\.16\.0 at ",
+    ):
+        strongclaw_bootstrap._ensure_node_runtime_darwin()
 
 
 def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(
@@ -311,9 +388,12 @@ def test_bootstrap_host_darwin_happy_path(
     node_tool_calls: list[dict[str, object]] = []
 
     def _ensure_node_tools_installed(
-        *, repo_root: pathlib.Path | None = None, use_sudo: bool
+        *,
+        repo_root: pathlib.Path | None = None,
+        use_sudo: bool,
+        home_dir: pathlib.Path | None = None,
     ) -> object:
-        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo})
+        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo, "home_dir": home_dir})
         return None
 
     recorded_completion: dict[str, str] = {}
@@ -424,6 +504,21 @@ def test_bootstrap_host_darwin_happy_path(
         "ensure_docker_compatible_runtime",
         new=_ensure_docker_compatible_runtime,
     )
+    sandbox_builds: list[str] = []
+
+    def _docker_backend_ready() -> bool:
+        return True
+
+    def _ensure_openclaw_sandbox_image() -> bool:
+        sandbox_builds.append("built")
+        return True
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "docker_backend_ready", new=_docker_backend_ready
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "ensure_openclaw_sandbox_image", new=_ensure_openclaw_sandbox_image
+    )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_varlock_installed",
@@ -488,7 +583,8 @@ def test_bootstrap_host_darwin_happy_path(
         "dockerInstalledByBootstrap": False,
     }
     assert recorded_commands == []
-    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": False}]
+    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": False, "home_dir": home_dir}]
+    assert sandbox_builds == ["built"]
     assert recorded_completion == {
         "profile": "hypermemory",
         "host_os": "Darwin",
@@ -509,9 +605,12 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
     node_tool_calls: list[dict[str, object]] = []
 
     def _ensure_node_tools_installed(
-        *, repo_root: pathlib.Path | None = None, use_sudo: bool
+        *,
+        repo_root: pathlib.Path | None = None,
+        use_sudo: bool,
+        home_dir: pathlib.Path | None = None,
     ) -> object:
-        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo})
+        node_tool_calls.append({"repo_root": repo_root, "use_sudo": use_sudo, "home_dir": home_dir})
         return None
 
     repair_calls: list[str] = []
@@ -617,6 +716,21 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
         "ensure_docker_compatible_runtime",
         new=_ensure_docker_compatible_runtime,
     )
+    sandbox_builds: list[str] = []
+
+    def _docker_backend_ready() -> bool:
+        return False
+
+    def _ensure_openclaw_sandbox_image() -> bool:
+        sandbox_builds.append("built")
+        return True
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "docker_backend_ready", new=_docker_backend_ready
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "ensure_openclaw_sandbox_image", new=_ensure_openclaw_sandbox_image
+    )
     test_context.patch.patch_object(
         strongclaw_bootstrap,
         "ensure_varlock_installed",
@@ -708,7 +822,8 @@ def test_bootstrap_host_linux_runs_prerequisites_and_repairs_docker_access(
             "Acquire::ftp::Timeout=20",
         )
     ]
-    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": True}]
+    assert node_tool_calls == [{"repo_root": repo_root, "use_sudo": True, "home_dir": home_dir}]
+    assert sandbox_builds == []
     assert not any("npm" in command for command in recorded_commands)
 
 

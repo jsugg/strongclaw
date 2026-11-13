@@ -409,6 +409,12 @@ function formatJson(obj: any): string {
   return JSON.stringify(obj, null, 2);
 }
 
+// OpenClaw 2026.5+ routes plugin console output to stderr in `--json` mode so stdout stays
+// machine-readable; the JSON document itself must therefore go straight to stdout.
+function printJson(obj: any): void {
+  process.stdout.write(formatJson(obj) + "\n");
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -673,7 +679,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         );
 
         if (options.json) {
-          console.log(formatJson(memories));
+          printJson(memories);
         } else {
           if (memories.length === 0) {
             console.log("No memories found.");
@@ -710,7 +716,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         const results = await runSearch(query, limit, scopeFilter, options.category);
 
         if (options.json) {
-          console.log(formatJson(results));
+          printJson(results);
         } else {
           if (results.length === 0) {
             console.log("No relevant memories found.");
@@ -762,7 +768,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         };
 
         if (options.json) {
-          console.log(formatJson(summary));
+          printJson(summary);
         } else {
           console.log(`Memory Statistics:`);
           console.log(`• Total memories: ${stats.totalCount}`);

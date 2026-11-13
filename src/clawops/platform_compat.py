@@ -62,6 +62,9 @@ def load_node_tool_pins(
 NODE_TOOL_PINS: Final[Mapping[str, str]] = load_node_tool_pins()
 DEFAULT_OPENCLAW_VERSION: Final[str] = NODE_TOOL_PINS["openclaw"]
 DEFAULT_ACPX_VERSION: Final[str] = NODE_TOOL_PINS["acpx"]
+# Mirrors the major.minor guard in the pinned openclaw.mjs, which refuses to start below it.
+MINIMUM_NODE_VERSION: Final[tuple[int, int]] = (22, 19)
+MINIMUM_NODE_VERSION_TEXT: Final[str] = f"{MINIMUM_NODE_VERSION[0]}.{MINIMUM_NODE_VERSION[1]}"
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
 DEFAULT_MANAGED_PROJECT_PYTHON_VERSION = "3.12"

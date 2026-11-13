@@ -8,7 +8,7 @@ You need:
 
 - a private clone of this repo
 - Python 3.12+
-- Node 24+ preferred, Node 22.16+ minimum
+- Node 24+ preferred, Node 22.19+ minimum
 - a dedicated non-admin runtime user for OpenClaw
 - a supported package manager for the host bootstrap path
 - either an already installed Docker-compatible runtime or permission to install Docker as the fallback runtime
@@ -193,6 +193,8 @@ clawops render-openclaw-config --profile memory-lancedb-pro
 ```
 
 The default `hypermemory` profile renders a self-contained combined runtime: `lossless-claw` for context continuity plus `strongclaw-hypermemory` with `~/.config/strongclaw/memory/hypermemory.yaml`, `autoRecall: true`, and `autoReflect: false`.
+
+Auto-recall runs before every turn inside the plugin's `shortTimeoutMs` budget, so it skips the semantic reranker and ranks by sparse+dense fusion alone. Explicit `memory_search` calls still rerank. Set `recallRerank: true` in the plugin config to rerank auto-recall too; on a CPU-only host each recall then loads the cross-encoder, so raise `shortTimeoutMs` with it.
 
 Install and activate services:
 

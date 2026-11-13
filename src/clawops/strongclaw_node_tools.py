@@ -7,6 +7,11 @@ immutable release directory keyed by the lock digest, next to npm's own global t
     <npm prefix -g>/lib/strongclaw-node-tools/current        -> <digest>
     <npm prefix -g>/bin/<bin>  -> ../lib/strongclaw-node-tools/current/node_modules/.bin/<bin>
     <npm prefix -g>/lib/node_modules/<pkg>  -> ../strongclaw-node-tools/current/node_modules/<pkg>
+    <StrongClaw data dir>/node-tools        -> <npm prefix -g>/lib/strongclaw-node-tools/current
+
+Only the CLIs (OpenClaw, ACPX) get bin and ``lib/node_modules`` links. The other pins are the
+first-party OpenClaw plugins that newer OpenClaw releases no longer bundle; rendered configs
+load them from the per-user ``node-tools`` link, so OpenClaw never fetches them unlocked.
 
 The bins land exactly where ``npm install -g`` used to put them, so shells, service units, and
 every ``openclaw``/``acpx`` call site keep resolving them through the same PATH entry. The
@@ -36,7 +41,8 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Final, Literal, Protocol, cast
 
-from clawops.platform_compat import parse_node_tool_pins
+from clawops.app_paths import strongclaw_node_tools_dir
+from clawops.platform_compat import REQUIRED_NODE_TOOL_PACKAGES, parse_node_tool_pins
 from clawops.runtime_assets import resolve_asset_path
 from clawops.strongclaw_runtime import CommandError, ExecResult, run_command
 
@@ -79,6 +85,7 @@ _NPM_ERROR_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 _HTTP_SERVER_ERROR_PATTERN: Final[re.Pattern[str]] = re.compile(r"^E5\d\d$")
 _GIT_COMMIT_SUFFIX_PATTERN: Final[re.Pattern[str]] = re.compile(r"#[0-9a-f]{40}$")
+_NODE_MODULES_SEGMENT: Final[str] = "/node_modules/"
 _BIN_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _NPM_CI_TIMEOUT_SECONDS: Final[int] = 1800
 _SMOKE_TIMEOUT_SECONDS: Final[int] = 60
@@ -93,11 +100,20 @@ class NodeToolsError(CommandError):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class NodeToolPackage:
-    """One directly pinned node-tools package and the bins it exposes."""
+    """One directly pinned node-tools package and the bins it exposes.
+
+    Only the required CLIs publish bins and legacy global-package links; every other pin
+    (the first-party OpenClaw plugins) stays private to the release tree.
+    """
 
     name: str
     version: str
     bins: tuple[str, ...]
+
+    @property
+    def is_cli(self) -> bool:
+        """Return whether this package is published on npm's global bin directory."""
+        return bool(self.bins)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -113,6 +129,11 @@ class NodeToolsBundle:
     def bin_names(self) -> tuple[str, ...]:
         """Return every bin name exposed by the pinned packages."""
         return tuple(bin_name for package in self.packages for bin_name in package.bins)
+
+    @property
+    def cli_packages(self) -> tuple[NodeToolPackage, ...]:
+        """Return the pinned packages that publish bins and legacy global links."""
+        return tuple(package for package in self.packages if package.is_cli)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -297,10 +318,31 @@ def _require_mapping(value: object, *, context: str) -> dict[str, object]:
     return cast(dict[str, object], value)
 
 
-def _validate_lock_entry(key: str, entry: dict[str, object], *, source: str) -> None:
-    """Require every installed lock entry to be fetched from an immutable source."""
+def _bundling_package_key(key: str, packages: Mapping[str, object]) -> str | None:
+    """Return the lock key of the package whose tarball ships the `inBundle` entry *key*."""
+    candidate = key
+    while _NODE_MODULES_SEGMENT in candidate:
+        candidate = candidate.rsplit(_NODE_MODULES_SEGMENT, 1)[0]
+        parent = packages.get(candidate)
+        if isinstance(parent, dict) and cast(dict[str, object], parent).get("inBundle") is not True:
+            return candidate
+    return None
+
+
+def _validate_lock_entry(
+    key: str, entry: dict[str, object], *, packages: Mapping[str, object], source: str
+) -> None:
+    """Require every installed lock entry to be fetched from an immutable source.
+
+    `inBundle` entries are extracted from their bundler's tarball, so that package's
+    integrity covers them and npm may omit their own `resolved`/`integrity`.
+    """
     if entry.get("link") is True:
         raise NodeToolsError(f"{source}: {key} is a local link; the lock must be self-contained")
+    if entry.get("inBundle") is True:
+        if _bundling_package_key(key, packages) is None:
+            raise NodeToolsError(f"{source}: {key} is bundled by a package missing from the lock")
+        return
     resolved = entry.get("resolved")
     if not isinstance(resolved, str) or not resolved:
         raise NodeToolsError(f"{source}: {key} is missing `resolved`")
@@ -347,7 +389,9 @@ def parse_node_tools_lock(
         )
     for key, raw_entry in packages.items():
         if key:
-            _validate_lock_entry(key, _require_mapping(raw_entry, context=key), source=source)
+            _validate_lock_entry(
+                key, _require_mapping(raw_entry, context=key), packages=packages, source=source
+            )
     pinned: list[NodeToolPackage] = []
     for name, version in pins.items():
         entry = _require_mapping(
@@ -357,11 +401,10 @@ def parse_node_tools_lock(
             raise NodeToolsError(
                 f"{source}: {name} is locked at {entry.get('version')!r}, manifest pins {version}"
             )
-        pinned.append(
-            NodeToolPackage(
-                name=name, version=version, bins=_package_bins(name, entry, source=source)
-            )
+        bins = (
+            _package_bins(name, entry, source=source) if name in REQUIRED_NODE_TOOL_PACKAGES else ()
         )
+        pinned.append(NodeToolPackage(name=name, version=version, bins=bins))
     return tuple(pinned)
 
 
@@ -599,7 +642,7 @@ class NodeToolsInstaller:
             return "managed"
         resolved = pathlib.Path(os.path.normpath(self._layout.bin_dir / target))
         owners = [
-            self._layout.global_node_modules / package.name for package in self._bundle.packages
+            self._layout.global_node_modules / package.name for package in self._bundle.cli_packages
         ]
         if _is_within(resolved, self._layout.tool_root) or any(
             _is_within(resolved, owner) for owner in owners
@@ -610,7 +653,7 @@ class NodeToolsInstaller:
     def _collision_message(self, link: pathlib.Path, occupant: str) -> str:
         return (
             f"refusing to replace {link}: it is {occupant} not installed by npm for "
-            f"{', '.join(package.name for package in self._bundle.packages)}. "
+            f"{', '.join(package.name for package in self._bundle.cli_packages)}. "
             "Remove it, then re-run `clawops bootstrap`."
         )
 
@@ -659,7 +702,7 @@ class NodeToolsInstaller:
     def _link_compat_packages(self) -> bool:
         """Point each legacy global package path at the active release."""
         changed = False
-        for package in self._bundle.packages:
+        for package in self._bundle.cli_packages:
             link = self._layout.compat_package_link(package.name)
             target = self._layout.compat_package_target(package.name)
             if link.is_symlink() and os.readlink(link) == target:
@@ -712,13 +755,40 @@ class NodeToolsInstaller:
                 )
 
 
+def publish_node_tools_link(
+    layout: NodeToolsLayout,
+    *,
+    home_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Point the per-user stable node-tools path at the prefix's active release.
+
+    Rendered OpenClaw configs load the locked first-party plugins through this link, so they
+    stay valid across lock upgrades and never depend on where npm's global prefix lives.
+    """
+    link = strongclaw_node_tools_dir(home_dir=home_dir)
+    target = str(layout.current_link)
+    if link.is_symlink() and os.readlink(link) == target:
+        return link
+    if link.exists() and not link.is_symlink():
+        raise NodeToolsError(
+            f"refusing to replace {link}: it is not a symlink. "
+            "Remove it, then re-run `clawops bootstrap`."
+        )
+    link.parent.mkdir(parents=True, exist_ok=True)
+    LocalPrefixWriter().replace_symlink(link, target)
+    return link
+
+
 def ensure_node_tools_installed(
     *,
     repo_root: pathlib.Path | None = None,
     use_sudo: bool,
+    home_dir: pathlib.Path | None = None,
 ) -> NodeToolsInstallResult:
     """Install the locked OpenClaw/ACPX tree behind npm's global bin directory."""
     bundle = load_node_tools_bundle(resolve_node_tools_dir(repo_root))
     writer: PrefixWriter = SudoPrefixWriter() if use_sudo else LocalPrefixWriter()
     layout = NodeToolsLayout(prefix=resolve_npm_global_prefix(command_prefix=writer.command_prefix))
-    return NodeToolsInstaller(bundle, layout, writer).ensure()
+    result = NodeToolsInstaller(bundle, layout, writer).ensure()
+    publish_node_tools_link(layout, home_dir=home_dir)
+    return result

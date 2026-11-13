@@ -9,12 +9,11 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from clawops.app_paths import strongclaw_lossless_claw_dir
+from clawops.app_paths import strongclaw_lossless_claw_dir, strongclaw_node_tools_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
-from clawops.openclaw_plugins import attach_bundled_plugins
-from clawops.platform_compat import DEFAULT_ACPX_VERSION
+from clawops.openclaw_plugins import attach_first_party_plugins
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_runtime import managed_python
 
@@ -373,10 +372,43 @@ def render_openclaw_profile(
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
-    return cast(
-        dict[str, Any],
-        attach_bundled_plugins(cast(dict[str, object], merged), acpx_version=DEFAULT_ACPX_VERSION),
+    return attach_first_party_plugins(
+        cast(dict[str, Any], merged),
+        node_modules_dir=strongclaw_node_tools_dir(home_dir=home_dir) / "node_modules",
     )
+
+
+def _agent_directory_paths(config: Mapping[str, object]) -> list[str]:
+    """Return every workspace and agentDir path the rendered agents reference."""
+    agents = config.get("agents")
+    if not isinstance(agents, Mapping):
+        return []
+    agents_mapping = cast(Mapping[str, object], agents)
+    paths: list[str] = []
+    defaults = agents_mapping.get("defaults")
+    if isinstance(defaults, Mapping):
+        paths.append(str(cast(Mapping[str, object], defaults).get("workspace") or ""))
+    agent_list = agents_mapping.get("list")
+    for agent in cast(list[object], agent_list) if isinstance(agent_list, list) else []:
+        if isinstance(agent, Mapping):
+            agent_mapping = cast(Mapping[str, object], agent)
+            paths.extend(str(agent_mapping.get(key) or "") for key in ("workspace", "agentDir"))
+    return [path for path in paths if path]
+
+
+def ensure_agent_directories(config: Mapping[str, object], *, home_dir: pathlib.Path) -> None:
+    """Create the workspace and agent directories a rendered config points at.
+
+    OpenClaw 2026.6 `doctor` aborts with an unhandled `root dir not found` when an agent
+    workspace is missing, where 2026.3 created it lazily on the first turn.
+    """
+    for raw_path in _agent_directory_paths(config):
+        path = (
+            home_dir / raw_path[2:]
+            if raw_path.startswith("~/")
+            else pathlib.Path(raw_path).expanduser()
+        )
+        path.mkdir(parents=True, exist_ok=True)
 
 
 def build_profile_help() -> str:
@@ -462,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             extra_overlays=tuple(args.overlay),
         )
     write_json(resolved_output_path, rendered)
+    ensure_agent_directories(rendered, home_dir=home_dir)
     print(f"Rendered {resolved_output_path}")
     if args.exec_approvals_output is not None:
         approvals = render_openclaw_overlay(

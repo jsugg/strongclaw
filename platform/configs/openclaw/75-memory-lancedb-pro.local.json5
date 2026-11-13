@@ -7,6 +7,11 @@
     "entries": {
       "memory-lancedb-pro": {
         "enabled": true,
+        // OpenClaw 2026.5+ withholds conversation hooks (`agent_end`) from non-bundled plugins
+        // without this grant; autoCapture smart extraction runs from `agent_end`.
+        "hooks": {
+          "allowConversationAccess": true
+        },
         "config": {
           "embedding": {
             "provider": "openai-compatible",
