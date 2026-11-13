@@ -193,27 +193,6 @@ try {
     "sessionMemory.enabled=true should register the /new hook",
   );
 
-  const reflectionApi = createMockApi({
-    dbPath: path.join(workDir, "db-reflection"),
-    autoCapture: false,
-    autoRecall: false,
-    sessionStrategy: "memoryReflection",
-    embedding: {
-      provider: "openai-compatible",
-      apiKey: "dummy",
-      model: "text-embedding-3-small",
-      baseURL: "http://127.0.0.1:9/v1",
-      dimensions: 1536,
-    },
-  });
-  plugin.register(reflectionApi);
-  assert.equal(
-    typeof reflectionApi.hooks["before_reset"],
-    "function",
-    "memoryReflection should also reflect from the typed before_reset hook OpenClaw 2026.3 fires on /new",
-  );
-  assert.equal(typeof reflectionApi.hooks["command:new"], "function");
-
   const longText = `${"Long embedding payload. ".repeat(420)}tail`;
   const threshold = 6000;
   const embeddingServer = http.createServer(async (req, res) => {

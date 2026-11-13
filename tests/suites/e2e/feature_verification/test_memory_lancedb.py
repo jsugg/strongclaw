@@ -191,18 +191,9 @@ def test_reflection_runs_through_the_embedded_runner(
             timeout=300,
         ).require_ok()
         started = time.time()
-        # An operator resets with /new. OpenClaw 2026.3 delivers that to plugins as the typed
-        # before_reset hook; its gateway sessions.reset method fires only internal hooks, which
-        # the gateway does not dispatch to plugins.
-        params = json.dumps(
-            {
-                "sessionKey": MAIN_SESSION_KEY,
-                "message": "/new",
-                "idempotencyKey": f"featver-reflect-new-{uuid.uuid4().hex[:8]}",
-            }
-        )
+        params = json.dumps({"key": MAIN_SESSION_KEY, "reason": "new"})
         feature_host.openclaw(
-            "gateway", "call", "chat.send", "--params", params, "--json", timeout=300
+            "gateway", "call", "sessions.reset", "--params", params, "--json", timeout=300
         ).require_ok()
         deadline = time.monotonic() + REFLECTION_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
@@ -215,7 +206,7 @@ def test_reflection_runs_through_the_embedded_runner(
                 break
             time.sleep(_POLL_SECONDS)
         else:
-            raise AssertionError("no reflection file was written after /new")
+            raise AssertionError("no reflection file was written after sessions.reset")
         prompts = [
             str(request.get("prompt"))
             for request in feature_host.fake_model_requests()
