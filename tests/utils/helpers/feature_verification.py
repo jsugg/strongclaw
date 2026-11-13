@@ -10,6 +10,7 @@ from tests.utils.helpers._feature_verification.fake_model import (
     FakeModelServer,
     canned_reply,
     deterministic_embedding,
+    system_prompt_tokens,
 )
 from tests.utils.helpers._feature_verification.host import (
     CommandOutcome,
@@ -99,6 +100,7 @@ __all__ = [
     "collect_lane_diagnostics",
     "apply_model_provider",
     "deterministic_embedding",
+    "system_prompt_tokens",
     "enable_systemd_user_manager",
     "extract_json",
     "gateway_rpc_ok",

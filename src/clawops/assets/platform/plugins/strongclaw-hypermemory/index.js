@@ -300,6 +300,17 @@ function buildDisabledSearchResult(error) {
   };
 }
 
+// Upper bound on the recall block injected into each turn's system context.
+const RECALL_CONTEXT_MAX_CHARS = 2000;
+const RECALL_CONTEXT_TRUNCATION_MARK = "\n- [recall truncated]";
+
+function capRecallContext(text, maxChars = RECALL_CONTEXT_MAX_CHARS) {
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return text.slice(0, maxChars - RECALL_CONTEXT_TRUNCATION_MARK.length) + RECALL_CONTEXT_TRUNCATION_MARK;
+}
+
 function formatRecallContext(results) {
   const lines = ["Relevant StrongClaw hypermemory context:"];
   for (const entry of results) {
@@ -619,6 +630,8 @@ function buildRecallSearchArgs(pluginConfig, prompt) {
   return args;
 }
 
+export { RECALL_CONTEXT_MAX_CHARS };
+
 const strongclawHypermemoryPlugin = {
   id: "strongclaw-hypermemory",
   name: "StrongClaw Hypermemory",
@@ -926,8 +939,16 @@ const strongclawHypermemoryPlugin = {
               JSON.stringify(injectedIds),
             ], { ensureReady });
           }
+          // Upstream (docs/concepts/agent-loop.md) reserves system-context fields for stable
+          // guidance and recommends `prependContext` for per-turn dynamic text. Recall uses
+          // `appendSystemContext` anyway: lossless-claw, the hypermemory profile's context
+          // engine, rebuilds the turn from its own store and drops `prependContext` on
+          // OpenClaw 2026.6. Appending keeps the stable system prefix cacheable; the block holds
+          // only the recall results and is capped at RECALL_CONTEXT_MAX_CHARS.
           return {
-            prependContext: formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
+            appendSystemContext: capRecallContext(
+              formatRecallContext(results.slice(0, pluginConfig.recallMaxResults)),
+            ),
           };
         } catch (error) {
           api.logger.warn(`strongclaw-hypermemory recall failed: ${String(error)}`);

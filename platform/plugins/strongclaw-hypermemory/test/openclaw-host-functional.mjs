@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import strongclawHypermemoryPlugin from "../index.js";
+import strongclawHypermemoryPlugin, { RECALL_CONTEXT_MAX_CHARS } from "../index.js";
 import {
   createPluginApiStub,
 } from "./helpers/openclaw-plugin-sdk-stub.mjs";
@@ -109,7 +109,7 @@ function createProgramStub() {
 }
 
 // Records each hypermemory operation's argv (after `hypermemory --config <path>`) as JSON lines.
-function writeRecordingCommand(runDir) {
+function writeRecordingCommand(runDir, { snippet = "Alice" } = {}) {
   const commandPath = path.join(runDir, "recording-command.mjs");
   const logPath = path.join(runDir, "recording-command.jsonl");
   writeFileSync(
@@ -119,7 +119,7 @@ function writeRecordingCommand(runDir) {
       'import { appendFileSync } from "node:fs";',
       "const args = process.argv.slice(5);",
       `appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + "\\n");`,
-      'const results = args[0] === "search" ? [{ path: "MEMORY.md", snippet: "Alice", itemId: 1 }] : [];',
+      `const results = args[0] === "search" ? [{ path: "MEMORY.md", snippet: ${JSON.stringify(snippet)}, itemId: 1 }] : [];`,
       "process.stdout.write(JSON.stringify({ ok: true, results }) + \"\\n\");",
     ].join("\n"),
     { encoding: "utf8", mode: 0o755 },
@@ -152,11 +152,22 @@ async function assertRecallRerankPaths(runDir, memoryConfigPath) {
   const fastStub = createPluginApiStub({ ...baseConfig, command: [fastPath.commandPath] });
   strongclawHypermemoryPlugin.register(fastStub.api);
   const fastRecall = await runRecall(fastStub, "Who owns the deployment playbook?");
-  assert.match(String(fastRecall?.prependContext), /MEMORY\.md/);
+  assert.match(String(fastRecall?.appendSystemContext), /MEMORY\.md/);
+  assert.equal(fastRecall?.prependContext, undefined, "recall rides the system context only");
   await fastStub.tools.get("memory_search").execute("explicit-search", { query: "playbook" });
   const [recallArgs, explicitArgs] = fastPath.searches();
   assert.ok(recallArgs.includes("--no-rerank"), `auto-recall skips rerank: ${recallArgs}`);
   assert.ok(!explicitArgs.includes("--no-rerank"), `memory_search keeps rerank: ${explicitArgs}`);
+
+  const capPath = writeRecordingCommand(mkdtempSync(path.join(runDir, "recall-cap-")), {
+    snippet: "x".repeat(5_000),
+  });
+  const capStub = createPluginApiStub({ ...baseConfig, command: [capPath.commandPath] });
+  strongclawHypermemoryPlugin.register(capStub.api);
+  const capped = String((await runRecall(capStub, "Who owns the deployment playbook?"))?.appendSystemContext);
+  assert.ok(capped.startsWith("Relevant StrongClaw hypermemory context:"), capped.slice(0, 80));
+  assert.ok(capped.length <= RECALL_CONTEXT_MAX_CHARS, `recall block is capped: ${capped.length}`);
+  assert.match(capped, /\[recall truncated\]$/);
 
   const rerankPath = writeRecordingCommand(mkdtempSync(path.join(runDir, "recall-rerank-")));
   const rerankStub = createPluginApiStub({
