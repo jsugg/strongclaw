@@ -5,6 +5,6 @@
   "description": "Pinned OpenClaw and ACPX CLIs installed by clawops bootstrap.",
   "dependencies": {
     "acpx": "0.3.0",
-    "openclaw": "2026.3.13"
+    "openclaw": "2026.11.3"
   }
 }
