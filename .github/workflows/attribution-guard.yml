@@ -24,14 +24,14 @@ jobs:
     steps:
       # Run the guard from the trusted base revision so a pull request cannot rewrite its own check.
       - name: Check out trusted guard revision
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
           persist-credentials: false
       - name: Check out pull request revision to bootstrap the guard
         if: github.event_name == 'pull_request' && hashFiles('tests/scripts/attribution_guard.py') == ''
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
