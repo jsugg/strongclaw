@@ -3249,13 +3249,44 @@ const memoryLanceDBProPlugin = {
         }
       };
 
-      api.registerHook("command:new", runMemoryReflection, {
+      // A reset can reach reflection through both hook systems; reflect once per session.
+      const reflectedSessions = new Map<string, number>();
+      const runMemoryReflectionOnce = async (event: any) => {
+        const context = (event?.context || {}) as Record<string, unknown>;
+        const entry = (context.previousSessionEntry || context.sessionEntry || {}) as Record<string, unknown>;
+        const identity = String(entry.sessionId || entry.sessionFile || event?.sessionKey || "");
+        const now = Date.now();
+        for (const [key, at] of reflectedSessions) {
+          if (now - at > 10 * 60_000) reflectedSessions.delete(key);
+        }
+        if (identity && reflectedSessions.has(identity)) return;
+        if (identity) reflectedSessions.set(identity, now);
+        await runMemoryReflection(event);
+      };
+
+      api.registerHook("command:new", runMemoryReflectionOnce, {
         name: "memory-lancedb-pro.memory-reflection.command-new",
         description: "Generate reflection log before /new",
       });
-      api.registerHook("command:reset", runMemoryReflection, {
+      api.registerHook("command:reset", runMemoryReflectionOnce, {
         name: "memory-lancedb-pro.memory-reflection.command-reset",
         description: "Generate reflection log before /reset",
+      });
+      // OpenClaw 2026.3 gateways drop plugin-registered internal hooks when they load their own
+      // hook files, so /new and /reset reach reflection only through the typed before_reset hook.
+      api.on("before_reset", async (event: any, ctx: any) => {
+        await runMemoryReflectionOnce({
+          type: "command",
+          action: typeof event?.reason === "string" ? event.reason : "reset",
+          sessionKey: typeof ctx?.sessionKey === "string" ? ctx.sessionKey : "",
+          timestamp: Date.now(),
+          context: {
+            cfg: api.config,
+            workspaceDir: ctx?.workspaceDir,
+            previousSessionEntry: { sessionId: ctx?.sessionId, sessionFile: event?.sessionFile },
+            commandSource: "before_reset",
+          },
+        });
       });
       api.logger.info("memory-reflection: integrated hooks registered (command:new, command:reset, after_tool_call, before_prompt_build, session_end)");
     }

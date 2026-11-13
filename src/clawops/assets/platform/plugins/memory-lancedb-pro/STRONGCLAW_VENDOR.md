@@ -23,6 +23,10 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
 
 ## Local patches
 
+- `index.ts` also runs `memoryReflection` from the typed `before_reset` hook, once per session.
+  OpenClaw `2026.3.13` gateways drop plugin-registered internal hooks when they load their own
+  hook files, so the `command:new` / `command:reset` registrations never fire there; `/new` and
+  `/reset` still reach plugins as `before_reset`.
 - `index.ts` `getExtensionApiImportSpecifiers()` also probes
   `<prefix>/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js` for the
   `/usr`, `/usr/local`, and `/opt/homebrew` prefixes, ahead of each legacy
