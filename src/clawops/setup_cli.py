@@ -16,6 +16,7 @@ from clawops.openclaw_config import (
     materialize_runtime_memory_configs,
     render_openclaw_profile,
 )
+from clawops.openclaw_plugin_installs import ensure_openclaw_plugin_installs
 from clawops.openclaw_sandbox import ensure_openclaw_sandbox_image
 from clawops.platform_verify import verify_channels, verify_observability, verify_sidecars
 from clawops.runtime_assets import resolve_asset_path
@@ -67,6 +68,7 @@ def _render_openclaw_config(
     materialize_runtime_memory_configs(repo_root=repo_root, home_dir=home_dir)
     write_json(output_path, rendered)
     ensure_agent_directories(rendered, home_dir=home_dir)
+    ensure_openclaw_plugin_installs(repo_root, rendered)
     return output_path
 
 

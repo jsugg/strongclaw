@@ -12,11 +12,18 @@ from clawops.openclaw_plugins import (
     FIRST_PARTY_PLUGINS,
     attach_first_party_plugins,
     configured_model_providers,
+    required_openclaw_installs,
 )
+from clawops.platform_compat import NODE_TOOL_PINS
 from tests.utils.helpers.repo import REPO_ROOT
 
 _NODE_MODULES = pathlib.Path("/opt/strongclaw/node-tools/node_modules")
-_ALL_PATHS = [(_NODE_MODULES / plugin.package).as_posix() for plugin in FIRST_PARTY_PLUGINS]
+_ALL_PATHS = [
+    (_NODE_MODULES / plugin.package).as_posix()
+    for plugin in FIRST_PARTY_PLUGINS
+    if not plugin.openclaw_installed
+]
+_ACPX = next(plugin for plugin in FIRST_PARTY_PLUGINS if plugin.plugin_id == "acpx")
 
 
 def _plugins(config: dict[str, object]) -> dict[str, object]:
@@ -98,7 +105,10 @@ def test_restrictive_allowlist_names_needed_plugins_and_bundled_providers() -> N
         "openai",
         "openrouter",
     ]
-    assert plugins["entries"] == {"diagnostics-otel": {"enabled": False}}
+    assert plugins["entries"] == {
+        "acpx": {"enabled": True},
+        "diagnostics-otel": {"enabled": False},
+    }
     assert plugins["bundledDiscovery"] == "compat"
 
 
@@ -122,14 +132,15 @@ def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None
 
 
 @pytest.mark.parametrize(
-    ("overlay", "plugin_id"),
+    ("overlay", "plugin_id", "entry"),
     [
-        ({"diagnostics": {"otel": {"enabled": True}}}, "diagnostics-otel"),
-        ({"acp": {"backend": "acpx"}}, "acpx"),
+        ({"diagnostics": {"otel": {"enabled": True}}}, "diagnostics-otel", None),
+        # The installed ACP runtime registers its backend only when explicitly enabled.
+        ({"acp": {"backend": "acpx"}}, "acpx", {"enabled": True}),
     ],
 )
 def test_service_plugins_load_only_when_configured(
-    overlay: dict[str, object], plugin_id: str
+    overlay: dict[str, object], plugin_id: str, entry: dict[str, object] | None
 ) -> None:
     """Runtime and service plugins are enabled exactly when their feature is configured."""
     config = {**_base_config(allow=["memory-core"]), **overlay}
@@ -137,7 +148,7 @@ def test_service_plugins_load_only_when_configured(
     plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
 
     assert plugin_id in cast(list[str], plugins["allow"])
-    assert plugin_id not in cast(dict[str, object], plugins["entries"])
+    assert cast(dict[str, object], plugins["entries"]).get(plugin_id) == entry
 
 
 def test_reattach_keeps_operator_disables_and_allowlisted_plugins() -> None:
@@ -209,17 +220,35 @@ def test_restrictive_memory_profiles_keep_the_bundled_ollama_provider(profile_na
     assert "ollama" in allow
 
 
-def test_acp_profile_loads_the_locked_acpx_runtime() -> None:
-    """The acp profile loads `@openclaw/acpx` from the lock and never disables it.
+def test_acp_profile_requires_the_trusted_acpx_install() -> None:
+    """The acp profile enables acpx from OpenClaw's trusted install, never from a load path.
 
-    The 2026.6 plugin's config schema rejects unknown keys, so no `command` pin is rendered.
+    OpenClaw 2026.6 refuses ACP session state to an untrusted (load-path) acpx, and the
+    plugin's config schema rejects unknown keys, so no `command` pin is rendered either.
     """
-    plugins = _plugins(_render("acp"))
+    rendered = _render("acp")
+    plugins = _plugins(rendered)
     load_paths = cast(list[str], cast(dict[str, object], plugins["load"])["paths"])
-    entry = cast(dict[str, object], plugins.get("entries", {})).get("acpx", {})
+    entry = cast(dict[str, object], cast(dict[str, object], plugins["entries"])["acpx"])
 
-    assert any(path.endswith("/node_modules/@openclaw/acpx") for path in load_paths)
-    assert cast(dict[str, object], entry).get("enabled") is not False
-    assert "command" not in cast(
-        dict[str, object], cast(dict[str, object], entry).get("config", {})
-    )
+    assert not any(path.endswith("/@openclaw/acpx") for path in load_paths)
+    assert entry["enabled"] is True
+    assert "command" not in cast(dict[str, object], entry.get("config", {}))
+    assert required_openclaw_installs(rendered) == (_ACPX,)
+    assert _ACPX.npm_spec == f"npm:@openclaw/acpx@{NODE_TOOL_PINS['@openclaw/acpx']}"
+
+
+def test_profiles_without_acp_need_no_trusted_install() -> None:
+    """Only a config that routes work through acpx asks OpenClaw to install it."""
+    assert required_openclaw_installs(_render("hypermemory")) == ()
+    assert required_openclaw_installs(_base_config(enabled=False)) == ()
+
+
+def test_reattach_drops_a_stale_locked_acpx_load_path() -> None:
+    """A load-path acpx left by an older render would shadow the trusted install."""
+    stale = (_NODE_MODULES / "@openclaw/acpx").as_posix()
+    config = _base_config(load={"paths": [stale, "/x/hypermemory", stale]})
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["load"])["paths"] == ["/x/hypermemory", *_ALL_PATHS]

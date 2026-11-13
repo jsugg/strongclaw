@@ -15,6 +15,9 @@
 - `reviewer`: read-only verification
 - `messaging`: channel-only lane
 - `admin`: trusted operator lane
+- `acp-dispatch` (acp profile only): the single unsandboxed agent. It has no callable tools and is
+  reachable only through the `operator.admin` `/acp spawn` command. See
+  [ACP Workers](ACP_WORKERS.md#starting-acp-workers-from-openclaw-acp-profile).
 
 ## Review requirements
 

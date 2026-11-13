@@ -293,7 +293,7 @@ features:
     category: memory
     title: strongclaw-hypermemory autoRecall injects stored memory into gateway agent turns
     call_sites:
-      - platform/plugins/strongclaw-hypermemory/index.js:884
+      - platform/plugins/strongclaw-hypermemory/index.js:949
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_plugin_recalls_memory_into_turns
@@ -412,9 +412,11 @@ features:
   # --- ACP workers ----------------------------------------------------------------------------
   - id: acp.worker-agent-turn
     category: acp
-    title: An OpenClaw ACP worker agent (acp profile) runs a turn through OpenClaw's acpx backend
+    title: The acp profile's dispatcher starts an ACP worker with admin `/acp spawn` and the worker answers through OpenClaw's trusted acpx backend
     call_sites:
-      - platform/configs/openclaw/20-acp-workers.json5:11
+      - platform/configs/openclaw/20-acp-workers.json5:101
+      - src/clawops/openclaw_plugin_installs.py:84
+      - src/clawops/setup_cli.py:71
     lanes: [linux-profiles]
     verification: stub
     limitations: The codex adapter behind acpx is the ACP stub agent; a live vendor session is acp.vendor-live-sessions.

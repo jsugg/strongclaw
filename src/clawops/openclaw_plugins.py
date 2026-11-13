@@ -5,6 +5,10 @@ into separately published ``@openclaw/*`` plugins. Left alone, OpenClaw fetches 
 at an unpinned ``latest`` (``doctor --fix``, ``openclaw update``) or fails at runtime. StrongClaw
 instead pins them in ``platform/node-tools`` and points ``plugins.load.paths`` at that tree, so
 every plugin OpenClaw loads comes from the committed, integrity-checked lock.
+
+The exception is a plugin that needs OpenClaw's trusted-plugin APIs: 2026.6 grants those only to
+an official package that its own installer recorded as an npm install, never to a load path. Such
+plugins (the ACP runtime) are installed with ``openclaw plugins install`` at the lock's exact pin.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ import dataclasses
 import pathlib
 from collections.abc import Callable, Iterator, Mapping
 from typing import Final, cast
+
+from clawops.platform_compat import NODE_TOOL_PINS
 
 type JsonObject = dict[str, object]
 
@@ -126,10 +132,17 @@ class FirstPartyPlugin:
     # Providers replace former OpenClaw built-ins and stay available like they used to;
     # runtimes, channels, and services load only when the config uses them.
     always_enabled: bool = False
+    # Installed by `openclaw plugins install` (trusted) instead of loaded from the lock tree.
+    openclaw_installed: bool = False
+
+    @property
+    def npm_spec(self) -> str:
+        """Return the exact npm spec `openclaw plugins install` takes for this plugin."""
+        return f"npm:{self.package}@{NODE_TOOL_PINS[self.package]}"
 
 
 FIRST_PARTY_PLUGINS: Final[tuple[FirstPartyPlugin, ...]] = (
-    FirstPartyPlugin("acpx", "@openclaw/acpx", _uses_acpx_backend),
+    FirstPartyPlugin("acpx", "@openclaw/acpx", _uses_acpx_backend, openclaw_installed=True),
     FirstPartyPlugin("codex", "@openclaw/codex", _uses_codex_runtime),
     FirstPartyPlugin("diagnostics-otel", "@openclaw/diagnostics-otel", _uses_otel_diagnostics),
     FirstPartyPlugin(
@@ -169,6 +182,17 @@ def _append_unique(target: list[object], value: str) -> None:
         target.append(value)
 
 
+def required_openclaw_installs(config: Mapping[str, object]) -> tuple[FirstPartyPlugin, ...]:
+    """Return the trusted-install plugins *config* routes work through."""
+    if _mapping(config.get("plugins")).get("enabled") is False:
+        return ()
+    return tuple(
+        plugin
+        for plugin in FIRST_PARTY_PLUGINS
+        if plugin.openclaw_installed and plugin.is_required(config)
+    )
+
+
 def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.Path) -> JsonObject:
     """Load every locked first-party plugin from *node_modules_dir* and enable the needed ones.
 
@@ -186,12 +210,21 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
     allowlist = cast(list[object], allow) if isinstance(allow, list) and allow else None
     entries = _child_object(plugins, "entries")
     for plugin in FIRST_PARTY_PLUGINS:
-        _append_unique(load_paths, (node_modules_dir / plugin.package).as_posix())
+        locked_path = (node_modules_dir / plugin.package).as_posix()
         required = plugin.is_required(config)
+        if plugin.openclaw_installed:
+            # A load-path copy would shadow the trusted install (config origin wins).
+            while locked_path in load_paths:
+                load_paths.remove(locked_path)
+        else:
+            _append_unique(load_paths, locked_path)
         entry = entries.get(plugin.plugin_id)
         settings = cast(JsonObject, entry) if isinstance(entry, dict) else None
-        # A config that routes work through a plugin cannot also keep it disabled.
-        if required and settings is not None and settings.get("enabled") is False:
+        if required and plugin.openclaw_installed:
+            # An installed runtime registers its backend only when explicitly enabled.
+            _child_object(entries, plugin.plugin_id)["enabled"] = True
+        elif required and settings is not None and settings.get("enabled") is False:
+            # A config that routes work through a plugin cannot also keep it disabled.
             del settings["enabled"]
             if not settings:
                 del entries[plugin.plugin_id]
