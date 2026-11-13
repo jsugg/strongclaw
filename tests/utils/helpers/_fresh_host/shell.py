@@ -14,6 +14,7 @@ from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Literal, cast
 
+from clawops.app_paths import openclaw_scoped_compose_state_dir
 from clawops.strongclaw_compose import compose_project_name
 from clawops.strongclaw_runtime import (
     VARLOCK_ENV_MODE_ENV,
@@ -309,7 +310,9 @@ def _compose_probe_env(
         else:
             state_dir = resolve_repo_local_compose_state_dir(repo_root_path)
     else:
-        state_dir = openclaw_state_dir / "compose"
+        state_dir = openclaw_scoped_compose_state_dir(
+            openclaw_state_dir, home_dir=home_dir, environ=probe_env
+        )
     state_dir.mkdir(parents=True, exist_ok=True)
     openclaw_home = probe_env.get("OPENCLAW_HOME", "").strip()
     if openclaw_home:

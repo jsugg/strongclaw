@@ -174,6 +174,26 @@ def strongclaw_compose_state_dir(
     return strongclaw_state_dir(home_dir=resolved_home, environ=env, os_name=os_name) / "compose"
 
 
+def openclaw_scoped_compose_state_dir(
+    openclaw_state_dir: pathlib.Path,
+    *,
+    home_dir: pathlib.Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+) -> pathlib.Path:
+    """Return the compose-sidecar state root for one OpenClaw state root, kept outside it.
+
+    `openclaw backup create` archives the whole OpenClaw state root and cannot read the
+    container-owned database files the sidecars keep, so their state lives under StrongClaw
+    state, one scope per OpenClaw state root.
+    """
+    resolved = openclaw_state_dir.expanduser().resolve()
+    digest = hashlib.sha256(resolved.as_posix().encode("utf-8")).hexdigest()[:12]
+    return strongclaw_compose_state_dir(home_dir=home_dir, environ=environ, os_name=os_name) / (
+        f"{_slugify(resolved.name)}-{digest}"
+    )
+
+
 def strongclaw_repo_local_compose_state_dir(
     repo_root: pathlib.Path,
     *,
