@@ -129,7 +129,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 1
         run: ./tests/scripts/feature_verification.py stop-fake-model --state-dir "${RUNNER_TEMP}/fake-model"
+      # A hung artifact-service call would otherwise drop the whole lane from the report.
       - name: Upload lane results
+        id: upload-results
         if: always()
         continue-on-error: true
         timeout-minutes: 3
@@ -141,6 +143,19 @@ jobs:
             ${{ runner.temp }}/fresh-host-reports
             ${{ runner.temp }}/fake-model/fake-model.log
           include-hidden-files: true
+      - name: Retry lane results upload
+        if: ${{ always() && steps.upload-results.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feature-results-${{ matrix.lane }}
+          path: |
+            ${{ github.workspace }}/.feature-results
+            ${{ runner.temp }}/fresh-host-reports
+            ${{ runner.temp }}/fake-model/fake-model.log
+          include-hidden-files: true
+          overwrite: true
 
   macos-lane:
     name: macOS Features (macos-launchd)
@@ -238,7 +253,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 1
         run: ./tests/scripts/feature_verification.py stop-fake-model --state-dir "${RUNNER_TEMP}/fake-model"
+      # A hung artifact-service call would otherwise drop the whole lane from the report.
       - name: Upload lane results
+        id: upload-results
         if: always()
         continue-on-error: true
         timeout-minutes: 3
@@ -250,6 +267,19 @@ jobs:
             ${{ runner.temp }}/fresh-host-reports
             ${{ runner.temp }}/fake-model/fake-model.log
           include-hidden-files: true
+      - name: Retry lane results upload
+        if: ${{ always() && steps.upload-results.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feature-results-macos-launchd
+          path: |
+            ${{ github.workspace }}/.feature-results
+            ${{ runner.temp }}/fresh-host-reports
+            ${{ runner.temp }}/fake-model/fake-model.log
+          include-hidden-files: true
+          overwrite: true
       - name: Clean up macOS feature context
         if: ${{ always() && env.FRESH_HOST_CONTEXT != '' }}
         continue-on-error: true

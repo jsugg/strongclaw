@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 
 import pytest
 
-from clawops import strongclaw_ops
+from clawops import qdrant_storage, strongclaw_ops
 from clawops.qdrant_storage import (
     UNKNOWN_RELEASE_LINE,
     QdrantRelease,
@@ -43,10 +44,15 @@ class _RecordingOperations:
     """Record every side effect requested by `prepare_storage`."""
 
     def __init__(
-        self, *, existing_volumes: tuple[str, ...] = (), remove_error: Exception | None = None
+        self,
+        *,
+        existing_volumes: tuple[str, ...] = (),
+        remove_error: Exception | None = None,
+        container_clears: pathlib.Path | None = None,
     ) -> None:
         self.existing_volumes = set(existing_volumes)
         self.remove_error = remove_error
+        self.container_clears = container_clears
         self.calls: list[str] = []
         self.messages: list[str] = []
 
@@ -55,8 +61,18 @@ class _RecordingOperations:
             volume_exists=self._volume_exists,
             stop_service=lambda: self.calls.append("stop"),
             remove_volume=self._remove_volume,
+            clear_mounted_storage=self._clear_mounted_storage,
             log=self.messages.append,
         )
+
+    def _clear_mounted_storage(self) -> None:
+        self.calls.append("clear-in-container")
+        if self.container_clears is not None:
+            for child in self.container_clears.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
 
     def _volume_exists(self, name: str) -> bool:
         self.calls.append(f"inspect:{name}")
@@ -485,3 +501,81 @@ def test_ops_wraps_guard_failures_as_command_errors(
     test_context.patch.patch_object(strongclaw_ops, "_compose_config_json", new=compose_config)
     with pytest.raises(CommandError, match="qdrant storage upgrade check failed: refusing"):
         strongclaw_ops._prepare_qdrant_storage(execution)
+
+
+def _deny_host_clear(_directory: pathlib.Path) -> None:
+    raise PermissionError(13, "Permission denied", "raft_state.json")
+
+
+def test_bind_reset_clears_container_owned_storage_from_the_container(
+    tmp_path: pathlib.Path, test_context: TestContext
+) -> None:
+    state_dir, storage_dir = _state_with_storage(tmp_path)
+    recorder = _RecordingOperations(container_clears=storage_dir)
+    test_context.patch.patch_object(qdrant_storage, "clear_directory", new=_deny_host_clear)
+
+    decision = prepare_storage(
+        compose_config=_bind_config(storage_dir),
+        compose_state_dir=state_dir,
+        operations=recorder.build(),
+    )
+
+    assert decision.action == "reset"
+    assert recorder.calls == ["stop", "clear-in-container"]
+    assert storage_dir.is_dir() and not any(storage_dir.iterdir())
+    stamp = read_stamp(stamp_path(state_dir))
+    assert stamp is not None and stamp.release_line == "1.20" and stamp.reindex_pending
+
+
+def test_bind_reset_fails_when_the_container_clear_leaves_storage_behind(
+    tmp_path: pathlib.Path, test_context: TestContext
+) -> None:
+    state_dir, storage_dir = _state_with_storage(tmp_path)
+    recorder = _RecordingOperations()
+    test_context.patch.patch_object(qdrant_storage, "clear_directory", new=_deny_host_clear)
+
+    with pytest.raises(QdrantStorageError, match="still not empty"):
+        prepare_storage(
+            compose_config=_bind_config(storage_dir),
+            compose_state_dir=state_dir,
+            operations=recorder.build(),
+        )
+    stamp = read_stamp(stamp_path(state_dir))
+    assert stamp is not None and stamp.reindex_pending
+
+
+def test_ops_clears_mounted_storage_through_a_throwaway_qdrant_container(
+    tmp_path: pathlib.Path, test_context: TestContext
+) -> None:
+    state_dir, storage_dir = _state_with_storage(tmp_path)
+    execution = strongclaw_ops._ComposeExecution(
+        repo_root=tmp_path,
+        compose_path=tmp_path / "docker-compose.yaml",
+        cwd=tmp_path,
+        env={"STRONGCLAW_COMPOSE_STATE_DIR": str(state_dir)},
+    )
+    commands: list[list[str]] = []
+
+    def compose_config(_execution: object) -> dict[str, object]:
+        return _bind_config(storage_dir)
+
+    def checked_docker(_execution: object, command: list[str], *, what: str) -> None:
+        commands.append(command)
+        if "find" in command:
+            shutil.rmtree(storage_dir)
+            storage_dir.mkdir()
+
+    test_context.patch.patch_object(strongclaw_ops, "_compose_config_json", new=compose_config)
+    test_context.patch.patch_object(strongclaw_ops, "_checked_docker", new=checked_docker)
+    test_context.patch.patch_object(qdrant_storage, "clear_directory", new=_deny_host_clear)
+
+    assert strongclaw_ops._prepare_qdrant_storage(execution).action == "reset"
+    compose = ["docker", "compose", "-f", str(tmp_path / "docker-compose.yaml")]
+    assert commands == [
+        [*compose, "rm", "--stop", "--force", "qdrant"],
+        [
+            *compose,
+            *("run", "--rm", "--no-deps", "-T", "--entrypoint", "find", "qdrant"),
+            *("/qdrant/storage", "-mindepth", "1", "-delete"),
+        ],
+    ]

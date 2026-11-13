@@ -41,6 +41,10 @@ _compose_state_dir = cast(
     _ComposeStateDir,
     cast(Any, strongclaw_ops)._compose_state_dir,
 )
+_adopt_legacy_compose_state = cast(
+    Callable[[pathlib.Path, pathlib.Path], pathlib.Path],
+    cast(Any, strongclaw_ops)._adopt_legacy_compose_state,
+)
 _compose_env = cast(
     _ComposeEnv,
     cast(Any, strongclaw_ops)._compose_env,
@@ -77,19 +81,70 @@ def _identity_varlock_command(
     return [str(part) for part in command]
 
 
-def test_compose_state_dir_defaults_to_openclaw_state_root(
+def test_compose_state_dir_follows_the_openclaw_state_root_from_outside_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
-    """Sidecar operations should follow the configured OpenClaw state root."""
-    openclaw_state_dir = tmp_path / ".openclaw"
+    """Each OpenClaw state root gets its own compose state, outside what openclaw backs up."""
+    first = tmp_path / ".openclaw"
+    second = tmp_path / ".openclaw-dev"
+    roots = iter((first, second, first))
 
     def _resolve_openclaw_state_dir(_repo_root: pathlib.Path) -> pathlib.Path:
-        return openclaw_state_dir
+        return next(roots)
 
     monkeypatch.delenv("STRONGCLAW_COMPOSE_STATE_DIR", raising=False)
+    monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "strongclaw-state"))
     monkeypatch.setattr(strongclaw_ops, "resolve_openclaw_state_dir", _resolve_openclaw_state_dir)
 
-    assert _compose_state_dir(tmp_path, repo_local_state=False) == (openclaw_state_dir / "compose")
+    first_dir = _compose_state_dir(tmp_path, repo_local_state=False)
+    second_dir = _compose_state_dir(tmp_path, repo_local_state=False)
+
+    assert first_dir.parent == tmp_path / "strongclaw-state" / "compose"
+    assert first_dir.name.startswith(".openclaw-") and first_dir != second_dir
+    assert not first_dir.is_relative_to(first)
+    assert _compose_state_dir(tmp_path, repo_local_state=False) == first_dir
+
+
+def test_legacy_compose_state_moves_out_of_the_openclaw_state_root(
+    tmp_path: pathlib.Path,
+) -> None:
+    legacy = tmp_path / ".openclaw" / "compose"
+    (legacy / "postgres").mkdir(parents=True)
+    (legacy / "postgres" / "PG_VERSION").write_text("16", encoding="utf-8")
+    target = tmp_path / "state" / "compose" / "scope"
+
+    adopted = _adopt_legacy_compose_state(legacy, target)
+
+    assert adopted == target
+    assert (target / "postgres" / "PG_VERSION").read_text(encoding="utf-8") == "16"
+    assert not legacy.exists()
+
+
+def test_legacy_compose_state_is_left_alone_once_the_new_location_exists(
+    tmp_path: pathlib.Path,
+) -> None:
+    legacy = tmp_path / ".openclaw" / "compose"
+    legacy.mkdir(parents=True)
+    target = tmp_path / "state" / "compose" / "scope"
+    target.mkdir(parents=True)
+
+    assert _adopt_legacy_compose_state(legacy, target) == target
+    assert legacy.is_dir()
+
+
+def test_legacy_compose_state_stays_in_use_when_it_cannot_move(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy = tmp_path / ".openclaw" / "compose"
+    legacy.mkdir(parents=True)
+    target = tmp_path / "state" / "compose" / "scope"
+
+    def _cross_device(_self: pathlib.Path, _target: pathlib.Path) -> pathlib.Path:
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(pathlib.Path, "rename", _cross_device)
+
+    assert _adopt_legacy_compose_state(legacy, target) == legacy
 
 
 def test_compose_state_dir_explicit_override_wins(
@@ -165,12 +220,15 @@ def test_compose_env_exports_openclaw_and_compose_state(
         return config_path
 
     monkeypatch.delenv("STRONGCLAW_COMPOSE_STATE_DIR", raising=False)
+    monkeypatch.setenv("STRONGCLAW_STATE_DIR", str(tmp_path / "strongclaw-state"))
     monkeypatch.setattr(strongclaw_ops, "resolve_openclaw_state_dir", _resolve_openclaw_state_dir)
     monkeypatch.setattr(
         strongclaw_ops,
         "resolve_openclaw_config_path",
         _resolve_openclaw_config_path,
     )
+    # An install from before the move keeps its sidecar data inside the OpenClaw state root.
+    (openclaw_state_dir / "compose" / "qdrant").mkdir(parents=True)
 
     env = _compose_env(
         REPO_ROOT,
@@ -178,8 +236,11 @@ def test_compose_env_exports_openclaw_and_compose_state(
         compose_name="docker-compose.aux-stack.yaml",
     )
 
+    compose_state_dir = pathlib.Path(env["STRONGCLAW_COMPOSE_STATE_DIR"])
     assert env["OPENCLAW_STATE_DIR"] == str(openclaw_state_dir)
-    assert env["STRONGCLAW_COMPOSE_STATE_DIR"] == str(openclaw_state_dir / "compose")
+    assert compose_state_dir.parent == tmp_path / "strongclaw-state" / "compose"
+    assert (compose_state_dir / "qdrant").is_dir()
+    assert not (openclaw_state_dir / "compose").exists()
     assert env["OPENCLAW_CONFIG"] == str(config_path)
 
 

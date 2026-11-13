@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import http.client
+import ipaddress
 import json
 import pathlib
-import re
 import socket
 import time
 import urllib.error
@@ -136,7 +136,13 @@ def _find_published_port(
 
 def _is_loopback_host(host: str) -> bool:
     """Return True for loopback-only listeners."""
-    return host in {"127.0.0.1", "localhost", "[::1]", "::1"}
+    candidate = host.strip("[]")
+    if candidate == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
 
 
 def _check_required_service(
@@ -218,8 +224,17 @@ def _check_http_endpoint(name: str, url: str, *, require_body: bool = False) -> 
     return _fail(name, f"http reachability failed for {url}: {detail}")
 
 
+def _local_address_host(address: str, port: int) -> str | None:
+    """Return the host of one ``host:port`` (or BSD ``host.port``) address bound to ``port``."""
+    for separator in (":", "."):
+        host, found, candidate = address.rpartition(separator)
+        if found and candidate == str(port):
+            return host.strip("[]").split("%", 1)[0]
+    return None
+
+
 def _listener_addresses(port: int) -> list[str]:
-    """Collect listener addresses for one TCP port."""
+    """Collect the local addresses of the TCP listeners bound to one port."""
     commands = (
         ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-F", "n"],
         ["ss", "-H", "-ltn", f"( sport = :{port} )"],
@@ -230,14 +245,16 @@ def _listener_addresses(port: int) -> list[str]:
         if not result.ok:
             continue
         if command[0] == "lsof":
-            return [line[1:] for line in result.stdout.splitlines() if line.startswith("n")]
-        if command[0] == "ss":
-            return [line.split()[-1] for line in result.stdout.splitlines() if line.split()]
-        return [
-            line.split()[-1]
-            for line in result.stdout.splitlines()
-            if "LISTEN" in line and re.search(rf"[.:]{port}\b", line)
-        ]
+            addresses = [line[1:] for line in result.stdout.splitlines() if line.startswith("n")]
+        else:
+            # ss and netstat both print the local address in the fourth column.
+            rows = [line.split() for line in result.stdout.splitlines()]
+            addresses = [
+                row[3]
+                for row in rows
+                if len(row) > 3 and (command[0] == "ss" or row[-1] == "LISTEN")
+            ]
+        return [address for address in addresses if _local_address_host(address, port) is not None]
     return []
 
 
@@ -249,7 +266,9 @@ def _check_loopback_ports(ports: Sequence[int]) -> Check:
         if not listeners:
             continue
         non_loopback = [
-            listener for listener in listeners if not _is_loopback_host(listener.split(":")[0])
+            listener
+            for listener in listeners
+            if not _is_loopback_host(_local_address_host(listener, port) or listener)
         ]
         if non_loopback:
             failures.append(f"port {port}: {', '.join(non_loopback)}")

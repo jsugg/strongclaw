@@ -7,11 +7,13 @@ from typing import cast
 
 import pytest
 
+from clawops.openclaw_config import render_openclaw_profile
 from clawops.openclaw_plugins import (
     FIRST_PARTY_PLUGINS,
     attach_first_party_plugins,
     configured_model_providers,
 )
+from tests.utils.helpers.repo import REPO_ROOT
 
 _NODE_MODULES = pathlib.Path("/opt/strongclaw/node-tools/node_modules")
 _ALL_PATHS = [(_NODE_MODULES / plugin.package).as_posix() for plugin in FIRST_PARTY_PLUGINS]
@@ -187,4 +189,37 @@ def test_attach_is_idempotent_and_respects_disabled_plugins() -> None:
     disabled = _base_config(enabled=False)
     assert attach_first_party_plugins(disabled, node_modules_dir=_NODE_MODULES) == _base_config(
         enabled=False
+    )
+
+
+def _render(profile_name: str) -> dict[str, object]:
+    return render_openclaw_profile(
+        profile_name=profile_name,
+        repo_root=REPO_ROOT,
+        home_dir=pathlib.Path.home(),
+        user_timezone="UTC",
+    )
+
+
+@pytest.mark.parametrize("profile_name", ["hypermemory", "memory-lancedb-pro"])
+def test_restrictive_memory_profiles_keep_the_bundled_ollama_provider(profile_name: str) -> None:
+    """The memory profiles' allowlist keeps the provider behind OLLAMA_API_KEY."""
+    allow = cast(list[object], _plugins(_render(profile_name))["allow"])
+
+    assert "ollama" in allow
+
+
+def test_acp_profile_loads_the_locked_acpx_runtime() -> None:
+    """The acp profile loads `@openclaw/acpx` from the lock and never disables it.
+
+    The 2026.6 plugin's config schema rejects unknown keys, so no `command` pin is rendered.
+    """
+    plugins = _plugins(_render("acp"))
+    load_paths = cast(list[str], cast(dict[str, object], plugins["load"])["paths"])
+    entry = cast(dict[str, object], plugins.get("entries", {})).get("acpx", {})
+
+    assert any(path.endswith("/node_modules/@openclaw/acpx") for path in load_paths)
+    assert cast(dict[str, object], entry).get("enabled") is not False
+    assert "command" not in cast(
+        dict[str, object], cast(dict[str, object], entry).get("config", {})
     )

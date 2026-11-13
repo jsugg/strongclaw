@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tarfile
 import time
@@ -43,6 +44,45 @@ def test_backup_verify_accepts_latest_archive(feature_host: FeatureHost) -> None
     assert verified["ok"] is True and verified["archive"] == created["archive"], verified
 
 
+def _expected_restored_paths(archive: Path, *, home: Path) -> set[str]:
+    """Return the home-relative files a restore must produce from *archive*.
+
+    A tar-fallback archive already stores home-relative paths. An `openclaw backup create`
+    archive stores each manifest asset under `<root>/payload/posix/<absolute path>`, and a
+    restore lays those out relative to the backed-up home.
+    """
+    with tarfile.open(archive, "r:gz") as bundle:
+        files = [member.name for member in bundle.getmembers() if member.isfile()]
+        manifests = [name for name in files if name.count("/") == 1]
+        manifest_name = next((name for name in manifests if name.endswith("/manifest.json")), None)
+        if manifest_name is None:
+            return set(files)
+        handle = bundle.extractfile(manifest_name)
+        assert handle is not None
+        manifest = cast(dict[str, object], json.load(handle))
+    resolved_home = home.resolve()
+    prefixes = [
+        (
+            str(cast(dict[str, object], asset)["archivePath"]),
+            Path(str(cast(dict[str, object], asset)["sourcePath"]))
+            .resolve()
+            .relative_to(resolved_home)
+            .as_posix(),
+        )
+        for asset in cast(list[object], manifest["assets"])
+    ]
+    expected: set[str] = set()
+    for name in files:
+        for prefix, relative in prefixes:
+            if name.startswith(f"{prefix}/"):
+                expected.add(f"{relative}/{name[len(prefix) + 1 :]}")
+                break
+            if name == prefix:
+                expected.add(relative)
+                break
+    return expected
+
+
 def test_restore_extracts_openclaw_state(feature_host: FeatureHost) -> None:
     archive = Path(str(_create_backup(feature_host)["archive"]))
     destination = feature_host.scratch("restore")
@@ -51,8 +91,7 @@ def test_restore_extracts_openclaw_state(feature_host: FeatureHost) -> None:
         _recovery(feature_host, "restore", str(archive), str(destination)).require_ok().json(),
     )
     assert Path(str(restored["destination"])) == destination, restored
-    with tarfile.open(archive, "r:gz") as bundle:
-        member_names = {member.name for member in bundle.getmembers() if member.isfile()}
+    member_names = _expected_restored_paths(archive, home=feature_host.home)
     assert member_names, "the archive holds no files"
     restored_files = {
         path.relative_to(destination).as_posix()

@@ -488,3 +488,73 @@ def test_recovery_emits_structured_events_for_backup_and_prune(
     assert create_event["bytes"] >= 1
     assert verify_event["result"] == "ok"
     assert prune_event["result"] == "ok"
+
+
+def _write_openclaw_archive(
+    archive_path: Path, *, state_dir: Path, members: dict[str, bytes]
+) -> None:
+    """Write an archive in the `openclaw backup create` layout (manifest + encoded payload)."""
+    root = "2026-01-01T00-00-00.000Z-openclaw-backup"
+    asset_path = f"{root}/payload/posix/{state_dir.as_posix().lstrip('/')}"
+    manifest = json.dumps(
+        {
+            "schemaVersion": 1,
+            "archiveRoot": root,
+            "assets": [{"kind": "state", "sourcePath": str(state_dir), "archivePath": asset_path}],
+        }
+    ).encode("utf-8")
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for name, payload in {
+            f"{root}/manifest.json": manifest,
+            **{f"{asset_path}/{relative}": data for relative, data in members.items()},
+        }.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+
+
+def test_restore_backup_lays_out_openclaw_archives_relative_to_home(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    """An OpenClaw-made archive restores into the same home-relative tree as the tar fallback."""
+    home_dir = tmp_path / "home"
+    state_dir = home_dir / ".openclaw"
+    archive_path = tmp_path / "openclaw.tar.gz"
+    _write_openclaw_archive(
+        archive_path,
+        state_dir=state_dir.resolve(),
+        members={"logs/smoke.log": b"marker\n", "openclaw.json": b"{}\n"},
+    )
+
+    def _verified(path: Path, *, home_dir: Path | None = None) -> Path:
+        del home_dir
+        return path
+
+    test_context.patch.patch_object(strongclaw_recovery, "verify_backup", new=_verified)
+    restored = tmp_path / "restore"
+
+    strongclaw_recovery.restore_backup(archive_path, destination=restored, home_dir=home_dir)
+
+    assert (restored / ".openclaw" / "logs" / "smoke.log").read_bytes() == b"marker\n"
+    assert (restored / ".openclaw" / "openclaw.json").read_bytes() == b"{}\n"
+    assert sorted(path.name for path in restored.iterdir()) == [".openclaw"]
+
+
+def test_restore_backup_refuses_openclaw_assets_outside_the_home(
+    tmp_path: Path, test_context: TestContext
+) -> None:
+    archive_path = tmp_path / "openclaw.tar.gz"
+    _write_openclaw_archive(
+        archive_path, state_dir=(tmp_path / "elsewhere").resolve(), members={"a.txt": b"a"}
+    )
+
+    def _verified(path: Path, *, home_dir: Path | None = None) -> Path:
+        del home_dir
+        return path
+
+    test_context.patch.patch_object(strongclaw_recovery, "verify_backup", new=_verified)
+
+    with pytest.raises(CommandError, match="outside the home directory"):
+        strongclaw_recovery.restore_backup(
+            archive_path, destination=tmp_path / "restore", home_dir=tmp_path / "home"
+        )

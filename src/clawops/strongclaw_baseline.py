@@ -232,10 +232,12 @@ def verify_baseline(
         isolated_home = pathlib.Path(isolated_home_dir)
         pytest_env = dict(os.environ)
         pytest_env["HOME"] = str(isolated_home)
-        pytest_env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
-        pytest_env["XDG_DATA_HOME"] = str(isolated_home / ".local" / "share")
-        pytest_env["XDG_STATE_HOME"] = str(isolated_home / ".local" / "state")
+        # XDG overrides would win over each test's own home directory and make every test share
+        # one state tree; without them the paths still derive from the isolated HOME.
         for key in (
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
             "OPENCLAW_HOME",
             "OPENCLAW_STATE_DIR",
             "OPENCLAW_CONFIG_PATH",

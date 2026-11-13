@@ -51,13 +51,15 @@ StrongClaw-generated runtime artifacts should not live inside the repository che
 | StrongClaw data | `~/.local/share/strongclaw` | `~/Library/Application Support/StrongClaw` |
 | StrongClaw state | `~/.local/state/strongclaw` | `~/Library/Application Support/StrongClaw/state` |
 | StrongClaw logs | `~/.local/state/strongclaw/logs` | `~/Library/Logs/StrongClaw` |
-| Compose sidecar state | `<state>/compose` | `<state>/compose` |
+| Compose sidecar state | `<state>/compose/<openclaw-state-dir>-<hash>` | `<state>/compose/<openclaw-state-dir>-<hash>` |
 | Harness output | `<state>/runs/harness` | `<state>/runs/harness` |
 | ACP session summaries | `<state>/workspaces/<scope>/acp` | `<state>/workspaces/<scope>/acp` |
 | Workflow context packs | `<state>/workspaces/<scope>/context-packs` | `<state>/workspaces/<scope>/context-packs` |
 | QMD package files | `<data>/qmd` | `<data>/qmd` |
 | `lossless-claw` checkout | `<data>/plugins/lossless-claw` | `<data>/plugins/lossless-claw` |
 | Locked node-tools release (link) | `<data>/node-tools` | `<data>/node-tools` |
+
+Compose sidecar state is scoped to its OpenClaw state root but kept outside it, because `openclaw backup create` archives that root and cannot read container-owned database files. Sidecar state that older releases kept in `<openclaw-state-dir>/compose` is moved there on the next compose command.
 
 Use `STRONGCLAW_DATA_DIR`, `STRONGCLAW_STATE_DIR`, `STRONGCLAW_LOG_DIR`, `STRONGCLAW_RUNS_DIR`, or `STRONGCLAW_COMPOSE_STATE_DIR` when an operator needs to override those defaults. The Python-owned compose commands export `STRONGCLAW_COMPOSE_STATE_DIR` automatically before invoking Docker Compose.
 

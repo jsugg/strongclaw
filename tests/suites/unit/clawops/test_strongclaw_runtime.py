@@ -706,3 +706,37 @@ def test_docker_backend_watch_confirms_a_definitive_failure_at_once() -> None:
 def test_docker_backend_watch_rejects_a_non_positive_probe_limit() -> None:
     with pytest.raises(ValueError, match="probe_limit must be positive"):
         runtime.DockerBackendWatch(_ScriptedProbe(), probe_limit=0)
+
+
+def test_run_command_decodes_output_captured_before_a_timeout(test_context: TestContext) -> None:
+    def _fake_subprocess_run(*args: object, **kwargs: object) -> object:
+        del args
+        raise subprocess.TimeoutExpired(
+            cmd="systemctl",
+            timeout=cast(float, kwargs["timeout"]),
+            output=b"partial \xe2\x86\x92 out",
+            stderr=b"Created symlink",
+        )
+
+    test_context.patch.patch_object(runtime.subprocess, "run", new=_fake_subprocess_run)
+
+    result = runtime.run_command(["systemctl", "--user", "start", "unit"], timeout_seconds=5)
+
+    assert result.timed_out is True
+    assert result.stdout == "partial → out"
+    assert result.stderr == "Created symlink"
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"agents": {"list": [{"id": "reader"}, {"id": "admin", "default": True}]}}, "admin"),
+        ({"agents": {"list": [{"id": "Reader"}, {"id": "admin"}]}}, "reader"),
+        ({"agents": {"list": [{"name": "unnamed"}]}}, "main"),
+        ({}, "main"),
+    ],
+)
+def test_openclaw_default_agent_id_follows_openclaw_resolution(
+    config: dict[str, object], expected: str
+) -> None:
+    assert runtime.openclaw_default_agent_id(config) == expected

@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from clawops.common import deep_merge, load_json, load_overlay
+from clawops.common import deep_merge, extract_json_document, load_json, load_overlay
 
 
 def test_deep_merge_nested_mapping() -> None:
@@ -54,3 +54,19 @@ def test_load_json_remains_strict_for_machine_documents(tmp_path: pathlib.Path) 
 
     with pytest.raises(json.JSONDecodeError):
         load_json(json_path)
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ('{"ok": true}', {"ok": True}),
+        ('[plugins] [lcm] Plugin loaded\n[\n  {"id": 1}\n]\n', [{"id": 1}]),
+        ('Doctor warnings\n  - fix me\n{"agents": []}\ntrailer', {"agents": []}),
+        ("[plugins] loaded\nNo matches.\n", None),
+        ("", None),
+    ],
+)
+def test_extract_json_document_skips_log_lines_before_the_payload(
+    output: str, expected: dict[str, object] | list[object] | None
+) -> None:
+    assert extract_json_document(output) == expected

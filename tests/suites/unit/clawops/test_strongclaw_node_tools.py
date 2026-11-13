@@ -89,6 +89,7 @@ class _FakeNpm:
         npm_path = bin_dir / "npm"
         npm_path.write_text(f"#!{sys.executable}\n{_FAKE_NPM}", encoding="utf-8")
         npm_path.chmod(0o755)
+        self.bin_dir = bin_dir
         self.prefix = root / "prefix"
         (self.prefix / "bin").mkdir(parents=True)
         self.log_path = root / "npm-log.jsonl"
@@ -522,9 +523,14 @@ def test_sudo_mode_keeps_the_historical_privilege_rule(
 
 
 def test_ensure_node_tools_installed_uses_the_committed_lock(
-    fake_npm: _FakeNpm, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    test_context: TestContext,
+    fake_npm: _FakeNpm,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The bootstrap entrypoint installs the repo lock and publishes the per-user link."""
+    # Hide host-installed openclaw/acpx so the PATH report is about the fresh install only.
+    test_context.env.set("PATH", os.pathsep.join((str(fake_npm.bin_dir), "/usr/bin", "/bin")))
     home_dir = tmp_path / "home"
     result = ensure_node_tools_installed(repo_root=REPO_ROOT, use_sudo=False, home_dir=home_dir)
     bundle = load_node_tools_bundle(REPO_ROOT / "platform" / "node-tools")

@@ -172,6 +172,7 @@ def test_legacy_storage_is_reset_and_reindexed_on_upgrade(
         volume_exists=lambda name: pytest.fail(f"bind mount must not probe volume {name}"),
         stop_service=lambda: stops.append("qdrant"),
         remove_volume=lambda name: pytest.fail(f"bind mount must not remove volume {name}"),
+        clear_mounted_storage=lambda: pytest.fail("a host-owned bind mount clears from the host"),
         log=messages.append,
     )
     decision = prepare_storage(

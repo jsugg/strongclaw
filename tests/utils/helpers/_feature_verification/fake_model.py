@@ -395,10 +395,14 @@ class FakeModelHandler(BaseHTTPRequestHandler):
             self._send_json({"embedding": deterministic_embedding(text, dimensions)})
             return
         inputs = self._embedding_inputs(payload.get("input"))
+        # Ollama's /api/embed always reports usage; clients such as LiteLLM rely on it.
         self._send_json(
             {
                 "model": str(payload.get("model") or EMBEDDING_MODEL_ID),
                 "embeddings": [deterministic_embedding(text, dimensions) for text in inputs],
+                "total_duration": 1000,
+                "load_duration": 100,
+                "prompt_eval_count": sum(len(text.split()) or 1 for text in inputs),
             }
         )
 
