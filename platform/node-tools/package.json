@@ -4,12 +4,12 @@
   "private": true,
   "description": "Pinned OpenClaw and ACPX CLIs installed by clawops bootstrap.",
   "dependencies": {
-    "@openclaw/acpx": "2026.6.35",
-    "@openclaw/codex": "2026.6.35",
+    "@openclaw/acpx": "2026.9.37",
+    "@openclaw/codex": "2026.9.37",
     "@openclaw/diagnostics-otel": "2026.6.35",
     "@openclaw/moonshot-provider": "2026.6.35",
     "@openclaw/zai-provider": "2026.6.35",
     "acpx": "0.21.1",
-    "openclaw": "2026.6.35"
+    "openclaw": "2026.9.37"
   }
 }
