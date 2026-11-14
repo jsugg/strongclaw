@@ -69,7 +69,7 @@ jobs:
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: "5"
       FEATURE_RESULTS_DIR: ${{ github.workspace }}/.feature-results
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Reserves equal the scenario+lane step timeouts and the summed observer step timeouts.
       - name: Initialize Linux feature job budget
         run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 150 --scenario-reserve-minutes 105 --observer-reserve-minutes 10 --github-env-file "${GITHUB_ENV}"
@@ -167,7 +167,7 @@ jobs:
       FRESH_HOST_SELECTED_DOCKER_PULL_MAX_ATTEMPTS: "5"
       FEATURE_RESULTS_DIR: ${{ github.workspace }}/.feature-results
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize macOS feature job budget
         run: ./tests/scripts/fresh_host.py initialize-budget --job-timeout-minutes 150 --scenario-reserve-minutes 75 --observer-reserve-minutes 12 --github-env-file "${GITHUB_ENV}"
       - name: Restore OrbStack DMG cache
@@ -295,7 +295,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
