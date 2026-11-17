@@ -71,9 +71,13 @@ def test_unrestricted_allowlist_loads_all_and_disables_unused_runtimes() -> None
 
     assert cast(dict[str, object], plugins["load"])["paths"] == _ALL_PATHS
     assert plugins["allow"] == []
+    # The runtime and the configured model providers are enabled the way doctor --fix enables them.
     assert plugins["entries"] == {
         "acpx": {"enabled": False},
+        "codex": {"enabled": True},
         "diagnostics-otel": {"enabled": False},
+        "zai": {"enabled": True},
+        "openai": {"enabled": True},
     }
     assert "bundledDiscovery" not in plugins
 
@@ -107,9 +111,32 @@ def test_restrictive_allowlist_names_needed_plugins_and_bundled_providers() -> N
     ]
     assert plugins["entries"] == {
         "acpx": {"enabled": True},
+        "codex": {"enabled": True},
         "diagnostics-otel": {"enabled": False},
+        "github-copilot": {"enabled": True},
+        "openai": {"enabled": True},
+        "zai": {"enabled": True},
     }
-    assert plugins["bundledDiscovery"] == "compat"
+
+
+def test_attach_drops_the_retired_bundled_discovery_switch() -> None:
+    """OpenClaw 2026.8 keeps bundled discovery in its own state and rejects the config key."""
+    config = _base_config(allow=["x"], bundledDiscovery="compat")
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert "bundledDiscovery" not in plugins
+
+
+def test_custom_model_providers_are_not_enabled_as_plugins() -> None:
+    """Operator-defined `models.providers` ids are not plugins, so they get no plugin entry."""
+    config = _base_config()
+    defaults = cast(dict[str, dict[str, object]], config["agents"])["defaults"]
+    defaults["model"] = {"primary": "featver/fake-model"}
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert "featver" not in cast(dict[str, object], plugins["entries"])
 
 
 def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None:
@@ -125,17 +152,18 @@ def test_usage_overrides_a_stale_disable_but_operator_entries_are_kept() -> None
     plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
 
     assert plugins["entries"] == {
-        "acpx": {"enabled": False},
-        "zai": {"config": {"region": "intl"}},
+        "codex": {"enabled": True},
+        "zai": {"enabled": True, "config": {"region": "intl"}},
         "diagnostics-otel": {"enabled": True, "config": {"x": 1}},
+        "acpx": {"enabled": False},
+        "openai": {"enabled": True},
     }
 
 
 @pytest.mark.parametrize(
     ("overlay", "plugin_id", "entry"),
     [
-        ({"diagnostics": {"otel": {"enabled": True}}}, "diagnostics-otel", None),
-        # The installed ACP runtime registers its backend only when explicitly enabled.
+        ({"diagnostics": {"otel": {"enabled": True}}}, "diagnostics-otel", {"enabled": True}),
         ({"acp": {"backend": "acpx"}}, "acpx", {"enabled": True}),
     ],
 )
@@ -160,7 +188,10 @@ def test_reattach_keeps_operator_disables_and_allowlisted_plugins() -> None:
 
     assert twice["entries"] == {
         "moonshot": {"enabled": False},
+        "codex": {"enabled": True},
         "diagnostics-otel": {"enabled": False},
+        "zai": {"enabled": True},
+        "openai": {"enabled": True},
     }
     assert "acpx" in cast(list[str], twice["allow"])
 
@@ -168,7 +199,7 @@ def test_reattach_keeps_operator_disables_and_allowlisted_plugins() -> None:
 def test_plugin_that_stops_being_required_is_disabled_on_the_next_attach() -> None:
     """Dropping the GPT runtime pin (API-key route) turns its runtime plugin off again."""
     config = attach_first_party_plugins(_base_config(), node_modules_dir=_NODE_MODULES)
-    assert "codex" not in cast(dict[str, object], _plugins(config)["entries"])
+    assert cast(dict[str, object], _plugins(config)["entries"])["codex"] == {"enabled": True}
     defaults = cast(dict[str, dict[str, object]], config["agents"])["defaults"]
     defaults["models"] = {"openai/gpt-5.4": {}}
 
@@ -252,3 +283,26 @@ def test_reattach_drops_a_stale_locked_acpx_load_path() -> None:
     plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
 
     assert cast(dict[str, object], plugins["load"])["paths"] == ["/x/hypermemory", *_ALL_PATHS]
+
+
+@pytest.mark.parametrize(
+    ("slot", "dreaming", "expected"),
+    [
+        ("memory-core", None, {"enabled": True, "config": {"dreaming": {"enabled": False}}}),
+        ("memory-core", True, {"config": {"dreaming": {"enabled": True}}, "enabled": True}),
+        ("strongclaw-hypermemory", None, None),
+    ],
+    ids=["memory-core-slot", "operator-choice", "other-memory-slot"],
+)
+def test_dreaming_stays_opt_in_only_where_memory_core_holds_the_slot(
+    slot: str, dreaming: bool | None, expected: dict[str, object] | None
+) -> None:
+    """2026.8 dreams by default; any `memory-core` entry would also load it beside another slot."""
+    entries: dict[str, object] = (
+        {} if dreaming is None else {"memory-core": {"config": {"dreaming": {"enabled": dreaming}}}}
+    )
+    config = _base_config(slots={"memory": slot}, entries=entries)
+
+    plugins = _plugins(attach_first_party_plugins(config, node_modules_dir=_NODE_MODULES))
+
+    assert cast(dict[str, object], plugins["entries"]).get("memory-core") == expected

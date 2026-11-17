@@ -3,6 +3,9 @@
     "list": [
       {
         "agentDir": "~/.openclaw/agents/coder-acp-codex/agent",
+        // OpenClaw 2026.6 made the first roster entry the default agent implicitly;
+        // 2026.8 leaves an unmarked fleet without an owner for ambient work.
+        "default": true,
         "id": "coder-acp-codex",
         "name": "Coder ACP Codex",
         "runtime": {

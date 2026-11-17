@@ -13,6 +13,7 @@ from clawops.app_paths import strongclaw_lossless_claw_dir, strongclaw_node_tool
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import load_overlay, write_json
 from clawops.json_merge import merge_documents
+from clawops.openclaw_agents import agent_entries, normalize_agent_roster, sync_model_policy
 from clawops.openclaw_plugins import attach_first_party_plugins
 from clawops.runtime_assets import resolve_asset_path, resolve_runtime_layout
 from clawops.strongclaw_runtime import managed_python
@@ -67,7 +68,7 @@ PROFILES: dict[str, RenderProfile] = {
             OPENCLAW_CONFIG_DIR / "10-trust-zones.json5",
             OPENCLAW_CONFIG_DIR / "40-qmd-context.json5",
         ),
-        description="OpenClaw built-ins plus the experimental QMD memory backend.",
+        description="OpenClaw built-ins with builtin memory indexing the QMD document corpus.",
     ),
     "memory-lancedb-pro": RenderProfile(
         name="memory-lancedb-pro",
@@ -372,8 +373,9 @@ def render_openclaw_profile(
     merged = merge_documents(base, overlays)
     if not isinstance(merged, dict):
         raise TypeError("rendered OpenClaw profile must merge to a mapping")
+    config = sync_model_policy(normalize_agent_roster(cast(dict[str, object], merged)))
     return attach_first_party_plugins(
-        cast(dict[str, Any], merged),
+        config,
         node_modules_dir=strongclaw_node_tools_dir(home_dir=home_dir) / "node_modules",
     )
 
@@ -388,11 +390,8 @@ def _agent_directory_paths(config: Mapping[str, object]) -> list[str]:
     defaults = agents_mapping.get("defaults")
     if isinstance(defaults, Mapping):
         paths.append(str(cast(Mapping[str, object], defaults).get("workspace") or ""))
-    agent_list = agents_mapping.get("list")
-    for agent in cast(list[object], agent_list) if isinstance(agent_list, list) else []:
-        if isinstance(agent, Mapping):
-            agent_mapping = cast(Mapping[str, object], agent)
-            paths.extend(str(agent_mapping.get(key) or "") for key in ("workspace", "agentDir"))
+    for settings in agent_entries(config).values():
+        paths.extend(str(settings.get(key) or "") for key in ("workspace", "agentDir"))
     return [path for path in paths if path]
 
 

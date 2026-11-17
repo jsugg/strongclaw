@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Final, cast
 
+from clawops.openclaw_agents import agent_entries, default_agent_id
 from clawops.strongclaw_runtime import resolve_openclaw_config_path
 from tests.utils.helpers.feature_verification import (
     ACP_STUB_REPLY_PREFIX,
@@ -89,16 +90,46 @@ def test_openclaw_default_profile_boots_with_memory_core(
     feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
 
 
-def test_openclaw_qmd_profile_installs_and_uses_qmd(
+def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
     feature_host: FeatureHost, gateway: GatewayController
 ) -> None:
+    """OpenClaw 2026.8 removed the QMD backend (docs/concepts/memory-builtin.md, "Migrating from
+    QMD"): the profile still installs QMD and serves its corpus through builtin `extraPaths`."""
     _activate(feature_host, gateway, "openclaw-qmd")
     qmd = feature_host.home / ".bun" / "bin" / "qmd"
     feature_host.run([str(qmd), "status"], timeout=120).require_ok()
     memory = cast(dict[str, object], feature_host.rendered_config()["memory"])
-    assert memory["backend"] == "qmd", memory
-    status = feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
-    assert "qmd" in status.output.lower(), status.describe()
+    assert {"backend", "qmd"}.isdisjoint(memory), memory
+    runbooks = (feature_host.repo_root / "platform" / "docs").resolve().as_posix()
+    extra_paths = cast(
+        list[dict[str, str]], cast(dict[str, object], memory["search"])["extraPaths"]
+    )
+    assert runbooks in [Path(entry["path"]).resolve().as_posix() for entry in extra_paths]
+    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+    owner = default_agent_id(feature_host.rendered_config())
+    feature_host.openclaw("memory", "index", "--agent", owner, "--force", timeout=900).require_ok()
+    payload = (
+        feature_host.openclaw(
+            "memory",
+            "search",
+            "--agent",
+            owner,
+            "--query",
+            "StrongClaw degradation contract dependency health runtime impact",
+            "--max-results",
+            "5",
+            "--json",
+            timeout=600,
+        )
+        .require_ok()
+        .json()
+    )
+    result = cast(dict[str, object], payload)
+    assert result.get("stale") is not True, result
+    hits = [
+        str(cast(dict[str, object], hit)["path"]) for hit in cast(list[object], result["results"])
+    ]
+    assert any("/platform/docs/" in path for path in hits), hits
 
 
 def test_acp_profile_registers_acp_worker_agents(
@@ -108,10 +139,9 @@ def test_acp_profile_registers_acp_worker_agents(
     listed = _agent_ids(feature_host)
     for agent_id in ACP_WORKER_AGENTS:
         assert agent_id in listed, listed
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
     runtimes = {
-        str(cast(dict[str, object], agent)["id"]): cast(dict[str, object], agent).get("runtime")
-        for agent in cast(list[object], agents["list"])
+        agent_id: agent.get("runtime")
+        for agent_id, agent in agent_entries(feature_host.rendered_config()).items()
     }
     for agent_id in ACP_WORKER_AGENTS:
         runtime = cast(dict[str, object], runtimes[agent_id])
@@ -168,12 +198,7 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
     feature_host: FeatureHost, gateway: GatewayController
 ) -> None:
     _activate(feature_host, gateway, "acp")
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
-    coder = next(
-        cast(dict[str, object], agent)
-        for agent in cast(list[object], agents["list"])
-        if cast(dict[str, object], agent)["id"] == "coder-acp-codex"
-    )
+    coder = agent_entries(feature_host.rendered_config())["coder-acp-codex"]
     acp = cast(dict[str, object], cast(dict[str, object], coder["runtime"])["acp"])
     acp_cwd = Path(str(acp["cwd"]))
     acp_cwd.mkdir(parents=True, exist_ok=True)

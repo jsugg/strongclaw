@@ -136,17 +136,17 @@ def test_repo_qmd_template_includes_expected_default_corpus() -> None:
         user_timezone="UTC",
     )
 
-    assert rendered["memory"]["backend"] == "qmd"
-    qmd = rendered["memory"]["qmd"]
-    assert qmd["includeDefaultMemory"] is True
-    path_names = {entry["name"] for entry in qmd["paths"]}
-    assert {
-        "runbooks",
-        "skills",
-        "openclaw-workspaces",
-        "openclaw-upstream",
-        "repo-root-markdown",
-    } <= path_names
+    workspace_root = strongclaw_workspace_dir(home_dir=pathlib.Path.home())
+    upstream_root = strongclaw_upstream_repo_dir(home_dir=pathlib.Path.home())
+    # OpenClaw 2026.8 removed the QMD backend; doctor maps its paths onto builtin extraPaths.
+    assert {"backend", "qmd"}.isdisjoint(rendered["memory"])
+    assert rendered["memory"]["search"]["extraPaths"] == [
+        {"path": f"{repo_root.as_posix()}/platform/docs", "pattern": "**/*.md"},
+        {"path": f"{repo_root.as_posix()}/platform/skills", "pattern": "**/*.md"},
+        {"path": workspace_root.as_posix(), "pattern": "**/*.md"},
+        {"path": upstream_root.as_posix(), "pattern": "**/*.md"},
+        {"path": repo_root.as_posix(), "pattern": "*.md"},
+    ]
 
 
 def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> None:
@@ -162,8 +162,13 @@ def test_render_openclaw_default_profile_merges_baseline_and_trust_zones() -> No
     assert "backend" not in rendered["memory"]
     assert rendered["gateway"]["bind"] == "loopback"
     assert rendered["plugins"]["slots"]["memory"] == "memory-core"
-    admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
-    assert admin["workspace"] == f"{workspace_root.as_posix()}/admin"
+    agents = rendered["agents"]
+    assert "list" not in agents
+    assert list(agents["entries"]) == ["admin", "reader", "coder", "reviewer", "messaging"]
+    assert agents["entries"]["admin"]["workspace"] == f"{workspace_root.as_posix()}/admin"
+    assert agents["ownership"] == "explicit"
+    assert agents["defaults"]["systemAgent"] == {"agentId": "admin"}
+    assert agents["defaults"]["modelPolicy"]["allow"] == list(agents["defaults"]["models"])
 
 
 def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> None:
@@ -176,9 +181,10 @@ def test_render_openclaw_qmd_profile_merges_baseline_trust_zones_and_qmd() -> No
         user_timezone="UTC",
     )
 
-    assert rendered["memory"]["backend"] == "qmd"
+    assert {"backend", "qmd"}.isdisjoint(rendered["memory"])
+    assert rendered["memory"]["search"]["extraPaths"]
     assert rendered["gateway"]["bind"] == "loopback"
-    admin = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "admin")
+    admin = rendered["agents"]["entries"]["admin"]
     assert admin["workspace"] == f"{workspace_root.as_posix()}/admin"
 
 
@@ -192,7 +198,10 @@ def test_render_acp_profile_replaces_upstream_repo_placeholders() -> None:
         user_timezone="UTC",
     )
 
-    coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
+    entries = rendered["agents"]["entries"]
+    assert list(entries) == ["coder-acp-codex", "reviewer-acp-claude", "acp-dispatch"]
+    assert rendered["agents"]["defaults"]["systemAgent"] == {"agentId": "coder-acp-codex"}
+    coder = entries["coder-acp-codex"]
     runtime = coder["runtime"]["acp"]
     assert runtime["cwd"] == upstream_root.as_posix()
     assert coder["workspace"] == upstream_root.as_posix()
@@ -210,7 +219,7 @@ def test_render_profile_accepts_additional_placeholder_backed_overlays() -> None
     )
 
     plugin = rendered["plugins"]["entries"]["memory-lancedb-pro"]["config"]
-    coder = next(agent for agent in rendered["agents"]["list"] if agent["id"] == "coder-acp-codex")
+    coder = rendered["agents"]["entries"]["coder-acp-codex"]
     assert plugin["dbPath"] == f"{pathlib.Path.home().as_posix()}/.openclaw/memory/lancedb-pro"
     assert coder["workspace"] == upstream_root.as_posix()
 

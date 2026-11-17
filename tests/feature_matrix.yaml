@@ -43,7 +43,7 @@ features:
     category: host-lifecycle
     title: clawops bootstrap installs the locked OpenClaw/ACPX toolchain, varlock and the venv
     call_sites:
-      - src/clawops/strongclaw_bootstrap.py:576
+      - src/clawops/strongclaw_bootstrap.py:575
       - src/clawops/strongclaw_node_tools.py:715
     lanes: [linux-core, macos-launchd]
     verification: live
@@ -52,8 +52,8 @@ features:
     category: host-lifecycle
     title: clawops setup (non-interactive) renders the profile and activates the host services
     call_sites:
-      - src/clawops/setup_cli.py:310
-      - src/clawops/setup_cli.py:139
+      - src/clawops/setup_cli.py:311
+      - src/clawops/setup_cli.py:140
     lanes: [linux-core, macos-launchd]
     verification: live
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_guided_setup_completes_with_service_activation
@@ -89,7 +89,7 @@ features:
     category: host-lifecycle
     title: clawops doctor-host validates the toolchain and the rendered config
     call_sites:
-      - src/clawops/setup_cli.py:127
+      - src/clawops/setup_cli.py:128
     lanes: [linux-core, macos-launchd]
     verification: live
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_doctor_host_reports_toolchain
@@ -97,7 +97,7 @@ features:
     category: host-lifecycle
     title: clawops doctor runs every readiness check (model probe, audits, memory, sidecars)
     call_sites:
-      - src/clawops/setup_cli.py:392
+      - src/clawops/setup_cli.py:393
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_deep_doctor_passes_every_check
@@ -105,7 +105,7 @@ features:
     category: host-lifecycle
     title: clawops baseline verify passes with runtime probes
     call_sites:
-      - src/clawops/strongclaw_baseline.py:138
+      - src/clawops/strongclaw_baseline.py:139
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_baseline_verify_passes_with_runtime_probes
@@ -122,7 +122,7 @@ features:
     category: model-auth
     title: openclaw agents list --json reports every configured agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:114
+      - src/clawops/strongclaw_model_auth.py:115
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_agents_list_matches_rendered_config
@@ -130,8 +130,8 @@ features:
     category: model-auth
     title: clawops model-auth ensure applies the env-driven model chain to every agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:343
-      - src/clawops/strongclaw_model_auth.py:239
+      - src/clawops/strongclaw_model_auth.py:340
+      - src/clawops/strongclaw_model_auth.py:240
     lanes: [linux-core, macos-launchd]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_auth_ensure_applies_env_driven_chain
@@ -139,7 +139,7 @@ features:
     category: model-auth
     title: models status --check --probe reaches the provider for every agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:170
+      - src/clawops/strongclaw_model_auth.py:171
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_probe_reaches_the_provider
@@ -147,7 +147,7 @@ features:
     category: model-auth
     title: openclaw models --agent X list --json reports an available model (fallback path)
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:141
+      - src/clawops/strongclaw_model_auth.py:142
     lanes: [linux-profiles]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_models_list_reports_available_models
@@ -155,7 +155,7 @@ features:
     category: model-auth
     title: Interactive model wizard (openclaw configure --section model)
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:393
+      - src/clawops/strongclaw_model_auth.py:459
     status: unverifiable
     reason: Runs only on an interactive TTY and walks a vendor sign-in/provider picker; the non-interactive env-driven chain (model-auth.ensure) covers the same outcome.
 
@@ -164,7 +164,7 @@ features:
     category: gateway
     title: openclaw gateway status --json reports a loopback RPC endpoint
     call_sites:
-      - src/clawops/setup_cli.py:493
+      - src/clawops/setup_cli.py:494
       - src/clawops/strongclaw_ops.py:977
     lanes: [linux-core, macos-launchd]
     verification: live
@@ -182,7 +182,7 @@ features:
     category: gateway
     title: The gateway listens on loopback only
     call_sites:
-      - platform/configs/openclaw/00-baseline.json5:116
+      - platform/configs/openclaw/00-baseline.json5:113
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_gateway_binds_only_loopback
@@ -190,7 +190,7 @@ features:
     category: gateway
     title: openclaw doctor --non-interactive is clean on the rendered profile
     call_sites:
-      - src/clawops/strongclaw_baseline.py:156
+      - src/clawops/strongclaw_baseline.py:157
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_openclaw_doctor_is_clean
@@ -198,7 +198,7 @@ features:
     category: security
     title: openclaw security audit --deep passes
     call_sites:
-      - src/clawops/strongclaw_baseline.py:157
+      - src/clawops/strongclaw_baseline.py:158
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_security_audit_passes
@@ -206,7 +206,7 @@ features:
     category: security
     title: openclaw secrets audit --check passes
     call_sites:
-      - src/clawops/strongclaw_baseline.py:158
+      - src/clawops/strongclaw_baseline.py:159
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_secrets_audit_passes
@@ -225,7 +225,7 @@ features:
     title: hypermemory profile loads strongclaw-hypermemory and lossless-claw into their slots
     call_sites:
       - src/clawops/memory_profiles.py:23
-      - src/clawops/strongclaw_bootstrap.py:425
+      - src/clawops/strongclaw_bootstrap.py:424
       - platform/configs/openclaw/77-hypermemory.example.json5:12
     lanes: [linux-core]
     verification: live
@@ -234,7 +234,7 @@ features:
     category: memory
     title: openclaw memory status --deep reports the active memory backend
     call_sites:
-      - src/clawops/setup_cli.py:501
+      - src/clawops/setup_cli.py:502
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_openclaw_memory_status_is_healthy
@@ -242,7 +242,7 @@ features:
     category: memory
     title: openclaw memory search returns corpus hits through the memory plugin
     call_sites:
-      - src/clawops/setup_cli.py:510
+      - src/clawops/setup_cli.py:511
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_openclaw_memory_search_returns_corpus_hits
@@ -293,7 +293,7 @@ features:
     category: memory
     title: strongclaw-hypermemory autoRecall injects stored memory into gateway agent turns
     call_sites:
-      - platform/plugins/strongclaw-hypermemory/index.js:949
+      - platform/plugins/strongclaw-hypermemory/index.js:952
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_hypermemory.py::test_hypermemory_plugin_recalls_memory_into_turns
@@ -322,7 +322,7 @@ features:
     title: memory-lancedb-pro profile installs the vendored plugin and loads it into the memory slot
     call_sites:
       - src/clawops/memory_profiles.py:41
-      - src/clawops/strongclaw_bootstrap.py:391
+      - src/clawops/strongclaw_bootstrap.py:390
       - platform/configs/openclaw/75-memory-lancedb-pro.local.json5:11
     lanes: [linux-lancedb]
     verification: live
@@ -355,17 +355,17 @@ features:
     category: memory
     title: memory-lancedb-pro autoCapture runs smart extraction and embeddings after a turn
     call_sites:
-      - platform/plugins/memory-lancedb-pro/index.ts:2725
+      - platform/plugins/memory-lancedb-pro/index.ts:2730
     lanes: [linux-lancedb]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_smart_extraction_calls_the_extraction_model
   - id: lancedb.reflection-embedded-runner
     category: memory
-    title: memory reflection runs through extensionAPI.js runEmbeddedPiAgent on session reset
+    title: memory reflection runs through the host api.runtime.agent.runEmbeddedAgent on session reset
     call_sites:
-      - platform/plugins/memory-lancedb-pro/index.ts:399
-      - platform/plugins/memory-lancedb-pro/index.ts:1212
-      - platform/plugins/memory-lancedb-pro/index.ts:3252
+      - platform/plugins/memory-lancedb-pro/index.ts:393
+      - platform/plugins/memory-lancedb-pro/index.ts:1217
+      - platform/plugins/memory-lancedb-pro/index.ts:3258
     lanes: [linux-lancedb]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_reflection_runs_through_the_embedded_runner
@@ -382,20 +382,20 @@ features:
     test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_openclaw_default_profile_boots_with_memory_core
   - id: profile.openclaw-qmd
     category: profiles
-    title: openclaw-qmd profile installs QMD and boots the gateway on the qmd memory backend
+    title: openclaw-qmd profile installs QMD and indexes its corpus with builtin memory
     call_sites:
       - src/clawops/memory_profiles.py:35
-      - src/clawops/strongclaw_bootstrap.py:342
-      - platform/configs/openclaw/40-qmd-context.json5:3
+      - src/clawops/strongclaw_bootstrap.py:341
+      - platform/configs/openclaw/40-qmd-context.json5:8
     lanes: [linux-profiles]
     verification: fake-model
-    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_openclaw_qmd_profile_installs_and_uses_qmd
+    test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory
   - id: profile.acp
     category: profiles
     title: acp profile registers the ACP worker agents and boots the gateway
     call_sites:
       - src/clawops/memory_profiles.py:48
-      - platform/configs/openclaw/20-acp-workers.json5:11
+      - platform/configs/openclaw/20-acp-workers.json5:14
     lanes: [linux-profiles]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_setup_profiles.py::test_acp_profile_registers_acp_worker_agents
@@ -414,9 +414,9 @@ features:
     category: acp
     title: The acp profile's dispatcher starts an ACP worker with admin `/acp spawn` and the worker answers through OpenClaw's trusted acpx backend
     call_sites:
-      - platform/configs/openclaw/20-acp-workers.json5:101
+      - platform/configs/openclaw/20-acp-workers.json5:104
       - src/clawops/openclaw_plugin_installs.py:84
-      - src/clawops/setup_cli.py:71
+      - src/clawops/setup_cli.py:72
     lanes: [linux-profiles]
     verification: stub
     limitations: The codex adapter behind acpx is the ACP stub agent; a live vendor session is acp.vendor-live-sessions.
@@ -593,7 +593,7 @@ features:
     title: Browser lab starts, exposes CDP on 9222 and the egress proxy on 3128, then stops
     call_sites:
       - src/clawops/strongclaw_ops.py:1004
-      - src/clawops/platform_verify.py:678
+      - src/clawops/platform_verify.py:679
       - platform/compose/docker-compose.browser-lab.yaml:12
     lanes: [linux-core]
     verification: live
@@ -699,7 +699,7 @@ features:
     title: The channels overlay renders and validates under OpenClaw with Telegram and WhatsApp configured
     call_sites:
       - platform/configs/openclaw/30-channels.json5:12
-      - src/clawops/openclaw_config.py:338
+      - src/clawops/openclaw_config.py:339
     lanes: [linux-profiles]
     verification: stub
     limitations: Telegram uses a placeholder bot token; no message reaches a messaging network.
@@ -844,14 +844,14 @@ features:
   - id: baseline.harness-smoke
     category: host-lifecycle
     title: Baseline harness-smoke runs both regression suites into a runs dir
-    call_sites: [src/clawops/strongclaw_baseline.py:347, src/clawops/strongclaw_baseline.py:34]
+    call_sites: [src/clawops/strongclaw_baseline.py:348, src/clawops/strongclaw_baseline.py:35]
     lanes: [linux-profiles]
     verification: live
     test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_baseline_harness_smoke_writes_results
   - id: channels.verify-platform
     category: channels
     title: verify-platform channels checks overlays, docs, and allowlist parity
-    call_sites: [src/clawops/platform_verify.py:751, src/clawops/platform_verify.py:528]
+    call_sites: [src/clawops/platform_verify.py:752, src/clawops/platform_verify.py:529]
     lanes: [linux-profiles]
     verification: live
     test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_verify_platform_channels_passes
@@ -865,7 +865,7 @@ features:
   - id: render.overlays
     category: profiles
     title: render-openclaw-config merges operator overlays and renders exec approvals
-    call_sites: [src/clawops/openclaw_config.py:386, src/clawops/openclaw_config.py:431]
+    call_sites: [src/clawops/openclaw_config.py:388, src/clawops/openclaw_config.py:430]
     lanes: [linux-profiles]
     verification: live
     test: tests/suites/e2e/feature_verification/test_operator_tools.py::test_render_openclaw_config_merges_overlay
@@ -895,7 +895,7 @@ features:
     call_sites:
       - platform/configs/openclaw/77-hypermemory.example.json5:3
       - platform/configs/openclaw/75-memory-lancedb-pro.local.json5:3
-      - src/clawops/strongclaw_model_auth.py:232
+      - src/clawops/strongclaw_model_auth.py:233
     lanes: [linux-core, linux-lancedb]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_profile_allowlist_keeps_bundled_provider_plugins

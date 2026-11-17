@@ -16,6 +16,7 @@ from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
     CommandError,
     VarlockEnvMode,
+    openclaw_memory_search_arguments,
     rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_uses_hypermemory,
     require_openclaw,
@@ -160,7 +161,7 @@ def verify_baseline(
     _run_checked(
         repo_root,
         "OpenClaw memory search",
-        ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+        openclaw_memory_search_arguments(repo_root, query="ClawOps", max_results=1),
     )
 
     model_payload = ensure_model_auth(repo_root, check_only=True, probe=not degraded)

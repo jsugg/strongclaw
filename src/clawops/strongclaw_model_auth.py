@@ -13,6 +13,7 @@ from typing import Final, cast
 from clawops.app_paths import strongclaw_node_tools_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import extract_json_document
+from clawops.openclaw_agents import agent_entries, normalize_agent_roster, sync_model_policy
 from clawops.openclaw_plugins import CODEX_AGENT_RUNTIME_ID, attach_first_party_plugins
 from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
@@ -302,19 +303,14 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
         }
     configured_model = {"primary": primary, "fallbacks": list(fallbacks)}
     defaults_payload["model"] = configured_model
-    agent_list = agents_payload.get("list")
-    if not isinstance(agent_list, list):
-        raise CommandError(f"invalid OpenClaw config at {config_path}: missing `agents.list` array")
-    for raw_agent in cast(list[object], agent_list):
-        agent = _mutable_mapping_or_none(raw_agent)
-        if agent is None:
-            raise CommandError(
-                f"invalid OpenClaw config at {config_path}: agent entries must be mappings"
-            )
-        if "id" not in agent:
-            raise CommandError(
-                f"invalid OpenClaw config at {config_path}: agent entry missing `id`"
-            )
+    try:
+        normalize_agent_roster(payload)
+    except TypeError as err:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: {err}") from err
+    agents = agent_entries(payload)
+    if not agents:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: no `agents.entries`")
+    for agent in agents.values():
         agent["model"] = {"primary": primary, "fallbacks": list(fallbacks)}
         agent_models = _mutable_mapping_or_none(agent.get("models"))
         for model_ref, codex_runtime in resolved_chain.items():
@@ -323,6 +319,7 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
             )
             if model_settings is not None:
                 _set_codex_runtime(model_settings, enabled=codex_runtime)
+    sync_model_policy(payload)
     attach_first_party_plugins(
         payload, node_modules_dir=strongclaw_node_tools_dir() / "node_modules"
     )
@@ -384,21 +381,25 @@ def _memory_search_provider(env_values: dict[str, str]) -> str:
 
 
 def _apply_memory_search_provider(repo_root: pathlib.Path, env_values: dict[str, str]) -> None:
-    """Pin `agents.defaults.memorySearch.provider` unless the operator already chose one."""
+    """Pin `memory.search.provider` unless the operator already chose one.
+
+    OpenClaw 2026.8 reads memory search settings from `memory.search`. A 2026.6-era
+    `agents.defaults.memorySearch` block moves there first, as `openclaw doctor --fix` moves it.
+    """
     config_path = resolve_openclaw_config_path(repo_root)
     payload = load_openclaw_config(config_path)
     defaults = _mutable_mapping_or_none(
         (_mutable_mapping_or_none(payload.get("agents")) or {}).get("defaults")
     )
-    if defaults is None:
-        return
-    memory_search = _mutable_mapping_or_none(defaults.get("memorySearch"))
-    if memory_search is None:
-        memory_search = {}
-        defaults["memorySearch"] = memory_search
-    if memory_search.get("provider") not in (None, "auto"):
-        return
-    memory_search["provider"] = _memory_search_provider(env_values)
+    legacy = _mutable_mapping_or_none(defaults.pop("memorySearch", None)) if defaults else None
+    memory = _mutable_mapping_or_none(payload.setdefault("memory", {}))
+    search = None if memory is None else _mutable_mapping_or_none(memory.setdefault("search", {}))
+    if search is None:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: `memory` must be an object")
+    for key, value in (legacy or {}).items():
+        search.setdefault(key, value)
+    if search.get("provider") in (None, "auto"):
+        search["provider"] = _memory_search_provider(env_values)
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

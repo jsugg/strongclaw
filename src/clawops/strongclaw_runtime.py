@@ -35,6 +35,7 @@ from clawops.app_paths import (
     strongclaw_workspace_dir,
 )
 from clawops.memory_profiles import MemoryProfileSpec, resolve_memory_profile
+from clawops.openclaw_agents import default_agent_id
 from clawops.platform_compat import (
     DEFAULT_ACPX_VERSION,
     DEFAULT_MANAGED_PROJECT_PYTHON_VERSION,
@@ -926,18 +927,23 @@ def load_openclaw_config(config_path: pathlib.Path) -> dict[str, Any]:
 
 
 def openclaw_default_agent_id(config: Mapping[str, Any]) -> str:
-    """Return OpenClaw's default agent: the `default` entry, else the first, else `main`."""
-    agents = _nested_mapping(config, "agents")
-    entries = agents.get("list") if agents is not None else None
-    candidates = [
-        cast(Mapping[str, Any], entry)
-        for entry in (cast(list[object], entries) if isinstance(entries, list) else [])
-        if isinstance(entry, Mapping) and isinstance(cast(Mapping[str, Any], entry).get("id"), str)
-    ]
-    chosen = next((entry for entry in candidates if entry.get("default") is True), None)
-    if chosen is None and candidates:
-        chosen = candidates[0]
-    return str(chosen["id"]).strip().lower() if chosen is not None else "main"
+    """Return the agent OpenClaw resolves for ambient work in *config*."""
+    return default_agent_id(config)
+
+
+def openclaw_memory_search_arguments(
+    repo_root: pathlib.Path, *, query: str, max_results: int
+) -> list[str]:
+    """Return `openclaw memory search` arguments scoped to the rendered config's ambient owner.
+
+    OpenClaw 2026.8 refuses an agent-scoped CLI read in a multi-agent fleet without `--agent`.
+    """
+    arguments = ["memory", "search"]
+    config_path = resolve_openclaw_config_path(repo_root)
+    if config_path.is_file():
+        owner = openclaw_default_agent_id(load_openclaw_config(config_path))
+        arguments.extend(["--agent", owner])
+    return [*arguments, "--query", query, "--max-results", str(max_results)]
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:

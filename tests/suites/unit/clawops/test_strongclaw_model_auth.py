@@ -390,10 +390,18 @@ def test_apply_model_chain_updates_rendered_openclaw_config_directly(
             }
         ],
     }
-    assert [agent["model"] for agent in payload["agents"]["list"]] == [
+    agents = payload["agents"]
+    assert "list" not in agents
+    assert [agent["model"] for agent in agents["entries"].values()] == [
         expected_model,
         expected_model,
         expected_model,
+    ]
+    # The defaults registry was the model allowlist through OpenClaw 2026.6; 2026.8 needs it explicit.
+    assert agents["defaults"]["modelPolicy"]["allow"] == [
+        "openai/gpt-5.4",
+        "ollama/deepseek-r1:latest",
+        "anthropic/claude-opus-4-6",
     ]
 
 
@@ -627,7 +635,7 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
 
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     defaults = payload["agents"]["defaults"]
-    coder = payload["agents"]["list"][0]
+    coder = payload["agents"]["entries"]["coder"]
     plugins = payload["plugins"]
     assert defaults["model"] == expected_model
     assert coder["model"] == expected_model
@@ -651,19 +659,27 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
     ],
     ids=["no-key-fts-only", "openai-key", "legacy-auto", "operator-choice"],
 )
+@pytest.mark.parametrize("location", ["memory.search", "agents.defaults.memorySearch"])
 def test_memory_search_provider_replays_the_legacy_auto_selection(
     test_context: TestContext,
     tmp_path: pathlib.Path,
     memory_search: dict[str, str] | None,
     env_values: dict[str, str],
     expected: str,
+    location: str,
 ) -> None:
-    """2026.5+ defaults to OpenAI embeddings and fails closed; model-auth pins the old choice."""
+    """2026.5+ defaults to OpenAI embeddings and fails closed; model-auth pins the old choice.
+
+    2026.8 reads `memory.search`; a 2026.6-era `agents.defaults.memorySearch` block moves there.
+    """
     config_path = tmp_path / "openclaw.json"
     defaults: dict[str, object] = {"model": {"primary": "featver/featver-chat"}}
-    if memory_search is not None:
+    config: dict[str, object] = {"agents": {"defaults": defaults}}
+    if memory_search is not None and location == "memory.search":
+        config["memory"] = {"search": memory_search}
+    elif memory_search is not None:
         defaults["memorySearch"] = memory_search
-    config_path.write_text(json.dumps({"agents": {"defaults": defaults}}), encoding="utf-8")
+    config_path.write_text(json.dumps(config), encoding="utf-8")
 
     def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
         del repo_root
@@ -682,4 +698,5 @@ def test_memory_search_provider_replays_the_legacy_auto_selection(
     apply_provider(tmp_path, env_values)
 
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload["agents"]["defaults"]["memorySearch"]["provider"] == expected
+    assert payload["memory"]["search"]["provider"] == expected
+    assert "memorySearch" not in payload["agents"]["defaults"]
