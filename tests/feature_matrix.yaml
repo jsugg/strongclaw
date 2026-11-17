@@ -44,7 +44,7 @@ features:
     title: clawops bootstrap installs the locked OpenClaw/ACPX toolchain, varlock and the venv
     call_sites:
       - src/clawops/strongclaw_bootstrap.py:575
-      - src/clawops/strongclaw_node_tools.py:715
+      - src/clawops/strongclaw_node_tools.py:746
     lanes: [linux-core, macos-launchd]
     verification: live
     test: tests/suites/e2e/feature_verification/test_host_lifecycle.py::test_bootstrap_installs_the_locked_toolchain

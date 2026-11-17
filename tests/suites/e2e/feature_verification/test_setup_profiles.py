@@ -196,7 +196,16 @@ def _session_reply(
                 for part in cast(list[object], last.get("content", []))
             )
         time.sleep(1)
-    raise AssertionError(f"no reply to {message!r} from session {session_key}")
+    recent = feature_host.gateway_admin_call(
+        "chat.history", {"sessionKey": session_key, "limit": 6}
+    ).json()
+    entries = cast(list[object], cast(dict[str, object], recent).get("messages", []))
+    summary = [
+        f"{cast(dict[str, object], entry).get('role')}: "
+        f"{json.dumps(cast(dict[str, object], entry).get('content'))[:300]}"
+        for entry in entries
+    ]
+    raise AssertionError(f"no reply to {message!r} from session {session_key}; recent: {summary}")
 
 
 def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:

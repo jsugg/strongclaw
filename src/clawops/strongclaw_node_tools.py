@@ -49,6 +49,7 @@ from clawops.strongclaw_runtime import CommandError, ExecResult, run_command
 NODE_TOOLS_ASSET_DIR: Final[pathlib.Path] = pathlib.Path("platform/node-tools")
 MANIFEST_FILE_NAME: Final[str] = "package.json"
 LOCK_FILE_NAME: Final[str] = "package-lock.json"
+HOST_PACKAGE_NAME: Final[str] = "openclaw"
 TOOL_ROOT_NAME: Final[str] = "strongclaw-node-tools"
 CURRENT_LINK_NAME: Final[str] = "current"
 NPM_CI_ARGUMENTS: Final[tuple[str, ...]] = ("ci", "--omit=dev", "--no-audit", "--no-fund")
@@ -109,6 +110,7 @@ class NodeToolPackage:
     name: str
     version: str
     bins: tuple[str, ...]
+    peers_on_openclaw: bool = False
 
     @property
     def is_cli(self) -> bool:
@@ -404,7 +406,15 @@ def parse_node_tools_lock(
         bins = (
             _package_bins(name, entry, source=source) if name in REQUIRED_NODE_TOOL_PACKAGES else ()
         )
-        pinned.append(NodeToolPackage(name=name, version=version, bins=bins))
+        peers = entry.get("peerDependencies")
+        peers_on_openclaw = isinstance(peers, Mapping) and HOST_PACKAGE_NAME in cast(
+            Mapping[str, object], peers
+        )
+        pinned.append(
+            NodeToolPackage(
+                name=name, version=version, bins=bins, peers_on_openclaw=peers_on_openclaw
+            )
+        )
     return tuple(pinned)
 
 
@@ -533,7 +543,7 @@ def stage_node_tools_tree(
     *,
     extra_npm_arguments: Sequence[str] = (),
 ) -> None:
-    """Copy the manifest and lock into *target_dir* and run `npm ci` there."""
+    """Copy the manifest and lock into *target_dir*, run `npm ci` there, and link host peers."""
     writer.make_dirs(target_dir)
     writer.copy_file(bundle.manifest_path, target_dir / MANIFEST_FILE_NAME)
     writer.copy_file(bundle.lock_path, target_dir / LOCK_FILE_NAME)
@@ -542,6 +552,27 @@ def stage_node_tools_tree(
         command_prefix=writer.command_prefix,
         extra_arguments=extra_npm_arguments,
     )
+    link_openclaw_peers(bundle, target_dir, writer)
+
+
+def link_openclaw_peers(
+    bundle: NodeToolsBundle, target_dir: pathlib.Path, writer: PrefixWriter
+) -> None:
+    """Give each package that peers on OpenClaw its own `node_modules/openclaw` host link.
+
+    OpenClaw 2026.8 verifies a plugin's peer link to the running host before loading it and
+    marks the plugin degraded without one (`missing-openclaw-peer-link`), as its own installer
+    creates it. `npm ci` satisfies the peer by hoisting, so the link is added here.
+    """
+    for package in bundle.packages:
+        if not package.peers_on_openclaw:
+            continue
+        package_modules = target_dir / "node_modules" / package.name / "node_modules"
+        writer.make_dirs(package_modules)
+        depth = len(pathlib.PurePosixPath(package.name).parts) + 1
+        writer.replace_symlink(
+            package_modules / HOST_PACKAGE_NAME, "/".join([".."] * depth + [HOST_PACKAGE_NAME])
+        )
 
 
 def prefetch_node_tools_packages(*, repo_root: pathlib.Path | None = None) -> None:
