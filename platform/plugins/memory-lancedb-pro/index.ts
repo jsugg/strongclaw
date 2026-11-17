@@ -382,18 +382,20 @@ function getExtensionApiImportSpecifiers(): string[] {
     // ignore resolve failures and continue fallback probing
   }
 
-  // strongclaw: `clawops bootstrap` installs OpenClaw under <npm prefix -g>/lib/strongclaw-node-tools
-  // and keeps <npm prefix -g>/lib/node_modules/openclaw as a compat link; probe both layouts.
-  for (const prefix of ["/usr", "/usr/local", "/opt/homebrew"]) {
-    specifiers.push(
-      toImportSpecifier(
-        `${prefix}/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js`,
-      ),
-    );
-    specifiers.push(toImportSpecifier(`${prefix}/lib/node_modules/openclaw/dist/extensionAPI.js`));
-  }
+  specifiers.push(toImportSpecifier("/usr/lib/node_modules/openclaw/dist/extensionAPI.js"));
+  specifiers.push(toImportSpecifier("/usr/local/lib/node_modules/openclaw/dist/extensionAPI.js"));
+  specifiers.push(toImportSpecifier("/opt/homebrew/lib/node_modules/openclaw/dist/extensionAPI.js"));
 
   return [...new Set(specifiers.filter(Boolean))];
+}
+
+// strongclaw: prefer the embedded agent runner the host injects as api.runtime.agent.
+function resolveHostEmbeddedAgentRunner(api: OpenClawPluginApi): EmbeddedPiRunner | undefined {
+  const agentRuntime = (api as { runtime?: { agent?: Record<string, unknown> } }).runtime?.agent;
+  const runner = agentRuntime?.runEmbeddedAgent;
+  return typeof runner === "function"
+    ? (params) => (runner as EmbeddedPiRunner).call(agentRuntime, params)
+    : undefined;
 }
 
 async function loadEmbeddedPiRunner(): Promise<EmbeddedPiRunner> {
@@ -1177,6 +1179,9 @@ async function generateReflectionText(params: {
   thinkLevel: ReflectionThinkLevel;
   toolErrorSignals?: ReflectionErrorSignal[];
   logger?: { info?: (message: string) => void; warn?: (message: string) => void };
+  // strongclaw: the host-injected api.runtime.agent.runEmbeddedAgent; OpenClaw 2026.8.35 removed
+  // dist/extensionAPI.js, so the import probe below only serves older hosts.
+  runEmbeddedAgent?: EmbeddedPiRunner;
 }): Promise<{ text: string; usedFallback: boolean; promptHash: string; error?: string; runner: "embedded" | "cli" | "fallback" }> {
   const prompt = buildReflectionPrompt(
     params.conversation,
@@ -1203,7 +1208,7 @@ async function generateReflectionText(params: {
       retryState,
       onLog: onRetryLog,
       execute: async () => {
-        const runEmbeddedPiAgent = await loadEmbeddedPiRunner();
+        const runEmbeddedPiAgent = params.runEmbeddedAgent ?? (await loadEmbeddedPiRunner());
         const modelRef = resolveAgentPrimaryModelRef(params.cfg, params.agentId);
         const { provider, model } = modelRef ? splitProviderModel(modelRef) : {};
         const embeddedTimeoutMs = Math.max(params.timeoutMs + 5000, 15000);
@@ -3077,6 +3082,7 @@ const memoryLanceDBProPlugin = {
             thinkLevel: reflectionThinkLevel,
             toolErrorSignals,
             logger: api.logger,
+            runEmbeddedAgent: resolveHostEmbeddedAgentRunner(api),
           });
           api.logger.info(
             `memory-reflection: command:${action} reflection generation done for session ${currentSessionId}; runner=${reflectionGenerated.runner}; usedFallback=${reflectionGenerated.usedFallback ? "yes" : "no"}`

@@ -14,7 +14,7 @@ Strongclaw does not enable this plugin by default. The shipped local overlays ke
 - `selfImprovement.enabled = false`
 - `enableManagementTools = false`
 
-This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.6.35`.
+This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.8.35`.
 
 - Strongclaw auto-detects `darwin/x86_64` and installs the newest stable
 compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2` publishes Apple binaries for `darwin-arm64` but not `darwin-x64`.
@@ -23,12 +23,11 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
 
 ## Local patches
 
-- `index.ts` `getExtensionApiImportSpecifiers()` also probes
-  `<prefix>/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js` for the
-  `/usr`, `/usr/local`, and `/opt/homebrew` prefixes, ahead of each legacy
-  `<prefix>/lib/node_modules/openclaw` path. `clawops bootstrap` installs OpenClaw from the
-  committed `platform/node-tools` lock into that managed tree and keeps the legacy path as a
-  compat symlink.
+- `index.ts` runs memory reflection through the host-injected
+  `api.runtime.agent.runEmbeddedAgent` and keeps the upstream `dist/extensionAPI.js` import
+  probe only as a fallback for hosts without it. OpenClaw 2026.8.35 no longer ships
+  `dist/extensionAPI.js` (the deprecated `openclaw/extension-api` bridge, whose 2026.6 warning
+  pointed plugins at `api.runtime.agent.*`), so the probe alone finds no runner.
 - The `test/*.mjs` `NODE_PATH` lists add `<prefix>/lib/strongclaw-node-tools/current/node_modules`
   next to each `<prefix>/lib/node_modules/openclaw/node_modules` entry: `npm ci` hoists OpenClaw's
   dependencies there instead of nesting them under the package as `npm install -g` did.
