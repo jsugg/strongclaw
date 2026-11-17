@@ -280,7 +280,7 @@ steps can continue.
 workflows delegate their nontrivial operational steps to `tests/scripts/` helper CLIs instead of embedding shell blobs or Python heredocs directly in YAML.
 - Those Ubuntu quality-gate workflows install the distro `shellcheck` binary
 before invoking the shared gate, and the repo's `pre-commit` hook now uses that system binary instead of a Docker-backed hook.
-- `.github/workflows/security.yml` enforces independent review for pull requests touching security-critical paths (auth, secrets, CI/infrastructure, dependency manifests, and browser-lab surfaces) via `tests/scripts/security_workflow.py enforce-independent-review`.
+- `.github/workflows/security.yml` enforces independent review for pull requests touching security-critical paths (auth, secrets, CI/infrastructure, dependency manifests, and browser-lab surfaces) via `tests/scripts/security_workflow.py enforce-independent-review`. It is skipped while the repo has fewer than two human maintainers with write access.
 - `.github/workflows/security.yml` installs a pinned `semgrep` CLI directly
 instead of relying on the Docker-backed Semgrep action, which keeps the lane off Docker Hub.
 - The Semgrep ruleset covers the repo's Python-heavy risk surfaces, including
