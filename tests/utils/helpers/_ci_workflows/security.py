@@ -187,30 +187,30 @@ def _is_security_critical_path(path: str) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in _CRITICAL_REVIEW_PATH_PATTERNS)
 
 
-def _has_independent_collaborator(
+def _is_bot_account(row: Mapping[str, object]) -> bool:
+    """Return whether one collaborators API row is a bot rather than a person."""
+    login = row.get("login")
+    return row.get("type") == "Bot" or (isinstance(login, str) and login.endswith("[bot]"))
+
+
+def _count_human_maintainers(
     *,
     repository: str,
-    author_login: str,
     github_token: str,
     github_api_base: str,
-) -> bool:
-    """Return whether the repository has at least one non-author collaborator with write access."""
+) -> int:
+    """Return how many human collaborators can push to the repository."""
     collaborators = _github_paginated_get(
         url=f"{github_api_base.rstrip('/')}/repos/{repository}/collaborators?affiliation=direct&per_page=100",
         token=github_token,
     )
-    for row in collaborators:
-        login = row.get("login")
-        if not isinstance(login, str) or login == author_login:
-            continue
-        permissions = row.get("permissions")
-        if not isinstance(permissions, dict):
-            continue
-        permissions_obj = cast(dict[object, object], permissions)
-        for permission_name in ("admin", "maintain", "push"):
-            if bool(permissions_obj.get(permission_name)):
-                return True
-    return False
+    return sum(
+        1
+        for row in collaborators
+        if isinstance(row.get("login"), str)
+        and not _is_bot_account(row)
+        and _has_write_permissions(row)
+    )
 
 
 def _has_write_permissions(row: Mapping[str, object]) -> bool:
@@ -293,11 +293,15 @@ def enforce_independent_review(
     if not critical_paths:
         return
 
-    if not _has_independent_collaborator(
-        repository=repository,
-        author_login=author_login,
-        github_token=github_token,
-        github_api_base=api_base,
+    # Two humans are the minimum for independent review: with a sole maintainer, bot-authored
+    # PRs (e.g. Dependabot) would otherwise demand an approval only the merger can give.
+    if (
+        _count_human_maintainers(
+            repository=repository,
+            github_token=github_token,
+            github_api_base=api_base,
+        )
+        < 2
     ):
         return
 
