@@ -28,6 +28,10 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
   probe only as a fallback for hosts without it. OpenClaw 2026.8.35 no longer ships
   `dist/extensionAPI.js` (the deprecated `openclaw/extension-api` bridge, whose 2026.6 warning
   pointed plugins at `api.runtime.agent.*`), so the probe alone finds no runner.
+- Reflection and the `systemSessionMemory` hook read the reset session through
+  `openclaw/plugin-sdk/session-transcript-runtime` when no transcript file exists: OpenClaw 2026.8
+  keeps runtime transcripts in the agent's SQLite database, so the upstream JSONL recovery
+  finds nothing. The file path still serves older hosts.
 - The `test/*.mjs` `NODE_PATH` lists add `<prefix>/lib/strongclaw-node-tools/current/node_modules`
   next to each `<prefix>/lib/node_modules/openclaw/node_modules` entry: `npm ci` hoists OpenClaw's
   dependencies there instead of nesting them under the package as `npm install -g` did.

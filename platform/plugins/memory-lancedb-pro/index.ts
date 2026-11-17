@@ -947,34 +947,69 @@ function extractTextFromToolResult(result: unknown): string {
   }
 }
 
+function formatReflectionConversation(messages: Iterable<unknown>, messageCount: number): string | null {
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const msg = message as Record<string, unknown>;
+    const role = typeof msg.role === "string" ? msg.role : "";
+    if (role !== "user" && role !== "assistant") continue;
+
+    const text = extractTextContent(msg.content);
+    if (!text || shouldSkipReflectionMessage(role, text)) continue;
+
+    lines.push(`${role}: ${redactSecrets(text)}`);
+  }
+  if (lines.length === 0) return null;
+  return lines.slice(-messageCount).join("\n");
+}
+
 async function readSessionConversationForReflection(filePath: string, messageCount: number): Promise<string | null> {
   try {
     const lines = (await readFile(filePath, "utf-8")).trim().split("\n");
-    const messages: string[] = [];
+    const messages: unknown[] = [];
 
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
         if (entry?.type !== "message" || !entry?.message) continue;
-
-        const msg = entry.message as Record<string, unknown>;
-        const role = typeof msg.role === "string" ? msg.role : "";
-        if (role !== "user" && role !== "assistant") continue;
-
-        const text = extractTextContent(msg.content);
-        if (!text || shouldSkipReflectionMessage(role, text)) continue;
-
-        messages.push(`${role}: ${redactSecrets(text)}`);
+        messages.push(entry.message);
       } catch {
         // ignore JSON parse errors
       }
     }
 
-    if (messages.length === 0) return null;
-    return messages.slice(-messageCount).join("\n");
+    return formatReflectionConversation(messages, messageCount);
   } catch {
     return null;
   }
+}
+
+// strongclaw: OpenClaw 2026.8 keeps runtime transcripts in the agent's SQLite database instead of
+// session JSONL files; plugins read them through this SDK subpath (docs/plugins/sdk-runtime.md).
+async function readHostSessionConversation(params: {
+  agentId: string;
+  sessionKey: string;
+  sessionId: string;
+  messageCount: number;
+}): Promise<string | null> {
+  const runtime = (await import("openclaw/plugin-sdk/session-transcript-runtime")) as {
+    readVisibleSessionTranscriptMessageEntries?: (scope: {
+      agentId: string;
+      sessionKey: string;
+      sessionId: string;
+    }) => Promise<Array<{ message?: unknown }>>;
+  };
+  if (typeof runtime.readVisibleSessionTranscriptMessageEntries !== "function") return null;
+  const entries = await runtime.readVisibleSessionTranscriptMessageEntries({
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
+  });
+  return formatReflectionConversation(
+    entries.map((entry) => entry.message),
+    params.messageCount
+  );
 }
 
 export async function readSessionConversationWithResetFallback(sessionFilePath: string, messageCount: number): Promise<string | null> {
@@ -3033,7 +3068,26 @@ const memoryLanceDBProPlugin = {
             }
           }
 
-          if (!currentSessionFile) {
+          let conversation: string | null = null;
+          if (currentSessionFile) {
+            conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
+          } else if (sessionKey && currentSessionId !== "unknown") {
+            try {
+              conversation = await readHostSessionConversation({
+                agentId: sourceAgentId,
+                sessionKey,
+                sessionId: currentSessionId,
+                messageCount: reflectionMessageCount,
+              });
+              api.logger.info(
+                `memory-reflection: command:${action} read session ${currentSessionId} from the host transcript store`
+              );
+            } catch (err) {
+              api.logger.warn(
+                `memory-reflection: command:${action} host transcript read failed for session ${currentSessionId}: ${String(err)}`
+              );
+            }
+          } else {
             const searchDirs = resolveReflectionSessionSearchDirs({
               context,
               cfg,
@@ -3047,10 +3101,9 @@ const memoryLanceDBProPlugin = {
             return;
           }
 
-          const conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
           if (!conversation) {
             api.logger.warn(
-              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile}`
+              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile || "(host transcript)"}`
             );
             return;
           }
@@ -3312,15 +3365,22 @@ const memoryLanceDBProPlugin = {
             }
           }
 
-          if (!currentSessionFile) {
+          if (!currentSessionFile && (!sessionKey || currentSessionId === "unknown")) {
             api.logger.debug("session-memory: no session file found, skipping");
             return;
           }
 
-          const sessionContent = await readSessionConversationWithResetFallback(
-            currentSessionFile,
-            sessionMessageCount,
-          );
+          const sessionContent = currentSessionFile
+            ? await readSessionConversationWithResetFallback(currentSessionFile, sessionMessageCount)
+            : await readHostSessionConversation({
+                agentId,
+                sessionKey,
+                sessionId: currentSessionId,
+                messageCount: sessionMessageCount,
+              }).catch((err: unknown) => {
+                api.logger.warn(`session-memory: host transcript read failed: ${String(err)}`);
+                return null;
+              });
           if (!sessionContent) {
             api.logger.debug("session-memory: no session content found, skipping");
             return;
