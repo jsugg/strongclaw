@@ -5,14 +5,15 @@ replaces lists: the ACP profile swaps out the whole trust-zone roster. OpenClaw 
 keyed ``agents.entries`` map instead and migrates ``agents.list`` at gateway startup by rewriting
 ``openclaw.json`` (``docs/gateway/configuration.md``, startup migration). Rendered configs therefore
 carry the current shape, so the gateway never rewrites the config StrongClaw manages.
+
+Standard library only: ``strongclaw_runtime`` imports this module, and CI helper scripts load that
+on a bare runner Python before the project environment exists.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Final, cast
-
-from clawops.common import deep_merge
 
 type JsonObject = dict[str, object]
 
@@ -25,6 +26,16 @@ def _mapping(value: object) -> Mapping[str, object]:
     if isinstance(value, Mapping):
         return cast(Mapping[str, object], value)
     return {}
+
+
+def _merge(base: object, overlay: object) -> object:
+    """Recursively merge *overlay* onto *base*; overlay values win (stdlib-only `deep_merge`)."""
+    if isinstance(base, Mapping) and isinstance(overlay, Mapping):
+        merged: JsonObject = dict(cast(Mapping[str, object], base))
+        for key, value in cast(Mapping[str, object], overlay).items():
+            merged[key] = _merge(merged[key], value) if key in merged else value
+        return merged
+    return overlay
 
 
 def _child_object(parent: JsonObject, key: str) -> JsonObject:
@@ -94,7 +105,7 @@ def normalize_agent_roster(config: JsonObject) -> JsonObject:
             owner = agent_id
         settings = {key: value for key, value in agent.items() if key not in {"id", "default"}}
         existing = entries.get(agent_id)
-        entries[agent_id] = deep_merge(settings, existing) if existing is not None else settings
+        entries[agent_id] = _merge(settings, existing) if existing is not None else settings
     if len(entries) > 1:
         agents_object.setdefault("ownership", EXPLICIT_OWNERSHIP)
     if owner is not None:
