@@ -717,7 +717,7 @@ def test_memory_search_provider_replays_the_legacy_auto_selection(
             [
                 ["gateway", "status", "--json"],
                 ["models", "status", "--agent", "admin", "--check"],
-                ["gateway", "call", "openclaw.setup.verify", "--params", '{"agentId": "admin"}'],
+                ["infer", "model", "run", "--agent", "admin", "--prompt"],
             ],
         ),
     ],
@@ -741,8 +741,6 @@ def test_probe_goes_through_the_gateway_that_owns_the_state(
             return SimpleNamespace(ok=True, stdout='[{"id": "admin"}]')
         if arguments[:2] == ["gateway", "status"]:
             return SimpleNamespace(ok=True, stdout=json.dumps({"rpc": {"ok": gateway_up}}))
-        if arguments[:2] == ["gateway", "call"]:
-            return SimpleNamespace(ok=True, stdout='{"ok": true, "modelRef": "x/y"}')
         return SimpleNamespace(ok=True, stdout="")
 
     test_context.patch.patch_object(

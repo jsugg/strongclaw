@@ -1253,7 +1253,9 @@ async function generateReflectionText(params: {
             sessionId: `reflection-${Date.now()}`,
             sessionKey: "temp:memory-reflection",
             agentId: params.agentId,
-            sessionFile: tempSessionFile,
+            // strongclaw: the host runner owns its SQLite transcript and accepts a `sessionFile`
+            // only as a SQLite transcript marker; the temp JSONL file serves the legacy import.
+            ...(params.runEmbeddedAgent ? {} : { sessionFile: tempSessionFile }),
             workspaceDir: params.workspaceDir,
             config: params.cfg,
             prompt,

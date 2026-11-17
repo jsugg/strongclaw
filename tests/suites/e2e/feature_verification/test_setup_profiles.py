@@ -22,7 +22,6 @@ from tests.utils.helpers.feature_verification import (
     GatewayController,
     plugin_statuses,
     register_provider,
-    reply_texts,
 )
 
 ACP_WORKER_AGENTS: Final[tuple[str, ...]] = ("coder-acp-codex", "reviewer-acp-claude")
@@ -164,21 +163,27 @@ def _set_stub_harness(feature_host: FeatureHost, harness: str) -> None:
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
-    """Send a gateway command from the dispatcher session as operator.admin; return the reply."""
+def _session_reply(
+    feature_host: FeatureHost,
+    session_key: str,
+    message: str,
+    *,
+    timeout: float = COMMAND_REPLY_TIMEOUT_SECONDS,
+) -> str:
+    """Send *message* to *session_key* through the gateway as operator.admin; return the reply."""
     sent_at_ms = time.time() * 1000
     feature_host.gateway_admin_call(
         "chat.send",
         {
-            "sessionKey": DISPATCHER_SESSION_KEY,
-            "message": command,
+            "sessionKey": session_key,
+            "message": message,
             "idempotencyKey": f"featver-{uuid.uuid4().hex}",
         },
     ).require_ok()
-    deadline = time.monotonic() + COMMAND_REPLY_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         history = feature_host.gateway_admin_call(
-            "chat.history", {"sessionKey": DISPATCHER_SESSION_KEY, "limit": 1}
+            "chat.history", {"sessionKey": session_key, "limit": 1}
         ).require_ok()
         messages = cast(list[object], cast(dict[str, object], history.json()).get("messages", []))
         last = cast(dict[str, object], messages[-1]) if messages else {}
@@ -191,7 +196,12 @@ def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
                 for part in cast(list[object], last.get("content", []))
             )
         time.sleep(1)
-    raise AssertionError(f"no reply to {command!r} from the dispatcher session")
+    raise AssertionError(f"no reply to {message!r} from session {session_key}")
+
+
+def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
+    """Send a gateway command from the dispatcher session as operator.admin; return the reply."""
+    return _session_reply(feature_host, DISPATCHER_SESSION_KEY, command)
 
 
 def test_acp_worker_agent_runs_a_turn_through_acpx(
@@ -230,19 +240,13 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
     assert session_key is not None, f"/acp spawn did not start a session: {spawned}"
 
     token = f"FV-worker-{uuid.uuid4().hex[:10]}"
-    outcome = feature_host.openclaw(
-        "agent",
-        "--session-key",
-        session_key.group(0),
-        "--message",
-        f"Reply {token}",
-        "--json",
-        timeout=300,
-    )
-    replies = reply_texts(outcome.require_ok().json())
-    assert any(
-        ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies
-    ), f"the ACP worker did not answer through acpx; replies: {replies}"
+    # OpenClaw 2026.8 `openclaw agent` resolves the key's agent segment against configured agents,
+    # and an ACP session key carries the harness id (`agent:codex:acp:<uuid>`); the docs target
+    # the session key directly (docs/tools/acp-agents.md), which the gateway chat surface does.
+    reply = _session_reply(feature_host, session_key.group(0), f"Reply {token}", timeout=300)
+    assert (
+        ACP_STUB_REPLY_PREFIX in reply and token in reply
+    ), f"the ACP worker did not answer through acpx; reply: {reply}"
 
     # An ordinary turn addressed to the unsandboxed dispatcher never reaches the model.
     probe = f"FV-dispatch-{uuid.uuid4().hex[:10]}"

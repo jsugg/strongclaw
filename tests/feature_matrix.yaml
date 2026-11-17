@@ -122,7 +122,7 @@ features:
     category: model-auth
     title: openclaw agents list --json reports every configured agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:116
+      - src/clawops/strongclaw_model_auth.py:117
     lanes: [linux-core]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_agents_list_matches_rendered_config
@@ -130,8 +130,8 @@ features:
     category: model-auth
     title: clawops model-auth ensure applies the env-driven model chain to every agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:371
-      - src/clawops/strongclaw_model_auth.py:271
+      - src/clawops/strongclaw_model_auth.py:374
+      - src/clawops/strongclaw_model_auth.py:274
     lanes: [linux-core, macos-launchd]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_auth_ensure_applies_env_driven_chain
@@ -139,7 +139,7 @@ features:
     category: model-auth
     title: models status --check --probe reaches the provider for every agent
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:200
+      - src/clawops/strongclaw_model_auth.py:203
     lanes: [linux-core]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_model_probe_reaches_the_provider
@@ -147,7 +147,7 @@ features:
     category: model-auth
     title: openclaw models --agent X list --json reports an available model (fallback path)
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:143
+      - src/clawops/strongclaw_model_auth.py:144
     lanes: [linux-profiles]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_models_list_reports_available_models
@@ -155,7 +155,7 @@ features:
     category: model-auth
     title: Interactive model wizard (openclaw configure --section model)
     call_sites:
-      - src/clawops/strongclaw_model_auth.py:490
+      - src/clawops/strongclaw_model_auth.py:493
     status: unverifiable
     reason: Runs only on an interactive TTY and walks a vendor sign-in/provider picker; the non-interactive env-driven chain (model-auth.ensure) covers the same outcome.
 
@@ -355,7 +355,7 @@ features:
     category: memory
     title: memory-lancedb-pro autoCapture runs smart extraction and embeddings after a turn
     call_sites:
-      - platform/plugins/memory-lancedb-pro/index.ts:2765
+      - platform/plugins/memory-lancedb-pro/index.ts:2767
     lanes: [linux-lancedb]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_smart_extraction_calls_the_extraction_model
@@ -365,7 +365,7 @@ features:
     call_sites:
       - platform/plugins/memory-lancedb-pro/index.ts:393
       - platform/plugins/memory-lancedb-pro/index.ts:1252
-      - platform/plugins/memory-lancedb-pro/index.ts:3311
+      - platform/plugins/memory-lancedb-pro/index.ts:3313
     lanes: [linux-lancedb]
     verification: fake-model
     test: tests/suites/e2e/feature_verification/test_memory_lancedb.py::test_reflection_runs_through_the_embedded_runner
@@ -895,7 +895,7 @@ features:
     call_sites:
       - platform/configs/openclaw/77-hypermemory.example.json5:3
       - platform/configs/openclaw/75-memory-lancedb-pro.local.json5:3
-      - src/clawops/strongclaw_model_auth.py:264
+      - src/clawops/strongclaw_model_auth.py:267
     lanes: [linux-core, linux-lancedb]
     verification: live
     test: tests/suites/e2e/feature_verification/test_model_gateway.py::test_profile_allowlist_keeps_bundled_provider_plugins

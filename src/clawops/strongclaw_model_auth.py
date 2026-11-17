@@ -35,7 +35,8 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
-_GATEWAY_PROBE_TIMEOUT_SECONDS: Final[int] = 120
+_INFERENCE_PROBE_TIMEOUT_SECONDS: Final[int] = 120
+_PROBE_PROMPT: Final[str] = "Reply with exactly: ok"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
 OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
@@ -163,16 +164,18 @@ def _gateway_rpc_ready(repo_root: pathlib.Path) -> bool:
     return rpc is not None and rpc.get("ok") is True
 
 
-def _agent_inference_verified_by_gateway(repo_root: pathlib.Path, agent_id: str) -> bool:
-    """Live-probe one agent's configured inference route through the running Gateway."""
-    params = json.dumps({"agentId": agent_id})
+def _agent_inference_answers(repo_root: pathlib.Path, agent_id: str) -> bool:
+    """Live-probe one agent's configured model and auth with a one-shot local completion.
+
+    `openclaw infer model run` is stateless, so it runs beside a Gateway that owns the state
+    directory, and it exits non-zero when the provider returns no text (docs/cli/infer.md).
+    """
     result = run_openclaw_command(
         repo_root,
-        ["gateway", "call", "openclaw.setup.verify", "--params", params, "--json"],
-        timeout_seconds=_GATEWAY_PROBE_TIMEOUT_SECONDS,
+        ["infer", "model", "run", "--agent", agent_id, "--prompt", _PROBE_PROMPT, "--json"],
+        timeout_seconds=_INFERENCE_PROBE_TIMEOUT_SECONDS,
     )
-    verification = _mapping_or_none(extract_json_document(result.stdout)) if result.ok else None
-    return verification is not None and verification.get("ok") is True
+    return result.ok
 
 
 def _agent_model_status_ok(
@@ -186,7 +189,7 @@ def _agent_model_status_ok(
     """Return whether one agent passes the status check and, when asked, a live probe.
 
     OpenClaw 2026.8 refuses a direct `models status --probe` while a Gateway owns the state
-    directory (docs/cli/models.md); `openclaw.setup.verify` probes the same route through it.
+    directory (docs/cli/models.md); a one-shot `infer model run` probes the route instead.
     """
     command = ["models", "status", "--agent", agent_id, "--check"]
     if probe and not gateway_owns_state:
@@ -194,7 +197,7 @@ def _agent_model_status_ok(
     if not run_openclaw_command(repo_root, command, timeout_seconds=60).ok:
         return False
     if probe and gateway_owns_state:
-        return _agent_inference_verified_by_gateway(repo_root, agent_id)
+        return _agent_inference_answers(repo_root, agent_id)
     return True
 
 
