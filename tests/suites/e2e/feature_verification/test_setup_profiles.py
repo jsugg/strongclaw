@@ -250,8 +250,8 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
 
     token = f"FV-worker-{uuid.uuid4().hex[:10]}"
     # An unbound ACP session is driven by key with `/acp steer --session` (docs/tools/acp-agents.md,
-    # "Session target resolution"). Steer runs a full acpx turn and replies with the worker output;
-    # `openclaw agent` and the gateway `agent` method reject the key's harness segment as an agent id.
+    # "Session target resolution"); gateway `chat.send` only records the message. Steer runs a full
+    # acpx turn as the key's agent id, which the acp profile names after the owning worker agent.
     reply = _session_reply(
         feature_host,
         DISPATCHER_SESSION_KEY,

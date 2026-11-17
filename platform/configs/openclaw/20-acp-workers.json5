@@ -10,7 +10,7 @@
         "name": "Coder ACP Codex",
         "runtime": {
           "acp": {
-            "agent": "codex",
+            "agent": "coder-acp-codex",
             "backend": "acpx",
             "cwd": "__UPSTREAM_REPO_ROOT__",
             "mode": "persistent"
@@ -56,7 +56,7 @@
         "name": "Reviewer ACP Claude",
         "runtime": {
           "acp": {
-            "agent": "claude",
+            "agent": "reviewer-acp-claude",
             "backend": "acpx",
             "cwd": "__UPSTREAM_REPO_ROOT__",
             "mode": "persistent"
@@ -120,11 +120,38 @@
     ]
   },
   // `/acp spawn` targets ACP harness ids; only the two worker harnesses are allowed.
+  // OpenClaw 2026.8 names a spawned session `agent:<harness>:acp:<uuid>` and runs its turns as
+  // that agent id, so each harness is named after the configured worker agent that owns it.
   "acp": {
     "allowedAgents": [
-      "codex",
-      "claude"
+      "coder-acp-codex",
+      "reviewer-acp-claude"
     ]
   },
-  "bindings": []
+  "bindings": [],
+  "plugins": {
+    "entries": {
+      "acpx": {
+        "config": {
+          // Same adapter packages and ranges as acpx 0.21.1's built-in `codex` and `claude` harnesses.
+          "agents": {
+            "coder-acp-codex": {
+              "args": [
+                "-y",
+                "@agentclientprotocol/codex-acp@^1.1.5"
+              ],
+              "command": "npx"
+            },
+            "reviewer-acp-claude": {
+              "args": [
+                "-y",
+                "@agentclientprotocol/claude-agent-acp@^0.95.0"
+              ],
+              "command": "npx"
+            }
+          }
+        }
+      }
+    }
+  }
 }
