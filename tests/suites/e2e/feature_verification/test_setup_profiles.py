@@ -22,7 +22,6 @@ from tests.utils.helpers.feature_verification import (
     GatewayController,
     plugin_statuses,
     register_provider,
-    reply_texts,
 )
 
 ACP_WORKER_AGENTS: Final[tuple[str, ...]] = ("coder-acp-codex", "reviewer-acp-claude")
@@ -250,29 +249,18 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
     assert session_key is not None, f"/acp spawn did not start a session: {spawned}"
 
     token = f"FV-worker-{uuid.uuid4().hex[:10]}"
-    # OpenClaw 2026.8's `openclaw agent` CLI requires the key's agent segment to be a configured
-    # agent (docs/cli/agent.md), but an ACP key carries the harness id (`agent:codex:acp:<uuid>`,
-    # docs/tools/acp-agents.md). The Gateway `agent` method that CLI calls still routes the key, and
-    # gateway `chat.send` only records the message for an unbound ACP session.
-    params = {
-        "sessionKey": session_key.group(0),
-        "message": f"Reply {token}",
-        "idempotencyKey": f"featver-{uuid.uuid4().hex}",
-    }
-    outcome = feature_host.openclaw(
-        "gateway",
-        "call",
-        "agent",
-        "--params",
-        json.dumps(params),
-        "--expect-final",
-        "--json",
+    # An unbound ACP session is driven by key with `/acp steer --session` (docs/tools/acp-agents.md,
+    # "Session target resolution"). Steer runs a full acpx turn and replies with the worker output;
+    # `openclaw agent` and the gateway `agent` method reject the key's harness segment as an agent id.
+    reply = _session_reply(
+        feature_host,
+        DISPATCHER_SESSION_KEY,
+        f"/acp steer --session {session_key.group(0)} Reply {token}",
         timeout=300,
     )
-    replies = reply_texts(outcome.require_ok().json())
-    assert any(
-        ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies
-    ), f"the ACP worker did not answer through acpx; replies: {replies}"
+    assert (
+        ACP_STUB_REPLY_PREFIX in reply and token in reply
+    ), f"the ACP worker did not answer through acpx; reply: {reply}"
 
     # An ordinary turn addressed to the unsandboxed dispatcher never reaches the model.
     probe = f"FV-dispatch-{uuid.uuid4().hex[:10]}"

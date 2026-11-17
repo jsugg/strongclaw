@@ -109,10 +109,11 @@ class StubAgent:
             self._result(request_id, {"sessionId": f"featver-{uuid.uuid4().hex[:12]}"})
         elif method == "session/prompt":
             session_id = params_mapping.get("sessionId")
+            # Prompt before env: `/acp steer` truncates the reply it relays to 800 characters.
             reply = (
                 f"{REPLY_PREFIX} persona={self._persona} "
-                f"auth={'+'.join(self._authenticated) or 'none'} "
-                f"env={self._env_report()} prompt={self._prompt_text(params_mapping)}"
+                f"prompt={self._prompt_text(params_mapping)} "
+                f"auth={'+'.join(self._authenticated) or 'none'} env={self._env_report()}"
             )
             self._send(
                 {
