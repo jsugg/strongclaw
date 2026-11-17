@@ -32,6 +32,7 @@ Require an independent reviewer for:
 Repository enforcement:
 - `.github/workflows/security.yml` runs `tests/scripts/security_workflow.py enforce-independent-review`.
 - The check inspects pull-request file changes in security-critical paths and fails unless there is at least one non-author `APPROVED` review.
+- The check applies only when two or more human collaborators have write access. With a sole maintainer no independent reviewer exists, so it passes; bots never count as maintainers.
 
 ## Skill intake
 

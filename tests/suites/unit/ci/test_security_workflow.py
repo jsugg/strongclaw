@@ -650,6 +650,97 @@ def test_enforce_independent_review_skips_for_single_developer_repo(
     )
 
 
+def test_enforce_independent_review_skips_bot_authored_pr_in_single_maintainer_repo(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """A bot-authored PR must not demand approval when only one human maintains the repo."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 45,
+                    "user": {"login": "dependabot[bot]", "type": "Bot"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
+        assert token == "ghs_test"
+        if "/files?" in url:
+            return [{"filename": "uv.lock"}]
+        if "/collaborators?" in url:
+            return [
+                {"login": "sole-maintainer", "type": "User", "permissions": {"admin": True}},
+                {"login": "release-bot[bot]", "type": "Bot", "permissions": {"push": True}},
+            ]
+        if "/reviews?" in url:
+            raise AssertionError(
+                "review endpoint should not be queried for single-maintainer repos"
+            )
+        raise AssertionError(url)
+
+    test_context.patch.patch_object(
+        security_helpers,
+        "_github_paginated_get",
+        new=fake_paginated_get,
+    )
+
+    security_helpers.enforce_independent_review(
+        event_path=event_path,
+        repository="example/repo",
+        github_token="ghs_test",
+    )
+
+
+def test_enforce_independent_review_rejects_unapproved_bot_pr_with_two_maintainers(
+    test_context: TestContext,
+    tmp_path: Path,
+) -> None:
+    """With two human maintainers, a bot-authored critical change still needs an approval."""
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "number": 46,
+                    "user": {"login": "dependabot[bot]", "type": "Bot"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_paginated_get(*, url: str, token: str) -> list[dict[str, object]]:
+        assert token == "ghs_test"
+        if "/files?" in url:
+            return [{"filename": "package-lock.json"}]
+        if "/collaborators?" in url:
+            return [
+                {"login": "maintainer-one", "type": "User", "permissions": {"admin": True}},
+                {"login": "maintainer-two", "type": "User", "permissions": {"push": True}},
+            ]
+        if "/reviews?" in url:
+            return []
+        raise AssertionError(url)
+
+    test_context.patch.patch_object(
+        security_helpers,
+        "_github_paginated_get",
+        new=fake_paginated_get,
+    )
+
+    with pytest.raises(CiWorkflowError, match="independent review required"):
+        security_helpers.enforce_independent_review(
+            event_path=event_path,
+            repository="example/repo",
+            github_token="ghs_test",
+        )
+
+
 def test_security_workflow_main_dispatches_independent_review_enforcement(
     test_context: TestContext,
     tmp_path: Path,
