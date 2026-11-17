@@ -232,7 +232,7 @@ If you need the OpenClaw built-ins instead, switch to the explicit fallback:
 clawops config memory --set-profile openclaw-default
 ```
 
-If you need the built-ins plus the experimental QMD backend, switch to:
+If you need the built-ins plus builtin memory over the QMD document corpus (OpenClaw 2026.8 removed the QMD backend), switch to:
 
 ```bash
 clawops config memory --set-profile openclaw-qmd

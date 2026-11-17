@@ -85,7 +85,7 @@ def _write_observability_inputs(
             '  "diagnostics": {"enabled": true, "otel": {"enabled": true, "endpoint": '
             f'"http://{otlp_host}:{otlp_port}", "protocol": "http/protobuf", '
             '"metrics": true, "traces": true}},\n'
-            '  "logging": {"redactSensitive": "tools", "redactPatterns": ["sk-.*"]},\n'
+            '  "logging": {"redactPatterns": ["sk-.*"]},\n'
             '  "plugins": {"allow": ["diagnostics-otel"], "entries": {"diagnostics-otel": {"enabled": true}}}\n'
             "}\n"
         ),

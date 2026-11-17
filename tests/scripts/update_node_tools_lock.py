@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bump the locked OpenClaw/ACPX node-tools tree and every surface that quotes its versions.
 
-The lock is regenerated with the CI toolchain (Node 22.22.1 / npm 10.9.4), restricted to
+The lock is regenerated with the CI toolchain (Node 22.23.5 / npm 10.9.9), restricted to
 releases older than a quarantine window, validated, optionally smoke-installed, and then
 mirrored into the packaged assets alongside the docs and env templates that quote the pins.
 """
@@ -45,8 +45,8 @@ from clawops.strongclaw_runtime import (  # noqa: E402
 from tests.scripts.sync_runtime_assets import sync_runtime_assets  # noqa: E402
 from tests.utils.helpers.node_tools import rewrite_version_mentions  # noqa: E402
 
-REQUIRED_NODE_VERSION: Final[str] = "22.22.1"
-REQUIRED_NPM_VERSION: Final[str] = "10.9.4"
+REQUIRED_NODE_VERSION: Final[str] = "22.23.5"
+REQUIRED_NPM_VERSION: Final[str] = "10.9.9"
 DEFAULT_MIN_RELEASE_AGE_DAYS: Final[int] = 3
 _NPM_LOCK_TIMEOUT_SECONDS: Final[int] = 1800
 

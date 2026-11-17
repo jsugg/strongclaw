@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Final, cast
 
+from clawops.openclaw_agents import agent_entries, default_agent_id
 from clawops.strongclaw_runtime import resolve_openclaw_config_path
 from tests.utils.helpers.feature_verification import (
     ACP_STUB_REPLY_PREFIX,
@@ -21,7 +22,6 @@ from tests.utils.helpers.feature_verification import (
     GatewayController,
     plugin_statuses,
     register_provider,
-    reply_texts,
 )
 
 ACP_WORKER_AGENTS: Final[tuple[str, ...]] = ("coder-acp-codex", "reviewer-acp-claude")
@@ -89,16 +89,46 @@ def test_openclaw_default_profile_boots_with_memory_core(
     feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
 
 
-def test_openclaw_qmd_profile_installs_and_uses_qmd(
+def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
     feature_host: FeatureHost, gateway: GatewayController
 ) -> None:
+    """OpenClaw 2026.8 removed the QMD backend (docs/concepts/memory-builtin.md, "Migrating from
+    QMD"): the profile still installs QMD and serves its corpus through builtin `extraPaths`."""
     _activate(feature_host, gateway, "openclaw-qmd")
     qmd = feature_host.home / ".bun" / "bin" / "qmd"
     feature_host.run([str(qmd), "status"], timeout=120).require_ok()
     memory = cast(dict[str, object], feature_host.rendered_config()["memory"])
-    assert memory["backend"] == "qmd", memory
-    status = feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
-    assert "qmd" in status.output.lower(), status.describe()
+    assert {"backend", "qmd"}.isdisjoint(memory), memory
+    runbooks = (feature_host.repo_root / "platform" / "docs").resolve().as_posix()
+    extra_paths = cast(
+        list[dict[str, str]], cast(dict[str, object], memory["search"])["extraPaths"]
+    )
+    assert runbooks in [Path(entry["path"]).resolve().as_posix() for entry in extra_paths]
+    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+    owner = default_agent_id(feature_host.rendered_config())
+    feature_host.openclaw("memory", "index", "--agent", owner, "--force", timeout=900).require_ok()
+    payload = (
+        feature_host.openclaw(
+            "memory",
+            "search",
+            "--agent",
+            owner,
+            "--query",
+            "StrongClaw degradation contract dependency health runtime impact",
+            "--max-results",
+            "5",
+            "--json",
+            timeout=600,
+        )
+        .require_ok()
+        .json()
+    )
+    result = cast(dict[str, object], payload)
+    assert result.get("stale") is not True, result
+    hits = [
+        str(cast(dict[str, object], hit)["path"]) for hit in cast(list[object], result["results"])
+    ]
+    assert any("/platform/docs/" in path for path in hits), hits
 
 
 def test_acp_profile_registers_acp_worker_agents(
@@ -108,10 +138,9 @@ def test_acp_profile_registers_acp_worker_agents(
     listed = _agent_ids(feature_host)
     for agent_id in ACP_WORKER_AGENTS:
         assert agent_id in listed, listed
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
     runtimes = {
-        str(cast(dict[str, object], agent)["id"]): cast(dict[str, object], agent).get("runtime")
-        for agent in cast(list[object], agents["list"])
+        agent_id: agent.get("runtime")
+        for agent_id, agent in agent_entries(feature_host.rendered_config()).items()
     }
     for agent_id in ACP_WORKER_AGENTS:
         runtime = cast(dict[str, object], runtimes[agent_id])
@@ -134,21 +163,27 @@ def _set_stub_harness(feature_host: FeatureHost, harness: str) -> None:
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
-    """Send a gateway command from the dispatcher session as operator.admin; return the reply."""
+def _session_reply(
+    feature_host: FeatureHost,
+    session_key: str,
+    message: str,
+    *,
+    timeout: float = COMMAND_REPLY_TIMEOUT_SECONDS,
+) -> str:
+    """Send *message* to *session_key* through the gateway as operator.admin; return the reply."""
     sent_at_ms = time.time() * 1000
     feature_host.gateway_admin_call(
         "chat.send",
         {
-            "sessionKey": DISPATCHER_SESSION_KEY,
-            "message": command,
+            "sessionKey": session_key,
+            "message": message,
             "idempotencyKey": f"featver-{uuid.uuid4().hex}",
         },
     ).require_ok()
-    deadline = time.monotonic() + COMMAND_REPLY_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         history = feature_host.gateway_admin_call(
-            "chat.history", {"sessionKey": DISPATCHER_SESSION_KEY, "limit": 1}
+            "chat.history", {"sessionKey": session_key, "limit": 1}
         ).require_ok()
         messages = cast(list[object], cast(dict[str, object], history.json()).get("messages", []))
         last = cast(dict[str, object], messages[-1]) if messages else {}
@@ -161,19 +196,28 @@ def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
                 for part in cast(list[object], last.get("content", []))
             )
         time.sleep(1)
-    raise AssertionError(f"no reply to {command!r} from the dispatcher session")
+    recent = feature_host.gateway_admin_call(
+        "chat.history", {"sessionKey": session_key, "limit": 6}
+    ).json()
+    entries = cast(list[object], cast(dict[str, object], recent).get("messages", []))
+    summary = [
+        f"{cast(dict[str, object], entry).get('role')}: "
+        f"{json.dumps(cast(dict[str, object], entry).get('content'))[:300]}"
+        for entry in entries
+    ]
+    raise AssertionError(f"no reply to {message!r} from session {session_key}; recent: {summary}")
+
+
+def _dispatcher_command(feature_host: FeatureHost, command: str) -> str:
+    """Send a gateway command from the dispatcher session as operator.admin; return the reply."""
+    return _session_reply(feature_host, DISPATCHER_SESSION_KEY, command)
 
 
 def test_acp_worker_agent_runs_a_turn_through_acpx(
     feature_host: FeatureHost, gateway: GatewayController
 ) -> None:
     _activate(feature_host, gateway, "acp")
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
-    coder = next(
-        cast(dict[str, object], agent)
-        for agent in cast(list[object], agents["list"])
-        if cast(dict[str, object], agent)["id"] == "coder-acp-codex"
-    )
+    coder = agent_entries(feature_host.rendered_config())["coder-acp-codex"]
     acp = cast(dict[str, object], cast(dict[str, object], coder["runtime"])["acp"])
     acp_cwd = Path(str(acp["cwd"]))
     acp_cwd.mkdir(parents=True, exist_ok=True)
@@ -205,19 +249,18 @@ def test_acp_worker_agent_runs_a_turn_through_acpx(
     assert session_key is not None, f"/acp spawn did not start a session: {spawned}"
 
     token = f"FV-worker-{uuid.uuid4().hex[:10]}"
-    outcome = feature_host.openclaw(
-        "agent",
-        "--session-key",
-        session_key.group(0),
-        "--message",
-        f"Reply {token}",
-        "--json",
+    # An unbound ACP session is driven by key with `/acp steer --session` (docs/tools/acp-agents.md,
+    # "Session target resolution"); gateway `chat.send` only records the message. Steer runs a full
+    # acpx turn as the key's agent id, which the acp profile names after the owning worker agent.
+    reply = _session_reply(
+        feature_host,
+        DISPATCHER_SESSION_KEY,
+        f"/acp steer --session {session_key.group(0)} Reply {token}",
         timeout=300,
     )
-    replies = reply_texts(outcome.require_ok().json())
-    assert any(
-        ACP_STUB_REPLY_PREFIX in reply and token in reply for reply in replies
-    ), f"the ACP worker did not answer through acpx; replies: {replies}"
+    assert (
+        ACP_STUB_REPLY_PREFIX in reply and token in reply
+    ), f"the ACP worker did not answer through acpx; reply: {reply}"
 
     # An ordinary turn addressed to the unsandboxed dispatcher never reaches the model.
     probe = f"FV-dispatch-{uuid.uuid4().hex[:10]}"

@@ -136,7 +136,7 @@ If you want the legacy OpenClaw built-ins instead, use the explicit `openclaw-de
 uv run --project . clawops config memory --set-profile openclaw-default
 ```
 
-If you want the built-ins plus the experimental QMD backend, use `openclaw-qmd`:
+If you want the built-ins plus builtin memory over the QMD document corpus (OpenClaw 2026.8 removed the QMD backend), use `openclaw-qmd`:
 
 ```bash
 uv run --project . clawops config memory --set-profile openclaw-qmd
@@ -168,7 +168,7 @@ For a deeper post-setup scan, run:
 make doctor
 ```
 
-Supported toolchain versions are documented in [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The current validated baseline is Python `3.12` or `3.13`, Node `22.19.x` or `24.x`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.6.35`, ACPX `0.21.1`, QMD `2.0.1`, and `lossless-claw v0.3.0`.
+Supported toolchain versions are documented in [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The current validated baseline is Python `3.12` or `3.13`, Node `22.22.3+` or `24.15.0+`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.8.35`, ACPX `0.21.1`, QMD `2.0.1`, and `lossless-claw v0.3.0`.
 
 ## Development
 

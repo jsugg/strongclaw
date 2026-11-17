@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import cast
 
+from clawops.openclaw_agents import agent_entries
 from tests.utils.helpers.feature_verification import (
     FAKE_CHAT_MODEL_REF,
     REPLY_PREFIX,
@@ -19,10 +20,7 @@ TURN_TIMEOUT_SECONDS = 300
 
 
 def _agent_ids(feature_host: FeatureHost) -> list[str]:
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
-    return [
-        str(cast(dict[str, object], agent)["id"]) for agent in cast(list[object], agents["list"])
-    ]
+    return list(agent_entries(feature_host.rendered_config()))
 
 
 def _token(label: str) -> str:
@@ -50,8 +48,9 @@ def test_model_auth_ensure_applies_env_driven_chain(feature_host: FeatureHost) -
     agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
     defaults = cast(dict[str, object], agents["defaults"])
     assert cast(dict[str, object], defaults["model"])["primary"] == FAKE_CHAT_MODEL_REF
-    for raw_agent in cast(list[object], agents["list"]):
-        agent = cast(dict[str, object], raw_agent)
+    rendered_agents = agent_entries(feature_host.rendered_config())
+    assert rendered_agents, agents
+    for agent in rendered_agents.values():
         assert cast(dict[str, object], agent["model"])["primary"] == FAKE_CHAT_MODEL_REF, agent
 
 

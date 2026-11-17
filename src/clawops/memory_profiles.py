@@ -35,7 +35,7 @@ MEMORY_PROFILES: dict[str, MemoryProfileSpec] = {
     "openclaw-qmd": MemoryProfileSpec(
         profile_id="openclaw-qmd",
         render_profile="openclaw-qmd",
-        description="Built-in OpenClaw defaults plus the experimental QMD memory backend.",
+        description="Built-in OpenClaw defaults plus builtin memory over the QMD document corpus.",
         installs_qmd=True,
     ),
     "memory-lancedb-pro": MemoryProfileSpec(

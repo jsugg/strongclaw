@@ -70,7 +70,9 @@ def inspect_installed_plugin(repo_root: pathlib.Path, plugin_id: str) -> Install
 
 def _install(repo_root: pathlib.Path, plugin: FirstPartyPlugin, *, replace: bool) -> None:
     """Install *plugin* at its pinned version, replacing an existing install when asked."""
-    arguments = ["plugins", "install", plugin.npm_spec, "--pin"]
+    # OpenClaw 2026.8 installs a consent-gated artifact only with explicit consent (`--yes` does
+    # not grant it); the consent covers exactly this lock-pinned first-party version.
+    arguments = ["plugins", "install", plugin.npm_spec, "--pin", "--accept-capabilities"]
     if replace:
         arguments.append("--force")
     result = run_openclaw_command(repo_root, arguments, timeout_seconds=INSTALL_TIMEOUT_SECONDS)

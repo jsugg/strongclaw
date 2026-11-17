@@ -382,18 +382,20 @@ function getExtensionApiImportSpecifiers(): string[] {
     // ignore resolve failures and continue fallback probing
   }
 
-  // strongclaw: `clawops bootstrap` installs OpenClaw under <npm prefix -g>/lib/strongclaw-node-tools
-  // and keeps <npm prefix -g>/lib/node_modules/openclaw as a compat link; probe both layouts.
-  for (const prefix of ["/usr", "/usr/local", "/opt/homebrew"]) {
-    specifiers.push(
-      toImportSpecifier(
-        `${prefix}/lib/strongclaw-node-tools/current/node_modules/openclaw/dist/extensionAPI.js`,
-      ),
-    );
-    specifiers.push(toImportSpecifier(`${prefix}/lib/node_modules/openclaw/dist/extensionAPI.js`));
-  }
+  specifiers.push(toImportSpecifier("/usr/lib/node_modules/openclaw/dist/extensionAPI.js"));
+  specifiers.push(toImportSpecifier("/usr/local/lib/node_modules/openclaw/dist/extensionAPI.js"));
+  specifiers.push(toImportSpecifier("/opt/homebrew/lib/node_modules/openclaw/dist/extensionAPI.js"));
 
   return [...new Set(specifiers.filter(Boolean))];
+}
+
+// strongclaw: prefer the embedded agent runner the host injects as api.runtime.agent.
+function resolveHostEmbeddedAgentRunner(api: OpenClawPluginApi): EmbeddedPiRunner | undefined {
+  const agentRuntime = (api as { runtime?: { agent?: Record<string, unknown> } }).runtime?.agent;
+  const runner = agentRuntime?.runEmbeddedAgent;
+  return typeof runner === "function"
+    ? (params) => (runner as EmbeddedPiRunner).call(agentRuntime, params)
+    : undefined;
 }
 
 async function loadEmbeddedPiRunner(): Promise<EmbeddedPiRunner> {
@@ -945,34 +947,69 @@ function extractTextFromToolResult(result: unknown): string {
   }
 }
 
+function formatReflectionConversation(messages: Iterable<unknown>, messageCount: number): string | null {
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const msg = message as Record<string, unknown>;
+    const role = typeof msg.role === "string" ? msg.role : "";
+    if (role !== "user" && role !== "assistant") continue;
+
+    const text = extractTextContent(msg.content);
+    if (!text || shouldSkipReflectionMessage(role, text)) continue;
+
+    lines.push(`${role}: ${redactSecrets(text)}`);
+  }
+  if (lines.length === 0) return null;
+  return lines.slice(-messageCount).join("\n");
+}
+
 async function readSessionConversationForReflection(filePath: string, messageCount: number): Promise<string | null> {
   try {
     const lines = (await readFile(filePath, "utf-8")).trim().split("\n");
-    const messages: string[] = [];
+    const messages: unknown[] = [];
 
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
         if (entry?.type !== "message" || !entry?.message) continue;
-
-        const msg = entry.message as Record<string, unknown>;
-        const role = typeof msg.role === "string" ? msg.role : "";
-        if (role !== "user" && role !== "assistant") continue;
-
-        const text = extractTextContent(msg.content);
-        if (!text || shouldSkipReflectionMessage(role, text)) continue;
-
-        messages.push(`${role}: ${redactSecrets(text)}`);
+        messages.push(entry.message);
       } catch {
         // ignore JSON parse errors
       }
     }
 
-    if (messages.length === 0) return null;
-    return messages.slice(-messageCount).join("\n");
+    return formatReflectionConversation(messages, messageCount);
   } catch {
     return null;
   }
+}
+
+// strongclaw: OpenClaw 2026.8 keeps runtime transcripts in the agent's SQLite database instead of
+// session JSONL files; plugins read them through this SDK subpath (docs/plugins/sdk-runtime.md).
+async function readHostSessionConversation(params: {
+  agentId: string;
+  sessionKey: string;
+  sessionId: string;
+  messageCount: number;
+}): Promise<string | null> {
+  const runtime = (await import("openclaw/plugin-sdk/session-transcript-runtime")) as {
+    readVisibleSessionTranscriptMessageEntries?: (scope: {
+      agentId: string;
+      sessionKey: string;
+      sessionId: string;
+    }) => Promise<Array<{ message?: unknown }>>;
+  };
+  if (typeof runtime.readVisibleSessionTranscriptMessageEntries !== "function") return null;
+  const entries = await runtime.readVisibleSessionTranscriptMessageEntries({
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
+  });
+  return formatReflectionConversation(
+    entries.map((entry) => entry.message),
+    params.messageCount
+  );
 }
 
 export async function readSessionConversationWithResetFallback(sessionFilePath: string, messageCount: number): Promise<string | null> {
@@ -1177,6 +1214,9 @@ async function generateReflectionText(params: {
   thinkLevel: ReflectionThinkLevel;
   toolErrorSignals?: ReflectionErrorSignal[];
   logger?: { info?: (message: string) => void; warn?: (message: string) => void };
+  // strongclaw: the host-injected api.runtime.agent.runEmbeddedAgent; OpenClaw 2026.8.35 removed
+  // dist/extensionAPI.js, so the import probe below only serves older hosts.
+  runEmbeddedAgent?: EmbeddedPiRunner;
 }): Promise<{ text: string; usedFallback: boolean; promptHash: string; error?: string; runner: "embedded" | "cli" | "fallback" }> {
   const prompt = buildReflectionPrompt(
     params.conversation,
@@ -1203,7 +1243,7 @@ async function generateReflectionText(params: {
       retryState,
       onLog: onRetryLog,
       execute: async () => {
-        const runEmbeddedPiAgent = await loadEmbeddedPiRunner();
+        const runEmbeddedPiAgent = params.runEmbeddedAgent ?? (await loadEmbeddedPiRunner());
         const modelRef = resolveAgentPrimaryModelRef(params.cfg, params.agentId);
         const { provider, model } = modelRef ? splitProviderModel(modelRef) : {};
         const embeddedTimeoutMs = Math.max(params.timeoutMs + 5000, 15000);
@@ -1213,7 +1253,9 @@ async function generateReflectionText(params: {
             sessionId: `reflection-${Date.now()}`,
             sessionKey: "temp:memory-reflection",
             agentId: params.agentId,
-            sessionFile: tempSessionFile,
+            // strongclaw: the host runner owns its SQLite transcript and accepts a `sessionFile`
+            // only as a SQLite transcript marker; the temp JSONL file serves the legacy import.
+            ...(params.runEmbeddedAgent ? {} : { sessionFile: tempSessionFile }),
             workspaceDir: params.workspaceDir,
             config: params.cfg,
             prompt,
@@ -3028,7 +3070,26 @@ const memoryLanceDBProPlugin = {
             }
           }
 
-          if (!currentSessionFile) {
+          let conversation: string | null = null;
+          if (currentSessionFile) {
+            conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
+          } else if (sessionKey && currentSessionId !== "unknown") {
+            try {
+              conversation = await readHostSessionConversation({
+                agentId: sourceAgentId,
+                sessionKey,
+                sessionId: currentSessionId,
+                messageCount: reflectionMessageCount,
+              });
+              api.logger.info(
+                `memory-reflection: command:${action} read session ${currentSessionId} from the host transcript store`
+              );
+            } catch (err) {
+              api.logger.warn(
+                `memory-reflection: command:${action} host transcript read failed for session ${currentSessionId}: ${String(err)}`
+              );
+            }
+          } else {
             const searchDirs = resolveReflectionSessionSearchDirs({
               context,
               cfg,
@@ -3042,10 +3103,9 @@ const memoryLanceDBProPlugin = {
             return;
           }
 
-          const conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
           if (!conversation) {
             api.logger.warn(
-              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile}`
+              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile || "(host transcript)"}`
             );
             return;
           }
@@ -3077,6 +3137,7 @@ const memoryLanceDBProPlugin = {
             thinkLevel: reflectionThinkLevel,
             toolErrorSignals,
             logger: api.logger,
+            runEmbeddedAgent: resolveHostEmbeddedAgentRunner(api),
           });
           api.logger.info(
             `memory-reflection: command:${action} reflection generation done for session ${currentSessionId}; runner=${reflectionGenerated.runner}; usedFallback=${reflectionGenerated.usedFallback ? "yes" : "no"}`
@@ -3306,15 +3367,22 @@ const memoryLanceDBProPlugin = {
             }
           }
 
-          if (!currentSessionFile) {
+          if (!currentSessionFile && (!sessionKey || currentSessionId === "unknown")) {
             api.logger.debug("session-memory: no session file found, skipping");
             return;
           }
 
-          const sessionContent = await readSessionConversationWithResetFallback(
-            currentSessionFile,
-            sessionMessageCount,
-          );
+          const sessionContent = currentSessionFile
+            ? await readSessionConversationWithResetFallback(currentSessionFile, sessionMessageCount)
+            : await readHostSessionConversation({
+                agentId,
+                sessionKey,
+                sessionId: currentSessionId,
+                messageCount: sessionMessageCount,
+              }).catch((err: unknown) => {
+                api.logger.warn(`session-memory: host transcript read failed: ${String(err)}`);
+                return null;
+              });
           if (!sessionContent) {
             api.logger.debug("session-memory: no session content found, skipping");
             return;

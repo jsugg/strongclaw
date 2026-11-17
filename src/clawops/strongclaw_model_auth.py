@@ -13,6 +13,7 @@ from typing import Final, cast
 from clawops.app_paths import strongclaw_node_tools_dir
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.common import extract_json_document
+from clawops.openclaw_agents import agent_entries, normalize_agent_roster, sync_model_policy
 from clawops.openclaw_plugins import CODEX_AGENT_RUNTIME_ID, attach_first_party_plugins
 from clawops.strongclaw_runtime import (
     READINESS_VARLOCK_ENV_MODES,
@@ -34,6 +35,8 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
+_INFERENCE_PROBE_TIMEOUT_SECONDS: Final[int] = 120
+_PROBE_PROMPT: Final[str] = "Reply with exactly: ok"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
 OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
@@ -153,19 +156,49 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
     )
 
 
+def _gateway_rpc_ready(repo_root: pathlib.Path) -> bool:
+    """Return whether a running Gateway answers RPC for the rendered config."""
+    result = run_openclaw_command(repo_root, ["gateway", "status", "--json"], timeout_seconds=30)
+    status = _mapping_or_none(extract_json_document(result.stdout)) if result.ok else None
+    rpc = _mapping_or_none(status.get("rpc")) if status is not None else None
+    return rpc is not None and rpc.get("ok") is True
+
+
+def _agent_inference_answers(repo_root: pathlib.Path, agent_id: str) -> bool:
+    """Live-probe one agent's configured model and auth with a one-shot local completion.
+
+    `openclaw infer model run` is stateless, so it runs beside a Gateway that owns the state
+    directory, and it exits non-zero when the provider returns no text (docs/cli/infer.md).
+    """
+    result = run_openclaw_command(
+        repo_root,
+        ["infer", "model", "run", "--agent", agent_id, "--prompt", _PROBE_PROMPT, "--json"],
+        timeout_seconds=_INFERENCE_PROBE_TIMEOUT_SECONDS,
+    )
+    return result.ok
+
+
 def _agent_model_status_ok(
     repo_root: pathlib.Path,
     agent_id: str,
     *,
     probe: bool,
     probe_max_tokens: int,
+    gateway_owns_state: bool = False,
 ) -> bool:
-    """Return whether one agent passes the status check."""
+    """Return whether one agent passes the status check and, when asked, a live probe.
+
+    OpenClaw 2026.8 refuses a direct `models status --probe` while a Gateway owns the state
+    directory (docs/cli/models.md); a one-shot `infer model run` probes the route instead.
+    """
     command = ["models", "status", "--agent", agent_id, "--check"]
-    if probe:
+    if probe and not gateway_owns_state:
         command.extend(["--probe", "--probe-max-tokens", str(probe_max_tokens)])
-    result = run_openclaw_command(repo_root, command, timeout_seconds=60)
-    return result.ok
+    if not run_openclaw_command(repo_root, command, timeout_seconds=60).ok:
+        return False
+    if probe and gateway_owns_state:
+        return _agent_inference_answers(repo_root, agent_id)
+    return True
 
 
 def _all_agents_have_models(
@@ -178,6 +211,7 @@ def _all_agents_have_models(
     agent_ids = _list_agent_ids(repo_root)
     failures: list[str] = []
     use_status = _models_status_supported(repo_root)
+    gateway_owns_state = probe and use_status and _gateway_rpc_ready(repo_root)
     for agent_id in agent_ids:
         ok = (
             _agent_model_status_ok(
@@ -185,6 +219,7 @@ def _all_agents_have_models(
                 agent_id,
                 probe=probe,
                 probe_max_tokens=probe_max_tokens,
+                gateway_owns_state=gateway_owns_state,
             )
             if use_status
             else _agent_models_available_via_list(repo_root, agent_id)
@@ -302,19 +337,14 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
         }
     configured_model = {"primary": primary, "fallbacks": list(fallbacks)}
     defaults_payload["model"] = configured_model
-    agent_list = agents_payload.get("list")
-    if not isinstance(agent_list, list):
-        raise CommandError(f"invalid OpenClaw config at {config_path}: missing `agents.list` array")
-    for raw_agent in cast(list[object], agent_list):
-        agent = _mutable_mapping_or_none(raw_agent)
-        if agent is None:
-            raise CommandError(
-                f"invalid OpenClaw config at {config_path}: agent entries must be mappings"
-            )
-        if "id" not in agent:
-            raise CommandError(
-                f"invalid OpenClaw config at {config_path}: agent entry missing `id`"
-            )
+    try:
+        normalize_agent_roster(payload)
+    except TypeError as err:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: {err}") from err
+    agents = agent_entries(payload)
+    if not agents:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: no `agents.entries`")
+    for agent in agents.values():
         agent["model"] = {"primary": primary, "fallbacks": list(fallbacks)}
         agent_models = _mutable_mapping_or_none(agent.get("models"))
         for model_ref, codex_runtime in resolved_chain.items():
@@ -323,6 +353,7 @@ def _apply_model_chain(repo_root: pathlib.Path, model_chain: Sequence[str]) -> N
             )
             if model_settings is not None:
                 _set_codex_runtime(model_settings, enabled=codex_runtime)
+    sync_model_policy(payload)
     attach_first_party_plugins(
         payload, node_modules_dir=strongclaw_node_tools_dir() / "node_modules"
     )
@@ -384,21 +415,25 @@ def _memory_search_provider(env_values: dict[str, str]) -> str:
 
 
 def _apply_memory_search_provider(repo_root: pathlib.Path, env_values: dict[str, str]) -> None:
-    """Pin `agents.defaults.memorySearch.provider` unless the operator already chose one."""
+    """Pin `memory.search.provider` unless the operator already chose one.
+
+    OpenClaw 2026.8 reads memory search settings from `memory.search`. A 2026.6-era
+    `agents.defaults.memorySearch` block moves there first, as `openclaw doctor --fix` moves it.
+    """
     config_path = resolve_openclaw_config_path(repo_root)
     payload = load_openclaw_config(config_path)
     defaults = _mutable_mapping_or_none(
         (_mutable_mapping_or_none(payload.get("agents")) or {}).get("defaults")
     )
-    if defaults is None:
-        return
-    memory_search = _mutable_mapping_or_none(defaults.get("memorySearch"))
-    if memory_search is None:
-        memory_search = {}
-        defaults["memorySearch"] = memory_search
-    if memory_search.get("provider") not in (None, "auto"):
-        return
-    memory_search["provider"] = _memory_search_provider(env_values)
+    legacy = _mutable_mapping_or_none(defaults.pop("memorySearch", None)) if defaults else None
+    memory = _mutable_mapping_or_none(payload.setdefault("memory", {}))
+    search = None if memory is None else _mutable_mapping_or_none(memory.setdefault("search", {}))
+    if search is None:
+        raise CommandError(f"invalid OpenClaw config at {config_path}: `memory` must be an object")
+    for key, value in (legacy or {}).items():
+        search.setdefault(key, value)
+    if search.get("provider") in (None, "auto"):
+        search["provider"] = _memory_search_provider(env_values)
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 

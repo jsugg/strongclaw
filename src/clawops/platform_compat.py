@@ -62,9 +62,48 @@ def load_node_tool_pins(
 NODE_TOOL_PINS: Final[Mapping[str, str]] = load_node_tool_pins()
 DEFAULT_OPENCLAW_VERSION: Final[str] = NODE_TOOL_PINS["openclaw"]
 DEFAULT_ACPX_VERSION: Final[str] = NODE_TOOL_PINS["acpx"]
-# Mirrors the major.minor guard in the pinned openclaw.mjs, which refuses to start below it.
-MINIMUM_NODE_VERSION: Final[tuple[int, int]] = (22, 19)
-MINIMUM_NODE_VERSION_TEXT: Final[str] = f"{MINIMUM_NODE_VERSION[0]}.{MINIMUM_NODE_VERSION[1]}"
+type NodeVersion = tuple[int, int, int]
+
+# Mirrors NODE_RELEASE_FLOORS in the pinned openclaw node-version.mjs: one floor per supported
+# release line. Majors between listed lines are unsupported; majors above the last one are allowed.
+NODE_RELEASE_FLOORS: Final[tuple[NodeVersion, ...]] = ((22, 22, 3), (24, 15, 0), (25, 9, 0))
+MINIMUM_NODE_VERSION: Final[NodeVersion] = NODE_RELEASE_FLOORS[0]
+_NODE_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$"
+)
+
+
+def format_node_version(version: NodeVersion) -> str:
+    """Render a Node.js release version as `major.minor.patch`."""
+    return ".".join(str(part) for part in version)
+
+
+def _render_supported_node_range(floors: tuple[NodeVersion, ...]) -> str:
+    """Render *floors* in the npm `engines.node` syntax OpenClaw publishes."""
+    bounded = [f">={format_node_version(floor)} <{floor[0] + 1}" for floor in floors[:-1]]
+    return " || ".join([*bounded, f">={format_node_version(floors[-1])}"])
+
+
+MINIMUM_NODE_VERSION_TEXT: Final[str] = format_node_version(MINIMUM_NODE_VERSION)
+SUPPORTED_NODE_RANGE: Final[str] = _render_supported_node_range(NODE_RELEASE_FLOORS)
+
+
+def parse_node_version(text: str) -> NodeVersion | None:
+    """Parse a Node.js release version such as `v22.22.3`; return None when malformed."""
+    match = _NODE_VERSION_PATTERN.fullmatch(text.strip())
+    if match is None:
+        return None
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def node_version_supported(version: NodeVersion) -> bool:
+    """Return whether the pinned OpenClaw accepts *version*, following its release-line floors."""
+    for floor in NODE_RELEASE_FLOORS:
+        if version[0] == floor[0]:
+            return version >= floor
+    return version[0] > NODE_RELEASE_FLOORS[-1][0]
+
+
 DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION = "0.26.2"
 DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION = "0.22.3"
 DEFAULT_MANAGED_PROJECT_PYTHON_VERSION = "3.12"

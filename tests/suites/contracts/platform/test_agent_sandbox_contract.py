@@ -14,6 +14,7 @@ from typing import Final, cast
 
 import pytest
 
+from clawops.openclaw_agents import agent_entries, default_agent_id
 from clawops.openclaw_config import PROFILES, render_openclaw_profile
 from tests.utils.helpers.repo import REPO_ROOT
 
@@ -37,8 +38,7 @@ def _mapping(value: object) -> Mapping[str, object]:
 
 
 def _agents(config: Mapping[str, object]) -> list[Mapping[str, object]]:
-    raw = _mapping(config.get("agents")).get("list")
-    return [_mapping(agent) for agent in cast(list[object], raw)] if isinstance(raw, list) else []
+    return [{"id": agent_id, **settings} for agent_id, settings in agent_entries(config).items()]
 
 
 def _effective_sandbox_mode(config: Mapping[str, object], agent: Mapping[str, object]) -> object:
@@ -62,7 +62,7 @@ def _spawn_allowlists(config: Mapping[str, object]) -> Iterator[tuple[str, list[
     yield "agents.defaults", _string_list(_mapping(defaults.get("subagents")).get("allowAgents"))
     for agent in _agents(config):
         allow = _string_list(_mapping(agent.get("subagents")).get("allowAgents"))
-        yield f"agents.list[{agent.get('id')}]", allow
+        yield f"agents.entries.{agent.get('id')}", allow
 
 
 @pytest.mark.parametrize("profile_name", sorted(PROFILES))
@@ -95,9 +95,15 @@ def test_the_dispatcher_is_reachable_only_through_admin_acp_spawn() -> None:
     dispatcher = _dispatcher(config)
     agents = _agents(config)
 
-    # Default routing: unrouted channel and CLI traffic lands on the default agent, which is the
-    # one marked `default: true`, else the first entry.
-    assert dispatcher.get("default") is not True
+    # Ambient routing: unrouted channel, CLI, and system work lands on the surface owners that
+    # OpenClaw 2026.8 materializes from the legacy default agent, never on the dispatcher.
+    defaults = _mapping(_mapping(config.get("agents")).get("defaults"))
+    owners = {
+        _mapping(defaults.get(surface)).get("agentId")
+        for surface in ("systemAgent", "authInheritance")
+    } | {_mapping(config.get("talk")).get("agentId")}
+    assert owners == {"coder-acp-codex"}, owners
+    assert default_agent_id(config) != DISPATCHER_ID
     assert agents[0].get("id") != DISPATCHER_ID
     # Channel routing and ACP conversation bindings.
     bound = [

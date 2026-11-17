@@ -697,3 +697,21 @@ def test_bundle_digest_tracks_the_lock_bytes(tmp_path: pathlib.Path) -> None:
     assert first.digest == same.digest
     assert first.digest != bumped.digest
     assert len(first.digest) == 16
+
+
+def test_first_party_plugins_get_a_host_peer_link_after_npm_ci(tmp_path: pathlib.Path) -> None:
+    """OpenClaw 2026.8 degrades a plugin whose `node_modules/openclaw` peer link is missing."""
+    bundle = node_tools.load_node_tools_bundle(REPO_ROOT / "platform" / "node-tools")
+    peered = sorted(package.name for package in bundle.packages if package.peers_on_openclaw)
+    host = tmp_path / "node_modules" / "openclaw"
+    host.mkdir(parents=True)
+    for name in peered:
+        (tmp_path / "node_modules" / name).mkdir(parents=True)
+
+    node_tools.link_openclaw_peers(bundle, tmp_path, node_tools.LocalPrefixWriter())
+
+    assert peered and all(name.startswith("@openclaw/") for name in peered)
+    for name in peered:
+        link = tmp_path / "node_modules" / name / "node_modules" / "openclaw"
+        assert link.is_symlink() and link.resolve() == host.resolve(), name
+    assert not (host / "node_modules").exists()

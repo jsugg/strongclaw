@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from clawops.openclaw_agents import agent_entries
 from clawops.runtime_assets import resolve_runtime_layout
 from tests.utils.helpers.feature_verification import (
     CommandOutcome,
@@ -161,12 +162,7 @@ def test_smart_extraction_calls_the_extraction_model(
 
 
 def _reflection_files(feature_host: FeatureHost) -> list[Path]:
-    agents = cast(dict[str, object], feature_host.rendered_config()["agents"])
-    admin = next(
-        cast(dict[str, object], agent)
-        for agent in cast(list[object], agents["list"])
-        if cast(dict[str, object], agent)["id"] == "admin"
-    )
+    admin = agent_entries(feature_host.rendered_config())["admin"]
     day = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     return sorted((Path(str(admin["workspace"])) / "memory" / "reflections" / day).glob("*.md"))
 
@@ -216,7 +212,7 @@ def test_reflection_runs_through_the_embedded_runner(
         assert any("MEMORY REFLECTION" in prompt for prompt in prompts), "no reflection prompt"
         logs = gateway.log_text()
         assert "runner=embedded" in logs, (
-            "reflection did not run through extensionAPI runEmbeddedPiAgent "
+            "reflection did not run through the host embedded agent runner "
             f"(runner line: {[line for line in logs.splitlines() if 'runner=' in line][-3:]})"
         )
     finally:

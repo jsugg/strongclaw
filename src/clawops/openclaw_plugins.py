@@ -18,6 +18,7 @@ import pathlib
 from collections.abc import Callable, Iterator, Mapping
 from typing import Final, cast
 
+from clawops.openclaw_agents import agent_entries
 from clawops.platform_compat import NODE_TOOL_PINS
 
 type JsonObject = dict[str, object]
@@ -25,7 +26,7 @@ type JsonObject = dict[str, object]
 FIRST_PARTY_PLUGIN_SCOPE: Final[str] = "@openclaw/"
 CODEX_AGENT_RUNTIME_ID: Final[str] = "codex"
 ACPX_BACKEND_ID: Final[str] = "acpx"
-BUNDLED_DISCOVERY_COMPAT: Final[str] = "compat"
+MEMORY_CORE_PLUGIN_ID: Final[str] = "memory-core"
 # Bundled provider plugins behind the model-auth paths StrongClaw documents. They were core
 # built-ins before 2026.4, so restrictive `plugins.allow` lists never had to name them, and
 # model-auth may switch agents to any of them after render.
@@ -42,11 +43,8 @@ def _mapping(value: object) -> Mapping[str, object]:
 
 
 def _agents(config: Mapping[str, object]) -> list[Mapping[str, object]]:
-    """Return the configured agent entries."""
-    raw_list = _mapping(config.get("agents")).get("list")
-    if not isinstance(raw_list, list):
-        return []
-    return [_mapping(agent) for agent in cast(list[object], raw_list)]
+    """Return the configured agent settings."""
+    return list(agent_entries(config).values())
 
 
 def _model_selection_refs(selection: object) -> Iterator[str]:
@@ -150,6 +148,9 @@ FIRST_PARTY_PLUGINS: Final[tuple[FirstPartyPlugin, ...]] = (
     ),
     FirstPartyPlugin("zai", "@openclaw/zai-provider", _uses_provider("zai"), always_enabled=True),
 )
+PROVIDER_PLUGIN_IDS: Final[frozenset[str]] = BUNDLED_PROVIDER_PLUGIN_IDS | frozenset(
+    plugin.plugin_id for plugin in FIRST_PARTY_PLUGINS if plugin.always_enabled
+)
 
 
 def _child_object(parent: JsonObject, key: str) -> JsonObject:
@@ -182,6 +183,25 @@ def _append_unique(target: list[object], value: str) -> None:
         target.append(value)
 
 
+def pin_memory_core_defaults(config: JsonObject) -> JsonObject:
+    """Keep memory-core's background dreaming opt-in where memory-core holds the memory slot.
+
+    OpenClaw 2026.8 turned dreaming on by default: a scheduled, model-backed sweep that ingests
+    session transcripts into long-term memory (docs/concepts/dreaming.md); through 2026.6 it was
+    opt-in. Only the slot owner is touched, because a `memory-core` entry makes OpenClaw load the
+    plugin beside another memory plugin. An operator's own `dreaming.enabled` value is kept.
+    """
+    plugins = _mapping(config.get("plugins"))
+    if _mapping(plugins.get("slots")).get("memory") != MEMORY_CORE_PLUGIN_ID:
+        return config
+    entries = _child_object(_child_object(config, "plugins"), "entries")
+    memory_core = _child_object(entries, MEMORY_CORE_PLUGIN_ID)
+    # doctor --fix makes the slot owner explicit once its entry exists.
+    memory_core.setdefault("enabled", True)
+    _child_object(_child_object(memory_core, "config"), "dreaming").setdefault("enabled", False)
+    return config
+
+
 def required_openclaw_installs(config: Mapping[str, object]) -> tuple[FirstPartyPlugin, ...]:
     """Return the trusted-install plugins *config* routes work through."""
     if _mapping(config.get("plugins")).get("enabled") is False:
@@ -196,15 +216,17 @@ def required_openclaw_installs(config: Mapping[str, object]) -> tuple[FirstParty
 def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.Path) -> JsonObject:
     """Load every locked first-party plugin from *node_modules_dir* and enable the needed ones.
 
-    Each plugin is made discoverable so OpenClaw never installs it from npm. A plugin the config
-    requires is enabled, even over a stale `enabled: false`. An unused runtime or service plugin
-    is disabled unless the operator configured or allowlisted it. With a restrictive
-    `plugins.allow`, the enabled plugins plus the documented bundled providers are
-    allowlisted, and bundled discovery keeps OpenClaw's pre-2026.5 compatibility mode.
+    Each plugin is made discoverable so OpenClaw never installs it from npm. Every plugin the
+    config requires, and the provider plugin of every configured model, is explicitly enabled,
+    even over a stale `enabled: false`; that is the set `openclaw doctor --fix` 2026.8 enables.
+    An unused runtime or service plugin is disabled unless the operator configured or
+    allowlisted it. With a restrictive `plugins.allow`, the enabled plugins plus the documented
+    bundled providers are allowlisted.
     """
     plugins = _child_object(config, "plugins")
     if plugins.get("enabled") is False:
         return config
+    pin_memory_core_defaults(config)
     load_paths = _string_list(_child_object(plugins, "load"), "paths")
     allow = plugins.get("allow")
     allowlist = cast(list[object], allow) if isinstance(allow, list) and allow else None
@@ -218,25 +240,22 @@ def attach_first_party_plugins(config: JsonObject, *, node_modules_dir: pathlib.
                 load_paths.remove(locked_path)
         else:
             _append_unique(load_paths, locked_path)
-        entry = entries.get(plugin.plugin_id)
-        settings = cast(JsonObject, entry) if isinstance(entry, dict) else None
-        if required and plugin.openclaw_installed:
-            # An installed runtime registers its backend only when explicitly enabled.
-            _child_object(entries, plugin.plugin_id)["enabled"] = True
-        elif required and settings is not None and settings.get("enabled") is False:
+        if required:
             # A config that routes work through a plugin cannot also keep it disabled.
-            del settings["enabled"]
-            if not settings:
-                del entries[plugin.plugin_id]
+            _child_object(entries, plugin.plugin_id)["enabled"] = True
         if required or plugin.always_enabled:
             if allowlist is not None:
                 _append_unique(allowlist, plugin.plugin_id)
-        elif plugin.plugin_id not in entries and (
-            allowlist is None or plugin.plugin_id not in allowlist
-        ):
-            entries[plugin.plugin_id] = {"enabled": False}
+        elif allowlist is None or plugin.plugin_id not in allowlist:
+            # A bare `enabled: true` is the switch an earlier attach set while it was required.
+            if entries.get(plugin.plugin_id) in (None, {"enabled": True}):
+                entries[plugin.plugin_id] = {"enabled": False}
+    # Operator-defined `models.providers` ids are not plugins, so only known plugin ids qualify.
+    for provider_id in sorted(configured_model_providers(config) & PROVIDER_PLUGIN_IDS):
+        _child_object(entries, provider_id)["enabled"] = True
     if allowlist is not None:
         for provider_id in sorted(BUNDLED_PROVIDER_PLUGIN_IDS):
             _append_unique(allowlist, provider_id)
-        plugins.setdefault("bundledDiscovery", BUNDLED_DISCOVERY_COMPAT)
+    # OpenClaw 2026.8 moved bundled discovery into its SQLite state and rejects the key.
+    plugins.pop("bundledDiscovery", None)
     return config

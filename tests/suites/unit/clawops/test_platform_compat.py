@@ -2,22 +2,70 @@
 
 from __future__ import annotations
 
+import pytest
+
 from clawops.platform_compat import (
     DARWIN_X64_MEMORY_PLUGIN_LANCEDB_VERSION,
     DEFAULT_MANAGED_PROJECT_PYTHON_VERSION,
     DEFAULT_MEMORY_PLUGIN_LANCEDB_VERSION,
     SUPPORTED_LOCAL_RERANK_TORCH_CONSTRAINT,
+    SUPPORTED_NODE_RANGE,
     HostPlatform,
+    NodeVersion,
     build_compatibility_record,
     detect_host_platform,
+    node_version_supported,
     normalize_architecture,
     normalize_os_name,
+    parse_node_version,
     resolve_hypermemory_local_rerank_torch_constraint,
     resolve_memory_plugin_lancedb_version,
     resolve_preferred_project_python_version,
     resolve_service_manager,
     supports_hypermemory_local_rerank,
 )
+
+
+def test_supported_node_range_renders_the_npm_engine_syntax() -> None:
+    assert SUPPORTED_NODE_RANGE == ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+
+
+@pytest.mark.parametrize(
+    ("version", "supported"),
+    [
+        ((22, 22, 2), False),
+        ((22, 22, 3), True),
+        ((22, 23, 5), True),
+        ((23, 11, 1), False),
+        ((24, 13, 1), False),
+        ((24, 15, 0), True),
+        ((25, 8, 9), False),
+        ((25, 9, 0), True),
+        ((26, 0, 0), True),
+        ((20, 99, 99), False),
+    ],
+)
+def test_node_version_supported_follows_each_release_line_floor(
+    version: NodeVersion, supported: bool
+) -> None:
+    assert node_version_supported(version) is supported
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("v22.22.3\n", (22, 22, 3)),
+        ("24.15.0", (24, 15, 0)),
+        ("v25.9.0+build.1", (25, 9, 0)),
+        ("v24.15", None),
+        ("v26.0.0-nightly2026", None),
+        ("", None),
+    ],
+)
+def test_parse_node_version_accepts_release_versions_only(
+    text: str, expected: NodeVersion | None
+) -> None:
+    assert parse_node_version(text) == expected
 
 
 def test_normalize_platform_tokens() -> None:

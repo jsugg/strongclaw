@@ -109,6 +109,8 @@ def test_channels_overlay_validates_under_openclaw(feature_host: FeatureHost) ->
     ).require_ok()
     env = {"OPENCLAW_CONFIG_PATH": str(rendered), "TELEGRAM_BOT_TOKEN": "123456:featver-stub-token"}
     feature_host.openclaw("config", "validate", env=env, timeout=120).require_ok()
-    listed = feature_host.openclaw("channels", "list", "--no-usage", "--json", env=env, timeout=180)
+    # OpenClaw 2026.8 `channels list --json` is a local inventory with no usage fetch to skip
+    # (docs/cli/channels.md), so the former `--no-usage` switch no longer exists.
+    listed = feature_host.openclaw("channels", "list", "--json", env=env, timeout=180)
     payload = json.dumps(listed.require_ok().json())
     assert "telegram" in payload and "whatsapp" in payload, payload[:2000]
