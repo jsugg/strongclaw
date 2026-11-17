@@ -50,15 +50,15 @@ def _npm_update() -> dict[str, Any]:
 
 
 def test_dependabot_holds_openclaw_below_the_node_24_line() -> None:
-    """OpenClaw 2026.7+ needs a newer Node than the supported floor, so it is bumped by hand."""
+    """OpenClaw 2026.9 moves to Node 24, past the supported Node 22 line, so it is bumped by hand."""
     ignored = {
         str(rule["dependency-name"]): list(rule["versions"])
         for rule in cast(list[dict[str, Any]], _npm_update()["ignore"])
     }
     pinned = tuple(int(part) for part in platform_compat.DEFAULT_OPENCLAW_VERSION.split("."))
 
-    assert ignored == {"openclaw": [">=2026.7.0"], "@openclaw/*": [">=2026.7.0"]}
-    assert pinned < (2026, 7, 0)
+    assert ignored == {"openclaw": [">=2026.9.0"], "@openclaw/*": [">=2026.9.0"]}
+    assert pinned < (2026, 9, 0)
 
 
 def test_dependabot_groups_node_tools_security_updates() -> None:

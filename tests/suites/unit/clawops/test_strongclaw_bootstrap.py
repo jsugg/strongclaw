@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 from collections.abc import Callable, Sequence
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from typing import Any, cast
 import pytest
 
 from clawops import strongclaw_bootstrap
+from clawops.platform_compat import SUPPORTED_NODE_RANGE
 from tests.plugins.infrastructure.context import TestContext
 
 
@@ -202,14 +204,26 @@ def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) ->
     assert resolve_node_command() == "nodejs"
 
 
-def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext) -> None:
-    """Version checks should use the resolved Node.js executable name."""
+@pytest.mark.parametrize(
+    ("stdout", "ok", "supported"),
+    [
+        ("v22.22.3\n", True, True),
+        ("v22.19.0\n", True, False),
+        ("v24.13.1\n", True, False),
+        ("v26.1.0\n", True, True),
+        ("", False, False),
+    ],
+)
+def test_node_runtime_supported_checks_the_resolved_command_against_the_range(
+    test_context: TestContext, stdout: str, ok: bool, supported: bool
+) -> None:
+    """The version check runs the resolved Node.js and applies the per-line release floors."""
 
     seen_commands: list[list[str]] = []
 
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
         seen_commands.append(command)
-        return SimpleNamespace(ok=True)
+        return SimpleNamespace(ok=ok, stdout=stdout)
 
     def _resolve_node_command() -> str:
         return "nodejs"
@@ -221,19 +235,45 @@ def test_node_satisfies_minimum_uses_resolved_command(test_context: TestContext)
     )
     test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
 
-    node_satisfies_minimum = cast(
+    node_runtime_supported = cast(
         Callable[[], bool],
-        cast(Any, strongclaw_bootstrap)._node_satisfies_minimum,
+        cast(Any, strongclaw_bootstrap)._node_runtime_supported,
     )
-    assert callable(node_satisfies_minimum)
-    assert node_satisfies_minimum() is True
-    assert seen_commands == [
-        [
-            "nodejs",
-            "-e",
-            "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1);",
-        ]
-    ]
+    assert node_runtime_supported() is supported
+    assert seen_commands == [["nodejs", "--version"]]
+
+
+def test_ensure_node_runtime_darwin_upgrades_a_brew_node_below_its_line_floor(
+    test_context: TestContext,
+) -> None:
+    """A Homebrew Node 24 below 24.15.0 is upgraded rather than accepted as >= 22."""
+
+    node_versions = iter(["v24.13.1\n", "v26.1.0\n"])
+    brew_commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
+        if command == ["brew", "list", "--versions", "node"]:
+            return SimpleNamespace(ok=True, stdout="node 24.13.1\n")
+        assert command == ["node", "--version"]
+        return SimpleNamespace(ok=True, stdout=next(node_versions))
+
+    def fake_stream_checked(command: list[str], **_: object) -> None:
+        brew_commands.append(command)
+
+    def _resolve_node_command() -> str:
+        return "node"
+
+    test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_stream_checked", new=fake_stream_checked
+    )
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_resolve_node_command", new=_resolve_node_command
+    )
+
+    strongclaw_bootstrap._ensure_node_runtime_darwin()
+
+    assert brew_commands == [["brew", "upgrade", "node"]]
 
 
 @pytest.mark.parametrize(
@@ -254,7 +294,7 @@ def test_ensure_node_runtime_darwin_upgrades_or_installs_brew_node(
     checks = iter([False, True])
     brew_commands: list[list[str]] = []
 
-    def _node_satisfies_minimum() -> bool:
+    def _node_runtime_supported() -> bool:
         return next(checks)
 
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
@@ -265,7 +305,7 @@ def test_ensure_node_runtime_darwin_upgrades_or_installs_brew_node(
         brew_commands.append(command)
 
     test_context.patch.patch_object(
-        strongclaw_bootstrap, "_node_satisfies_minimum", new=_node_satisfies_minimum
+        strongclaw_bootstrap, "_node_runtime_supported", new=_node_runtime_supported
     )
     test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
     test_context.patch.patch_object(
@@ -282,20 +322,20 @@ def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
 ) -> None:
     """Bootstrap names the floor and the shadowing node PATH resolves when brew cannot help."""
 
-    def _node_satisfies_minimum() -> bool:
+    def _node_runtime_supported() -> bool:
         return False
 
     def _resolve_node_command() -> str:
         return "node"
 
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
-        return SimpleNamespace(ok=True, stdout="v22.16.0\n" if command[-1] == "--version" else "")
+        return SimpleNamespace(ok=True, stdout="v24.13.1\n" if command[-1] == "--version" else "")
 
     def fake_stream_checked(command: list[str], **_: object) -> None:
         return None
 
     test_context.patch.patch_object(
-        strongclaw_bootstrap, "_node_satisfies_minimum", new=_node_satisfies_minimum
+        strongclaw_bootstrap, "_node_runtime_supported", new=_node_runtime_supported
     )
     test_context.patch.patch_object(strongclaw_bootstrap, "run_command", new=fake_run_command)
     test_context.patch.patch_object(
@@ -308,7 +348,7 @@ def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
 
     with pytest.raises(
         strongclaw_bootstrap.CommandError,
-        match=r"node >= 22\.19 is required \(found v22\.16\.0 at ",
+        match=re.escape(f"node {SUPPORTED_NODE_RANGE} is required (found v24.13.1 at "),
     ):
         strongclaw_bootstrap._ensure_node_runtime_darwin()
 
