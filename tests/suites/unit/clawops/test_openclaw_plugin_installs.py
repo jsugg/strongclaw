@@ -65,7 +65,7 @@ def test_missing_plugin_is_installed_at_the_lock_pin(test_context: TestContext) 
     _patch(test_context, fake)
 
     assert installs.ensure_openclaw_plugin_installs(_REPO, _ACP_CONFIG) == ["acpx"]
-    assert fake.calls[-1] == ["plugins", "install", _SPEC, "--pin"]
+    assert fake.calls[-1] == ["plugins", "install", _SPEC, "--pin", "--accept-capabilities"]
 
 
 def test_trusted_install_at_the_pin_is_left_alone(test_context: TestContext) -> None:
@@ -90,7 +90,14 @@ def test_drifted_install_is_replaced(test_context: TestContext, stdout: str) -> 
     _patch(test_context, fake)
 
     assert installs.ensure_openclaw_plugin_installs(_REPO, _ACP_CONFIG) == ["acpx"]
-    assert fake.calls[-1] == ["plugins", "install", _SPEC, "--pin", "--force"]
+    assert fake.calls[-1] == [
+        "plugins",
+        "install",
+        _SPEC,
+        "--pin",
+        "--accept-capabilities",
+        "--force",
+    ]
 
 
 def test_failed_install_raises(test_context: TestContext) -> None:

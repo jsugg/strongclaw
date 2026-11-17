@@ -226,7 +226,7 @@ openclaw memory-pro import /tmp/strongclaw-memory-pro-project.json --scope proje
 ## Operational notes
 
 - `openclaw-default` keeps the OpenClaw built-ins available as an explicit fallback
-- `openclaw-qmd` keeps the experimental QMD path available as an explicit fallback
+- `openclaw-qmd` keeps the QMD document corpus available as an explicit fallback, indexed by OpenClaw's builtin memory since 2026.8 removed the QMD backend
 - hypermemory is loaded through `plugins.load.paths` and `plugins.slots.memory`
 - the default stack uses [platform/compose/docker-compose.aux-stack.yaml](../compose/docker-compose.aux-stack.yaml) for the supporting sidecars
 

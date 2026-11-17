@@ -53,7 +53,7 @@ If you want the built-in OpenClaw path instead, use the explicit `openclaw-defau
 clawops config memory --set-profile openclaw-default
 ```
 
-If you want the built-ins plus the experimental QMD backend, use `openclaw-qmd`:
+If you want the built-ins plus builtin memory over the QMD document corpus (OpenClaw 2026.8 removed the QMD backend), use `openclaw-qmd`:
 
 ```bash
 clawops config memory --set-profile openclaw-qmd
@@ -221,7 +221,7 @@ Add these only in order:
 3. QMD prewarm: `qmd status`
 4. Built-in OpenClaw memory fallback:
 `clawops setup --profile openclaw-default`
-5. Built-in OpenClaw plus experimental QMD:
+5. Built-in OpenClaw plus builtin memory over the QMD document corpus:
 `clawops setup --profile openclaw-qmd`
 6. Opt-in local LanceDB durable memory with Ollama-backed smart extraction by rerendering
 `clawops render-openclaw-config --profile memory-lancedb-pro`

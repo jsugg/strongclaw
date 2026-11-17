@@ -470,8 +470,9 @@ def verify_observability(
         else _fail("otel-signals", "diagnostics.otel.metrics and traces must both be true")
     )
     checks.append(
+        # OpenClaw 2026.8 always redacts logs and transcripts and rejects the old switch.
         _ok("logging-redaction", "logging redaction remains enabled")
-        if logging_mapping.get("redactSensitive") == "tools"
+        if "redactSensitive" not in logging_mapping
         and isinstance(logging_mapping.get("redactPatterns"), list)
         else _fail("logging-redaction", "logging redaction contract is incomplete")
     )

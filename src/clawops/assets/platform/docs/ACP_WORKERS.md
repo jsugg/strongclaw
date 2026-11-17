@@ -27,7 +27,7 @@ ACP/acpx is the preferred structured worker plane for coding agents.
 
 ## Starting ACP workers from OpenClaw (acp profile)
 
-OpenClaw 2026.6 routes work to a `runtime.type: "acp"` agent only through a channel binding,
+OpenClaw 2026.6 and later route work to a `runtime.type: "acp"` agent only through a channel binding,
 `sessions_spawn({ runtime: "acp" })` or the `/acp spawn` command. It refuses ACP spawns from any
 sandboxed session, because an ACP harness runs on the host outside the OpenClaw sandbox.
 `sessions_spawn` also refuses requesters that are not allowed `read`, `write`, `edit`, `exec`,
@@ -39,11 +39,16 @@ from its session with `/acp spawn <harness> ...`, which OpenClaw accepts only fr
 `operator.admin` client (the Control UI, or a CLI device paired with admin scope):
 
 ```text
-/acp spawn codex --mode persistent --bind off --thread off --cwd /path/to/worktree
+/acp spawn coder-acp-codex --mode persistent --bind off --thread off --cwd /path/to/worktree
 ```
 
-Follow-up turns go to the session key the command returns, for example
-`openclaw agent --session-key agent:codex:acp:<id> --message "..."`.
+Follow-up turns go to the session key the command returns, from the same dispatcher session:
+`/acp steer --session agent:coder-acp-codex:acp:<id> <instruction>`.
+
+OpenClaw 2026.8 names a spawned session `agent:<harness>:acp:<uuid>` and runs its turns as that
+agent id, rejecting ids that are not configured agents. Each harness is therefore named after the
+worker agent that owns it (`coder-acp-codex`, `reviewer-acp-claude`). The overlay maps those names
+to the same adapter packages acpx uses for its built-in `codex` and `claude` harnesses.
 
 Trade-off and the guards around it:
 
@@ -52,7 +57,7 @@ Trade-off and the guards around it:
   the prompt reaches a model. A message cannot make it act on the host.
 - It is never the default agent or a binding target, and no agent lists it in
   `subagents.allowAgents`. `acp.allowedAgents` limits `/acp spawn` to the worker harnesses
-  (`codex`, `claude`). Every other agent keeps `sandbox.mode: "all"`.
+  (`coder-acp-codex`, `reviewer-acp-claude`). Every other agent keeps `sandbox.mode: "all"`.
   `tests/suites/contracts/platform/test_agent_sandbox_contract.py` fails if any of this drifts.
 - What remains: anyone with `operator.admin` on the gateway can start a host-side ACP harness
   in a directory of their choice. That is the same trust OpenClaw already gives admin

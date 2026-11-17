@@ -451,6 +451,9 @@ function registerMemoryCli(program, runClawops) {
     .option("--fusion <mode>", "rrf or weighted.")
     .option("--explain", "Include ranking explanation metadata.")
     .option("--json", "Print JSON.")
+    // OpenClaw 2026.8 makes operators name an agent for `memory search` in a multi-agent fleet;
+    // hypermemory keeps one index shared by every agent, so the choice changes nothing here.
+    .option("--agent <id>", "Accepted for `openclaw memory search --agent`; same index.")
     .action(async (query, opts) => {
       const resolvedQuery =
         (typeof opts.query === "string" && opts.query.trim()) || (typeof query === "string" && query.trim());

@@ -2,7 +2,7 @@
   "channels": {
     "defaults": {
       "groupPolicy": "allowlist",
-      "heartbeat": {
+      "heartbeatVisibility": {
         "showAlerts": true,
         "showOk": false,
         "useIndicator": true

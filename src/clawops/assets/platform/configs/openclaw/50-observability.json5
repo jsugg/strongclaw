@@ -15,14 +15,13 @@
   },
   "logging": {
     "consoleLevel": "info",
-    "consoleStyle": "compact",
+    "consoleStyle": "pretty",
     "level": "info",
     "redactPatterns": [
       "sk-.*",
       "ghp_.*",
       "xoxb-.*"
-    ],
-    "redactSensitive": "tools"
+    ]
   },
   "plugins": {
     "allow": [

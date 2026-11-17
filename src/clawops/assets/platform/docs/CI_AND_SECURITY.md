@@ -9,7 +9,7 @@ The repository includes:
 - Policy Harness Smoke Tests
 - Nightly Test Run
 - Repository Dependency Snapshot from a generated SPDX SBOM snapshot
-- Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.6.35` host-functional coverage)
+- Memory Plugin Integration Checks for the vendored `memory-lancedb-pro` bundle (`npm test` plus `openclaw@2026.8.35` host-functional coverage)
 - `strongclaw-hypermemory` host-functional checks through the local plugin SDK stub
 - Devflow contract checks for the public `clawops devflow` surface
 - tagged release builds with artifact verification, GitHub Release assets, build provenance, and SBOM attestations
@@ -235,7 +235,7 @@ The vendored `platform/plugins/memory-lancedb-pro` bundle is verified on GitHub 
 - That flow reuses `clawops config memory --set-profile memory-lancedb-pro`, which
 auto-detects the host and installs the default LanceDB dependency on supported hosts or the Intel-macOS fallback `@lancedb/lancedb@0.22.3`.
 - The workflow delegates the host-functional orchestration to
-`tests/scripts/memory_plugin_verification.py`, which installs the pinned `openclaw@2026.6.35` CLI into a temporary tool directory and runs the host-functional `npm run test:openclaw-host` suite.
+`tests/scripts/memory_plugin_verification.py`, which installs the pinned `openclaw@2026.8.35` CLI into a temporary tool directory and runs the host-functional `npm run test:openclaw-host` suite.
 - The host-functional step clears ambient AWS credential env vars first so
 local Bedrock model discovery noise does not contaminate test assertions.
 
@@ -265,6 +265,12 @@ config, registers the plugin through the local SDK stub, verifies the exported `
   `cooldown.default-days` because Dependabot rejects semver cooldown keys for
   those ecosystems, and one unsupported key invalidates the whole file and
   silently stops every scheduled version update.
+- `platform/node-tools/package.json` carries exact npm `overrides` for transitive
+  packages that the pinned OpenClaw release pins inside a published security advisory
+  range (currently `undici`, `zod`, and `@modelcontextprotocol/sdk`). Each override stays
+  within the upstream major, and a contract test requires every locked copy of an
+  overridden package to resolve to its override. Drop an override once the pinned
+  OpenClaw ships a patched version itself.
 - `.github/workflows/security.yml`,
 `.github/workflows/upstream-merge-validation.yml`, and `.github/workflows/release.yml` all call the centralized `clawops supply-chain quality-gate` surface so linting, typing, tests, coverage, and compile checks stay aligned.
 - That shared quality gate now enforces one overall coverage floor plus named

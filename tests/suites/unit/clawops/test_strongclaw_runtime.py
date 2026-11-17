@@ -740,3 +740,31 @@ def test_openclaw_default_agent_id_follows_openclaw_resolution(
     config: dict[str, object], expected: str
 ) -> None:
     assert runtime.openclaw_default_agent_id(config) == expected
+
+
+def test_memory_search_arguments_name_the_ambient_owner(
+    test_context: TestContext, tmp_path: pathlib.Path
+) -> None:
+    """OpenClaw 2026.8 needs `--agent` for memory search in a multi-agent fleet."""
+    config_path = tmp_path / "openclaw.json"
+    test_context.env.set("OPENCLAW_CONFIG_PATH", str(config_path))
+    search = ["--query", "ClawOps", "--max-results", "1"]
+
+    assert runtime.openclaw_memory_search_arguments(tmp_path, query="ClawOps", max_results=1) == [
+        "memory",
+        "search",
+        *search,
+    ]
+
+    config_path.write_text(
+        '{"agents": {"defaults": {"systemAgent": {"agentId": "admin"}},'
+        ' "entries": {"admin": {}, "reader": {}}}}',
+        encoding="utf-8",
+    )
+    assert runtime.openclaw_memory_search_arguments(tmp_path, query="ClawOps", max_results=1) == [
+        "memory",
+        "search",
+        "--agent",
+        "admin",
+        *search,
+    ]

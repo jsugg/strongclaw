@@ -4,9 +4,7 @@
       "heartbeat": {
         "directPolicy": "block",
         "every": "0m",
-        "includeReasoning": false,
         "lightContext": true,
-        "suppressToolErrorWarnings": true,
         "target": "none"
       },
       "imageMaxDimensionPx": 1200,
@@ -39,7 +37,6 @@
       "subagents": {
         "runTimeoutSeconds": 1800
       },
-      "timeFormat": "24",
       "userTimezone": "__USER_TIMEZONE__",
       "workspace": "__ADMIN_WORKSPACE__"
     },
@@ -79,7 +76,7 @@
   "channels": {
     "defaults": {
       "groupPolicy": "allowlist",
-      "heartbeat": {
+      "heartbeatVisibility": {
         "showAlerts": true,
         "showOk": false,
         "useIndicator": true
@@ -125,9 +122,8 @@
   },
   "logging": {
     "consoleLevel": "info",
-    "consoleStyle": "compact",
-    "level": "info",
-    "redactSensitive": "tools"
+    "consoleStyle": "pretty",
+    "level": "info"
   },
   "memory": {
     "citations": "auto"
@@ -149,6 +145,14 @@
     "providers": {
       "default": {
         "source": "env"
+      }
+    }
+  },
+  "skills": {
+    "workshop": {
+      "approvalPolicy": "pending",
+      "autonomous": {
+        "mode": "off"
       }
     }
   },
@@ -186,10 +190,30 @@
       "update_goal",
       "update_plan",
       "skill_workshop",
-      "image",
+      "view_image",
       "image_generate",
       "music_generate",
-      "video_generate"
+      "video_generate",
+      "agents_wait",
+      "ask_user",
+      "computer",
+      "conversations_list",
+      "conversations_send",
+      "conversations_turn",
+      "dashboard",
+      "dismiss_task",
+      "github_identity_status",
+      "github_publish",
+      "mobile_ui",
+      "portal",
+      "progress_card",
+      "screen",
+      "secrets",
+      "sessions",
+      "sessions_search",
+      "show_widget",
+      "suggest_task",
+      "terminal"
     ],
     "elevated": {
       "enabled": false
@@ -198,11 +222,7 @@
       "workspaceOnly": true
     },
     "loopDetection": {
-      "criticalThreshold": 14,
-      "enabled": true,
-      "globalCircuitBreakerThreshold": 20,
-      "historySize": 30,
-      "warningThreshold": 8
+      "enabled": true
     },
     "profile": "minimal",
     "sessions": {

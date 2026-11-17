@@ -390,10 +390,18 @@ def test_apply_model_chain_updates_rendered_openclaw_config_directly(
             }
         ],
     }
-    assert [agent["model"] for agent in payload["agents"]["list"]] == [
+    agents = payload["agents"]
+    assert "list" not in agents
+    assert [agent["model"] for agent in agents["entries"].values()] == [
         expected_model,
         expected_model,
         expected_model,
+    ]
+    # The defaults registry was the model allowlist through OpenClaw 2026.6; 2026.8 needs it explicit.
+    assert agents["defaults"]["modelPolicy"]["allow"] == [
+        "openai/gpt-5.4",
+        "ollama/deepseek-r1:latest",
+        "anthropic/claude-opus-4-6",
     ]
 
 
@@ -627,7 +635,7 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
 
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     defaults = payload["agents"]["defaults"]
-    coder = payload["agents"]["list"][0]
+    coder = payload["agents"]["entries"]["coder"]
     plugins = payload["plugins"]
     assert defaults["model"] == expected_model
     assert coder["model"] == expected_model
@@ -651,19 +659,27 @@ def test_apply_model_chain_keeps_auth_routes_and_migrates_retired_refs(
     ],
     ids=["no-key-fts-only", "openai-key", "legacy-auto", "operator-choice"],
 )
+@pytest.mark.parametrize("location", ["memory.search", "agents.defaults.memorySearch"])
 def test_memory_search_provider_replays_the_legacy_auto_selection(
     test_context: TestContext,
     tmp_path: pathlib.Path,
     memory_search: dict[str, str] | None,
     env_values: dict[str, str],
     expected: str,
+    location: str,
 ) -> None:
-    """2026.5+ defaults to OpenAI embeddings and fails closed; model-auth pins the old choice."""
+    """2026.5+ defaults to OpenAI embeddings and fails closed; model-auth pins the old choice.
+
+    2026.8 reads `memory.search`; a 2026.6-era `agents.defaults.memorySearch` block moves there.
+    """
     config_path = tmp_path / "openclaw.json"
     defaults: dict[str, object] = {"model": {"primary": "featver/featver-chat"}}
-    if memory_search is not None:
+    config: dict[str, object] = {"agents": {"defaults": defaults}}
+    if memory_search is not None and location == "memory.search":
+        config["memory"] = {"search": memory_search}
+    elif memory_search is not None:
         defaults["memorySearch"] = memory_search
-    config_path.write_text(json.dumps({"agents": {"defaults": defaults}}), encoding="utf-8")
+    config_path.write_text(json.dumps(config), encoding="utf-8")
 
     def _resolve_openclaw_config_path(repo_root: pathlib.Path) -> pathlib.Path:
         del repo_root
@@ -682,4 +698,61 @@ def test_memory_search_provider_replays_the_legacy_auto_selection(
     apply_provider(tmp_path, env_values)
 
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload["agents"]["defaults"]["memorySearch"]["provider"] == expected
+    assert payload["memory"]["search"]["provider"] == expected
+    assert "memorySearch" not in payload["agents"]["defaults"]
+
+
+@pytest.mark.parametrize(
+    ("gateway_up", "expected_calls"),
+    [
+        (
+            False,
+            [
+                ["gateway", "status", "--json"],
+                ["models", "status", "--agent", "admin", "--check", "--probe"],
+            ],
+        ),
+        (
+            True,
+            [
+                ["gateway", "status", "--json"],
+                ["models", "status", "--agent", "admin", "--check"],
+                ["infer", "model", "run", "--agent", "admin", "--prompt"],
+            ],
+        ),
+    ],
+    ids=["direct-probe", "probe-through-running-gateway"],
+)
+def test_probe_goes_through_the_gateway_that_owns_the_state(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+    gateway_up: bool,
+    expected_calls: list[list[str]],
+) -> None:
+    """2026.8 refuses a direct `models status --probe` while a Gateway owns the state directory."""
+    calls: list[list[str]] = []
+
+    def _run_openclaw_command(
+        repo_root: pathlib.Path, arguments: list[str], **_: object
+    ) -> SimpleNamespace:
+        del repo_root
+        calls.append(arguments)
+        if arguments[:2] == ["agents", "list"]:
+            return SimpleNamespace(ok=True, stdout='[{"id": "admin"}]')
+        if arguments[:2] == ["gateway", "status"]:
+            return SimpleNamespace(ok=True, stdout=json.dumps({"rpc": {"ok": gateway_up}}))
+        return SimpleNamespace(ok=True, stdout="")
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth, "run_openclaw_command", new=_run_openclaw_command
+    )
+    all_agents_have_models = cast(
+        Callable[..., tuple[bool, list[str]]],
+        vars(strongclaw_model_auth)["_all_agents_have_models"],
+    )
+
+    assert all_agents_have_models(tmp_path, probe=True, probe_max_tokens=8) == (True, [])
+    observed = [
+        call[: len(expected)] for call, expected in zip(calls[2:], expected_calls, strict=True)
+    ]
+    assert observed == expected_calls

@@ -8,7 +8,7 @@ You need:
 
 - a private clone of this repo
 - Python 3.12+
-- Node 24+ preferred, Node 22.19+ minimum
+- Node 24.15+ preferred (OpenClaw recommends 26), Node 22.22.3+ minimum; Node 23 is unsupported
 - a dedicated non-admin runtime user for OpenClaw
 - a supported package manager for the host bootstrap path
 - either an already installed Docker-compatible runtime or permission to install Docker as the fallback runtime
@@ -270,7 +270,7 @@ clawops context codebase index --scale small --config platform/configs/context/c
 qmd status
 ```
 
-`bootstrap_qmd.sh` is now part of the standard host bootstrap path. Re-run it only if the QMD backend is missing or needs repair.
+`bootstrap_qmd.sh` is now part of the standard host bootstrap path. Re-run it only if the QMD install is missing or needs repair.
 
 Index a repo:
 

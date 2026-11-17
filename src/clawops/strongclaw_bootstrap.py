@@ -16,9 +16,11 @@ from collections.abc import Sequence
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.openclaw_sandbox import ensure_openclaw_sandbox_image
 from clawops.platform_compat import (
-    MINIMUM_NODE_VERSION,
-    MINIMUM_NODE_VERSION_TEXT,
+    SUPPORTED_NODE_RANGE,
+    NodeVersion,
     detect_host_platform,
+    node_version_supported,
+    parse_node_version,
     resolve_memory_plugin_lancedb_version,
 )
 from clawops.runtime_assets import (
@@ -72,7 +74,7 @@ _APT_UPDATE_MAX_ATTEMPTS = 3
 _APT_UPDATE_RETRY_DELAY_SECONDS = 15
 _UNRELIABLE_APT_MIRROR = "azure.archive.ubuntu.com"
 _STABLE_APT_MIRROR = "archive.ubuntu.com"
-_NODE_REQUIREMENT = f"node >= {MINIMUM_NODE_VERSION_TEXT}"
+_NODE_REQUIREMENT = f"node {SUPPORTED_NODE_RANGE}"
 
 
 def _apt_command(arguments: Sequence[str]) -> list[str]:
@@ -185,26 +187,23 @@ def _resolve_node_command() -> str | None:
     return None
 
 
-def _node_satisfies_minimum() -> bool:
-    """Return whether Node.js >= MINIMUM_NODE_VERSION is available."""
+def _installed_node_version() -> NodeVersion | None:
+    """Return the version of the Node.js that PATH resolves, or None when unavailable."""
     node_command = _resolve_node_command()
     if node_command is None:
-        return False
-    major, minor = MINIMUM_NODE_VERSION
-    result = run_command(
-        [
-            node_command,
-            "-e",
-            "const [major, minor] = process.versions.node.split('.').map(Number); "
-            f"process.exit(major > {major} || (major === {major} && minor >= {minor}) ? 0 : 1);",
-        ],
-        timeout_seconds=10,
-    )
-    return result.ok
+        return None
+    result = run_command([node_command, "--version"], timeout_seconds=10)
+    return parse_node_version(result.stdout) if result.ok else None
+
+
+def _node_runtime_supported() -> bool:
+    """Return whether PATH resolves a Node.js release the pinned OpenClaw supports."""
+    version = _installed_node_version()
+    return version is not None and node_version_supported(version)
 
 
 def _node_runtime_description() -> str:
-    """Describe the Node.js that PATH resolves, for floor errors (it may not be Homebrew's)."""
+    """Describe the Node.js that PATH resolves, for range errors (it may not be Homebrew's)."""
     node_command = _resolve_node_command()
     if node_command is None:
         return "no node on PATH"
@@ -225,20 +224,20 @@ def _brew_formula_installed(formula_name: str) -> bool:
 
 def _ensure_node_runtime_darwin() -> None:
     """Ensure macOS has a supported Node.js runtime, upgrading a too-old Homebrew node."""
-    if _node_satisfies_minimum():
+    if _node_runtime_supported():
         return
     # `brew install` leaves an outdated formula alone when HOMEBREW_NO_INSTALL_UPGRADE is set.
     if _brew_formula_installed("node"):
         _stream_checked(["brew", "upgrade", "node"], timeout_seconds=1800)
     else:
         _ensure_brew_formula("node")
-    if not _node_satisfies_minimum():
+    if not _node_runtime_supported():
         raise _node_floor_error()
 
 
 def _ensure_node_runtime_linux() -> None:
     """Ensure Linux has a supported Node.js runtime."""
-    if _node_satisfies_minimum():
+    if _node_runtime_supported():
         return
     if not command_exists("sudo"):
         raise CommandError(f"sudo is required to install {_NODE_REQUIREMENT} on Linux")
@@ -252,7 +251,7 @@ def _ensure_node_runtime_linux() -> None:
         _apt_command(["install", "-y", "nodejs"]),
         timeout_seconds=_APT_DEFAULT_TIMEOUT_SECONDS,
     )
-    if not _node_satisfies_minimum():
+    if not _node_runtime_supported():
         raise _node_floor_error()
 
 

@@ -78,7 +78,7 @@ def test_installed_package_can_render_openclaw_config_outside_source_checkout(
     )
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    admin = next(agent for agent in payload["agents"]["list"] if agent["id"] == "admin")
+    admin = payload["agents"]["entries"]["admin"]
     hypermemory_config = payload["plugins"]["entries"]["strongclaw-hypermemory"]["config"]
     plugin_paths = payload["plugins"]["load"]["paths"]
     generated_memory_config = (

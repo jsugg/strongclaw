@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,9 +12,11 @@ from pathlib import Path
 import pytest
 
 from clawops.openclaw_plugins import FIRST_PARTY_PLUGINS
+from clawops.platform_compat import node_version_supported, parse_node_version
 from clawops.strongclaw_runtime import CommandError, ExecResult
 from tests.plugins.infrastructure.context import TestContext
 from tests.scripts import update_node_tools_lock as updater
+from tests.utils.helpers.repo import REPO_ROOT
 
 _INTEGRITY = "sha512-" + "A" * 86 + "=="
 
@@ -132,7 +135,8 @@ def test_resolve_pins_rejects_ranges(tmp_path: Path) -> None:
 
 def test_render_manifest_preserves_metadata_and_sorts_dependencies(tmp_path: Path) -> None:
     manifest_path = tmp_path / "package.json"
-    manifest_path.write_text(_manifest({"openclaw": "2026.3.13", "acpx": "0.3.0"}))
+    payload = json.loads(_manifest({"openclaw": "2026.3.13", "acpx": "0.3.0"}))
+    manifest_path.write_text(json.dumps({**payload, "overrides": {"undici": "8.12.4"}}))
 
     rendered = updater.render_manifest(manifest_path, {"openclaw": "2026.3.14", "acpx": "0.3.0"})
 
@@ -141,7 +145,19 @@ def test_render_manifest_preserves_metadata_and_sorts_dependencies(tmp_path: Pat
         "name": "strongclaw-node-tools",
         "private": True,
         "dependencies": {"acpx": "0.3.0", "openclaw": "2026.3.14"},
+        "overrides": {"undici": "8.12.4"},
     }
+
+
+def test_required_toolchain_runs_the_pinned_openclaw_and_matches_fresh_host_ci() -> None:
+    """The lock toolchain is a Node the pinned OpenClaw accepts and the one fresh-host CI uses."""
+    version = parse_node_version(updater.REQUIRED_NODE_VERSION)
+
+    assert version is not None
+    assert node_version_supported(version)
+    for workflow_name in ("fresh-host-core.yml", "fresh-host-cache-warm.yml"):
+        workflow = (REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        assert f'node-version: "{updater.REQUIRED_NODE_VERSION}"' in workflow, workflow_name
 
 
 @pytest.mark.parametrize(("allow_mismatch", "raises"), [(False, True), (True, False)])
@@ -163,7 +179,7 @@ def test_check_toolchain_requires_the_ci_node_and_npm(
     test_context.patch.patch_object(updater, "run_command", new=_run_command)
 
     if raises:
-        with pytest.raises(CommandError, match="22.22.1"):
+        with pytest.raises(CommandError, match=re.escape(updater.REQUIRED_NODE_VERSION)):
             updater.check_toolchain(allow_mismatch=allow_mismatch)
     else:
         updater.check_toolchain(allow_mismatch=allow_mismatch)

@@ -5,8 +5,7 @@
     "evaluateEnabled": false,
     "profiles": {
       "browserlab": {
-        "cdpUrl": "http://127.0.0.1:9222",
-        "color": "#0066CC"
+        "cdpUrl": "http://127.0.0.1:9222"
       }
     },
     "ssrfPolicy": {
@@ -15,12 +14,15 @@
         "api.github.com",
         "docs.openclaw.ai"
       ],
-      "dangerouslyAllowPrivateNetwork": false,
-      "hostnameAllowlist": [
-        "github.com",
-        "docs.openclaw.ai",
-        "api.github.com"
-      ]
+      "dangerouslyAllowPrivateNetwork": false
+    }
+  },
+  // OpenClaw 2026.8 ships the browser as a bundled plugin; doctor --fix enables it here.
+  "plugins": {
+    "entries": {
+      "browser": {
+        "enabled": true
+      }
     }
   }
 }

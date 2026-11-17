@@ -33,6 +33,7 @@ from clawops.strongclaw_runtime import (
     docker_backend_ready,
     docker_shell_refresh_required,
     load_openclaw_config,
+    openclaw_memory_search_arguments,
     rendered_openclaw_hypermemory_config_path,
     rendered_openclaw_lossless_plugin_path,
     rendered_openclaw_uses_hypermemory,
@@ -512,11 +513,12 @@ def doctor_main(argv: list[str] | None = None) -> int:
             )
             _run_check(
                 "OpenClaw memory search",
-                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory search --query ClawOps --max-results 1",
+                "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory search --agent <owner> "
+                "--query ClawOps --max-results 1",
                 checks,
                 lambda: run_openclaw_command(
                     repo_root,
-                    ["memory", "search", "--query", "ClawOps", "--max-results", "1"],
+                    openclaw_memory_search_arguments(repo_root, query="ClawOps", max_results=1),
                     timeout_seconds=300,
                     check=True,
                 ),

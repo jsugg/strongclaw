@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 from typing import cast
@@ -91,6 +92,22 @@ def test_first_party_plugins_are_pinned_in_lockstep_with_openclaw() -> None:
         assert dependencies[plugin.package] == openclaw_version, plugin.package
         peers = _lock_packages()[f"node_modules/{plugin.package}"].get("peerDependencies")
         assert peers == {"openclaw": f">={openclaw_version}"}, plugin.package
+
+
+def test_security_overrides_are_exact_and_in_effect() -> None:
+    """Each override is an exact pin that every locked copy of its package resolves to."""
+    manifest = json.loads((_SOURCE_DIR / "package.json").read_text(encoding="utf-8"))
+    overrides = cast(dict[str, str], manifest.get("overrides", {}))
+    packages = _lock_packages()
+
+    for name, version in overrides.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", version), name
+        locked = {
+            entry.get("version")
+            for key, entry in packages.items()
+            if key.rsplit("node_modules/", 1)[-1] == name
+        }
+        assert locked == {version}, name
 
 
 def test_quoted_versions_match_the_manifest_everywhere() -> None:
