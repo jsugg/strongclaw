@@ -35,6 +35,7 @@ from clawops.strongclaw_runtime import (
 )
 
 DEFAULT_PROBE_MAX_TOKENS = 16
+_GATEWAY_PROBE_TIMEOUT_SECONDS: Final[int] = 120
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
 OLLAMA_CONTEXT_LENGTH_RE = re.compile(r"context length\s+(\d+)", re.IGNORECASE)
@@ -154,19 +155,47 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
     )
 
 
+def _gateway_rpc_ready(repo_root: pathlib.Path) -> bool:
+    """Return whether a running Gateway answers RPC for the rendered config."""
+    result = run_openclaw_command(repo_root, ["gateway", "status", "--json"], timeout_seconds=30)
+    status = _mapping_or_none(extract_json_document(result.stdout)) if result.ok else None
+    rpc = _mapping_or_none(status.get("rpc")) if status is not None else None
+    return rpc is not None and rpc.get("ok") is True
+
+
+def _agent_inference_verified_by_gateway(repo_root: pathlib.Path, agent_id: str) -> bool:
+    """Live-probe one agent's configured inference route through the running Gateway."""
+    params = json.dumps({"agentId": agent_id})
+    result = run_openclaw_command(
+        repo_root,
+        ["gateway", "call", "openclaw.setup.verify", "--params", params, "--json"],
+        timeout_seconds=_GATEWAY_PROBE_TIMEOUT_SECONDS,
+    )
+    verification = _mapping_or_none(extract_json_document(result.stdout)) if result.ok else None
+    return verification is not None and verification.get("ok") is True
+
+
 def _agent_model_status_ok(
     repo_root: pathlib.Path,
     agent_id: str,
     *,
     probe: bool,
     probe_max_tokens: int,
+    gateway_owns_state: bool = False,
 ) -> bool:
-    """Return whether one agent passes the status check."""
+    """Return whether one agent passes the status check and, when asked, a live probe.
+
+    OpenClaw 2026.8 refuses a direct `models status --probe` while a Gateway owns the state
+    directory (docs/cli/models.md); `openclaw.setup.verify` probes the same route through it.
+    """
     command = ["models", "status", "--agent", agent_id, "--check"]
-    if probe:
+    if probe and not gateway_owns_state:
         command.extend(["--probe", "--probe-max-tokens", str(probe_max_tokens)])
-    result = run_openclaw_command(repo_root, command, timeout_seconds=60)
-    return result.ok
+    if not run_openclaw_command(repo_root, command, timeout_seconds=60).ok:
+        return False
+    if probe and gateway_owns_state:
+        return _agent_inference_verified_by_gateway(repo_root, agent_id)
+    return True
 
 
 def _all_agents_have_models(
@@ -179,6 +208,7 @@ def _all_agents_have_models(
     agent_ids = _list_agent_ids(repo_root)
     failures: list[str] = []
     use_status = _models_status_supported(repo_root)
+    gateway_owns_state = probe and use_status and _gateway_rpc_ready(repo_root)
     for agent_id in agent_ids:
         ok = (
             _agent_model_status_ok(
@@ -186,6 +216,7 @@ def _all_agents_have_models(
                 agent_id,
                 probe=probe,
                 probe_max_tokens=probe_max_tokens,
+                gateway_owns_state=gateway_owns_state,
             )
             if use_status
             else _agent_models_available_via_list(repo_root, agent_id)

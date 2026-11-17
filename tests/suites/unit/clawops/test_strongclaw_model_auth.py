@@ -700,3 +700,61 @@ def test_memory_search_provider_replays_the_legacy_auto_selection(
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert payload["memory"]["search"]["provider"] == expected
     assert "memorySearch" not in payload["agents"]["defaults"]
+
+
+@pytest.mark.parametrize(
+    ("gateway_up", "expected_calls"),
+    [
+        (
+            False,
+            [
+                ["gateway", "status", "--json"],
+                ["models", "status", "--agent", "admin", "--check", "--probe"],
+            ],
+        ),
+        (
+            True,
+            [
+                ["gateway", "status", "--json"],
+                ["models", "status", "--agent", "admin", "--check"],
+                ["gateway", "call", "openclaw.setup.verify", "--params", '{"agentId": "admin"}'],
+            ],
+        ),
+    ],
+    ids=["direct-probe", "probe-through-running-gateway"],
+)
+def test_probe_goes_through_the_gateway_that_owns_the_state(
+    test_context: TestContext,
+    tmp_path: pathlib.Path,
+    gateway_up: bool,
+    expected_calls: list[list[str]],
+) -> None:
+    """2026.8 refuses a direct `models status --probe` while a Gateway owns the state directory."""
+    calls: list[list[str]] = []
+
+    def _run_openclaw_command(
+        repo_root: pathlib.Path, arguments: list[str], **_: object
+    ) -> SimpleNamespace:
+        del repo_root
+        calls.append(arguments)
+        if arguments[:2] == ["agents", "list"]:
+            return SimpleNamespace(ok=True, stdout='[{"id": "admin"}]')
+        if arguments[:2] == ["gateway", "status"]:
+            return SimpleNamespace(ok=True, stdout=json.dumps({"rpc": {"ok": gateway_up}}))
+        if arguments[:2] == ["gateway", "call"]:
+            return SimpleNamespace(ok=True, stdout='{"ok": true, "modelRef": "x/y"}')
+        return SimpleNamespace(ok=True, stdout="")
+
+    test_context.patch.patch_object(
+        strongclaw_model_auth, "run_openclaw_command", new=_run_openclaw_command
+    )
+    all_agents_have_models = cast(
+        Callable[..., tuple[bool, list[str]]],
+        vars(strongclaw_model_auth)["_all_agents_have_models"],
+    )
+
+    assert all_agents_have_models(tmp_path, probe=True, probe_max_tokens=8) == (True, [])
+    observed = [
+        call[: len(expected)] for call, expected in zip(calls[2:], expected_calls, strict=True)
+    ]
+    assert observed == expected_calls
