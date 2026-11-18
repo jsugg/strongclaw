@@ -71,7 +71,7 @@ def test_uv_default_dev_group_models_repo_tooling() -> None:
         "black>=26.3.1",
         "mypy>=2.4.1",
         "pre-commit>=4.5.1",
-        "ruff>=0.17.4",
+        "ruff>=0.17.5",
         "pyright>=1.1.408",
         "isort>=9.0.2",
         "twine>=7.0.0",
