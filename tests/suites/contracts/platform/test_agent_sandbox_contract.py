@@ -20,6 +20,8 @@ from tests.utils.helpers.repo import REPO_ROOT
 
 DISPATCHER_ID: Final[str] = "acp-dispatch"
 DISPATCHER_PROFILE: Final[str] = "acp"
+# Namespaced so no OpenClaw or plugin tool can ever register under it.
+DISPATCHER_NO_TOOLS_SENTINEL: Final[str] = "strongclaw_dispatcher_has_no_tools"
 
 type JsonObject = dict[str, object]
 
@@ -117,11 +119,12 @@ def test_the_dispatcher_is_reachable_only_through_admin_acp_spawn() -> None:
         assert DISPATCHER_ID not in allow and "*" not in allow, f"{scope}: {allow}"
     # A direct operator turn (`openclaw agent --agent acp-dispatch`) cannot be closed by config,
     # so it must fail closed: an explicit allowlist that leaves no callable tool makes OpenClaw
-    # stop the run before the prompt reaches the model. `/acp spawn` is a gateway command that
-    # runs before any agent turn and is gated on operator.admin by OpenClaw itself.
+    # stop the run before the prompt reaches the model. A `*` deny would defeat that: OpenClaw
+    # 2026.11 treats it as "tools disabled" and runs the turn tool-less. `/acp spawn` is a
+    # gateway command that runs before any agent turn and is gated on operator.admin itself.
     tools = _mapping(dispatcher.get("tools"))
-    assert _string_list(tools.get("allow")), "the dispatcher needs an explicit tool allowlist"
-    assert "*" in _string_list(tools.get("deny")), "the dispatcher must deny every tool"
+    assert _string_list(tools.get("allow")) == [DISPATCHER_NO_TOOLS_SENTINEL], tools
+    assert "*" not in _string_list(tools.get("deny")), "a `*` deny lets the turn run tool-less"
     assert not _mapping(dispatcher.get("runtime")), "the dispatcher is not itself an ACP agent"
 
 
