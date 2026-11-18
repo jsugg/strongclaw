@@ -16,7 +16,7 @@ import sys
 import time
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any, Final, Literal, cast
+from typing import Any, Final, Literal, Protocol, cast
 
 from clawops.app_paths import (
     strongclaw_compose_state_dir,
@@ -70,6 +70,7 @@ PLACEHOLDER_EXACT = {"", "null"}
 DEFAULT_QMD_VERSION = "2.0.1"
 DEFAULT_LOSSLESS_CLAW_REF = "v0.3.0"
 DEFAULT_LOSSLESS_CLAW_REPO = "https://github.com/Martian-Engineering/lossless-claw.git"
+_OPENCLAW_OFFLINE_ONLY_MARKER: Final[str] = "This command is offline-only"
 DEFAULT_VARLOCK_BIN_DIR = (
     pathlib.Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "varlock" / "bin"
 )
@@ -944,6 +945,40 @@ def openclaw_memory_search_arguments(
         owner = openclaw_default_agent_id(load_openclaw_config(config_path))
         arguments.extend(["--agent", owner])
     return [*arguments, "--query", query, "--max-results", str(max_results)]
+
+
+class OpenClawRunner(Protocol):
+    """Callable shape of `run_openclaw_command`, injectable by callers and their tests."""
+
+    def __call__(
+        self, repo_root: pathlib.Path, arguments: Sequence[str], *, timeout_seconds: int
+    ) -> ExecResult: ...
+
+
+def run_openclaw_memory_status(
+    repo_root: pathlib.Path,
+    *,
+    timeout_seconds: int,
+    check: bool = False,
+    run: OpenClawRunner = run_openclaw_command,
+) -> ExecResult:
+    """Run OpenClaw's deep memory status check offline, or through the Gateway owning the state.
+
+    OpenClaw 2026.11 runs `memory status` only while no Gateway owns the state directory and
+    says so ("This command is offline-only"); that Gateway answers the same deep check as the
+    `doctor.memory.status` method.
+    """
+    result = run(repo_root, ["memory", "status", "--deep"], timeout_seconds=timeout_seconds)
+    if not result.ok and _OPENCLAW_OFFLINE_ONLY_MARKER in f"{result.stdout}\n{result.stderr}":
+        result = run(
+            repo_root,
+            ["gateway", "call", "doctor.memory.status", "--params", '{"deep":true}', "--json"],
+            timeout_seconds=timeout_seconds,
+        )
+    if check and not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "openclaw memory status failed"
+        raise CommandError(detail, result=result)
+    return result
 
 
 def _nested_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:

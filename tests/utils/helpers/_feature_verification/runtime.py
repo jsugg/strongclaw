@@ -8,11 +8,13 @@ the remaining features still get a real gateway rather than cascading into failu
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import socket
 import subprocess
 import time
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, cast
@@ -201,6 +203,40 @@ class GatewayController:
             self._start_harness_process()
         time.sleep(_POLL_SECONDS)
         self.wait_ready()
+
+    @contextlib.contextmanager
+    def offline(self) -> Generator[None, None, None]:
+        """Stop the gateway around OpenClaw's offline-only commands, then bring it back.
+
+        OpenClaw 2026.11 runs `memory status|index|...` only while no Gateway owns the state
+        directory; an operator stops the Gateway first (docs/cli/agent.md).
+        """
+        mode = self.mode
+        domain = f"gui/{os.getuid()}"
+        plist = self.host.home / "Library" / "LaunchAgents" / f"{LAUNCHD_GATEWAY_LABEL}.plist"
+        if mode == "systemd":
+            self.host.run(
+                ["systemctl", "--user", "stop", SYSTEMD_GATEWAY_UNIT], timeout=120
+            ).require_ok()
+        elif mode == "launchd":
+            self.host.run(["launchctl", "bootout", domain, str(plist)], timeout=120).require_ok()
+        else:
+            self.stop()
+        try:
+            yield
+        finally:
+            if mode == "systemd":
+                self.host.run(
+                    ["systemctl", "--user", "start", SYSTEMD_GATEWAY_UNIT], timeout=120
+                ).require_ok()
+            elif mode == "launchd":
+                self.host.run(
+                    ["launchctl", "bootstrap", domain, str(plist)], timeout=120
+                ).require_ok()
+            else:
+                self._start_harness_process()
+            time.sleep(_POLL_SECONDS)
+            self.wait_ready()
 
     def stop(self) -> None:
         """Stop a harness-started gateway (its whole process group)."""

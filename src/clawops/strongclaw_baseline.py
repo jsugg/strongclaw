@@ -24,6 +24,7 @@ from clawops.strongclaw_runtime import (
     run_command,
     run_managed_clawops_command,
     run_openclaw_command,
+    run_openclaw_memory_status,
     use_varlock_env_mode,
 )
 
@@ -157,7 +158,7 @@ def verify_baseline(
     _run_checked(repo_root, "OpenClaw doctor", ["doctor", "--non-interactive"])
     _run_checked(repo_root, "OpenClaw security audit", ["security", "audit", "--deep"])
     _run_checked(repo_root, "OpenClaw secrets audit", ["secrets", "audit", "--check"])
-    _run_checked(repo_root, "OpenClaw memory status", ["memory", "status", "--deep"])
+    run_openclaw_memory_status(repo_root, timeout_seconds=300, check=True, run=run_openclaw_command)
     _run_checked(
         repo_root,
         "OpenClaw memory search",

@@ -86,7 +86,9 @@ def test_openclaw_default_profile_boots_with_memory_core(
     slots = cast(dict[str, object], plugins["slots"])
     assert slots == {"contextEngine": "legacy", "memory": "memory-core"}, slots
     assert plugin_statuses(feature_host).get("memory-core") == "loaded"
-    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+    # OpenClaw 2026.11 runs `memory status` only while no Gateway owns the state.
+    with gateway.offline():
+        feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
 
 
 def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
@@ -104,9 +106,13 @@ def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
         list[dict[str, str]], cast(dict[str, object], memory["search"])["extraPaths"]
     )
     assert runbooks in [Path(entry["path"]).resolve().as_posix() for entry in extra_paths]
-    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
     owner = default_agent_id(feature_host.rendered_config())
-    feature_host.openclaw("memory", "index", "--agent", owner, "--force", timeout=900).require_ok()
+    # OpenClaw 2026.11 runs `memory status|index` only while no Gateway owns the state.
+    with gateway.offline():
+        feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+        feature_host.openclaw(
+            "memory", "index", "--agent", owner, "--force", timeout=900
+        ).require_ok()
     payload = (
         feature_host.openclaw(
             "memory",
