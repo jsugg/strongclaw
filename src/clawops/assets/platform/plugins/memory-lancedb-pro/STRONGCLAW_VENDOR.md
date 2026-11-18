@@ -43,6 +43,9 @@ compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2`
   OpenClaw 2026.5+ routes plugin `console.log` output to stderr while a command runs in `--json`
   mode, which left `memory-pro search --json` with nothing but log lines on stdout. The host test
   now reads `--json` results from stdout alone instead of merging both streams.
+- The host test drops Node process-warning lines (`(node:<pid>) Warning: ...`) along with plugin
+  logs before comparing plain output: OpenClaw 2026.11 CLI commands warn on stderr as they exit
+  ("Plugin source receipt was not recorded: Gateway is closing ...").
 
 ## Review notes
 

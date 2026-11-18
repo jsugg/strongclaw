@@ -79,10 +79,17 @@ async function startMockEmbeddingServer() {
   };
 }
 
+// Node process warnings (`(node:<pid>) Warning: ...` and their `--trace-warnings` hint) are
+// host diagnostics, like plugin logs; OpenClaw 2026.11 emits them while a CLI command exits.
+const NODE_PROCESS_WARNING_LINE = /^\(node:\d+\) |^\(Use `node --trace-warnings/;
+
 function stripPluginLogs(output) {
   return output
     .split(/\r?\n/)
-    .filter((line) => line.trim() && !line.startsWith("[plugins]"))
+    .filter(
+      (line) =>
+        line.trim() && !line.startsWith("[plugins]") && !NODE_PROCESS_WARNING_LINE.test(line),
+    )
     .join("\n")
     .trim();
 }
