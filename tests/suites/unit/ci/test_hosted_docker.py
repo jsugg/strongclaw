@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -820,6 +821,111 @@ def test_setup_orbstack_rejects_checksum_mismatch(
         )
 
     assert not dmg_path.exists()
+
+
+def _node_pkg_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _fake_node_install(test_context: TestContext, *, reported_version: str) -> list[list[str]]:
+    commands: list[list[str]] = []
+
+    def fake_run_checked(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        commands.append(list(command))
+        if command[0] == "curl":
+            Path(command[-1]).write_bytes(b"downloaded package")
+        stdout = f"{reported_version}\n" if command[-1] == "--version" else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    test_context.patch.patch_object(hosted_docker_runtime.sys, "platform", new="darwin")
+    test_context.patch.patch_object(hosted_docker_runtime, "run_checked", new=fake_run_checked)
+    return commands
+
+
+def test_install_node_pkg_installs_a_cached_package_and_verifies_the_binary(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A verified package is installed system-wide and the resulting binary is version-checked."""
+    pkg_path = tmp_path / "node.pkg"
+    pkg_path.write_bytes(b"node package")
+    commands = _fake_node_install(test_context, reported_version="v24.22.3")
+
+    hosted_docker_runtime.install_node_pkg(
+        pkg_path=pkg_path, version="24.22.3", expected_sha256=_node_pkg_sha256(pkg_path)
+    )
+
+    assert commands == [
+        ["sudo", "installer", "-pkg", str(pkg_path.resolve()), "-target", "/"],
+        ["/usr/local/bin/node", "--version"],
+    ]
+
+
+def test_install_node_pkg_downloads_the_release_package_when_missing(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A missing package is fetched from the nodejs.org release directory for that version."""
+    pkg_path = tmp_path / "node.pkg"
+    commands = _fake_node_install(test_context, reported_version="v24.22.3")
+
+    with pytest.raises(fresh_host.FreshHostError, match="checksum mismatch"):
+        hosted_docker_runtime.install_node_pkg(
+            pkg_path=pkg_path, version="24.22.3", expected_sha256="0" * 64
+        )
+
+    assert commands[0][:2] == ["curl", "-fsSL"]
+    assert commands[0][2] == "https://nodejs.org/dist/v24.22.3/node-v24.22.3.pkg"
+
+
+def test_install_node_pkg_rejects_checksum_mismatch(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """A package with the wrong digest is removed and never installed."""
+    pkg_path = tmp_path / "node.pkg"
+    pkg_path.write_bytes(b"tampered package")
+    commands = _fake_node_install(test_context, reported_version="v24.22.3")
+
+    with pytest.raises(fresh_host.FreshHostError, match="checksum mismatch"):
+        hosted_docker_runtime.install_node_pkg(
+            pkg_path=pkg_path, version="24.22.3", expected_sha256="0" * 64
+        )
+
+    assert not pkg_path.exists()
+    assert commands == []
+
+
+@pytest.mark.parametrize("version", ["22.23.5", "25.9.0", "24.22"])
+def test_install_node_pkg_rejects_versions_openclaw_refuses(
+    tmp_path: Path,
+    test_context: TestContext,
+    version: str,
+) -> None:
+    """Only a release inside the pinned OpenClaw's Node range may be installed."""
+    commands = _fake_node_install(test_context, reported_version=f"v{version}")
+
+    with pytest.raises(fresh_host.FreshHostError, match="outside the supported"):
+        hosted_docker_runtime.install_node_pkg(
+            pkg_path=tmp_path / "node.pkg", version=version, expected_sha256="0" * 64
+        )
+
+    assert commands == []
+
+
+def test_install_node_pkg_fails_when_the_installed_binary_reports_another_version(
+    tmp_path: Path,
+    test_context: TestContext,
+) -> None:
+    """An installer that leaves a different Node on /usr/local/bin is reported, not trusted."""
+    pkg_path = tmp_path / "node.pkg"
+    pkg_path.write_bytes(b"node package")
+    _fake_node_install(test_context, reported_version="v22.23.2")
+
+    with pytest.raises(fresh_host.FreshHostError, match="reports 'v22.23.2'"):
+        hosted_docker_runtime.install_node_pkg(
+            pkg_path=pkg_path, version="24.22.3", expected_sha256=_node_pkg_sha256(pkg_path)
+        )
 
 
 @_ORBSTACK_ONLY

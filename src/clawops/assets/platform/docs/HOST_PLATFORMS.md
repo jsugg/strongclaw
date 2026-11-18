@@ -17,10 +17,10 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 | --- | --- | --- |
 | Python | `3.12`, `3.13` | `pyproject.toml` requires `>=3.12,<3.14`, and Ruff, Black, mypy, and Pyright all target Python 3.12 syntax/features. |
 | Managed install baseline | Python `3.12` | `make install` and bootstrap prefer Python `3.12` on supported Darwin/Linux hosts so the default hypermemory local-rerank path stays on the broadest compatible interpreter. |
-| Node.js | `22.22.3+` (22.x), `24.15.0+` (24.x), `25.9.0+` | OpenClaw `2026.8.35` requires `>=22.22.3` on the 22 line, `>=24.15.0` on 24, or `>=25.9.0`, and refuses Node 23; bootstrap enforces the same release-line floors. OpenClaw 2026.9.3+ drops Node 22. ACPX `0.21.1`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
+| Node.js | `24.16.0+` (24.x), `26.1.0+` | OpenClaw `2026.11.5` requires `>=24.16.0` on the 24 line or `>=26.1.0`, and refuses Node 22, 23, and 25; bootstrap enforces the same release-line floors. OpenClaw strongly recommends the `24.22.1` / `26.12.1` security releases. ACPX `0.21.1`, Varlock `0.5.0`, and QMD `2.0.1` all require Node 22+. |
 | `uv` | `0.10.9` | Setup and CI pin this version for reproducible environment sync. |
 | Varlock | `0.5.0` | Setup installs and verifies this exact version. |
-| OpenClaw | `2026.8.35` | Setup installs this exact CLI version, plus its full dependency tree, from the committed `platform/node-tools/package-lock.json` with `npm ci`. |
+| OpenClaw | `2026.11.5` | Setup installs this exact CLI version, plus its full dependency tree, from the committed `platform/node-tools/package-lock.json` with `npm ci`. |
 | ACPX | `0.21.1` | Installed from the same lock as OpenClaw. Both CLIs are linked into npm's global bin directory (`$(npm prefix -g)/bin`), the same place `npm install -g` uses. |
 | First-party OpenClaw plugins | same version as OpenClaw | OpenClaw 2026.4+ publishes some former built-ins as separate `@openclaw/*` plugins: the ACP backend, the Codex agent runtime, the Z.AI and Moonshot providers, and OpenTelemetry diagnostics. They are pinned in the same lock and rendered configs load them through `plugins.load.paths` from `<data>/node-tools`, so OpenClaw never installs them from npm. `@openclaw/whatsapp` is not locked yet: the WhatsApp channel overlay needs it installed separately. |
 | QMD | `2.0.1` | Setup installs this exact package version behind the `~/.bun/bin/qmd` wrapper. |
@@ -30,8 +30,8 @@ StrongClaw's supported baseline is derived from the codebase constraints plus th
 CI enforces this support statement through:
 
 - a Python matrix on `3.12` and `3.13`
-- a setup/install smoke matrix on Node `22.22.3` and `24.15.0`
-- a vendored memory-plugin integration matrix on Node `22.22.3` and `24.15.0`
+- a setup/install smoke matrix on Node `24.16.0` and `26.1.0`
+- a vendored memory-plugin integration matrix on Node `24.16.0` and `26.1.0`
 - a `strongclaw-hypermemory` OpenClaw host-functional lane on Ubuntu
 
 For low-end or older hosts, this split matters:

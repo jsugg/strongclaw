@@ -22,6 +22,8 @@ MIGRATION_REPORT_VERSION: Final[int] = 1
 DEFAULT_QUERY_COUNT: Final[int] = 5
 DEFAULT_RESULT_LIMIT: Final[int] = 5
 DEFAULT_IMPORT_TIMEOUT_SECONDS: Final[int] = 120
+# Since 2026.9 an OpenClaw CLI search loads the memory plugin first; 30s did not cover it.
+DEFAULT_SEARCH_TIMEOUT_SECONDS: Final[int] = 120
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -449,7 +451,7 @@ def _search_memory_pro_cli(
         str(limit),
         "--json",
     ]
-    result = run_command(command, timeout_seconds=30)
+    result = run_command(command, timeout_seconds=DEFAULT_SEARCH_TIMEOUT_SECONDS)
     if not result.ok:
         error = result.stderr.strip() or result.stdout.strip() or "memory-pro search failed"
         return [], error

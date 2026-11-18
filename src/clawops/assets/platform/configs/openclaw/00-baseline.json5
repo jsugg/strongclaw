@@ -1,12 +1,8 @@
 {
   "agents": {
+    // OpenClaw 2026.11 retired `heartbeat`: monitors are automation jobs, provisioned only by
+    // `openclaw setup`, which StrongClaw never runs, so no periodic check exists.
     "defaults": {
-      "heartbeat": {
-        "directPolicy": "block",
-        "every": "0m",
-        "lightContext": true,
-        "target": "none"
-      },
       "imageMaxDimensionPx": 1200,
       "model": {
         "fallbacks": [
@@ -75,12 +71,7 @@
   },
   "channels": {
     "defaults": {
-      "groupPolicy": "allowlist",
-      "heartbeatVisibility": {
-        "showAlerts": true,
-        "showOk": false,
-        "useIndicator": true
-      }
+      "groupPolicy": "allowlist"
     },
     "telegram": {
       "dmPolicy": "pairing",
@@ -149,8 +140,8 @@
     }
   },
   "skills": {
+    // OpenClaw 2026.11 removed Skill Workshop proposals and their `approvalPolicy`.
     "workshop": {
-      "approvalPolicy": "pending",
       "autonomous": {
         "mode": "off"
       }

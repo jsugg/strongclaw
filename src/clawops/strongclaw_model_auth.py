@@ -36,6 +36,9 @@ from clawops.strongclaw_runtime import (
 
 DEFAULT_PROBE_MAX_TOKENS = 16
 _INFERENCE_PROBE_TIMEOUT_SECONDS: Final[int] = 120
+# Since 2026.9, OpenClaw CLI queries run about twice as long as on 2026.8, and right after
+# setup they share the host with a starting Gateway.
+_OPENCLAW_QUERY_TIMEOUT_SECONDS: Final[int] = 120
 _PROBE_PROMPT: Final[str] = "Reply with exactly: ok"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 OLLAMA_MIN_CONTEXT_WINDOW = 16_000
@@ -108,7 +111,9 @@ def _extract_agent_ids(payload: object) -> list[str]:
 
 def _list_agent_ids(repo_root: pathlib.Path) -> list[str]:
     """Return the configured OpenClaw agent ids."""
-    result = run_openclaw_command(repo_root, ["agents", "list", "--json"], timeout_seconds=30)
+    result = run_openclaw_command(
+        repo_root, ["agents", "list", "--json"], timeout_seconds=_OPENCLAW_QUERY_TIMEOUT_SECONDS
+    )
     if not result.ok:
         detail = result.stderr.strip() or result.stdout.strip() or "openclaw agents list failed"
         raise CommandError(detail, result=result)
@@ -126,7 +131,7 @@ def _models_status_supported(repo_root: pathlib.Path) -> bool:
     result = run_openclaw_command(
         repo_root,
         ["models", "status", "--help"],
-        timeout_seconds=10,
+        timeout_seconds=_OPENCLAW_QUERY_TIMEOUT_SECONDS,
     )
     return result.ok
 
@@ -136,7 +141,7 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
     result = run_openclaw_command(
         repo_root,
         ["models", "--agent", agent_id, "list", "--json"],
-        timeout_seconds=30,
+        timeout_seconds=_OPENCLAW_QUERY_TIMEOUT_SECONDS,
     )
     if not result.ok:
         return False
@@ -158,7 +163,9 @@ def _agent_models_available_via_list(repo_root: pathlib.Path, agent_id: str) -> 
 
 def _gateway_rpc_ready(repo_root: pathlib.Path) -> bool:
     """Return whether a running Gateway answers RPC for the rendered config."""
-    result = run_openclaw_command(repo_root, ["gateway", "status", "--json"], timeout_seconds=30)
+    result = run_openclaw_command(
+        repo_root, ["gateway", "status", "--json"], timeout_seconds=_OPENCLAW_QUERY_TIMEOUT_SECONDS
+    )
     status = _mapping_or_none(extract_json_document(result.stdout)) if result.ok else None
     rpc = _mapping_or_none(status.get("rpc")) if status is not None else None
     return rpc is not None and rpc.get("ok") is True
@@ -194,7 +201,9 @@ def _agent_model_status_ok(
     command = ["models", "status", "--agent", agent_id, "--check"]
     if probe and not gateway_owns_state:
         command.extend(["--probe", "--probe-max-tokens", str(probe_max_tokens)])
-    if not run_openclaw_command(repo_root, command, timeout_seconds=60).ok:
+    if not run_openclaw_command(
+        repo_root, command, timeout_seconds=_OPENCLAW_QUERY_TIMEOUT_SECONDS
+    ).ok:
         return False
     if probe and gateway_owns_state:
         return _agent_inference_answers(repo_root, agent_id)

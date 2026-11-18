@@ -47,6 +47,7 @@ from clawops.strongclaw_runtime import (
     resolve_varlock_bin,
     run_command,
     run_openclaw_command,
+    run_openclaw_memory_status,
     use_varlock_env_mode,
 )
 from clawops.strongclaw_services import activate_services, render_service_files
@@ -507,8 +508,8 @@ def doctor_main(argv: list[str] | None = None) -> int:
                 "OpenClaw memory status",
                 "OPENCLAW_GATEWAY_TOKEN=<token> openclaw memory status --deep",
                 checks,
-                lambda: run_openclaw_command(
-                    repo_root, ["memory", "status", "--deep"], timeout_seconds=300, check=True
+                lambda: run_openclaw_memory_status(
+                    repo_root, timeout_seconds=300, check=True, run=run_openclaw_command
                 ),
             )
             _run_check(

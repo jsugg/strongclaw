@@ -27,21 +27,21 @@ from clawops.platform_compat import (
 
 
 def test_supported_node_range_renders_the_npm_engine_syntax() -> None:
-    assert SUPPORTED_NODE_RANGE == ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+    assert SUPPORTED_NODE_RANGE == ">=24.16.0 <25 || >=26.1.0"
 
 
 @pytest.mark.parametrize(
     ("version", "supported"),
     [
-        ((22, 22, 2), False),
-        ((22, 22, 3), True),
-        ((22, 23, 5), True),
+        ((22, 23, 5), False),
         ((23, 11, 1), False),
-        ((24, 13, 1), False),
-        ((24, 15, 0), True),
-        ((25, 8, 9), False),
-        ((25, 9, 0), True),
-        ((26, 0, 0), True),
+        ((24, 15, 9), False),
+        ((24, 16, 0), True),
+        ((24, 22, 3), True),
+        ((25, 9, 0), False),
+        ((26, 0, 9), False),
+        ((26, 1, 0), True),
+        ((27, 0, 0), True),
         ((20, 99, 99), False),
     ],
 )
@@ -54,10 +54,10 @@ def test_node_version_supported_follows_each_release_line_floor(
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("v22.22.3\n", (22, 22, 3)),
-        ("24.15.0", (24, 15, 0)),
+        ("v24.16.0\n", (24, 16, 0)),
+        ("26.1.0", (26, 1, 0)),
         ("v25.9.0+build.1", (25, 9, 0)),
-        ("v24.15", None),
+        ("v24.16", None),
         ("v26.0.0-nightly2026", None),
         ("", None),
     ],

@@ -10,6 +10,7 @@ from tests.utils.helpers._feature_verification.fake_model import (
     FakeModelServer,
     canned_reply,
     deterministic_embedding,
+    messages_text,
     system_prompt_tokens,
 )
 from tests.utils.helpers._feature_verification.host import (
@@ -17,6 +18,7 @@ from tests.utils.helpers._feature_verification.host import (
     FeatureHost,
     extract_json,
     reply_texts,
+    retry_while_openclaw_not_ready,
 )
 from tests.utils.helpers._feature_verification.http import (
     HttpResponse,
@@ -100,6 +102,7 @@ __all__ = [
     "collect_lane_diagnostics",
     "apply_model_provider",
     "deterministic_embedding",
+    "messages_text",
     "system_prompt_tokens",
     "enable_systemd_user_manager",
     "extract_json",
@@ -114,6 +117,7 @@ __all__ = [
     "register_provider",
     "render_markdown",
     "reply_texts",
+    "retry_while_openclaw_not_ready",
     "run_lane",
     "seed_env_contract",
     "service_active",

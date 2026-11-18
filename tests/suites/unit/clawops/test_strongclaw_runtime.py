@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
+from collections.abc import Sequence
 from typing import Any, cast
 
 import pytest
@@ -768,3 +769,72 @@ def test_memory_search_arguments_name_the_ambient_owner(
         "admin",
         *search,
     ]
+
+
+_OFFLINE_ONLY_REFUSAL = (
+    "Cannot admit memory.cli for memory stores in state root /s: This operation requires "
+    "exclusive offline state ownership. This command is offline-only. To run offline, stop it."
+)
+
+
+class _ScriptedOpenClaw:
+    """Stand-in `run_openclaw_command` that replays scripted results and records arguments."""
+
+    def __init__(self, outcomes: list[ExecResult]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[list[str]] = []
+
+    def __call__(
+        self, repo_root: pathlib.Path, arguments: Sequence[str], *, timeout_seconds: int
+    ) -> ExecResult:
+        del repo_root, timeout_seconds
+        self.calls.append(list(arguments))
+        return self.outcomes[len(self.calls) - 1]
+
+
+def test_memory_status_runs_offline_when_no_gateway_owns_the_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    """With no Gateway running, the documented offline deep check is the whole answer."""
+    run = _ScriptedOpenClaw([ExecResult(("openclaw",), 0, "ok", "", 1)])
+
+    result = runtime.run_openclaw_memory_status(tmp_path, timeout_seconds=30, check=True, run=run)
+
+    assert result.ok
+    assert run.calls == [["memory", "status", "--deep"]]
+
+
+def test_memory_status_asks_the_gateway_that_owns_the_state(
+    tmp_path: pathlib.Path,
+) -> None:
+    """An offline-only refusal falls back to the owning Gateway's `doctor.memory.status`."""
+    run = _ScriptedOpenClaw(
+        [
+            ExecResult(("openclaw",), 1, "", _OFFLINE_ONLY_REFUSAL, 1),
+            ExecResult(("openclaw",), 0, '{"embedding":{"ok":true}}', "", 1),
+        ],
+    )
+
+    result = runtime.run_openclaw_memory_status(tmp_path, timeout_seconds=30, check=True, run=run)
+
+    assert result.ok
+    assert run.calls[1] == [
+        "gateway",
+        "call",
+        "doctor.memory.status",
+        "--params",
+        '{"deep":true}',
+        "--json",
+    ]
+
+
+def test_memory_status_reports_other_failures_without_a_gateway_fallback(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A real status failure is raised as-is; it never routes to the Gateway."""
+    run = _ScriptedOpenClaw([ExecResult(("openclaw",), 1, "", "embedding provider unreachable", 1)])
+
+    with pytest.raises(CommandError, match="embedding provider unreachable"):
+        runtime.run_openclaw_memory_status(tmp_path, timeout_seconds=30, check=True, run=run)
+
+    assert run.calls == [["memory", "status", "--deep"]]

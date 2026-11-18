@@ -117,14 +117,18 @@ def test_doctor_host_reports_toolchain(feature_host: FeatureHost) -> None:
     assert Path(str(payload["config"])).is_file(), payload
 
 
+def _check_detail(check: dict[str, object]) -> str:
+    """Return the end of a failed check's message, without the plugin log lines that lead it."""
+    lines = [line for line in str(check["message"]).splitlines() if " [plugins] " not in line]
+    return "\n".join(lines)[-600:]
+
+
 def test_deep_doctor_passes_every_check(feature_host: FeatureHost, sidecars: str) -> None:
     del sidecars
     outcome = feature_host.clawops("doctor", "--asset-root", ".", timeout=1800)
     payload = cast(dict[str, object], outcome.json())
     checks = cast(list[dict[str, object]], payload["checks"])
-    failed = {
-        str(check["name"]): str(check["message"])[:600] for check in checks if not check["ok"]
-    }
+    failed = {str(check["name"]): _check_detail(check) for check in checks if not check["ok"]}
     assert payload["status"] == "pass" and outcome.ok, json.dumps(failed, indent=2)
 
 

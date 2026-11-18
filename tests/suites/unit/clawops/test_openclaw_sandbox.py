@@ -54,7 +54,7 @@ def test_sandbox_image_is_built_when_missing_or_stale(
     [command] = docker.builds
     assert command[:2] == ["docker", "build"]
     assert f"{openclaw_sandbox.SANDBOX_IMAGE_LABEL}={recipe}" in command
-    assert command[command.index("--tag") + 1] == "openclaw-sandbox:bookworm-slim"
+    assert command[command.index("--tag") + 1] == "openclaw-sandbox:trixie-slim"
     assert docker.dockerfiles == [openclaw_sandbox.SANDBOX_DOCKERFILE]
 
 
@@ -70,7 +70,7 @@ def test_failed_sandbox_build_is_reported(test_context: TestContext) -> None:
     """A failed build stops setup instead of leaving agents without a sandbox."""
     _FakeDocker(test_context, label=None, build_rc=1)
 
-    with pytest.raises(CommandError, match="openclaw-sandbox:bookworm-slim"):
+    with pytest.raises(CommandError, match="openclaw-sandbox:trixie-slim"):
         openclaw_sandbox.ensure_openclaw_sandbox_image()
 
 
@@ -78,7 +78,7 @@ def test_sandbox_recipe_pins_its_base_and_ships_python() -> None:
     """The base is digest-pinned and the image carries python3 for the write/edit helpers."""
     first_line = openclaw_sandbox.SANDBOX_DOCKERFILE.splitlines()[0]
 
-    assert first_line.startswith("FROM debian:bookworm-slim@sha256:")
+    assert first_line.startswith("FROM debian:trixie-slim@sha256:")
     assert len(first_line.rsplit(":", 1)[1]) == 64
     assert " python3 " in openclaw_sandbox.SANDBOX_DOCKERFILE
     assert "USER sandbox" in openclaw_sandbox.SANDBOX_DOCKERFILE

@@ -12,6 +12,7 @@ import yaml
 
 from clawops.platform_compat import (
     MINIMUM_NODE_VERSION_TEXT,
+    NODE_RELEASE_FLOORS,
     SUPPORTED_NODE_RANGE,
     node_version_supported,
     parse_node_version,
@@ -81,23 +82,22 @@ def test_every_ci_node_version_runs_the_pinned_openclaw(workflow_path: pathlib.P
 
 @pytest.mark.parametrize("workflow_name", _FLOOR_WORKFLOWS)
 def test_ci_matrices_exercise_the_floor(workflow_name: str) -> None:
-    """The oldest Node 22 leg in each compatibility matrix is the supported floor itself."""
+    """The oldest leg of each supported line in each compatibility matrix is that line's floor."""
     workflow_path = _WORKFLOWS_DIR / workflow_name
     jobs = cast(dict[str, Any], yaml.safe_load(workflow_path.read_text(encoding="utf-8"))["jobs"])
     legs = [
-        str(version)
+        version
         for job in jobs.values()
-        for version in cast(
+        for leg in cast(
             list[object], job.get("strategy", {}).get("matrix", {}).get("node-version", [])
         )
+        if (version := parse_node_version(str(leg))) is not None
     ]
-    node_22_legs = sorted(
-        (leg for leg in legs if leg.startswith("22.")),
-        key=lambda leg: tuple(int(part) for part in leg.split(".")),
-    )
 
-    assert node_22_legs, workflow_name
-    assert node_22_legs[0] == MINIMUM_NODE_VERSION_TEXT
+    for floor in NODE_RELEASE_FLOORS:
+        line_legs = [leg for leg in legs if leg[0] == floor[0]]
+        assert line_legs, f"{workflow_name}: no Node {floor[0]} leg"
+        assert min(line_legs) == floor, f"{workflow_name}: Node {floor[0]} floor"
 
 
 @pytest.mark.parametrize("relative_path", _FLOOR_DOCS)

@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, cast
@@ -50,6 +50,16 @@ _FRAMEWORK_ENV_KEYS: Final[frozenset[str]] = frozenset({"TEST_ID", "RESOURCE_PRE
 _JSON_START: Final[re.Pattern[str]] = re.compile(r"(?m)^[ \t]*[\[{]")
 _OUTPUT_TAIL_CHARS: Final[int] = 3000
 _GATEWAY_ADMIN_CALL_SCRIPT: Final[Path] = Path(__file__).with_name("gateway_admin_call.mjs")
+# OpenClaw refuses with these, and asks the caller to retry, while a starting gateway holds its
+# state store (schema admission, offline maintenance) or before its stores are ready.
+OPENCLAW_RETRY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"is undergoing (?:offline maintenance|schema admission)\b[^\n]*?; retry when it finishes"
+    r"|retry after session storage is ready"
+    r"|retry after the agent store is ready"
+    r"|Agent database maintenance is in progress; retry after"
+)
+OPENCLAW_RETRY_WINDOW_SECONDS: Final[float] = 180.0
+_OPENCLAW_RETRY_INTERVAL_SECONDS: Final[float] = 2.0
 
 
 def default_manifest_path(repo_root: Path) -> Path:
@@ -125,6 +135,28 @@ class CommandOutcome:
     def json(self) -> object:
         """Parse the first JSON document from stdout."""
         return extract_json(self.stdout)
+
+    @property
+    def asks_for_retry(self) -> bool:
+        """Return whether OpenClaw refused because its state is not ready yet."""
+        return not self.ok and OPENCLAW_RETRY_PATTERN.search(self.output) is not None
+
+
+def retry_while_openclaw_not_ready(
+    run: Callable[[], CommandOutcome],
+    *,
+    window_seconds: float = OPENCLAW_RETRY_WINDOW_SECONDS,
+    interval_seconds: float = _OPENCLAW_RETRY_INTERVAL_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> CommandOutcome:
+    """Re-run *run* while OpenClaw asks for a retry, until it settles or the window closes."""
+    deadline = clock() + window_seconds
+    outcome = run()
+    while outcome.asks_for_retry and clock() + interval_seconds < deadline:
+        sleep(interval_seconds)
+        outcome = run()
+    return outcome
 
 
 @dataclass(slots=True)
@@ -279,7 +311,9 @@ class FeatureHost:
     ) -> CommandOutcome:
         """Run ``openclaw`` exactly as StrongClaw does: inside ``varlock run``."""
         argv = wrap_command_with_varlock(self.repo_root, ["openclaw", *arguments])
-        return self.run(argv, cwd=cwd, timeout=timeout, env=env)
+        return retry_while_openclaw_not_ready(
+            lambda: self.run(argv, cwd=cwd, timeout=timeout, env=env)
+        )
 
     def gateway_admin_call(
         self, method: str, params: Mapping[str, object], *, timeout: float = 120
@@ -308,7 +342,9 @@ class FeatureHost:
             "OPENCLAW_STATE_DIR": str(identity_dir),
             "OPENCLAW_CONFIG_PATH": str(resolve_openclaw_config_path(self.repo_root)),
         }
-        return self.run(argv, timeout=timeout + 30, env=overrides)
+        return retry_while_openclaw_not_ready(
+            lambda: self.run(argv, timeout=timeout + 30, env=overrides)
+        )
 
     def clawops_managed(
         self,

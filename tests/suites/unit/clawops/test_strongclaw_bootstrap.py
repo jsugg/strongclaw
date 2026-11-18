@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from clawops import strongclaw_bootstrap
-from clawops.platform_compat import SUPPORTED_NODE_RANGE
+from clawops.platform_compat import MINIMUM_NODE_VERSION, SUPPORTED_NODE_RANGE
 from tests.plugins.infrastructure.context import TestContext
 
 
@@ -207,10 +207,11 @@ def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) ->
 @pytest.mark.parametrize(
     ("stdout", "ok", "supported"),
     [
-        ("v22.22.3\n", True, True),
-        ("v22.19.0\n", True, False),
-        ("v24.13.1\n", True, False),
-        ("v26.1.0\n", True, True),
+        ("v24.16.0\n", True, True),
+        ("v22.23.5\n", True, False),
+        ("v24.15.0\n", True, False),
+        ("v25.9.0\n", True, False),
+        ("v26.13.1\n", True, True),
         ("", False, False),
     ],
 )
@@ -246,14 +247,14 @@ def test_node_runtime_supported_checks_the_resolved_command_against_the_range(
 def test_ensure_node_runtime_darwin_upgrades_a_brew_node_below_its_line_floor(
     test_context: TestContext,
 ) -> None:
-    """A Homebrew Node 24 below 24.15.0 is upgraded rather than accepted as >= 22."""
+    """A Homebrew Node 24 below 24.16.0 is upgraded rather than accepted as a Node 24."""
 
-    node_versions = iter(["v24.13.1\n", "v26.1.0\n"])
+    node_versions = iter(["v24.15.0\n", "v26.13.1\n"])
     brew_commands: list[list[str]] = []
 
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
         if command == ["brew", "list", "--versions", "node"]:
-            return SimpleNamespace(ok=True, stdout="node 24.13.1\n")
+            return SimpleNamespace(ok=True, stdout="node 24.15.0\n")
         assert command == ["node", "--version"]
         return SimpleNamespace(ok=True, stdout=next(node_versions))
 
@@ -351,6 +352,41 @@ def test_ensure_node_runtime_darwin_reports_the_floor_when_still_too_old(
         match=re.escape(f"node {SUPPORTED_NODE_RANGE} is required (found v24.13.1 at "),
     ):
         strongclaw_bootstrap._ensure_node_runtime_darwin()
+
+
+def test_ensure_node_runtime_linux_installs_the_floor_release_line(
+    test_context: TestContext,
+) -> None:
+    """Linux provisions NodeSource's channel for the supported floor's release line."""
+
+    checks = iter([False, True])
+    streamed: list[list[str]] = []
+
+    def _node_runtime_supported() -> bool:
+        return next(checks)
+
+    def _command_exists(_name: str) -> bool:
+        return True
+
+    def fake_stream_checked(command: list[str], **_: object) -> None:
+        streamed.append(command)
+
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_node_runtime_supported", new=_node_runtime_supported
+    )
+    test_context.patch.patch_object(strongclaw_bootstrap, "command_exists", new=_command_exists)
+    test_context.patch.patch_object(
+        strongclaw_bootstrap, "_stream_checked", new=fake_stream_checked
+    )
+
+    strongclaw_bootstrap._ensure_node_runtime_linux()
+
+    assert streamed[0] == [
+        "bash",
+        "-lc",
+        f"curl -fsSL https://deb.nodesource.com/setup_{MINIMUM_NODE_VERSION[0]}.x | sudo -E bash -",
+    ]
+    assert streamed[1][-3:] == ["install", "-y", "nodejs"]
 
 
 def test_install_qmd_asset_writes_wrapper_with_resolved_node_command(

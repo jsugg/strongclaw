@@ -3,9 +3,9 @@
 StrongClaw configs run every agent with `sandbox.mode: "all"`. OpenClaw 2026.3 pulled
 `debian:bookworm-slim` and retagged it as the default sandbox image on first use; 2026.5+ fails
 the turn instead and expects the operator to build the image, which must carry `python3` for the
-sandbox write/edit helpers. StrongClaw builds it from upstream's documented recipe on a
-digest-pinned base, and labels it with the recipe digest so stale or foreign images (including
-the old retagged base) are rebuilt.
+sandbox write/edit helpers; 2026.11 moved the default image to Debian trixie. StrongClaw builds it
+from upstream's documented recipe on a digest-pinned base, and labels it with the recipe digest so
+stale or foreign images (including the old retagged base) are rebuilt.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from typing import Final
 
 from clawops.strongclaw_runtime import CommandError, run_command, run_command_inherited
 
-SANDBOX_IMAGE: Final[str] = "openclaw-sandbox:bookworm-slim"
+SANDBOX_IMAGE: Final[str] = "openclaw-sandbox:trixie-slim"
 SANDBOX_IMAGE_LABEL: Final[str] = "ai.strongclaw.openclaw-sandbox.recipe"
 # Upstream recipe: docs/gateway/sandboxing.md ("Build the default image", npm install path).
 SANDBOX_DOCKERFILE: Final[str] = """\
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \\
   bash ca-certificates curl git jq python3 ripgrep \\

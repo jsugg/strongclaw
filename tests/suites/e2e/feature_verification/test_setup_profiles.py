@@ -86,7 +86,9 @@ def test_openclaw_default_profile_boots_with_memory_core(
     slots = cast(dict[str, object], plugins["slots"])
     assert slots == {"contextEngine": "legacy", "memory": "memory-core"}, slots
     assert plugin_statuses(feature_host).get("memory-core") == "loaded"
-    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+    # OpenClaw 2026.11 runs `memory status` only while no Gateway owns the state.
+    with gateway.offline():
+        feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
 
 
 def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
@@ -104,9 +106,13 @@ def test_openclaw_qmd_profile_indexes_the_qmd_corpus_with_builtin_memory(
         list[dict[str, str]], cast(dict[str, object], memory["search"])["extraPaths"]
     )
     assert runbooks in [Path(entry["path"]).resolve().as_posix() for entry in extra_paths]
-    feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
     owner = default_agent_id(feature_host.rendered_config())
-    feature_host.openclaw("memory", "index", "--agent", owner, "--force", timeout=900).require_ok()
+    # OpenClaw 2026.11 runs `memory status|index` only while no Gateway owns the state.
+    with gateway.offline():
+        feature_host.openclaw("memory", "status", "--deep", timeout=600).require_ok()
+        feature_host.openclaw(
+            "memory", "index", "--agent", owner, "--force", timeout=900
+        ).require_ok()
     payload = (
         feature_host.openclaw(
             "memory",
@@ -163,6 +169,19 @@ def _set_stub_harness(feature_host: FeatureHost, harness: str) -> None:
     config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _latest_message_timestamp(feature_host: FeatureHost, session_key: str) -> float:
+    """Return the timestamp of *session_key*'s latest message, or 0 when it has none yet."""
+    history = feature_host.gateway_admin_call(
+        "chat.history", {"sessionKey": session_key, "limit": 1}
+    )
+    if not history.ok:
+        return 0.0
+    messages = cast(list[object], cast(dict[str, object], history.json()).get("messages", []))
+    if not messages:
+        return 0.0
+    return float(cast(float, cast(dict[str, object], messages[-1]).get("timestamp", 0)))
+
+
 def _session_reply(
     feature_host: FeatureHost,
     session_key: str,
@@ -171,6 +190,9 @@ def _session_reply(
     timeout: float = COMMAND_REPLY_TIMEOUT_SECONDS,
 ) -> str:
     """Send *message* to *session_key* through the gateway as operator.admin; return the reply."""
+    # A reply to the previous command can land within the clock tolerance below; only a message
+    # newer than the session's latest one before sending answers this command.
+    previous_at_ms = _latest_message_timestamp(feature_host, session_key)
     sent_at_ms = time.time() * 1000
     feature_host.gateway_admin_call(
         "chat.send",
@@ -187,9 +209,11 @@ def _session_reply(
         ).require_ok()
         messages = cast(list[object], cast(dict[str, object], history.json()).get("messages", []))
         last = cast(dict[str, object], messages[-1]) if messages else {}
+        replied_at_ms = float(cast(float, last.get("timestamp", 0)))
         if (
             last.get("role") == "assistant"
-            and float(cast(float, last.get("timestamp", 0))) >= sent_at_ms - 1000
+            and replied_at_ms >= sent_at_ms - 1000
+            and replied_at_ms > previous_at_ms
         ):
             return " ".join(
                 str(cast(dict[str, object], part).get("text", ""))
