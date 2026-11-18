@@ -66,7 +66,7 @@ type NodeVersion = tuple[int, int, int]
 
 # Mirrors NODE_RELEASE_FLOORS in the pinned openclaw node-version.mjs: one floor per supported
 # release line. Majors between listed lines are unsupported; majors above the last one are allowed.
-NODE_RELEASE_FLOORS: Final[tuple[NodeVersion, ...]] = ((22, 22, 3), (24, 15, 0), (25, 9, 0))
+NODE_RELEASE_FLOORS: Final[tuple[NodeVersion, ...]] = ((24, 22, 1), (26, 12, 1))
 MINIMUM_NODE_VERSION: Final[NodeVersion] = NODE_RELEASE_FLOORS[0]
 _NODE_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^v?(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?$"
@@ -89,7 +89,7 @@ SUPPORTED_NODE_RANGE: Final[str] = _render_supported_node_range(NODE_RELEASE_FLO
 
 
 def parse_node_version(text: str) -> NodeVersion | None:
-    """Parse a Node.js release version such as `v22.22.3`; return None when malformed."""
+    """Parse a Node.js release version such as `v24.22.1`; return None when malformed."""
     match = _NODE_VERSION_PATTERN.fullmatch(text.strip())
     if match is None:
         return None

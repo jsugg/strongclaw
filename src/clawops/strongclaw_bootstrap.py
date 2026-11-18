@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from clawops.cli_roots import add_asset_root_argument, resolve_asset_root_argument
 from clawops.openclaw_sandbox import ensure_openclaw_sandbox_image
 from clawops.platform_compat import (
+    MINIMUM_NODE_VERSION,
     SUPPORTED_NODE_RANGE,
     NodeVersion,
     detect_host_platform,
@@ -75,6 +76,8 @@ _APT_UPDATE_RETRY_DELAY_SECONDS = 15
 _UNRELIABLE_APT_MIRROR = "azure.archive.ubuntu.com"
 _STABLE_APT_MIRROR = "archive.ubuntu.com"
 _NODE_REQUIREMENT = f"node {SUPPORTED_NODE_RANGE}"
+# NodeSource tracks the newest release on a line, which clears that line's floor.
+_NODESOURCE_SETUP_URL = f"https://deb.nodesource.com/setup_{MINIMUM_NODE_VERSION[0]}.x"
 
 
 def _apt_command(arguments: Sequence[str]) -> list[str]:
@@ -244,7 +247,7 @@ def _ensure_node_runtime_linux() -> None:
     if not command_exists("apt-get"):
         raise CommandError(f"apt-get is required to install {_NODE_REQUIREMENT} on Linux")
     _stream_checked(
-        ["bash", "-lc", "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"],
+        ["bash", "-lc", f"curl -fsSL {_NODESOURCE_SETUP_URL} | sudo -E bash -"],
         timeout_seconds=1800,
     )
     _stream_checked(

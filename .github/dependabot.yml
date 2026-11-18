@@ -80,14 +80,14 @@ updates:
     open-pull-requests-limit: 2
     # CalVer months count as minor bumps, so cooldown alone would not hold this line.
     ignore:
-      # Node 24 migration needed: 2026.9.3+ and every 2026.9 extended-stable release drop Node 22.
+      # Hold the 2026.9 extended-stable line; later lines are adopted by hand once vetted.
       - dependency-name: "openclaw"
         versions:
-          - ">=2026.9.0"
+          - ">=2026.10.0"
       # First-party plugins peer on their own host version and move in lockstep with it.
       - dependency-name: "@openclaw/*"
         versions:
-          - ">=2026.9.0"
+          - ">=2026.10.0"
     groups:
       # One PR per dependency across both directories keeps the packaged mirror identical.
       node-tools:
