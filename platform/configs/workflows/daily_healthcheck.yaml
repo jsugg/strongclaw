@@ -1,9 +1,12 @@
 name: daily-healthcheck
 steps:
+  # OpenClaw 2026.9 checks take ~20-30s on an idle host; setup gives doctor the same budget.
   - name: openclaw doctor
     kind: shell
     command: ["openclaw", "doctor"]
+    timeout: 300
 
   - name: security audit
     kind: shell
     command: ["openclaw", "security", "audit", "--deep"]
+    timeout: 300
