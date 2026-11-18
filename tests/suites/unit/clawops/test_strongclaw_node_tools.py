@@ -7,6 +7,7 @@ import os
 import pathlib
 import sys
 from collections.abc import Sequence
+from types import SimpleNamespace
 
 import pytest
 
@@ -227,7 +228,9 @@ def fake_npm(test_context: TestContext, tmp_path: pathlib.Path) -> _FakeNpm:
 @pytest.fixture
 def recorded_sleeps(test_context: TestContext) -> list[float]:
     sleeps: list[float] = []
-    test_context.patch.patch_object(node_tools.time, "sleep", new=sleeps.append)
+    # Rebind the module's `time`, not `time.sleep` itself: subprocess polls with the global
+    # `time.sleep` while npm runs, which would record its waits as retry backoff.
+    test_context.patch.patch_object(node_tools, "time", new=SimpleNamespace(sleep=sleeps.append))
     return sleeps
 
 

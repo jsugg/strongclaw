@@ -16,6 +16,7 @@ from tests.utils.helpers._fresh_host import linux as fresh_host_linux
 from tests.utils.helpers.feature_verification import (
     ACP_STUB_REPLY_PREFIX,
     REPLY_PREFIX,
+    CommandOutcome,
     FeatureResult,
     FeatureVerificationError,
     LaneResults,
@@ -25,8 +26,10 @@ from tests.utils.helpers.feature_verification import (
     extract_json,
     load_lane_results,
     load_manifest,
+    messages_text,
     register_provider,
     render_markdown,
+    retry_while_openclaw_not_ready,
     system_prompt_tokens,
 )
 from tests.utils.helpers.repo import REPO_ROOT
@@ -67,6 +70,122 @@ def _write_manifest(tmp_path: Path, features: str = _VALID_FEATURES) -> Path:
 def test_canned_reply_echoes_tokens_from_the_latest_user_turn() -> None:
     assert canned_reply("ctx", "please answer FV-abc123 now") == f"{REPLY_PREFIX} FV-abc123"
     assert canned_reply("ctx", "no token here") == f"{REPLY_PREFIX} acknowledged"
+
+
+@pytest.mark.parametrize(
+    ("messages", "expected_latest"),
+    [
+        pytest.param(
+            [
+                {"role": "user", "content": "earlier FV-old-0001"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "Reply FV-new-0002"},
+                {
+                    "role": "user",
+                    "content": "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\nnow\n"
+                    "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+                },
+            ],
+            "Reply FV-new-0002\n<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\nnow\n"
+            "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+            id="runtime-context-carrier-after-prompt",
+        ),
+        pytest.param(
+            [
+                {"role": "user", "content": [{"type": "text", "text": "Run FV-tool-0003"}]},
+                {"role": "assistant", "content": "calling a tool"},
+                {"role": "tool", "content": "result"},
+            ],
+            "Run FV-tool-0003",
+            id="tool-round-trip-keeps-the-turn",
+        ),
+    ],
+)
+def test_messages_text_reads_the_whole_latest_user_turn(
+    messages: list[dict[str, object]], expected_latest: str
+) -> None:
+    """Consecutive user messages form one turn, so the prompt's tokens survive a context carrier."""
+    _, latest = messages_text({"messages": messages})
+
+    assert latest == expected_latest
+    assert canned_reply("ctx", latest).startswith(f"{REPLY_PREFIX} FV-")
+
+
+_NOT_READY = "Error: OpenClaw state at /s/openclaw.sqlite is undergoing offline maintenance; retry when it finishes."
+
+
+def _outcome(returncode: int, stderr: str = "") -> CommandOutcome:
+    return CommandOutcome(
+        argv=("openclaw",), returncode=returncode, stdout="", stderr=stderr, duration_seconds=0.1
+    )
+
+
+class _ScriptedRuns:
+    """Return scripted outcomes in order and advance a fake clock on every sleep."""
+
+    def __init__(self, outcomes: list[CommandOutcome]) -> None:
+        self.outcomes = outcomes
+        self.calls = 0
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def run(self) -> CommandOutcome:
+        outcome = self.outcomes[min(self.calls, len(self.outcomes) - 1)]
+        self.calls += 1
+        return outcome
+
+    def clock(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def test_retry_while_openclaw_not_ready_waits_out_a_starting_gateway() -> None:
+    """OpenClaw's explicit retry refusals are retried until the command settles."""
+    runs = _ScriptedRuns(
+        [
+            _outcome(1, _NOT_READY),
+            _outcome(
+                1, "Session access facts are unavailable; retry after session storage is ready."
+            ),
+            _outcome(0),
+        ]
+    )
+
+    outcome = retry_while_openclaw_not_ready(
+        runs.run, window_seconds=60, interval_seconds=2, clock=runs.clock, sleep=runs.sleep
+    )
+
+    assert outcome.ok
+    assert runs.calls == 3
+    assert runs.sleeps == [2, 2]
+
+
+def test_retry_while_openclaw_not_ready_returns_other_failures_immediately() -> None:
+    """A real failure is never retried."""
+    runs = _ScriptedRuns([_outcome(1, "config invalid"), _outcome(0)])
+
+    outcome = retry_while_openclaw_not_ready(
+        runs.run, window_seconds=60, interval_seconds=2, clock=runs.clock, sleep=runs.sleep
+    )
+
+    assert not outcome.ok
+    assert runs.calls == 1
+
+
+def test_retry_while_openclaw_not_ready_gives_up_when_the_window_closes() -> None:
+    """A state store that never settles surfaces its last refusal within the window."""
+    runs = _ScriptedRuns([_outcome(1, _NOT_READY)])
+
+    outcome = retry_while_openclaw_not_ready(
+        runs.run, window_seconds=10, interval_seconds=2, clock=runs.clock, sleep=runs.sleep
+    )
+
+    assert outcome.asks_for_retry
+    assert runs.now < 10
+    assert runs.calls == len(runs.sleeps) + 1
 
 
 def test_system_prompt_tokens_come_from_system_and_developer_messages_only() -> None:

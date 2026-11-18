@@ -65,22 +65,31 @@ def _content_text(content: object) -> str:
     return ""
 
 
-def _messages_text(payload: JsonObject) -> tuple[str, str]:
-    """Return (all message text, latest user message text) for a chat payload."""
+def messages_text(payload: JsonObject) -> tuple[str, str]:
+    """Return (all message text, latest user turn text) for a chat payload.
+
+    A user turn is a run of consecutive user messages: OpenClaw 2026.9 sends per-request runtime
+    context as its own user message right after the prompt.
+    """
     messages = payload.get("messages")
     if not isinstance(messages, list):
         prompt = payload.get("prompt")
         text = prompt if isinstance(prompt, str) else ""
         return text, text
     all_parts: list[str] = []
-    latest_user = ""
+    latest_turn: list[str] = []
+    previous_role: object = None
     for raw_message in cast(Sequence[object], messages):
         message = _as_object(raw_message)
         text = _content_text(message.get("content"))
         all_parts.append(text)
-        if message.get("role") == "user":
-            latest_user = text
-    return "\n".join(all_parts), latest_user
+        role = message.get("role")
+        if role == "user":
+            if previous_role != "user":
+                latest_turn = []
+            latest_turn.append(text)
+        previous_role = role
+    return "\n".join(all_parts), "\n".join(latest_turn)
 
 
 SYSTEM_ROLES: Final[frozenset[str]] = frozenset({"system", "developer"})
@@ -230,7 +239,7 @@ class FakeModelHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _record(self, payload: JsonObject, *, reply: str | None = None) -> None:
-        all_text, latest_user = _messages_text(payload)
+        all_text, latest_user = messages_text(payload)
         self.journal.record(
             {
                 "at": round(time.time(), 3),
@@ -301,7 +310,7 @@ class FakeModelHandler(BaseHTTPRequestHandler):
             self._send_json({"error": f"unknown path {path}"}, HTTPStatus.NOT_FOUND)
 
     def _openai_chat(self, payload: JsonObject) -> None:
-        all_text, latest_user = _messages_text(payload)
+        all_text, latest_user = messages_text(payload)
         reply = canned_reply(all_text, latest_user)
         self._record(payload, reply=reply)
         model = str(payload.get("model") or CHAT_MODEL_ID)
@@ -430,7 +439,7 @@ class FakeModelHandler(BaseHTTPRequestHandler):
         )
 
     def _ollama_chat(self, payload: JsonObject) -> None:
-        all_text, latest_user = _messages_text(payload)
+        all_text, latest_user = messages_text(payload)
         reply = canned_reply(all_text, latest_user)
         self._record(payload, reply=reply)
         model = str(payload.get("model") or CHAT_MODEL_ID)
