@@ -80,14 +80,14 @@ updates:
     open-pull-requests-limit: 2
     # CalVer months count as minor bumps, so cooldown alone would not hold this line.
     ignore:
-      # Hold the 2026.9 extended-stable line; later lines are adopted by hand once vetted.
+      # Hold the pinned 2026.11 line; the next CalVer month is adopted by hand once vetted.
       - dependency-name: "openclaw"
         versions:
-          - ">=2026.10.0"
+          - ">=2026.12.0"
       # First-party plugins peer on their own host version and move in lockstep with it.
       - dependency-name: "@openclaw/*"
         versions:
-          - ">=2026.10.0"
+          - ">=2026.12.0"
     groups:
       # One PR per dependency across both directories keeps the packaged mirror identical.
       node-tools:

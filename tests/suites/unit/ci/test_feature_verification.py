@@ -111,7 +111,10 @@ def test_messages_text_reads_the_whole_latest_user_turn(
     assert canned_reply("ctx", latest).startswith(f"{REPLY_PREFIX} FV-")
 
 
-_NOT_READY = "Error: OpenClaw state at /s/openclaw.sqlite is undergoing offline maintenance; retry when it finishes."
+_NOT_READY = (
+    "Error: OpenClaw state at /s/openclaw.sqlite is undergoing offline maintenance by gateway "
+    "process 4242 (ownerKind=schema); retry when it finishes."
+)
 
 
 def _outcome(returncode: int, stderr: str = "") -> CommandOutcome:
@@ -148,8 +151,13 @@ def test_retry_while_openclaw_not_ready_waits_out_a_starting_gateway() -> None:
         [
             _outcome(1, _NOT_READY),
             _outcome(
+                1,
+                "OpenClaw state at /s/x.sqlite is undergoing schema admission; retry when it finishes.",
+            ),
+            _outcome(
                 1, "Session access facts are unavailable; retry after session storage is ready."
             ),
+            _outcome(1, "Agent auth (admin); retry after the agent store is ready."),
             _outcome(0),
         ]
     )
@@ -159,8 +167,8 @@ def test_retry_while_openclaw_not_ready_waits_out_a_starting_gateway() -> None:
     )
 
     assert outcome.ok
-    assert runs.calls == 3
-    assert runs.sleeps == [2, 2]
+    assert runs.calls == 5
+    assert runs.sleeps == [2, 2, 2, 2]
 
 
 def test_retry_while_openclaw_not_ready_returns_other_failures_immediately() -> None:

@@ -50,12 +50,13 @@ _FRAMEWORK_ENV_KEYS: Final[frozenset[str]] = frozenset({"TEST_ID", "RESOURCE_PRE
 _JSON_START: Final[re.Pattern[str]] = re.compile(r"(?m)^[ \t]*[\[{]")
 _OUTPUT_TAIL_CHARS: Final[int] = 3000
 _GATEWAY_ADMIN_CALL_SCRIPT: Final[Path] = Path(__file__).with_name("gateway_admin_call.mjs")
-# OpenClaw 2026.9 refuses with these, and asks the caller to retry, while a starting gateway
-# holds its state store for maintenance or before session storage is ready.
-OPENCLAW_RETRY_MARKERS: Final[tuple[str, ...]] = (
-    "undergoing offline maintenance; retry when it finishes",
-    "could not be verified; retry after maintenance finishes",
-    "retry after session storage is ready",
+# OpenClaw refuses with these, and asks the caller to retry, while a starting gateway holds its
+# state store (schema admission, offline maintenance) or before its stores are ready.
+OPENCLAW_RETRY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"is undergoing (?:offline maintenance|schema admission)\b[^\n]*?; retry when it finishes"
+    r"|retry after session storage is ready"
+    r"|retry after the agent store is ready"
+    r"|Agent database maintenance is in progress; retry after"
 )
 OPENCLAW_RETRY_WINDOW_SECONDS: Final[float] = 180.0
 _OPENCLAW_RETRY_INTERVAL_SECONDS: Final[float] = 2.0
@@ -138,7 +139,7 @@ class CommandOutcome:
     @property
     def asks_for_retry(self) -> bool:
         """Return whether OpenClaw refused because its state is not ready yet."""
-        return not self.ok and any(marker in self.output for marker in OPENCLAW_RETRY_MARKERS)
+        return not self.ok and OPENCLAW_RETRY_PATTERN.search(self.output) is not None
 
 
 def retry_while_openclaw_not_ready(

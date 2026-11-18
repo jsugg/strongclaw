@@ -22,7 +22,7 @@ MIGRATION_REPORT_VERSION: Final[int] = 1
 DEFAULT_QUERY_COUNT: Final[int] = 5
 DEFAULT_RESULT_LIMIT: Final[int] = 5
 DEFAULT_IMPORT_TIMEOUT_SECONDS: Final[int] = 120
-# An OpenClaw 2026.9 CLI search loads the memory plugin before it queries; 30s did not cover it.
+# Since 2026.9 an OpenClaw CLI search loads the memory plugin first; 30s did not cover it.
 DEFAULT_SEARCH_TIMEOUT_SECONDS: Final[int] = 120
 
 

@@ -36,8 +36,8 @@ from clawops.strongclaw_runtime import (
 
 DEFAULT_PROBE_MAX_TOKENS = 16
 _INFERENCE_PROBE_TIMEOUT_SECONDS: Final[int] = 120
-# OpenClaw 2026.9 CLI queries run about twice as long as on 2026.8, and right after setup they
-# share the host with a starting Gateway.
+# Since 2026.9, OpenClaw CLI queries run about twice as long as on 2026.8, and right after
+# setup they share the host with a starting Gateway.
 _OPENCLAW_QUERY_TIMEOUT_SECONDS: Final[int] = 120
 _PROBE_PROMPT: Final[str] = "Reply with exactly: ok"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"

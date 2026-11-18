@@ -207,9 +207,9 @@ def test_resolve_node_command_falls_back_to_nodejs(test_context: TestContext) ->
 @pytest.mark.parametrize(
     ("stdout", "ok", "supported"),
     [
-        ("v24.22.1\n", True, True),
+        ("v24.16.0\n", True, True),
         ("v22.23.5\n", True, False),
-        ("v24.18.0\n", True, False),
+        ("v24.15.0\n", True, False),
         ("v25.9.0\n", True, False),
         ("v26.13.1\n", True, True),
         ("", False, False),
@@ -247,14 +247,14 @@ def test_node_runtime_supported_checks_the_resolved_command_against_the_range(
 def test_ensure_node_runtime_darwin_upgrades_a_brew_node_below_its_line_floor(
     test_context: TestContext,
 ) -> None:
-    """A Homebrew Node 24 below 24.22.1 is upgraded rather than accepted as a Node 24."""
+    """A Homebrew Node 24 below 24.16.0 is upgraded rather than accepted as a Node 24."""
 
-    node_versions = iter(["v24.18.0\n", "v26.13.1\n"])
+    node_versions = iter(["v24.15.0\n", "v26.13.1\n"])
     brew_commands: list[list[str]] = []
 
     def fake_run_command(command: list[str], **_: object) -> SimpleNamespace:
         if command == ["brew", "list", "--versions", "node"]:
-            return SimpleNamespace(ok=True, stdout="node 24.18.0\n")
+            return SimpleNamespace(ok=True, stdout="node 24.15.0\n")
         assert command == ["node", "--version"]
         return SimpleNamespace(ok=True, stdout=next(node_versions))
 

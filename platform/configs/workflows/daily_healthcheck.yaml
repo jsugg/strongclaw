@@ -1,6 +1,6 @@
 name: daily-healthcheck
 steps:
-  # OpenClaw 2026.9 checks take ~20-30s on an idle host; setup gives doctor the same budget.
+  # Since OpenClaw 2026.9 doctor takes ~20-30s on an idle host; setup gives it the same budget.
   - name: openclaw doctor
     kind: shell
     command: ["openclaw", "doctor"]

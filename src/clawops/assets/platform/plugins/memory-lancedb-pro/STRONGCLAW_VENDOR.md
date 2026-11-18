@@ -14,7 +14,7 @@ Strongclaw does not enable this plugin by default. The shipped local overlays ke
 - `selfImprovement.enabled = false`
 - `enableManagementTools = false`
 
-This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.9.37`.
+This avoids the upstream `command:new` / `command:reset` typed-hook incompatibility tracked in upstream issue `#191` when running on OpenClaw `2026.11.5`.
 
 - Strongclaw auto-detects `darwin/x86_64` and installs the newest stable
 compatible LanceDB fallback, `@lancedb/lancedb@0.22.3`, because LanceDB `0.26.2` publishes Apple binaries for `darwin-arm64` but not `darwin-x64`.

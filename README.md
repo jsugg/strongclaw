@@ -168,7 +168,7 @@ For a deeper post-setup scan, run:
 make doctor
 ```
 
-Supported toolchain versions are documented in [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The current validated baseline is Python `3.12` or `3.13`, Node `24.22.1+` (24.x) or `26.12.1+`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.9.37`, ACPX `0.21.1`, QMD `2.0.1`, and `lossless-claw v0.3.0`.
+Supported toolchain versions are documented in [`platform/docs/HOST_PLATFORMS.md`](platform/docs/HOST_PLATFORMS.md). The current validated baseline is Python `3.12` or `3.13`, Node `24.16.0+` (24.x) or `26.1.0+`, `uv 0.10.9`, Varlock `0.5.0`, OpenClaw `2026.11.5`, ACPX `0.21.1`, QMD `2.0.1`, and `lossless-claw v0.3.0`.
 
 ## Development
 

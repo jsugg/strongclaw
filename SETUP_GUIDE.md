@@ -8,7 +8,7 @@ You need:
 
 - a private clone of this repo
 - Python 3.12+
-- Node 24.22.1+ minimum or 26.12.1+ (OpenClaw recommends 26); Node 22, 23, and 25 are unsupported
+- Node 24.16.0+ or 26.1.0+ (OpenClaw recommends 26, and the 24.22.1+ / 26.12.1+ security releases); Node 22, 23, and 25 are unsupported
 - a dedicated non-admin runtime user for OpenClaw
 - a supported package manager for the host bootstrap path
 - either an already installed Docker-compatible runtime or permission to install Docker as the fallback runtime

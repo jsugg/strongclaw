@@ -49,16 +49,17 @@ def _npm_update() -> dict[str, Any]:
     return next(entry for entry in updates if entry["package-ecosystem"] == "npm")
 
 
-def test_dependabot_holds_openclaw_on_the_extended_stable_line() -> None:
-    """Dependabot patches the pinned 2026.9 extended-stable line; later lines are bumped by hand."""
+def test_dependabot_holds_openclaw_on_the_pinned_calver_month() -> None:
+    """Dependabot patches the pinned OpenClaw month; the next month is bumped by hand."""
     ignored = {
         str(rule["dependency-name"]): list(rule["versions"])
         for rule in cast(list[dict[str, Any]], _npm_update()["ignore"])
     }
-    pinned = tuple(int(part) for part in platform_compat.DEFAULT_OPENCLAW_VERSION.split("."))
+    year, month, _ = (int(part) for part in platform_compat.DEFAULT_OPENCLAW_VERSION.split("."))
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    held = [f">={next_year}.{next_month}.0"]
 
-    assert ignored == {"openclaw": [">=2026.10.0"], "@openclaw/*": [">=2026.10.0"]}
-    assert (2026, 9, 0) <= pinned < (2026, 10, 0)
+    assert ignored == {"openclaw": held, "@openclaw/*": held}
 
 
 def test_dependabot_groups_node_tools_security_updates() -> None:

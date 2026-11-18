@@ -68,8 +68,8 @@ def _content_text(content: object) -> str:
 def messages_text(payload: JsonObject) -> tuple[str, str]:
     """Return (all message text, latest user turn text) for a chat payload.
 
-    A user turn is a run of consecutive user messages: OpenClaw 2026.9 sends per-request runtime
-    context as its own user message right after the prompt.
+    A user turn is a run of consecutive user messages: since 2026.9, OpenClaw sends per-request
+    runtime context as its own user message right after the prompt.
     """
     messages = payload.get("messages")
     if not isinstance(messages, list):
