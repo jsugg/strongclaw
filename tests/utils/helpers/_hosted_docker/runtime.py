@@ -18,6 +18,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
 
+from clawops.platform_compat import (
+    SUPPORTED_NODE_RANGE,
+    node_version_supported,
+    parse_node_version,
+)
 from tests.utils.helpers._fresh_host.budget import (
     BUDGET_EXHAUSTED,
     MIN_COMMAND_SECONDS,
@@ -66,6 +71,8 @@ _RUNTIME_VALIDATION_COMMANDS: Final[tuple[list[str], ...]] = (
     ["docker", "compose", "version"],
     ["docker", "info"],
 )
+_NODE_DIST_URL: Final[str] = "https://nodejs.org/dist"
+_NODE_PKG_BINARY: Final[Path] = Path("/usr/local/bin/node")
 _ORBSTACK_MOUNTPOINT = Path("/tmp/orbstack_mnt")
 _ORB_START_LOG = Path("/tmp/orb-start.log")
 
@@ -181,6 +188,61 @@ def setup_orbstack(*, dmg_path: Path, dmg_url: str, expected_sha256: str) -> Non
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+
+
+def install_node_pkg(*, pkg_path: Path, version: str, expected_sha256: str) -> None:
+    """Install the official Node.js macOS package into `/usr/local`, where a fresh host finds it.
+
+    Hosted Intel images ship a Node.js below the pinned OpenClaw's floor, and Homebrew publishes
+    no Intel macOS bottles, so bootstrap cannot provision one there; an Intel operator installs
+    the nodejs.org package instead.
+    """
+    if sys.platform != "darwin":
+        raise FreshHostError("Node.js package install is only supported on macOS")
+    parsed_version = parse_node_version(version)
+    if parsed_version is None or not node_version_supported(parsed_version):
+        raise FreshHostError(f"Node.js {version} is outside the supported {SUPPORTED_NODE_RANGE}")
+
+    cwd = Path.cwd()
+    env = macos_env()
+    resolved_pkg_path = pkg_path.resolve()
+    if not resolved_pkg_path.is_file():
+        run_checked(
+            [
+                "curl",
+                "-fsSL",
+                f"{_NODE_DIST_URL}/v{version}/node-v{version}.pkg",
+                "-o",
+                str(resolved_pkg_path),
+            ],
+            cwd=cwd,
+            env=env,
+            timeout_seconds=600,
+        )
+
+    actual_sha256 = _sha256(resolved_pkg_path)
+    if actual_sha256 != expected_sha256:
+        resolved_pkg_path.unlink(missing_ok=True)
+        raise FreshHostError(
+            f"Node.js package checksum mismatch: expected {expected_sha256}, got {actual_sha256}"
+        )
+
+    run_checked(
+        ["sudo", "installer", "-pkg", str(resolved_pkg_path), "-target", "/"],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=600,
+    )
+    installed = run_checked(
+        [str(_NODE_PKG_BINARY), "--version"],
+        cwd=cwd,
+        env=env,
+        timeout_seconds=60,
+        capture_output=True,
+    ).stdout.strip()
+    if installed != f"v{version}":
+        raise FreshHostError(f"{_NODE_PKG_BINARY} reports {installed!r} after installing {version}")
+    log(f"Installed Node.js {installed} at {_NODE_PKG_BINARY}.")
 
 
 def _docker_socket_path(docker_host: str) -> Path | None:

@@ -23,6 +23,7 @@ from tests.utils.helpers._hosted_docker.pull_client import (
     classify_pull_failure,
 )
 from tests.utils.helpers._hosted_docker.runtime import (
+    install_node_pkg,
     setup_orbstack,
     wait_runtime_ready,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "classify_pull_failure",
     "collect_runtime_diagnostics",
     "ensure_images",
+    "install_node_pkg",
     "list_local_images",
     "pull_images",
     "setup_orbstack",

@@ -17,6 +17,7 @@ from tests.utils.helpers.fresh_host import FreshHostError  # noqa: E402
 from tests.utils.helpers.hosted_docker import (  # noqa: E402
     collect_runtime_diagnostics,
     ensure_images,
+    install_node_pkg,
     setup_orbstack,
     wait_runtime_ready,
 )
@@ -34,6 +35,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     setup_parser.add_argument("--dmg-path", type=Path, required=True)
     setup_parser.add_argument("--url", required=True)
     setup_parser.add_argument("--sha256", required=True)
+
+    node_parser = subparsers.add_parser(
+        "install-node",
+        help="Install the official Node.js macOS package into /usr/local.",
+    )
+    node_parser.add_argument("--pkg-path", type=Path, required=True)
+    node_parser.add_argument("--version", required=True)
+    node_parser.add_argument("--sha256", required=True)
 
     wait_parser = subparsers.add_parser(
         "wait-runtime-ready",
@@ -64,6 +73,13 @@ def main(argv: list[str] | None = None) -> int:
             setup_orbstack(
                 dmg_path=Path(args.dmg_path).expanduser().resolve(),
                 dmg_url=str(args.url),
+                expected_sha256=str(args.sha256),
+            )
+            return 0
+        if args.command == "install-node":
+            install_node_pkg(
+                pkg_path=Path(args.pkg_path).expanduser().resolve(),
+                version=str(args.version),
                 expected_sha256=str(args.sha256),
             )
             return 0
