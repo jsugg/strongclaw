@@ -1,12 +1,7 @@
 {
   "channels": {
     "defaults": {
-      "groupPolicy": "allowlist",
-      "heartbeatVisibility": {
-        "showAlerts": true,
-        "showOk": false,
-        "useIndicator": true
-      }
+      "groupPolicy": "allowlist"
     },
     "modelByChannel": {
       "telegram": {

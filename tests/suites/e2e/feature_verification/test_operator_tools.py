@@ -1209,7 +1209,7 @@ def test_render_openclaw_config_merges_overlay(feature_host: FeatureHost) -> Non
         "  // operator overlay\n"
         "  agents: { defaults: {\n"
         "    imageMaxDimensionPx: 800,\n"
-        "    heartbeat: { every: '30m' },\n"
+        "    subagents: { runTimeoutSeconds: 900 },\n"
         "    workspace: '__CODER_WORKSPACE__',\n"
         "  } },\n"
         "}\n",
@@ -1234,7 +1234,7 @@ def test_render_openclaw_config_merges_overlay(feature_host: FeatureHost) -> Non
     defaults = _as_object(_as_object(expected["agents"])["defaults"])
     admin_workspace = Path(str(defaults["workspace"]))
     defaults["imageMaxDimensionPx"] = 800
-    _as_object(defaults["heartbeat"])["every"] = "30m"
+    _as_object(defaults["subagents"])["runTimeoutSeconds"] = 900
     defaults["workspace"] = (admin_workspace.parent / "coder").as_posix()
     merged_text = merged_path.read_text(encoding="utf-8")
     assert json.loads(merged_text) == expected, "overlay must change only the keys it sets"
