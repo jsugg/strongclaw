@@ -9,7 +9,7 @@
     "@openclaw/diagnostics-otel": "2026.8.35",
     "@openclaw/moonshot-provider": "2026.8.35",
     "@openclaw/zai-provider": "2026.8.35",
-    "acpx": "0.21.1",
+    "acpx": "0.22.0",
     "openclaw": "2026.8.35"
   },
   "overrides": {
